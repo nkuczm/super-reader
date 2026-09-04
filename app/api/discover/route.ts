@@ -14,8 +14,9 @@ export async function GET(request: Request) {
   const limit = Number.isFinite(requested)
     ? Math.min(Math.max(requested, 1), 100)
     : 12;
+  const scope = params.get("scope") === "site" ? "site" : "auto";
   try {
-    return NextResponse.json(await discover(input, limit));
+    return NextResponse.json(await discover(input, limit, scope));
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Lookup failed" },

@@ -36,6 +36,26 @@ npm test                     # parser + discovery tests
    into a feed (`lib/scrape.ts`). This is how sites like `anthropic.com/news`,
    which never published RSS, become followable.
 
+### Sections vs whole sites
+
+Pasting a section — `blog.google/products-and-platforms/products/gemini` —
+should follow that section, not the entire blog. Section pages routinely
+declare the *site-wide* feed in their `<head>`, so trusting that link silently
+widens the source to everything the publisher posts.
+
+Anything deeper than the domain root is therefore treated as a section, and
+resolved in this order:
+
+1. A feed for the section itself (`<section>/rss`, `<section>/feed`, …), or a
+   declared feed whose URL sits under the section path.
+2. Failing that, the section page is read directly — it lists exactly that
+   section's articles.
+3. Only then the site-wide feed.
+
+The preview shows which applied and offers a **This section / Whole site**
+switch, so the wider scope is one click away when that is what you want. A
+bare domain is always site-wide and shows no switch.
+
 ### Reading a page that has no feed
 
 A listing page links to its articles many times in a consistent shape

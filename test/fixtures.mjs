@@ -107,6 +107,44 @@ const PNG = Buffer.from(
   "base64",
 );
 
+// Mirrors blog.google: a section page that advertises the site-wide feed in
+// its <head>, while also exposing its own feed at <section>/rss.
+const sectionPage = `<html><head><title>Gemini</title>
+<link rel="alternate" type="application/rss+xml" href="/rss">
+</head><body><main>
+<a href="/topics/gemini/post-one"><h3>A Gemini announcement</h3></a>
+<a href="/topics/gemini/post-two"><h3>Another Gemini announcement</h3></a>
+<a href="/topics/gemini/post-three"><h3>A third Gemini announcement</h3></a>
+</main></body></html>`;
+
+const siteFeed = `<?xml version="1.0"?><rss version="2.0"><channel>
+<title>News from Everywhere</title><link>http://127.0.0.1:8784</link>
+<item><title>Something about translate</title><link>/x/translate</link><guid>s1</guid>
+<pubDate>Thu, 04 Sep 2025 10:00:00 GMT</pubDate></item>
+<item><title>Something about education</title><link>/x/education</link><guid>s2</guid>
+<pubDate>Wed, 03 Sep 2025 10:00:00 GMT</pubDate></item>
+</channel></rss>`;
+
+const sectionFeed = `<?xml version="1.0"?><rss version="2.0"><channel>
+<title>Gemini</title><link>http://127.0.0.1:8784/topics/gemini</link>
+<item><title>A Gemini announcement</title><link>/topics/gemini/post-one</link><guid>g1</guid>
+<pubDate>Thu, 04 Sep 2025 12:00:00 GMT</pubDate></item>
+<item><title>Another Gemini announcement</title><link>/topics/gemini/post-two</link><guid>g2</guid>
+<pubDate>Wed, 03 Sep 2025 12:00:00 GMT</pubDate></item>
+</channel></rss>`;
+
+/** A site whose sections have their own feeds. */
+export function startSectionSite(port = 8784, { sectionHasFeed = true } = {}) {
+  const routes = {
+    "/topics/gemini": [200, "text/html", sectionPage],
+    "/rss": [200, "application/rss+xml", siteFeed],
+  };
+  if (sectionHasFeed) {
+    routes["/topics/gemini/rss"] = [200, "application/rss+xml", sectionFeed];
+  }
+  return serve(routes, port);
+}
+
 const noFeedRoutes = {
   "/news": [200, "text/html", newsIndex],
   "/about": [200, "text/html", aboutPage],

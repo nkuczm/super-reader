@@ -64,6 +64,8 @@ async function tryFeed(url: string, limit: number) {
 export async function discover(
   input: string,
   limit = 12,
+  /** "site" forces the whole-site feed even when a section was pasted. */
+  scope: "auto" | "site" = "auto",
 ): Promise<DiscoverResult> {
   const raw = input.trim();
   if (!raw) throw new Error("Nothing to look up");
@@ -73,7 +75,7 @@ export async function discover(
   const handle = xHandleFrom(raw);
   if (handle) {
     const { meta, articles } = await fetchXFeed(handle, limit);
-    return { ...meta, kind: "x", total: articles.length, articles };
+    return { ...meta, kind: "x", scope: "site", total: articles.length, articles };
   }
 
   if (!isProbablyUrl(raw)) {
@@ -83,6 +85,7 @@ export async function discover(
       ...meta,
       total,
       kind: "topic",
+      scope: "site",
       title: raw,
       description: `Latest stories about “${raw}”`,
       siteUrl: "https://news.google.com",
@@ -92,6 +95,12 @@ export async function discover(
   }
 
   const url = normalizeUrl(raw);
+  const asUrl = new URL(url);
+  // Anything deeper than the domain root is a section the user asked for by
+  // name — "just the Gemini posts", not the whole blog.
+  const sectionPath = asUrl.pathname.replace(/\/$/, "");
+  const hasSection = sectionPath !== "";
+  const wantsSection = hasSection && scope !== "site";
 
   // 1. The URL may already be a feed.
   try {
@@ -99,6 +108,7 @@ export async function discover(
     return {
       ...meta,
       kind: "feed",
+      scope: hasSection ? "section" : "site",
       total,
       favicon: faviconFor(meta.siteUrl),
       // Plenty of feeds ship no images at all; fill those in from each post.
@@ -110,41 +120,94 @@ export async function discover(
     /* not a feed itself — treat it as a web page below */
   }
 
-  // 2. Look for a declared feed in the page's <head>.
-  let candidates: string[] = [];
+  // 2. Read the page, both for its declared feeds and to scrape if needed.
+  let declared: string[] = [];
   let pageBase = url;
+  let pageBody: string | null = null;
   try {
     const { body, finalUrl } = await fetchText(url);
     pageBase = finalUrl;
-    candidates = feedLinksInHtml(body, finalUrl);
+    pageBody = body;
+    declared = feedLinksInHtml(body, finalUrl);
   } catch {
     /* page unreachable — still try the conventional paths */
   }
 
-  // 3. Fall back to conventional feed paths on the same origin.
   const origin = new URL(pageBase).origin;
-  for (const path of COMMON_PATHS) {
-    const guess = `${origin}${path}`;
-    if (!candidates.includes(guess)) candidates.push(guess);
-  }
-
-  for (const candidate of candidates) {
+  const under = (candidate: string) => {
     try {
-      const { meta, total, articles } = await tryFeed(candidate, limit);
-      if (articles.length === 0) continue;
-      return {
-        ...meta,
-        kind: "feed",
-        total,
-        favicon: faviconFor(meta.siteUrl || origin),
-        articles: await enrichArticles(articles, {
+      return new URL(candidate).pathname.replace(/\/$/, "").startsWith(sectionPath);
+    } catch {
+      return false;
+    }
+  };
+
+  // A feed for the section itself is worth more than the site's main feed,
+  // and most publishers expose one at <section>/rss or <section>/feed.
+  const sectionCandidates = wantsSection
+    ? [
+        ...COMMON_PATHS.map((path) => `${origin}${sectionPath}${path}`),
+        ...declared.filter(under),
+      ]
+    : [];
+
+  const siteCandidates = [
+    ...declared.filter((c) => !sectionCandidates.includes(c)),
+    ...COMMON_PATHS.map((path) => `${origin}${path}`),
+  ];
+
+  const tryAll = async (candidates: string[], resultScope: "section" | "site") => {
+    for (const candidate of [...new Set(candidates)]) {
+      try {
+        const { meta, total, articles } = await tryFeed(candidate, limit);
+        if (articles.length === 0) continue;
+        return {
+          ...meta,
+          kind: "feed" as const,
+          scope: resultScope,
+          total,
+          favicon: faviconFor(meta.siteUrl || origin),
+          articles: await enrichArticles(articles, {
+            siteDescription: meta.description,
+          }),
+        };
+      } catch {
+        /* try the next candidate */
+      }
+    }
+    return null;
+  };
+
+  const sectionFeed = await tryAll(sectionCandidates, "section");
+  if (sectionFeed) return sectionFeed;
+
+  // No feed for the section, but the page itself lists exactly its articles —
+  // still closer to what was asked for than the whole site's feed.
+  if (wantsSection && pageBody) {
+    try {
+      const { meta, articles } = scrapePage(pageBody, pageBase);
+      const enriched = sortNewestFirst(
+        await enrichArticles(articles.slice(0, limit), {
           siteDescription: meta.description,
         }),
-      };
+      );
+      if (enriched.length > 0) {
+        return {
+          ...meta,
+          kind: "page",
+          scope: "section",
+          total: articles.length,
+          favicon: faviconFor(meta.siteUrl),
+          articles: enriched,
+        };
+      }
     } catch {
-      /* try the next candidate */
+      /* fall through to the site-wide feed */
     }
   }
+
+  const siteFeed = await tryAll(siteCandidates, "site");
+  if (siteFeed) return siteFeed;
 
   // 4. No feed anywhere. Read the page itself, the way Feedly does for sites
   //    that never published one.
@@ -161,6 +224,7 @@ export async function discover(
     return {
       ...meta,
       kind: "page",
+      scope: hasSection ? "section" : "site",
       total: articles.length,
       favicon: faviconFor(meta.siteUrl),
       articles: enriched,

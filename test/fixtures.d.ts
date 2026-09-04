@@ -1,2 +1,10 @@
 export function startFixtures(port?: number): Promise<{ close: () => void }>;
 export function startNoFeedSite(port?: number): Promise<{ close: () => void }>;
+export function startSectionSite(
+  port?: number,
+  options?: { sectionHasFeed?: boolean },
+): Promise<{ close: () => void }>;
+export function startFakeX(port?: number): Promise<{
+  calls: string[];
+  close: () => void;
+}>;

@@ -16,6 +16,18 @@ type Props = {
 
 const NEW_FEED = "__new__";
 
+/** True when the pasted URL points at a section rather than a whole site. */
+function pastedASection(input: string) {
+  const value = input.trim();
+  if (!/^(https?:\/\/)?[^\s]+\.[^\s]+\//.test(value)) return false;
+  try {
+    const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+    return url.pathname.replace(/\/$/, "") !== "";
+  } catch {
+    return false;
+  }
+}
+
 export default function AddSourceDialog({
   feeds,
   defaultFeedId,
@@ -26,6 +38,7 @@ export default function AddSourceDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<DiscoverResult | null>(null);
+  const [scope, setScope] = useState<"auto" | "site">("auto");
   const [target, setTarget] = useState(defaultFeedId ?? feeds[0]?.id ?? NEW_FEED);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -39,14 +52,18 @@ export default function AddSourceDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onCancel]);
 
-  async function runPreview() {
+  async function runPreview(nextScope: "auto" | "site" = scope) {
     const value = query.trim();
     if (!value) return;
     setLoading(true);
     setError(null);
     setPreview(null);
+    setScope(nextScope);
     try {
-      const res = await fetch(`/api/discover?q=${encodeURIComponent(value)}`);
+      const res = await fetch(
+        `/api/discover?q=${encodeURIComponent(value)}` +
+          (nextScope === "site" ? "&scope=site" : ""),
+      );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not read that source");
       setPreview(data as DiscoverResult);
@@ -84,12 +101,12 @@ export default function AddSourceDialog({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Enter") runPreview();
+                if (event.key === "Enter") runPreview("auto");
               }}
             />
             <button
               className="btn small"
-              onClick={runPreview}
+              onClick={() => runPreview("auto")}
               disabled={loading || !query.trim()}
             >
               {loading ? <span className="spinner" /> : "Preview"}
@@ -117,6 +134,28 @@ export default function AddSourceDialog({
                   </span>
                 </div>
               </div>
+              {pastedASection(query) && (
+                <div className="scope-row">
+                  <span>Covering</span>
+                  <div className="scope-switch">
+                    <button
+                      className={preview.scope === "section" ? "on" : ""}
+                      onClick={() => runPreview("auto")}
+                      disabled={loading}
+                    >
+                      This section
+                    </button>
+                    <button
+                      className={preview.scope === "site" ? "on" : ""}
+                      onClick={() => runPreview("site")}
+                      disabled={loading}
+                    >
+                      Whole site
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <ul className="preview-list">
                 {preview.articles.slice(0, 6).map((article) => (
                   <li key={article.id}>
