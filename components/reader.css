@@ -1,4 +1,6 @@
 .app { display: grid; grid-template-columns: 268px 1fr; height: 100vh; }
+/* dvh accounts for mobile browser chrome that appears and disappears. */
+@supports (height: 100dvh) { .app { height: 100dvh; } }
 
 /* ---------- sidebar ---------- */
 .sidebar {
@@ -144,10 +146,74 @@
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-@media (max-width: 760px) {
+/* The drawer toggle and scrim exist only on small screens. */
+.menu-btn { display: none; }
+.scrim { display: none; }
+
+@media (max-width: 860px) {
   .app { grid-template-columns: 1fr; }
-  .sidebar { display: none; }
-  .articles, .main-head { padding-left: 16px; padding-right: 16px; }
+
+  /* The sidebar becomes an off-canvas drawer rather than disappearing:
+     feed switching and sync have to stay reachable on a phone. */
+  .sidebar {
+    position: fixed; inset: 0 auto 0 0; width: min(84vw, 320px); z-index: 40;
+    transform: translateX(-100%); transition: transform 0.22s ease;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.3);
+    padding-left: env(safe-area-inset-left);
+  }
+  .sidebar.open { transform: translateX(0); }
+
+  .scrim {
+    display: block; position: fixed; inset: 0; z-index: 35;
+    background: rgba(0, 0, 0, 0.45); border: 0;
+    animation: fade 0.2s ease;
+  }
+  @keyframes fade { from { opacity: 0; } }
+
+  .menu-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 40px; height: 40px; margin-right: 2px;
+    border: 1px solid var(--border); border-radius: 9px;
+    background: transparent; color: var(--text); flex: none;
+  }
+  .menu-btn:hover { background: var(--bg-hover); }
+
+  .main-head {
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+    gap: 10px; align-items: center;
+  }
+  .main-head h1 { font-size: 19px; }
+  .head-actions { width: 100%; margin-left: 0; }
+  .head-actions .btn { flex: 1; justify-content: center; min-height: 40px; }
+
+  .articles { padding: 4px 16px 64px; }
+  .article { gap: 12px; padding: 15px 0; }
+  .thumb { width: 84px; height: 62px; }
+  .article-title { font-size: 16px; }
+
+  /* Comfortable touch targets in the drawer. */
+  .nav-item { padding: 10px 10px; font-size: 15px; }
+  .source-row .nav-item { font-size: 14.5px; }
+  .icon-btn { opacity: 1; padding: 8px; }
+
+  .dialog { max-height: 88vh; border-radius: 14px 14px 0 0; }
+  .overlay { padding: 0; align-items: flex-end; }
+  .dialog-foot { flex-wrap: wrap; padding-bottom: calc(13px + env(safe-area-inset-bottom, 0px)); }
+  .select { margin-right: 0; width: 100%; }
+  .dialog-foot .btn { flex: 1; }
+
+  .reader { padding: 0 16px calc(72px + env(safe-area-inset-bottom, 0px)); }
+  .reader-body h1 { font-size: 25px; }
+  .prose { font-size: 17px; }
+}
+
+/* Phones: the input row stacks so the field is never cramped. */
+@media (max-width: 460px) {
+  .row { flex-wrap: wrap; }
+  .row .input { flex: 1 1 100%; }
+  .row .btn { width: 100%; min-height: 42px; }
+  .code-row { flex-wrap: wrap; }
+  .code-row .btn { width: 100%; }
   .thumb { display: none; }
 }
 
@@ -244,12 +310,6 @@
   font-weight: 600;
 }
 .read-btn:hover { background: var(--bg-hover); color: var(--accent); border-color: var(--accent); }
-
-@media (max-width: 760px) {
-  .reader { padding-left: 16px; padding-right: 16px; }
-  .reader-body h1 { font-size: 25px; }
-  .prose { font-size: 17px; }
-}
 
 /* ---------- sync ---------- */
 .sync-btn {

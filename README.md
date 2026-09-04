@@ -79,10 +79,33 @@ Each source shows its favicon, with a letter avatar as fallback.
 | `app/api/feed` | Batch feed refresh |
 | `app/api/article` | Readable, sanitized article for the reader |
 | `app/api/sync` | Create / fetch / save a synced feed list |
+| `app/manifest.ts` | Web app manifest for Home Screen installs |
+| `scripts/gen-icons.mjs` | Regenerates the PNG app icons from the mark |
 | `components/Reader.tsx` | Sidebar, article list, feed management |
 
 Feeds are fetched server-side, which sidesteps browser CORS restrictions —
 this is why the app needs a Node server rather than being a static page.
+
+## On a phone
+
+The layout adapts below 860px: the sidebar becomes an off-canvas drawer behind
+a menu button (it used to be hidden outright, which left no way to switch feeds
+or reach sync), touch targets grow, dialogs slide up from the bottom, and
+safe-area insets keep content clear of the notch and home indicator.
+
+### Adding it to your Home Screen
+
+The app ships a web manifest, so it installs as a standalone app with no
+browser chrome.
+
+- **iOS:** open it in Safari → Share → **Add to Home Screen**.
+- **Android:** Chrome menu → **Install app** / **Add to Home screen**.
+- **Desktop:** the install icon in the address bar.
+
+Icons are generated from the same lens mark (`scripts/gen-icons.mjs`): a
+maskable variant keeps the mark inside the safe zone so Android can crop it to
+any shape, and the Apple touch icon is full-bleed because iOS applies its own
+rounded mask.
 
 ## Syncing across devices
 

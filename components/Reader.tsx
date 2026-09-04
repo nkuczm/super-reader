@@ -38,6 +38,7 @@ export default function Reader() {
   );
   const [syncCode, setSyncCode] = useState<string | null>(null);
   const [syncOpen, setSyncOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [syncState, setSyncState] = useState<
     "idle" | "working" | "saved" | "error"
   >("idle");
@@ -306,6 +307,12 @@ export default function Reader() {
     [allSources],
   );
 
+  // On a phone the drawer covers the list, so any choice should close it.
+  const choose = useCallback((next: Selection) => {
+    setSelection(next);
+    setMenuOpen(false);
+  }, []);
+
   const heading =
     selection.type === "all"
       ? "All articles"
@@ -318,7 +325,7 @@ export default function Reader() {
 
   return (
     <div className="app">
-      <aside className="sidebar">
+      <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
         <div className="brand">
           {Icon.logo} Super Reader
         </div>
@@ -326,7 +333,7 @@ export default function Reader() {
         <div className="sidebar-scroll">
           <button
             className={`nav-item ${selection.type === "all" ? "active" : ""}`}
-            onClick={() => setSelection({ type: "all" })}
+            onClick={() => choose({ type: "all" })}
           >
             {Icon.inbox}
             <span className="feed-name">All articles</span>
@@ -345,7 +352,7 @@ export default function Reader() {
                         ? "active"
                         : ""
                     }`}
-                    onClick={() => setSelection({ type: "feed", id: feed.id })}
+                    onClick={() => choose({ type: "feed", id: feed.id })}
                     onDoubleClick={() => renameFeed(feed)}
                     title="Double-click to rename"
                   >
@@ -373,9 +380,7 @@ export default function Reader() {
                           ? "active"
                           : ""
                       }`}
-                      onClick={() =>
-                        setSelection({ type: "source", id: source.id })
-                      }
+                      onClick={() => choose({ type: "source", id: source.id })}
                     >
                       <SourceIcon src={source.favicon} title={source.title} />
                       <span className="feed-name">{source.title}</span>
@@ -415,6 +420,14 @@ export default function Reader() {
         </div>
       </aside>
 
+      {menuOpen && (
+        <button
+          className="scrim"
+          aria-label="Close feeds"
+          onClick={() => setMenuOpen(false)}
+        />
+      )}
+
       <main className="main">
         {reading ? (
           <ArticleReader
@@ -425,6 +438,13 @@ export default function Reader() {
         ) : (
           <>
         <div className="main-head">
+          <button
+            className="menu-btn"
+            onClick={() => setMenuOpen(true)}
+            aria-label="Open feeds"
+          >
+            {Icon.menu}
+          </button>
           <div>
             <h1>{heading}</h1>
             <p className="sub">
