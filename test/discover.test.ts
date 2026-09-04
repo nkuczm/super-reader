@@ -156,6 +156,33 @@ test("extracts a readable article and strips anything executable", async () => {
   );
 });
 
+test("recovers real photos from lazy-loading markup", async () => {
+  const { extractArticle } = await import("../lib/article");
+  const a = await extractArticle(`${N}/news/claude-opus-5`);
+
+  assert.ok(a.html.includes(`${N}/img/chart.png`), "plain images still work");
+  assert.ok(
+    a.html.includes(`${N}/img/wide-1200.jpg`),
+    "takes the widest <source> out of a <picture>",
+  );
+  assert.ok(
+    !a.html.includes("data:image/gif"),
+    "the base64 placeholder is not used as the image",
+  );
+  assert.ok(
+    a.html.includes(`${N}/img/real-photo.jpg`),
+    "prefers data-src over a placeholder src",
+  );
+  assert.ok(
+    a.html.includes(`${N}/img/large.jpg`),
+    "takes the widest srcset candidate",
+  );
+  assert.ok(
+    a.html.includes('referrerpolicy="no-referrer"'),
+    "sends no referrer so hot-link protection does not block images",
+  );
+});
+
 test("fills in missing summaries from each article's metadata", async () => {
   const r = await discover(`${N}/news`);
   const opus = r.articles.find((a) => a.link.endsWith("/claude-opus-5"));

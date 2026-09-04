@@ -77,6 +77,9 @@ const article = `<html><head><title>Introducing Claude Opus 5</title>
 <blockquote>The model is markedly better at knowing when it does not know.</blockquote>
 <p>Read the system card for a full account of evaluations, safety testing and the mitigations we applied before release.</p>
 <img src="/img/chart.png" alt="Benchmark chart">
+<picture><source srcset="/img/wide-1200.jpg 1200w, /img/wide-600.jpg 600w"><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="Wide shot"></picture>
+<img src="/img/placeholder.png" data-src="/img/real-photo.jpg" alt="Lazy photo">
+<img src="/img/small.jpg" srcset="/img/small.jpg 400w, /img/large.jpg 1600w" alt="Responsive">
 <script>window.tracker = 1;</script>
 <p onclick="steal()">Availability begins today across every supported region.</p>
 <a href="/news/system-card" onclick="evil()">Read the system card</a>

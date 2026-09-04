@@ -7,8 +7,8 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "Paste a link or a topic. Get a feed you can actually read.",
     start_url: "/",
     display: "standalone",
-    background_color: "#111318",
-    theme_color: "#111318",
+    background_color: "#0d0d0f",
+    theme_color: "#14b8a6",
     orientation: "portrait-primary",
     icons: [
       { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },

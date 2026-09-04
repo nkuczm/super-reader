@@ -2,8 +2,14 @@ import { XMLParser } from "fast-xml-parser";
 import { sortNewestFirst } from "./sort";
 import type { Article, SourceMeta } from "./types";
 
+/**
+ * Many publishers (OpenAI among them) return 403 to anything that does not
+ * look like a browser, which broke the reader on their articles. These are
+ * ordinary reader requests made on the user's behalf, one page at a time.
+ */
 const UA =
-  "Mozilla/5.0 (compatible; SuperReader/1.0; +https://github.com/nkuczm/super-reader)";
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 export async function fetchText(url: string, timeoutMs = 12000) {
   const controller = new AbortController();
@@ -13,7 +19,9 @@ export async function fetchText(url: string, timeoutMs = 12000) {
       headers: {
         "user-agent": UA,
         accept:
-          "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html;q=0.9, */*;q=0.8",
+          "text/html,application/xhtml+xml,application/rss+xml,application/atom+xml," +
+          "application/xml;q=0.9,*/*;q=0.8",
+        "accept-language": "en-US,en;q=0.9",
       },
       redirect: "follow",
       signal: controller.signal,

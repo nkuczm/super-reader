@@ -15,6 +15,7 @@ import {
 } from "@/lib/store";
 import AddSourceDialog from "./AddSourceDialog";
 import SyncDialog from "./SyncDialog";
+import InlineName from "./InlineName";
 import ArticleReader from "./ArticleReader";
 import SourceIcon from "./SourceIcon";
 import { Icon } from "./icons";
@@ -39,6 +40,11 @@ export default function Reader() {
   const [syncCode, setSyncCode] = useState<string | null>(null);
   const [syncOpen, setSyncOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  // Naming and deleting happen inline in the sidebar rather than in
+  // browser prompt()/confirm() dialogs.
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
   const [syncState, setSyncState] = useState<
     "idle" | "working" | "saved" | "error"
   >("idle");
@@ -249,20 +255,19 @@ export default function Reader() {
     setDialogOpen(false);
   }
 
-  function addFeed() {
-    const name = window.prompt("Name this feed", "New feed")?.trim();
-    if (!name) return;
-    const feed: Feed = { id: newId(), name, sources: [] };
+  function createFeed(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const feed: Feed = { id: newId(), name: trimmed, sources: [] };
     setFeeds((current) => [...current, feed]);
     setSelection({ type: "feed", id: feed.id });
+    setAdding(false);
   }
 
   function removeFeed(id: string) {
-    const feed = feeds.find((f) => f.id === id);
-    if (!feed) return;
-    if (!window.confirm(`Delete “${feed.name}” and its sources?`)) return;
     setFeeds((current) => current.filter((f) => f.id !== id));
     setSelection({ type: "all" });
+    setConfirming(null);
   }
 
   function removeSource(feedId: string, sourceId: string) {
@@ -276,11 +281,12 @@ export default function Reader() {
     setSelection({ type: "all" });
   }
 
-  function renameFeed(feed: Feed) {
-    const name = window.prompt("Rename feed", feed.name)?.trim();
-    if (!name) return;
+  function renameFeed(id: string, name: string) {
+    const trimmed = name.trim();
+    setEditing(null);
+    if (!trimmed) return;
     setFeeds((current) =>
-      current.map((f) => (f.id === feed.id ? { ...f, name } : f)),
+      current.map((f) => (f.id === id ? { ...f, name: trimmed } : f)),
     );
   }
 
@@ -346,26 +352,59 @@ export default function Reader() {
             return (
               <div className="feed-group" key={feed.id}>
                 <div className="feed-head">
-                  <button
-                    className={`nav-item ${
-                      selection.type === "feed" && selection.id === feed.id
-                        ? "active"
-                        : ""
-                    }`}
-                    onClick={() => choose({ type: "feed", id: feed.id })}
-                    onDoubleClick={() => renameFeed(feed)}
-                    title="Double-click to rename"
-                  >
-                    <span className="feed-name">{feed.name}</span>
-                    <span className="count">{count || ""}</span>
-                  </button>
-                  <button
-                    className="icon-btn danger"
-                    onClick={() => removeFeed(feed.id)}
-                    aria-label={`Delete ${feed.name}`}
-                  >
-                    {Icon.trash}
-                  </button>
+                  {editing === feed.id ? (
+                    <InlineName
+                      initial={feed.name}
+                      onSubmit={(value) => renameFeed(feed.id, value)}
+                      onCancel={() => setEditing(null)}
+                    />
+                  ) : confirming === feed.id ? (
+                    <div className="confirm-row">
+                      <span>Delete “{feed.name}”?</span>
+                      <button
+                        className="link-btn danger"
+                        onClick={() => removeFeed(feed.id)}
+                      >
+                        Delete
+                      </button>
+                      <button
+                        className="link-btn"
+                        onClick={() => setConfirming(null)}
+                      >
+                        Keep
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <button
+                        className={`nav-item ${
+                          selection.type === "feed" && selection.id === feed.id
+                            ? "active"
+                            : ""
+                        }`}
+                        onClick={() => choose({ type: "feed", id: feed.id })}
+                        onDoubleClick={() => setEditing(feed.id)}
+                        title="Double-click to rename"
+                      >
+                        <span className="feed-name">{feed.name}</span>
+                        <span className="count">{count || ""}</span>
+                      </button>
+                      <button
+                        className="icon-btn"
+                        onClick={() => setEditing(feed.id)}
+                        aria-label={`Rename ${feed.name}`}
+                      >
+                        {Icon.pencil}
+                      </button>
+                      <button
+                        className="icon-btn danger"
+                        onClick={() => setConfirming(feed.id)}
+                        aria-label={`Delete ${feed.name}`}
+                      >
+                        {Icon.trash}
+                      </button>
+                    </>
+                  )}
                 </div>
 
                 {feed.sources.length === 0 && (
@@ -400,9 +439,21 @@ export default function Reader() {
         </div>
 
         <div className="sidebar-foot">
-          <button className="btn ghost small" onClick={addFeed} style={{ width: "100%" }}>
-            {Icon.plus} New feed
-          </button>
+          {adding ? (
+            <InlineName
+              placeholder="Name this feed"
+              onSubmit={createFeed}
+              onCancel={() => setAdding(false)}
+            />
+          ) : (
+            <button
+              className="btn ghost small"
+              onClick={() => setAdding(true)}
+              style={{ width: "100%" }}
+            >
+              {Icon.plus} New feed
+            </button>
+          )}
           <button
             className="sync-btn"
             onClick={() => setSyncOpen(true)}

@@ -55,12 +55,15 @@ export async function GET(request: Request) {
   try {
     return NextResponse.json(await extractArticle(target.toString()));
   } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Could not load that article";
+    // Some publishers refuse anything that is not a person in a browser.
+    const blocked = /\b(401|403|429|451)\b/.test(message);
     return NextResponse.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Could not load that article",
+        error: blocked
+          ? "This site doesn't allow reader view."
+          : message,
       },
       { status: 502 },
     );
