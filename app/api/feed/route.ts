@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { fetchText, parseFeed, looksLikeFeed, faviconFor } from "@/lib/feed";
 import { scrapePage } from "@/lib/scrape";
 import { enrichArticles } from "@/lib/enrich";
+import { xHandleFrom, fetchXFeed } from "@/lib/x";
 import { sortNewestFirst } from "@/lib/sort";
 
 export const runtime = "nodejs";
@@ -17,6 +18,12 @@ export async function GET(request: Request) {
   const results = await Promise.all(
     urls.map(async (url) => {
       try {
+        const handle = xHandleFrom(url);
+        if (handle) {
+          const { meta, articles } = await fetchXFeed(handle);
+          return { ok: true as const, ...meta, feedUrl: url, articles };
+        }
+
         const { body, finalUrl } = await fetchText(url);
         // A source may be a real feed or a scraped page; the body tells us.
         const isFeed = looksLikeFeed(body);

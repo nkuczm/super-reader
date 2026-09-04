@@ -30,7 +30,9 @@ npm test                     # parser + discovery tests
    in the page's `<head>`, then falls back to conventional paths (`/feed`,
    `/rss.xml`, `/index.xml`, …) that cover Substack, WordPress, Ghost, Hugo and
    Jekyll.
-4. **A page with no feed at all** → the page's HTML is read directly and turned
+4. **An X account** (`@OpenAI`, `x.com/OpenAI`, `twitter.com/OpenAI`) → the
+   account's posts, via the official X API. See below.
+5. **A page with no feed at all** → the page's HTML is read directly and turned
    into a feed (`lib/scrape.ts`). This is how sites like `anthropic.com/news`,
    which never published RSS, become followable.
 
@@ -71,6 +73,7 @@ Each source shows its favicon, with a letter avatar as fallback.
 | `lib/enrich.ts` | Fill in missing summaries/dates from article metadata |
 | `lib/article.ts` | Extract + sanitize an article for the in-app reader |
 | `lib/sort.ts` | Newest-first ordering shared by every path |
+| `lib/x.ts` | Following an X account through the official API |
 | `lib/sync-code.ts` | Sync code generation, normalising and hashing |
 | `lib/sync.ts` | Reading and writing a synced feed list |
 | `lib/db.ts` | Postgres connection and one-table schema |
@@ -106,6 +109,24 @@ Icons are generated from the same lens mark (`scripts/gen-icons.mjs`): a
 maskable variant keeps the mark inside the safe zone so Android can crop it to
 any shape, and the Apple touch icon is full-bleed because iOS applies its own
 rounded mask.
+
+## Following X accounts
+
+x.com shows logged-out visitors a login wall with no posts, and the community
+front-ends that used to expose them (Nitter and friends) were hit with
+cease-and-desist letters in August 2026 and no longer answer. The only route
+left is the official API — which is how Feedly does it too, with you supplying
+your own credentials.
+
+1. Create a project at the [X developer portal](https://developer.x.com) and
+   generate a **bearer token**. Reading timelines needs a paid tier; the free
+   tier does not include it.
+2. Add `X_BEARER_TOKEN` to the project's environment variables in Vercel.
+3. Redeploy.
+
+Then paste `@handle` or an `x.com/handle` URL like any other source. Without
+the key, everything else keeps working and the dialog explains what is missing.
+Replies are excluded, and posts carry their images and full text.
 
 ## Syncing across devices
 

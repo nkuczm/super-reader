@@ -128,3 +128,60 @@ export function startFixtures(port = 8781) {
     server.listen(port, () => resolve(server));
   });
 }
+
+/**
+ * Stands in for api.x.com so the X integration can be tested without a paid
+ * key. Records the paths requested so the test can assert the calls made.
+ */
+export function startFakeX(port = 8785) {
+  const calls = [];
+  const server = http.createServer((req, res) => {
+    calls.push(req.url);
+    const auth = req.headers.authorization ?? "";
+    const json = (status, body) => {
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify(body));
+    };
+    if (auth !== "Bearer test-token") return json(401, { title: "Unauthorized" });
+
+    const path = new URL(req.url, "http://x").pathname;
+    if (path === "/users/by/username/OpenAI") {
+      return json(200, {
+        data: {
+          id: "4398626122",
+          name: "OpenAI",
+          username: "OpenAI",
+          description: "Our mission is to ensure AGI benefits all of humanity.",
+          profile_image_url: "https://pbs.twimg.com/profile_images/openai.jpg",
+        },
+      });
+    }
+    if (path === "/users/by/username/nosuchaccount") {
+      return json(200, { errors: [{ title: "Not Found Error" }] });
+    }
+    if (path === "/users/4398626122/tweets") {
+      return json(200, {
+        data: [
+          {
+            id: "1002",
+            text: "Introducing something new today. Read more at https://openai.com/index/thing",
+            created_at: "2026-09-03T13:15:00.000Z",
+            attachments: { media_keys: ["3_media1"] },
+          },
+          {
+            id: "1001",
+            text: "A much longer post that runs well past the length we want to use as a headline, because a title has to stay short enough to scan in a list without wrapping three times.",
+            created_at: "2026-09-01T10:00:00.000Z",
+          },
+        ],
+        includes: {
+          media: [{ media_key: "3_media1", url: "https://pbs.twimg.com/media/photo.jpg" }],
+        },
+      });
+    }
+    return json(404, { title: "Not Found" });
+  });
+  return new Promise((resolve) => {
+    server.listen(port, () => resolve({ server, calls, close: () => server.close() }));
+  });
+}

@@ -1,6 +1,7 @@
 import { fetchText, parseFeed, looksLikeFeed, faviconFor } from "./feed";
 import { scrapePage } from "./scrape";
 import { enrichArticles } from "./enrich";
+import { xHandleFrom, fetchXFeed } from "./x";
 import { sortNewestFirst } from "./sort";
 import type { DiscoverResult } from "./types";
 
@@ -66,6 +67,14 @@ export async function discover(
 ): Promise<DiscoverResult> {
   const raw = input.trim();
   if (!raw) throw new Error("Nothing to look up");
+
+  // An X account is neither a feed nor a scrapable page: x.com serves
+  // logged-out visitors a login wall, so it goes through the API instead.
+  const handle = xHandleFrom(raw);
+  if (handle) {
+    const { meta, articles } = await fetchXFeed(handle, limit);
+    return { ...meta, kind: "x", total: articles.length, articles };
+  }
 
   if (!isProbablyUrl(raw)) {
     // A plain topic: search-backed feed so any subject becomes a source.

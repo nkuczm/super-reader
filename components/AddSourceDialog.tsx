@@ -69,9 +69,9 @@ export default function AddSourceDialog({
         <div className="dialog-head">
           <h2>Add a source</h2>
           <p>
-            Paste a website, a Substack, an RSS URL — or just type a topic like
-            “semiconductors”. Sites without a feed are read straight from the
-            page.
+            Paste a website, a Substack, an RSS URL, an X account like
+            @OpenAI — or just type a topic. Sites without a feed are read
+            straight from the page.
           </p>
         </div>
 
@@ -80,7 +80,7 @@ export default function AddSourceDialog({
             <input
               ref={inputRef}
               className="input"
-              placeholder="stratechery.com, a topic, or an RSS link"
+              placeholder="stratechery.com, @OpenAI, or a topic"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => {
@@ -107,7 +107,9 @@ export default function AddSourceDialog({
                   <span>
                     {preview.kind === "topic"
                       ? "Topic feed"
-                      : hostOf(preview.siteUrl)}{" "}
+                      : preview.kind === "x"
+                        ? "X account"
+                        : hostOf(preview.siteUrl)}{" "}
                     · {preview.articles.length} recent articles
                     {preview.kind === "page" && (
                       <em className="badge">built from the page — no RSS</em>

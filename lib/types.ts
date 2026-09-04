@@ -17,7 +17,7 @@ export type SourceMeta = {
 };
 
 export type DiscoverResult = SourceMeta & {
-  kind: "feed" | "topic" | "page";
+  kind: "feed" | "topic" | "page" | "x";
   /** How many articles the source really has, before the preview cap. */
   total: number;
   articles: Article[];
