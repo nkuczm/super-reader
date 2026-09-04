@@ -1,4 +1,5 @@
 import { XMLParser } from "fast-xml-parser";
+import { sortNewestFirst } from "./sort";
 import type { Article, SourceMeta } from "./types";
 
 const UA =
@@ -173,7 +174,7 @@ export function parseFeed(
         title: text(atom.title) || site,
         description: stripHtml(text(atom.subtitle), 200) || undefined,
       },
-      articles: entries,
+      articles: sortNewestFirst(entries),
     };
   }
 
@@ -187,7 +188,7 @@ export function parseFeed(
       title: text(rss.title) || site,
       description: stripHtml(text(rss.description), 200) || undefined,
     },
-    articles: items.map((item: any) => rssItem(item, site)),
+    articles: sortNewestFirst(items.map((item: any) => rssItem(item, site))),
   };
 }
 

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { fetchText, parseFeed, looksLikeFeed, faviconFor } from "@/lib/feed";
 import { scrapePage } from "@/lib/scrape";
+import { enrichArticles } from "@/lib/enrich";
+import { sortNewestFirst } from "@/lib/sort";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,15 +19,20 @@ export async function GET(request: Request) {
       try {
         const { body, finalUrl } = await fetchText(url);
         // A source may be a real feed or a scraped page; the body tells us.
-        const { meta, articles } = looksLikeFeed(body)
+        const isFeed = looksLikeFeed(body);
+        const { meta, articles } = isFeed
           ? parseFeed(body, finalUrl)
           : scrapePage(body, finalUrl);
+        // Scraped pages need their summaries filled in; real feeds carry them.
+        const ready = sortNewestFirst(
+          isFeed ? articles : await enrichArticles(articles),
+        );
         return {
           ok: true as const,
           ...meta,
           feedUrl: url,
           favicon: faviconFor(meta.siteUrl),
-          articles,
+          articles: ready,
         };
       } catch (error) {
         return {

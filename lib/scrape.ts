@@ -5,6 +5,7 @@ import {
   decodeEntities,
 
 } from "./feed";
+import { sortNewestFirst } from "./sort";
 import type { Article, SourceMeta } from "./types";
 
 /**
@@ -18,6 +19,7 @@ import type { Article, SourceMeta } from "./types";
 type Candidate = {
   url: string;
   title: string;
+  summary?: string;
   image?: string;
   publishedAt?: string;
   group: string;
@@ -61,18 +63,32 @@ const DATEISH =
  * otherwise split the card into its text chunks and take the longest one,
  * which is the headline in practice — labels and dates are short.
  */
-function titleFrom(innerHtml: string) {
-  const heading = innerHtml.match(/<(h[1-6])\b[^>]*>([\s\S]*?)<\/\1>/i)?.[2];
-  const asHeading = heading ? stripHtml(heading, 200) : "";
-  if (asHeading.length >= 8) return asHeading;
-
+function cardText(innerHtml: string): { title: string; summary?: string } {
   const chunks = innerHtml
     .split(/<[^>]+>/)
-    .map((chunk) => stripHtml(chunk, 200))
+    .map((chunk) => stripHtml(chunk, 400))
     .filter((chunk) => chunk.length > 0 && !DATEISH.test(chunk));
 
-  const longest = chunks.reduce((best, chunk) => (chunk.length > best.length ? chunk : best), "");
-  return longest || stripHtml(innerHtml, 200);
+  const heading = innerHtml.match(/<(h[1-6])\b[^>]*>([\s\S]*?)<\/\1>/i)?.[2];
+  const asHeading = heading ? stripHtml(heading, 200) : "";
+
+  // With a real heading the title is settled; otherwise the longest chunk is
+  // the headline, since labels and dates are short.
+  const title =
+    asHeading.length >= 8
+      ? asHeading
+      : chunks.reduce((best, c) => (c.length > best.length ? c : best), "");
+
+  // A richer "featured" card also carries a blurb: the longest remaining chunk
+  // that is clearly prose rather than a category label.
+  const summary = chunks
+    .filter((c) => c !== title && c.length >= 60)
+    .reduce((best, c) => (c.length > best.length ? c : best), "");
+
+  return {
+    title: title || stripHtml(innerHtml, 200),
+    summary: summary || undefined,
+  };
 }
 
 const DATE_PATTERNS = [
@@ -134,13 +150,14 @@ function collect(html: string, pageUrl: string): Candidate[] {
     const slug = segments[segments.length - 1];
     if (slug.length < 6) continue;
 
-    const title = titleFrom(inner);
+    const { title, summary } = cardText(inner);
     if (title.length < 12) continue;
 
     seen.add(clean);
     out.push({
       url: clean,
       title,
+      summary,
       image: firstImage(inner, pageUrl),
       publishedAt: dateFrom(inner, url.pathname),
       group: groupOf(url.pathname),
@@ -205,12 +222,15 @@ export function scrapePage(
       title: title || new URL(pageUrl).hostname,
       description: metaContent(html, "og:description"),
     },
-    articles: best.items.map((item) => ({
-      id: item.url,
-      title: item.title,
-      link: item.url,
-      publishedAt: item.publishedAt,
-      image: item.image,
-    })),
+    articles: sortNewestFirst(
+      best.items.map((item) => ({
+        id: item.url,
+        title: item.title,
+        link: item.url,
+        summary: item.summary,
+        publishedAt: item.publishedAt,
+        image: item.image,
+      })),
+    ),
   };
 }

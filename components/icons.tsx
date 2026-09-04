@@ -20,6 +20,16 @@ export const Icon = {
       <path d="M21 12a9 9 0 1 1-2.6-6.4" /><path d="M21 3v6h-6" />
     </svg>
   ),
+  back: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M15 5l-7 7 7 7" />
+    </svg>
+  ),
+  book: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z" />
+    </svg>
+  ),
   inbox: (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 12h5l2 3h4l2-3h5" /><path d="M4 5h16l1 7v7H3v-7z" />

@@ -52,7 +52,12 @@ are more fragile than real RSS: a site redesign can change the markup.
 You always see a preview — the source's real recent articles — before deciding
 to keep it, and you pick which feed it joins.
 
-**Reading** merges every source in the selected feed newest-first. Click a feed
+**Reading** merges every source in the selected feed, always newest first
+(undated items sort last). Click a headline to read the whole article inside
+the app: the server fetches it, extracts the body with Mozilla's Readability,
+and **sanitizes the HTML** — scripts, styles, iframes, event handlers and
+non-http URLs are stripped before it reaches the page. Cmd/Ctrl-click still
+opens the original. Click a feed
 in the sidebar to see everything in it, or a single source to narrow to it.
 Each source shows its favicon, with a letter avatar as fallback.
 
@@ -63,9 +68,13 @@ Each source shows its favicon, with a letter avatar as fallback.
 | `lib/feed.ts` | Fetch + parse RSS 2.0, Atom, and RDF into one article shape |
 | `lib/discover.ts` | Turn a pasted topic/URL/site into a feed |
 | `lib/scrape.ts` | Build a feed from a page that has no RSS |
+| `lib/enrich.ts` | Fill in missing summaries/dates from article metadata |
+| `lib/article.ts` | Extract + sanitize an article for the in-app reader |
+| `lib/sort.ts` | Newest-first ordering shared by every path |
 | `lib/store.ts` | `localStorage` persistence for feeds and read state |
 | `app/api/discover` | Preview endpoint used by the add dialog |
 | `app/api/feed` | Batch feed refresh |
+| `app/api/article` | Readable, sanitized article for the reader |
 | `components/Reader.tsx` | Sidebar, article list, feed management |
 
 Feeds are fetched server-side, which sidesteps browser CORS restrictions —
@@ -85,6 +94,13 @@ what avoids browser CORS limits.
 - Feeds are stored per-browser. There's no sync between devices yet; an
   OPML import/export would be the natural next step.
 - Favicons come from Google's public `s2/favicons` service.
+- Scraped pages only expose what the site server-renders. `anthropic.com/news`,
+  for example, ships ~11 posts in its HTML and paginates client-side, so that
+  is what a scraper (Feedly included) can see. Fine for following new posts;
+  it is not a back catalogue.
+- Listing pages rarely include a summary for every card, so missing summaries
+  are filled from each article's `og:description`. That costs one extra request
+  per article, capped and batched.
 - The site is public (no Vercel login) so it works from any device. Nothing
   personal is exposed by that: feeds never leave your browser, and the server
   keeps no state.

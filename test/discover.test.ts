@@ -84,13 +84,14 @@ test("builds a feed from a page that has no RSS at all", async () => {
   assert.equal(r.articles.length, 6, "finds the articles, not the chrome");
 
   const titles = r.articles.map((a) => a.title);
+  // Newest first, not document order.
   assert.deepEqual(titles, [
     "Introducing Claude Opus 5",
+    // Date and category must not be glued onto the headline.
+    "How Claude\u2019s text watermark works",
     "The Anthropic Economic Index update",
     "Progress on interpretability research",
     "Enterprise frontier safeguards",
-    // Date and category must not be glued onto the headline.
-    "How Claude\u2019s text watermark works",
     "Our position on open-weights models",
   ]);
 
@@ -120,4 +121,69 @@ test("refuses a page that is not a list of articles", async () => {
     () => discover(`${N}/about`),
     /doesn't look like a list of articles|article links could be read/,
   );
+});
+
+test("extracts a readable article and strips anything executable", async () => {
+  const { extractArticle } = await import("../lib/article");
+  const article = await extractArticle(`${N}/news/claude-opus-5`);
+
+  assert.equal(article.title, "Introducing Claude Opus 5");
+  assert.equal(article.siteName, "Anthropic");
+  assert.ok(
+    article.publishedAt?.startsWith("2026-09-02"),
+    `read the published date, got ${article.publishedAt}`,
+  );
+  assert.ok(
+    article.html.includes("step change in capability"),
+    "keeps the body text",
+  );
+  assert.ok(article.html.includes("<blockquote"), "keeps block structure");
+  assert.ok(article.wordCount > 40, "counts words for the read estimate");
+
+  // The security-critical part: nothing executable survives.
+  assert.ok(!/<script/i.test(article.html), "no script tags");
+  assert.ok(!/onclick/i.test(article.html), "no event handlers");
+  assert.ok(!/window\.tracker/.test(article.html), "no inline JS");
+
+  // Relative URLs are rewritten so images and links work off-site.
+  assert.ok(
+    article.html.includes(`${N}/img/chart.png`),
+    "image src made absolute",
+  );
+  assert.ok(
+    article.html.includes(`${N}/news/system-card`),
+    "link href made absolute",
+  );
+});
+
+test("fills in missing summaries from each article's metadata", async () => {
+  const r = await discover(`${N}/news`);
+  const opus = r.articles.find((a) => a.link.endsWith("/claude-opus-5"));
+  assert.ok(opus, "found the article");
+  assert.equal(
+    opus.summary,
+    "Opus 5 is a step change in capability across coding and reasoning.",
+    "summary came from og:description",
+  );
+  // The listing card already had an image, so enrichment leaves it alone.
+  assert.equal(opus.image, `${N}/img/opus.png`, "card image is kept");
+});
+
+test("sorts every feed newest first, with undated items last", async () => {
+  const r = await discover(`${N}/news`);
+  const times = r.articles.map((a) =>
+    a.publishedAt ? Date.parse(a.publishedAt) : Number.NEGATIVE_INFINITY,
+  );
+  for (let i = 1; i < times.length; i++) {
+    assert.ok(
+      times[i - 1] >= times[i],
+      `article ${i} is newer than the one above it`,
+    );
+  }
+
+  const rss = await discover(`${B}/rss`);
+  const rssTimes = rss.articles.map((a) => Date.parse(a.publishedAt ?? ""));
+  for (let i = 1; i < rssTimes.length; i++) {
+    assert.ok(rssTimes[i - 1] >= rssTimes[i], "RSS is chronological too");
+  }
 });

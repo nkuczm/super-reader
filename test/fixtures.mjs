@@ -63,9 +63,31 @@ const routes = {
 
 // A second origin that publishes no feed anywhere — the case this scraper
 // exists for. Kept separate so feed discovery cannot short-circuit to /feed.
+const article = `<html><head><title>Introducing Claude Opus 5</title>
+<meta property="og:site_name" content="Anthropic">
+<meta property="og:description" content="Opus 5 is a step change in capability across coding and reasoning.">
+<meta property="article:published_time" content="2026-09-02T10:00:00Z">
+<meta property="og:image" content="/img/social.png">
+</head><body>
+<header><a href="/">Home</a></header>
+<article>
+<h1>Introducing Claude Opus 5</h1>
+<p>Opus 5 is a step change in capability across coding, reasoning and long-horizon agentic work. It is available today to all paid plans and through the API.</p>
+<p>We measured substantial gains on agentic benchmarks, with the largest improvements on tasks that require many steps of tool use and careful verification of intermediate results.</p>
+<blockquote>The model is markedly better at knowing when it does not know.</blockquote>
+<p>Read the system card for a full account of evaluations, safety testing and the mitigations we applied before release.</p>
+<img src="/img/chart.png" alt="Benchmark chart">
+<script>window.tracker = 1;</script>
+<p onclick="steal()">Availability begins today across every supported region.</p>
+<a href="/news/system-card" onclick="evil()">Read the system card</a>
+</article>
+<footer><a href="/privacy">Privacy</a></footer>
+</body></html>`;
+
 const noFeedRoutes = {
   "/news": [200, "text/html", newsIndex],
   "/about": [200, "text/html", aboutPage],
+  "/news/claude-opus-5": [200, "text/html", article],
 };
 
 function serve(routeTable, port) {

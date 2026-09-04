@@ -1,5 +1,7 @@
 import { fetchText, parseFeed, looksLikeFeed, faviconFor } from "./feed";
 import { scrapePage } from "./scrape";
+import { enrichArticles } from "./enrich";
+import { sortNewestFirst } from "./sort";
 import type { DiscoverResult } from "./types";
 
 /** Feed paths that cover Substack, WordPress, Ghost, Hugo, Jekyll and friends. */
@@ -135,12 +137,17 @@ export async function discover(
   try {
     const { body, finalUrl } = await fetchText(pageBase);
     const { meta, articles } = scrapePage(body, finalUrl);
+    // A listing page gives titles and links; summaries and exact dates come
+    // from each article's own metadata.
+    const enriched = sortNewestFirst(
+      await enrichArticles(articles.slice(0, limit)),
+    );
     return {
       ...meta,
       kind: "page",
       total: articles.length,
       favicon: faviconFor(meta.siteUrl),
-      articles: articles.slice(0, limit),
+      articles: enriched,
     };
   } catch (error) {
     throw new Error(

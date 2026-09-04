@@ -12,9 +12,11 @@ import {
   type Source,
 } from "@/lib/store";
 import AddSourceDialog from "./AddSourceDialog";
+import ArticleReader from "./ArticleReader";
 import SourceIcon from "./SourceIcon";
 import { Icon } from "./icons";
 import { timeAgo, hostOf } from "./format";
+import { sortNewestFirst } from "@/lib/sort";
 import "./reader.css";
 
 type Loaded = Article & { sourceId: string };
@@ -28,6 +30,9 @@ export default function Reader() {
   const [selection, setSelection] = useState<Selection>({ type: "all" });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [reading, setReading] = useState<{ url: string; title: string } | null>(
+    null,
+  );
 
   useEffect(() => {
     setFeeds(loadFeeds());
@@ -66,11 +71,7 @@ export default function Reader() {
           merged.push({ ...article, sourceId, id: `${sourceId}:${article.id}` });
         }
       }
-      merged.sort(
-        (a, b) =>
-          Date.parse(b.publishedAt ?? "0") - Date.parse(a.publishedAt ?? "0"),
-      );
-      setArticles(merged);
+      setArticles(sortNewestFirst(merged));
     } finally {
       setRefreshing(false);
     }
@@ -271,6 +272,14 @@ export default function Reader() {
       </aside>
 
       <main className="main">
+        {reading ? (
+          <ArticleReader
+            url={reading.url}
+            fallbackTitle={reading.title}
+            onClose={() => setReading(null)}
+          />
+        ) : (
+          <>
         <div className="main-head">
           <div>
             <h1>{heading}</h1>
@@ -346,15 +355,36 @@ export default function Reader() {
                     <a
                       className="article-title"
                       href={article.link}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                      onClick={() => markRead(article.id)}
+                      onClick={(event) => {
+                        // Plain click reads in-app; modified clicks still open
+                        // the original in a new tab.
+                        if (
+                          event.metaKey ||
+                          event.ctrlKey ||
+                          event.shiftKey ||
+                          event.button !== 0
+                        ) {
+                          return;
+                        }
+                        event.preventDefault();
+                        markRead(article.id);
+                        setReading({ url: article.link, title: article.title });
+                      }}
                     >
                       {article.title}
                     </a>
                     {article.summary && (
                       <p className="article-summary">{article.summary}</p>
                     )}
+                    <button
+                      className="read-btn"
+                      onClick={() => {
+                        markRead(article.id);
+                        setReading({ url: article.link, title: article.title });
+                      }}
+                    >
+                      {Icon.book} Read here
+                    </button>
                   </div>
                   {article.image && (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -373,6 +403,8 @@ export default function Reader() {
               );
             })}
           </div>
+        )}
+          </>
         )}
       </main>
 
