@@ -36,6 +36,10 @@ const newsIndex = `<html><head><title>News \\ Anthropic</title>
   <a href="/news/interpretability-progress"><div><span>Research</span><time datetime="2026-08-19">Aug 19, 2026</time><h3>Progress on interpretability research</h3></div></a>
   <a href="/news/enterprise-safeguards"><div><span>Policy</span><time datetime="2026-08-11">Aug 11, 2026</time><h3>Enterprise frontier safeguards</h3></div></a>
   <a href="/news/claude-opus-5">Read more</a>
+  <!-- Cards with no heading tag: date and category sit beside the headline,
+       exactly as anthropic.com/news renders them. -->
+  <a href="/news/watermark-explainer"><div><div>Sep 1, 2026</div><div>Announcements</div><div>How Claude&#8217;s text watermark works</div></div></a>
+  <a href="/news/open-weights-position"><div><div>Jul 27, 2026</div><div>Policy</div><div>Our position on open-weights models</div></div></a>
 </main>
 <footer><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/legal/aup">Usage policy</a></footer>
 </body></html>`;

@@ -81,7 +81,7 @@ test("builds a feed from a page that has no RSS at all", async () => {
   const r = await discover(`${N}/news`);
   assert.equal(r.kind, "page");
   assert.equal(r.title, "Anthropic", "uses og:site_name");
-  assert.equal(r.articles.length, 4, "finds the four articles, not the chrome");
+  assert.equal(r.articles.length, 6, "finds the articles, not the chrome");
 
   const titles = r.articles.map((a) => a.title);
   assert.deepEqual(titles, [
@@ -89,6 +89,9 @@ test("builds a feed from a page that has no RSS at all", async () => {
     "The Anthropic Economic Index update",
     "Progress on interpretability research",
     "Enterprise frontier safeguards",
+    // Date and category must not be glued onto the headline.
+    "How Claude\u2019s text watermark works",
+    "Our position on open-weights models",
   ]);
 
   const [first] = r.articles;

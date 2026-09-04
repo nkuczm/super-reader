@@ -51,18 +51,28 @@ function metaContent(html: string, property: string) {
   return value ? decodeEntities(value) : undefined;
 }
 
+const DATEISH =
+  /^(?:\d{1,2}\s+)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s*\d{0,4}$|^\d{4}-\d{2}-\d{2}$|^\d{1,2}\/\d{1,2}\/\d{2,4}$/i;
+
 /**
- * Prefer an inner heading for the title: listing cards often wrap a category
- * label, a date and the headline in one anchor, and the heading is the part a
- * reader actually wants.
+ * Pull the headline out of a listing card. Cards commonly stack a date, a
+ * category label and the headline inside one <a>, so taking the anchor's whole
+ * text yields "Sep 1, 2026 Announcements Real Title". Prefer a real heading;
+ * otherwise split the card into its text chunks and take the longest one,
+ * which is the headline in practice — labels and dates are short.
  */
 function titleFrom(innerHtml: string) {
-  const heading = innerHtml.match(
-    /<(h[1-6])\b[^>]*>([\s\S]*?)<\/\1>/i,
-  )?.[2];
-  const heading2 = heading ? stripHtml(heading, 200) : "";
-  if (heading2.length >= 8) return heading2;
-  return stripHtml(innerHtml, 200);
+  const heading = innerHtml.match(/<(h[1-6])\b[^>]*>([\s\S]*?)<\/\1>/i)?.[2];
+  const asHeading = heading ? stripHtml(heading, 200) : "";
+  if (asHeading.length >= 8) return asHeading;
+
+  const chunks = innerHtml
+    .split(/<[^>]+>/)
+    .map((chunk) => stripHtml(chunk, 200))
+    .filter((chunk) => chunk.length > 0 && !DATEISH.test(chunk));
+
+  const longest = chunks.reduce((best, chunk) => (chunk.length > best.length ? chunk : best), "");
+  return longest || stripHtml(innerHtml, 200);
 }
 
 const DATE_PATTERNS = [
