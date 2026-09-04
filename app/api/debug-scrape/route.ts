@@ -24,8 +24,32 @@ export async function GET(request: Request) {
     .map((m) => m[1])
     .filter((h) => h.includes("/news/"));
 
+  // Probe likely pagination shapes to see whether more articles are reachable.
+  const probes = ["?page=2", "/page/2", "?p=2", "/archive", "/all"];
+  const base = finalUrl.replace(/\/$/, "");
+  const pagination = await Promise.all(
+    probes.map(async (suffix) => {
+      const target = suffix.startsWith("?") ? base + suffix : base + suffix;
+      try {
+        const res = await fetchText(target);
+        return {
+          probe: target,
+          bytes: res.body.length,
+          slugs: slugs(res.body).length,
+          sample: slugs(res.body).slice(0, 5),
+        };
+      } catch (e) {
+        return { probe: target, error: e instanceof Error ? e.message : "failed" };
+      }
+    }),
+  );
+
+  const relNext = body.match(/<link[^>]+rel=["']next["'][^>]*>/i)?.[0];
+
   return NextResponse.json({
     finalUrl,
+    pagination,
+    relNext: relNext ?? null,
     htmlBytes: body.length,
     bytesOutsideScripts: withoutScripts.length,
     newsSlugsAnywhere: slugs(body).length,
