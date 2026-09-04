@@ -5,12 +5,17 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const input = new URL(request.url).searchParams.get("q");
+  const params = new URL(request.url).searchParams;
+  const input = params.get("q");
   if (!input?.trim()) {
     return NextResponse.json({ error: "Missing ?q" }, { status: 400 });
   }
+  const requested = Number.parseInt(params.get("limit") ?? "", 10);
+  const limit = Number.isFinite(requested)
+    ? Math.min(Math.max(requested, 1), 100)
+    : 12;
   try {
-    return NextResponse.json(await discover(input));
+    return NextResponse.json(await discover(input, limit));
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Lookup failed" },

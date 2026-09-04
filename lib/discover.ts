@@ -55,7 +55,7 @@ async function tryFeed(url: string, limit: number) {
   const { body, finalUrl } = await fetchText(url);
   if (!looksLikeFeed(body)) throw new Error("Response was not a feed");
   const { meta, articles } = parseFeed(body, finalUrl);
-  return { meta, articles: articles.slice(0, limit) };
+  return { meta, total: articles.length, articles: articles.slice(0, limit) };
 }
 
 export async function discover(
@@ -67,9 +67,10 @@ export async function discover(
 
   if (!isProbablyUrl(raw)) {
     // A plain topic: search-backed feed so any subject becomes a source.
-    const { meta, articles } = await tryFeed(topicFeedUrl(raw), limit);
+    const { meta, total, articles } = await tryFeed(topicFeedUrl(raw), limit);
     return {
       ...meta,
+      total,
       kind: "topic",
       title: raw,
       description: `Latest stories about “${raw}”`,
@@ -83,8 +84,14 @@ export async function discover(
 
   // 1. The URL may already be a feed.
   try {
-    const { meta, articles } = await tryFeed(url, limit);
-    return { ...meta, kind: "feed", favicon: faviconFor(meta.siteUrl), articles };
+    const { meta, total, articles } = await tryFeed(url, limit);
+    return {
+      ...meta,
+      kind: "feed",
+      total,
+      favicon: faviconFor(meta.siteUrl),
+      articles,
+    };
   } catch {
     /* not a feed itself — treat it as a web page below */
   }
@@ -109,11 +116,12 @@ export async function discover(
 
   for (const candidate of candidates) {
     try {
-      const { meta, articles } = await tryFeed(candidate, limit);
+      const { meta, total, articles } = await tryFeed(candidate, limit);
       if (articles.length === 0) continue;
       return {
         ...meta,
         kind: "feed",
+        total,
         favicon: faviconFor(meta.siteUrl || origin),
         articles,
       };
@@ -130,6 +138,7 @@ export async function discover(
     return {
       ...meta,
       kind: "page",
+      total: articles.length,
       favicon: faviconFor(meta.siteUrl),
       articles: articles.slice(0, limit),
     };
