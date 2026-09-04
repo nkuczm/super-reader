@@ -9,7 +9,9 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     title: "Reader",
-    statusBarStyle: "black-translucent",
+    // "default" keeps iOS from drawing the page under the status bar; the
+    // safe-area padding in the stylesheet covers devices that still do.
+    statusBarStyle: "default",
   },
   formatDetection: { telephone: false },
   other: {
