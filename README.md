@@ -63,6 +63,21 @@ opens the original. Click a feed
 in the sidebar to see everything in it, or a single source to narrow to it.
 Each source shows its favicon, with a letter avatar as fallback.
 
+## View modes
+
+Settings (bottom of the sidebar) chooses how articles are laid out:
+
+- **Magazine** — a large header image inline above each story, in a narrower
+  column. Best for image-rich sources.
+- **Cards** — a small thumbnail beside the headline. The default.
+- **List** — headlines only, no images or summaries. Most stories per screen.
+
+There is also an option to hide articles you have already opened rather than
+just dimming them.
+
+The choice is stored per device, not synced: a phone and a desktop want
+different densities, while the feeds themselves are what needs to match.
+
 ### Layout
 
 | Path | What it does |
@@ -85,6 +100,7 @@ Each source shows its favicon, with a letter avatar as fallback.
 | `app/manifest.ts` | Web app manifest for Home Screen installs |
 | `scripts/gen-icons.mjs` | Regenerates the PNG app icons from the mark |
 | `components/Reader.tsx` | Sidebar, article list, feed management |
+| `components/SettingsDialog.tsx` | View mode and reading preferences |
 
 Feeds are fetched server-side, which sidesteps browser CORS restrictions —
 this is why the app needs a Node server rather than being a static page.

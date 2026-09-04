@@ -31,6 +31,47 @@ export function saveFeeds(feeds: Feed[]) {
   }
 }
 
+export type ViewMode = "magazine" | "cards" | "list";
+
+export type Settings = {
+  view: ViewMode;
+  /** Hide articles already opened, rather than only dimming them. */
+  hideRead: boolean;
+};
+
+export const DEFAULT_SETTINGS: Settings = { view: "cards", hideRead: false };
+
+const SETTINGS_KEY = "super-reader:settings:v1";
+
+/**
+ * Kept per device rather than synced: a phone and a desktop want different
+ * densities, and the feeds themselves are what needs to match.
+ */
+export function loadSettings(): Settings {
+  if (typeof window === "undefined") return DEFAULT_SETTINGS;
+  try {
+    const raw = window.localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return DEFAULT_SETTINGS;
+    const parsed = JSON.parse(raw) as Partial<Settings>;
+    return {
+      view: (["magazine", "cards", "list"] as const).includes(parsed.view as ViewMode)
+        ? (parsed.view as ViewMode)
+        : DEFAULT_SETTINGS.view,
+      hideRead: Boolean(parsed.hideRead),
+    };
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
+}
+
+export function saveSettings(settings: Settings) {
+  try {
+    window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    /* storage unavailable; the choice just won't persist */
+  }
+}
+
 const CODE_KEY = "super-reader:sync-code:v1";
 
 export function loadSyncCode(): string | null {

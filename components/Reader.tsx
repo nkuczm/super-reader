@@ -9,6 +9,10 @@ import {
   saveRead,
   loadSyncCode,
   saveSyncCode,
+  loadSettings,
+  saveSettings,
+  DEFAULT_SETTINGS,
+  type Settings,
   newId,
   type Feed,
   type Source,
@@ -16,6 +20,7 @@ import {
 import AddSourceDialog from "./AddSourceDialog";
 import SyncDialog from "./SyncDialog";
 import InlineName from "./InlineName";
+import SettingsDialog from "./SettingsDialog";
 import ArticleReader from "./ArticleReader";
 import SourceIcon from "./SourceIcon";
 import { Icon } from "./icons";
@@ -45,6 +50,8 @@ export default function Reader() {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [syncState, setSyncState] = useState<
     "idle" | "working" | "saved" | "error"
   >("idle");
@@ -56,6 +63,7 @@ export default function Reader() {
     setFeeds(loadFeeds());
     setRead(loadRead());
     setSyncCode(loadSyncCode());
+    setSettings(loadSettings());
     setReady(true);
   }, []);
 
@@ -290,6 +298,11 @@ export default function Reader() {
     );
   }
 
+  function updateSettings(next: Settings) {
+    setSettings(next);
+    saveSettings(next);
+  }
+
   function markRead(id: string) {
     setRead((current) => {
       const next = new Set(current).add(id);
@@ -307,6 +320,11 @@ export default function Reader() {
     const ids = new Set(feed?.sources.map((s) => s.id));
     return articles.filter((a) => ids.has(a.sourceId));
   }, [articles, feeds, selection]);
+
+  const shown = useMemo(
+    () => (settings.hideRead ? visible.filter((a) => !read.has(a.id)) : visible),
+    [visible, settings.hideRead, read],
+  );
 
   const sourceById = useMemo(
     () => new Map(allSources.map((s) => [s.id, s])),
@@ -456,6 +474,13 @@ export default function Reader() {
           )}
           <button
             className="sync-btn"
+            onClick={() => setSettingsOpen(true)}
+          >
+            {Icon.gear}
+            Settings
+          </button>
+          <button
+            className="sync-btn"
             onClick={() => setSyncOpen(true)}
             title={syncCode ? "Syncing across devices" : "Sync across devices"}
           >
@@ -499,7 +524,7 @@ export default function Reader() {
           <div>
             <h1>{heading}</h1>
             <p className="sub">
-              {visible.length} article{visible.length === 1 ? "" : "s"}
+              {shown.length} article{shown.length === 1 ? "" : "s"}
               {allSources.length > 0 &&
                 ` · ${allSources.length} source${allSources.length === 1 ? "" : "s"}`}
             </p>
@@ -530,20 +555,34 @@ export default function Reader() {
               {Icon.plus} Add your first source
             </button>
           </div>
-        ) : visible.length === 0 ? (
+        ) : shown.length === 0 ? (
           <div className="state">
             <h2>{refreshing ? "Loading articles…" : "Nothing here yet."}</h2>
             {!refreshing && <p>This selection has no articles right now.</p>}
           </div>
         ) : (
-          <div className="articles">
-            {visible.map((article) => {
+          <div className={`articles view-${settings.view}`}>
+            {shown.map((article) => {
               const source = sourceById.get(article.sourceId);
               return (
                 <article
                   className={`article ${read.has(article.id) ? "read" : ""}`}
                   key={article.id}
                 >
+                  {/* Magazine leads with the image; the other views don't. */}
+                  {settings.view === "magazine" && article.image && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      className="hero"
+                      src={article.image}
+                      alt=""
+                      loading="lazy"
+                      referrerPolicy="no-referrer"
+                      onError={(event) => {
+                        event.currentTarget.style.display = "none";
+                      }}
+                    />
+                  )}
                   <div className="article-body">
                     <div className="article-meta">
                       {source && (
@@ -588,7 +627,7 @@ export default function Reader() {
                     >
                       {article.title}
                     </a>
-                    {article.summary && (
+                    {article.summary && settings.view !== "list" && (
                       <p className="article-summary">{article.summary}</p>
                     )}
                     <button
@@ -601,13 +640,14 @@ export default function Reader() {
                       {Icon.book} Read here
                     </button>
                   </div>
-                  {article.image && (
+                  {article.image && settings.view === "cards" && (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       className="thumb"
                       src={article.image}
                       alt=""
                       loading="lazy"
+                      referrerPolicy="no-referrer"
                       // Drop the slot entirely if the image 404s.
                       onError={(event) => {
                         event.currentTarget.style.display = "none";
@@ -622,6 +662,14 @@ export default function Reader() {
           </>
         )}
       </main>
+
+      {settingsOpen && (
+        <SettingsDialog
+          settings={settings}
+          onChange={updateSettings}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
 
       {syncOpen && (
         <SyncDialog

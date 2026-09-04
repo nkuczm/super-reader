@@ -92,11 +92,18 @@ const boilerplatePage = `<html><head><title>Interpretability</title>
 </head><body><article><h1>Progress on interpretability research</h1>
 <p>Body text.</p></article></body></html>`;
 
+// A real 1x1 PNG so image-dependent layouts can be measured in tests.
+const PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+);
+
 const noFeedRoutes = {
   "/news": [200, "text/html", newsIndex],
   "/about": [200, "text/html", aboutPage],
   "/news/claude-opus-5": [200, "text/html", article],
   "/news/interpretability-progress": [200, "text/html", boilerplatePage],
+  "/img/opus.png": [200, "image/png", PNG],
 };
 
 function serve(routeTable, port) {
