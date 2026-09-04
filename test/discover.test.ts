@@ -1,15 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { startFixtures } from "./fixtures.mjs";
+import { startFixtures, startNoFeedSite } from "./fixtures.mjs";
 import { discover } from "../lib/discover";
 
 const B = "http://127.0.0.1:8781";
+// A site with no feed of any kind, on its own origin.
+const N = "http://127.0.0.1:8783";
 let server: { close: () => void };
+let noFeed: { close: () => void };
 
 test.before(async () => {
   server = await startFixtures(8781);
+  noFeed = await startNoFeedSite(8783);
 });
-test.after(() => server.close());
+test.after(() => {
+  server.close();
+  noFeed.close();
+});
 
 test("parses an RSS 2.0 feed", async () => {
   const r = await discover(`${B}/rss`);
@@ -66,6 +73,48 @@ test("honors the article limit", async () => {
 test("reports a clear error when there is no feed", async () => {
   await assert.rejects(
     () => discover("http://127.0.0.1:8782/nothing"),
-    /No RSS or Atom feed found/,
+    /No feed found for that site/,
+  );
+});
+
+test("builds a feed from a page that has no RSS at all", async () => {
+  const r = await discover(`${N}/news`);
+  assert.equal(r.kind, "page");
+  assert.equal(r.title, "Anthropic", "uses og:site_name");
+  assert.equal(r.articles.length, 4, "finds the four articles, not the chrome");
+
+  const titles = r.articles.map((a) => a.title);
+  assert.deepEqual(titles, [
+    "Introducing Claude Opus 5",
+    "The Anthropic Economic Index update",
+    "Progress on interpretability research",
+    "Enterprise frontier safeguards",
+  ]);
+
+  const [first] = r.articles;
+  assert.equal(first.link, `${N}/news/claude-opus-5`);
+  assert.ok(
+    first.publishedAt?.startsWith("2026-09-02"),
+    `read the <time> date, got ${first.publishedAt}`,
+  );
+  assert.equal(first.image, `${N}/img/opus.png`);
+
+  // Nav, footer and legal links must not become articles.
+  const links = r.articles.map((a) => a.link).join(" ");
+  for (const junk of ["/pricing", "/careers", "/privacy", "/terms", "/legal"]) {
+    assert.ok(!links.includes(junk), `${junk} leaked into the feed`);
+  }
+});
+
+test("dedupes repeated links to the same article", async () => {
+  const r = await discover(`${N}/news`);
+  const links = r.articles.map((a) => a.link);
+  assert.equal(new Set(links).size, links.length);
+});
+
+test("refuses a page that is not a list of articles", async () => {
+  await assert.rejects(
+    () => discover(`${N}/about`),
+    /doesn't look like a list of articles|article links could be read/,
   );
 });

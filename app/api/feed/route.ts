@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { fetchText, parseFeed, faviconFor } from "@/lib/feed";
+import { fetchText, parseFeed, looksLikeFeed, faviconFor } from "@/lib/feed";
+import { scrapePage } from "@/lib/scrape";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +16,10 @@ export async function GET(request: Request) {
     urls.map(async (url) => {
       try {
         const { body, finalUrl } = await fetchText(url);
-        const { meta, articles } = parseFeed(body, finalUrl);
+        // A source may be a real feed or a scraped page; the body tells us.
+        const { meta, articles } = looksLikeFeed(body)
+          ? parseFeed(body, finalUrl)
+          : scrapePage(body, finalUrl);
         return {
           ok: true as const,
           ...meta,

@@ -17,6 +17,6 @@ export type SourceMeta = {
 };
 
 export type DiscoverResult = SourceMeta & {
-  kind: "feed" | "topic";
+  kind: "feed" | "topic" | "page";
   articles: Article[];
 };

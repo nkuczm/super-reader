@@ -70,7 +70,8 @@ export default function AddSourceDialog({
           <h2>Add a source</h2>
           <p>
             Paste a website, a Substack, an RSS URL — or just type a topic like
-            “semiconductors”.
+            “semiconductors”. Sites without a feed are read straight from the
+            page.
           </p>
         </div>
 
@@ -108,6 +109,9 @@ export default function AddSourceDialog({
                       ? "Topic feed"
                       : hostOf(preview.siteUrl)}{" "}
                     · {preview.articles.length} recent articles
+                    {preview.kind === "page" && (
+                      <em className="badge">built from the page — no RSS</em>
+                    )}
                   </span>
                 </div>
               </div>

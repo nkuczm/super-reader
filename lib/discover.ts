@@ -1,4 +1,5 @@
 import { fetchText, parseFeed, looksLikeFeed, faviconFor } from "./feed";
+import { scrapePage } from "./scrape";
 import type { DiscoverResult } from "./types";
 
 /** Feed paths that cover Substack, WordPress, Ghost, Hugo, Jekyll and friends. */
@@ -121,7 +122,22 @@ export async function discover(
     }
   }
 
-  throw new Error(
-    "No RSS or Atom feed found for that site. Try pasting the feed URL directly.",
-  );
+  // 4. No feed anywhere. Read the page itself, the way Feedly does for sites
+  //    that never published one.
+  try {
+    const { body, finalUrl } = await fetchText(pageBase);
+    const { meta, articles } = scrapePage(body, finalUrl);
+    return {
+      ...meta,
+      kind: "page",
+      favicon: faviconFor(meta.siteUrl),
+      articles: articles.slice(0, limit),
+    };
+  } catch (error) {
+    throw new Error(
+      error instanceof Error && /article links|list of articles/.test(error.message)
+        ? error.message
+        : "No feed found for that site, and its articles could not be read.",
+    );
+  }
 }

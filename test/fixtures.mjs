@@ -21,6 +21,31 @@ const atom = `<?xml version="1.0" encoding="utf-8"?>
 <author><name>Grace</name></author><published>2025-09-03T12:00:00Z</published>
 <summary>Atom summary text.</summary></entry></feed>`;
 
+
+// A news index with no feed at all, shaped like a modern JS-framework site:
+// nav/footer chrome, cards wrapping a category, date and heading in one <a>.
+const newsIndex = `<html><head><title>News \\ Anthropic</title>
+<meta property="og:site_name" content="Anthropic">
+<meta property="og:description" content="Announcements from Anthropic">
+</head><body>
+<header><a href="/">Home</a><a href="/pricing">Pricing</a><a href="/careers">Careers</a></header>
+<nav><a href="/product">Product</a><a href="/research">Research</a></nav>
+<main>
+  <a href="/news/claude-opus-5"><div><span>Announcements</span><time datetime="2026-09-02">Sep 2, 2026</time><h3>Introducing Claude Opus 5</h3></div><img src="/img/opus.png"></a>
+  <a href="/news/economic-index-update"><div><span>Societal Impacts</span><time datetime="2026-08-28">Aug 28, 2026</time><h3>The Anthropic Economic Index update</h3></div></a>
+  <a href="/news/interpretability-progress"><div><span>Research</span><time datetime="2026-08-19">Aug 19, 2026</time><h3>Progress on interpretability research</h3></div></a>
+  <a href="/news/enterprise-safeguards"><div><span>Policy</span><time datetime="2026-08-11">Aug 11, 2026</time><h3>Enterprise frontier safeguards</h3></div></a>
+  <a href="/news/claude-opus-5">Read more</a>
+</main>
+<footer><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/legal/aup">Usage policy</a></footer>
+</body></html>`;
+
+// A page that is not a list of articles at all.
+const aboutPage = `<html><head><title>About</title></head><body><main>
+<p>We are a company that does things and believes in things.</p>
+<a href="/contact-us-today">Contact our team about partnerships</a>
+</main></body></html>`;
+
 const routes = {
   "/rss": [200, "application/rss+xml", rss],
   "/atom": [200, "application/atom+xml", atom],
@@ -31,6 +56,30 @@ const routes = {
   "/silent": [200, "text/html", `<html><body>no feed link</body></html>`],
   "/feed": [200, "application/rss+xml", rss],
 };
+
+// A second origin that publishes no feed anywhere — the case this scraper
+// exists for. Kept separate so feed discovery cannot short-circuit to /feed.
+const noFeedRoutes = {
+  "/news": [200, "text/html", newsIndex],
+  "/about": [200, "text/html", aboutPage],
+};
+
+function serve(routeTable, port) {
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      const path = new URL(req.url, "http://x").pathname;
+      const hit = routeTable[path];
+      if (!hit) { res.writeHead(404); return res.end("nope"); }
+      res.writeHead(hit[0], { "content-type": hit[1] });
+      res.end(hit[2]);
+    });
+    server.listen(port, () => resolve(server));
+  });
+}
+
+export function startNoFeedSite(port = 8783) {
+  return serve(noFeedRoutes, port);
+}
 
 export function startFixtures(port = 8781) {
   return new Promise((resolve) => {

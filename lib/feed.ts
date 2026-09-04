@@ -94,7 +94,7 @@ export function decodeEntities(input: string): string {
   );
 }
 
-function stripHtml(html: string, max = 320) {
+export function stripHtml(html: string, max = 320) {
   const plain = decodeEntities(
     html
       .replace(/<script[\s\S]*?<\/script>/gi, "")
@@ -106,7 +106,7 @@ function stripHtml(html: string, max = 320) {
   return plain.length > max ? plain.slice(0, max).trimEnd() + "…" : plain;
 }
 
-function absolute(href: string, base: string) {
+export function absolute(href: string, base: string) {
   const decoded = decodeEntities(href.trim());
   try {
     return new URL(decoded, base).toString();
@@ -115,12 +115,12 @@ function absolute(href: string, base: string) {
   }
 }
 
-function firstImageIn(html: string, base: string) {
+export function firstImageIn(html: string, base: string) {
   const match = html.match(/<img[^>]+src=["']([^"']+)["']/i);
   return match ? absolute(match[1], base) : undefined;
 }
 
-function toIso(value: string | undefined) {
+export function toIso(value: string | undefined) {
   if (!value) return undefined;
   const time = Date.parse(value);
   return Number.isNaN(time) ? undefined : new Date(time).toISOString();

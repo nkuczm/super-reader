@@ -30,6 +30,24 @@ npm test                     # parser + discovery tests
    in the page's `<head>`, then falls back to conventional paths (`/feed`,
    `/rss.xml`, `/index.xml`, …) that cover Substack, WordPress, Ghost, Hugo and
    Jekyll.
+4. **A page with no feed at all** → the page's HTML is read directly and turned
+   into a feed (`lib/scrape.ts`). This is how sites like `anthropic.com/news`,
+   which never published RSS, become followable.
+
+### Reading a page that has no feed
+
+A listing page links to its articles many times in a consistent shape
+(`/news/<slug>`), while nav and footer links are one-offs scattered across
+unrelated paths. So the scraper strips `<nav>`/`<header>`/`<footer>`, groups
+every remaining link by the directory it lives in, and keeps the largest group
+— strongly preferring links directly beneath the page being viewed. Titles come
+from the card's heading, dates from `<time datetime>` (or the URL), images from
+the card's `<img>`. If nothing looks like a repeated list, it says so rather
+than inventing a feed.
+
+These sources are labelled "built from the page — no RSS" in the preview, and
+refresh re-reads the page, so they stay up to date like any other source. They
+are more fragile than real RSS: a site redesign can change the markup.
 
 You always see a preview — the source's real recent articles — before deciding
 to keep it, and you pick which feed it joins.
@@ -44,6 +62,7 @@ Each source shows its favicon, with a letter avatar as fallback.
 | --- | --- |
 | `lib/feed.ts` | Fetch + parse RSS 2.0, Atom, and RDF into one article shape |
 | `lib/discover.ts` | Turn a pasted topic/URL/site into a feed |
+| `lib/scrape.ts` | Build a feed from a page that has no RSS |
 | `lib/store.ts` | `localStorage` persistence for feeds and read state |
 | `app/api/discover` | Preview endpoint used by the add dialog |
 | `app/api/feed` | Batch feed refresh |
