@@ -46,10 +46,29 @@ export async function GET(request: Request) {
 
   const relNext = body.match(/<link[^>]+rel=["']next["'][^>]*>/i)?.[0];
 
+  // Explain, per /news/ anchor, whether the scraper would keep it.
+  const inChrome = (idx: number) => {
+    for (const tag of ["footer", "header", "nav"]) {
+      const re = new RegExp(`<${tag}\\b[\\s\\S]*?</${tag}>`, "gi");
+      for (const m of body.matchAll(re)) {
+        if (idx >= m.index! && idx < m.index! + m[0].length) return tag;
+      }
+    }
+    return null;
+  };
+  const anchorReport = [...body.matchAll(/<a\b[^>]*href=["']([^"']*\/news\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)]
+    .map((m) => ({
+      href: m[1],
+      chrome: inChrome(m.index!),
+      textLen: m[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().length,
+      text: m[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 70),
+    }));
+
   return NextResponse.json({
     finalUrl,
     pagination,
     relNext: relNext ?? null,
+    anchorReport,
     htmlBytes: body.length,
     bytesOutsideScripts: withoutScripts.length,
     newsSlugsAnywhere: slugs(body).length,
