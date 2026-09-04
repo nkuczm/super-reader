@@ -33,7 +33,17 @@
 .nav-item.active .count { color: var(--accent); }
 
 .feed-group { margin-top: 6px; }
-.feed-head { display: flex; align-items: center; gap: 4px; }
+.feed-head { display: flex; align-items: center; gap: 2px; }
+
+.chev {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 24px; flex: none;
+  border: 0; background: transparent; color: var(--text-dim);
+  border-radius: 5px; padding: 0;
+  transition: transform 0.16s ease;
+}
+.chev:hover { background: var(--bg-hover); color: var(--text); }
+.chev.open { transform: rotate(90deg); }
 .feed-head .nav-item { flex: 1; min-width: 0; }
 .feed-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .icon-btn {
@@ -44,14 +54,14 @@
 .icon-btn:hover { background: var(--bg-hover); color: var(--text); }
 .icon-btn.danger:hover { color: var(--danger); }
 
-.source-row { display: flex; align-items: center; gap: 4px; padding-left: 14px; }
+.source-row { display: flex; align-items: center; gap: 4px; padding-left: 20px; }
 .source-row .nav-item { flex: 1; min-width: 0; font-size: 13.5px; color: var(--text-dim); }
 .source-row .nav-item.active { color: var(--accent); }
 .favicon {
   width: 17px; height: 17px; border-radius: 4px; flex: none;
   background: var(--bg-hover); object-fit: cover;
 }
-.empty-hint { padding: 6px 9px 6px 32px; font-size: 12.5px; color: var(--text-dim); }
+.empty-hint { padding: 6px 9px 6px 38px; font-size: 12.5px; color: var(--text-dim); }
 
 .sidebar-foot { padding: 10px; border-top: 1px solid var(--border); }
 .btn {
@@ -198,6 +208,8 @@
 
   /* Comfortable touch targets in the drawer. */
   .nav-item { padding: 10px 10px; font-size: 15px; }
+  /* A chevron is a small target on a phone. */
+  .chev { width: 36px; height: 38px; }
   .source-row .nav-item { font-size: 14.5px; }
   .icon-btn { opacity: 1; padding: 8px; }
 

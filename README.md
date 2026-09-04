@@ -83,6 +83,13 @@ opens the original. Click a feed
 in the sidebar to see everything in it, or a single source to narrow to it.
 Each source shows its favicon, with a letter avatar as fallback.
 
+## Sidebar
+
+Each feed collapses to hide its sources — click the chevron beside the name.
+Which feeds are collapsed is remembered per device. A collapsed feed still
+shows its unread count and is still selectable, and collapsing on a phone does
+not close the drawer.
+
 ## View modes
 
 Settings (bottom of the sidebar) chooses how articles are laid out:

@@ -72,6 +72,27 @@ export function saveSettings(settings: Settings) {
   }
 }
 
+const COLLAPSED_KEY = "super-reader:collapsed:v1";
+
+/** Which feeds are collapsed. Per device, like the other view preferences. */
+export function loadCollapsed(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(COLLAPSED_KEY);
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function saveCollapsed(collapsed: Set<string>) {
+  try {
+    window.localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed]));
+  } catch {
+    /* storage unavailable; the groups just reopen next time */
+  }
+}
+
 const CODE_KEY = "super-reader:sync-code:v1";
 
 export function loadSyncCode(): string | null {

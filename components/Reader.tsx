@@ -11,6 +11,8 @@ import {
   saveSyncCode,
   loadSettings,
   saveSettings,
+  loadCollapsed,
+  saveCollapsed,
   DEFAULT_SETTINGS,
   type Settings,
   newId,
@@ -52,6 +54,7 @@ export default function Reader() {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [syncState, setSyncState] = useState<
     "idle" | "working" | "saved" | "error"
   >("idle");
@@ -64,6 +67,7 @@ export default function Reader() {
     setRead(loadRead());
     setSyncCode(loadSyncCode());
     setSettings(loadSettings());
+    setCollapsed(loadCollapsed());
     setReady(true);
   }, []);
 
@@ -298,6 +302,16 @@ export default function Reader() {
     );
   }
 
+  function toggleCollapsed(id: string) {
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      saveCollapsed(next);
+      return next;
+    });
+  }
+
   function updateSettings(next: Settings) {
     setSettings(next);
     saveSettings(next);
@@ -336,6 +350,14 @@ export default function Reader() {
     setSelection(next);
     setMenuOpen(false);
   }, []);
+
+  // Count the sources behind whatever is selected, not every source there is.
+  const selectedSourceCount =
+    selection.type === "all"
+      ? allSources.length
+      : selection.type === "source"
+        ? 1
+        : (feeds.find((f) => f.id === selection.id)?.sources.length ?? 0);
 
   const heading =
     selection.type === "all"
@@ -395,6 +417,16 @@ export default function Reader() {
                   ) : (
                     <>
                       <button
+                        className={`chev ${collapsed.has(feed.id) ? "" : "open"}`}
+                        onClick={() => toggleCollapsed(feed.id)}
+                        aria-expanded={!collapsed.has(feed.id)}
+                        aria-label={`${
+                          collapsed.has(feed.id) ? "Expand" : "Collapse"
+                        } ${feed.name}`}
+                      >
+                        {Icon.chevron}
+                      </button>
+                      <button
                         className={`nav-item ${
                           selection.type === "feed" && selection.id === feed.id
                             ? "active"
@@ -425,11 +457,12 @@ export default function Reader() {
                   )}
                 </div>
 
-                {feed.sources.length === 0 && (
+                {!collapsed.has(feed.id) && feed.sources.length === 0 && (
                   <div className="empty-hint">No sources yet</div>
                 )}
 
-                {feed.sources.map((source) => (
+                {!collapsed.has(feed.id) &&
+                  feed.sources.map((source) => (
                   <div className="source-row" key={source.id}>
                     <button
                       className={`nav-item ${
@@ -525,8 +558,8 @@ export default function Reader() {
             <h1>{heading}</h1>
             <p className="sub">
               {shown.length} article{shown.length === 1 ? "" : "s"}
-              {allSources.length > 0 &&
-                ` · ${allSources.length} source${allSources.length === 1 ? "" : "s"}`}
+              {selectedSourceCount > 0 &&
+                ` · ${selectedSourceCount} source${selectedSourceCount === 1 ? "" : "s"}`}
             </p>
           </div>
           <div className="head-actions">
