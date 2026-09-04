@@ -1,6 +1,6 @@
 import http from "node:http";
 
-const rss = `<?xml version="1.0"?><rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+const rss = `<?xml version="1.0"?><rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:media="http://search.yahoo.com/mrss/">
 <channel><title>Example Blog</title><link>http://127.0.0.1:8781</link><description>A test blog</description>
 <item><title>Hello &amp; welcome</title><link>/posts/1</link><guid>p1</guid><dc:creator>Ada</dc:creator>
 <pubDate>Tue, 02 Sep 2025 10:00:00 GMT</pubDate>
@@ -12,6 +12,15 @@ const rss = `<?xml version="1.0"?><rss version="2.0" xmlns:dc="http://purl.org/d
 <pubDate>Sun, 31 Aug 2025 10:00:00 GMT</pubDate>
 <description>It&amp;#8217;s a test &amp;#8212; really&amp;#8230;</description>
 <enclosure url="http://cdn/i.jpg?w=10&amp;#038;ssl=1" type="image/jpeg"/></item>
+<item><title>Post with a tracking pixel only</title><link>/posts/4</link><guid>p4</guid>
+<pubDate>Sat, 30 Aug 2025 10:00:00 GMT</pubDate>
+<description>&lt;p&gt;Body text.&lt;/p&gt;&lt;img src="https://feeds.feedburner.com/~r/pixel.gif" width="1" height="1"&gt;</description></item>
+<item><title>Post with media group sizes</title><link>/posts/5</link><guid>p5</guid>
+<pubDate>Fri, 29 Aug 2025 10:00:00 GMT</pubDate>
+<media:group>
+<media:content url="http://cdn/small.jpg" width="320"/>
+<media:content url="http://cdn/big.jpg" width="1600"/>
+</media:group></item>
 </channel></rss>`;
 
 const atom = `<?xml version="1.0" encoding="utf-8"?>

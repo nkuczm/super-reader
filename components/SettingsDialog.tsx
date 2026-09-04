@@ -7,7 +7,7 @@ const VIEWS: { id: ViewMode; name: string; blurb: string }[] = [
   {
     id: "magazine",
     name: "Magazine",
-    blurb: "Large header image above each story.",
+    blurb: "Bigger image on the left of each story.",
   },
   {
     id: "cards",
@@ -27,8 +27,11 @@ function Preview({ view }: { view: ViewMode }) {
     return (
       <div className="vp vp-magazine" aria-hidden="true">
         <span className="vp-img" />
-        <span className="vp-line w70" />
-        <span className="vp-line w45 dim" />
+        <div className="vp-col">
+          <span className="vp-line w80" />
+          <span className="vp-line w60 dim" />
+          <span className="vp-line w70 dim" />
+        </div>
       </div>
     );
   }

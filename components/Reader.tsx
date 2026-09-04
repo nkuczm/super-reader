@@ -569,20 +569,34 @@ export default function Reader() {
                   className={`article ${read.has(article.id) ? "read" : ""}`}
                   key={article.id}
                 >
-                  {/* Magazine leads with the image; the other views don't. */}
-                  {settings.view === "magazine" && article.image && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      className="hero"
-                      src={article.image}
-                      alt=""
-                      loading="lazy"
-                      referrerPolicy="no-referrer"
-                      onError={(event) => {
-                        event.currentTarget.style.display = "none";
-                      }}
-                    />
-                  )}
+                  {/* Magazine puts the picture on the left. Articles without
+                      one keep the same column so headlines stay aligned. */}
+                  {settings.view === "magazine" &&
+                    (article.image ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        className="hero"
+                        src={article.image}
+                        alt=""
+                        loading="lazy"
+                        referrerPolicy="no-referrer"
+                        onError={(event) => {
+                          const el = event.currentTarget;
+                          el.classList.add("hero-failed");
+                          el.removeAttribute("src");
+                        }}
+                      />
+                    ) : (
+                      <div className="hero hero-blank" aria-hidden="true">
+                        {source && (
+                          <SourceIcon
+                            src={source.favicon}
+                            title={source.title}
+                            size={22}
+                          />
+                        )}
+                      </div>
+                    ))}
                   <div className="article-body">
                     <div className="article-meta">
                       {source && (

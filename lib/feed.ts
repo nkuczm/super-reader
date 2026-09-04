@@ -124,9 +124,24 @@ export function absolute(href: string, base: string) {
   }
 }
 
+/** Feeds are full of 1x1 beacons; treat those as no image at all. */
+export function isTrackingPixel(url: string) {
+  return (
+    /(^|[\/_.-])(pixel|beacon|spacer|blank|dot|1x1|track(ing)?)([._-]|\.|$)/i.test(url) ||
+    /\b(width|w|h|height)=1\b/i.test(url) ||
+    /feedburner|feedsportal|doubleclick|scorecardresearch|stats\./i.test(url)
+  );
+}
+
 export function firstImageIn(html: string, base: string) {
-  const match = html.match(/<img[^>]+src=["']([^"']+)["']/i);
-  return match ? absolute(match[1], base) : undefined;
+  for (const match of html.matchAll(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi)) {
+    const src = decodeEntities(match[1]);
+    if (isTrackingPixel(src)) continue;
+    // Explicitly tiny images are decoration, not the article's picture.
+    if (/(?:width|height)=["']?([1-9]?\d)["']?[\s>]/i.test(match[0])) continue;
+    return absolute(src, base);
+  }
+  return undefined;
 }
 
 export function toIso(value: string | undefined) {
@@ -208,12 +223,34 @@ function rssItem(item: any, site: string): Article {
     text(item["feedburner:origLink"]) ||
     "";
   const content = text(item["content:encoded"]) || text(item.description);
-  const enclosure = asArray(item.enclosure).find((e: any) =>
-    String(e?.["@_type"] ?? "").startsWith("image/"),
+  const enclosure = asArray(item.enclosure).find(
+    (e: any) =>
+      String(e?.["@_type"] ?? "").startsWith("image/") &&
+      e?.["@_url"] &&
+      !isTrackingPixel(String(e["@_url"])),
   );
-  const media =
-    first(asArray(item["media:content"]).filter((m: any) => m?.["@_url"])) ??
-    first(asArray(item["media:thumbnail"]).filter((m: any) => m?.["@_url"]));
+
+  // media:content can appear bare or nested inside a media:group, and a feed
+  // may offer several sizes — take the widest real image.
+  const mediaCandidates = [
+    ...asArray(item["media:content"]),
+    ...asArray(item["media:group"]).flatMap((g: any) =>
+      asArray(g?.["media:content"]),
+    ),
+    ...asArray(item["media:thumbnail"]),
+    ...asArray(item["itunes:image"]),
+  ].filter(
+    (m: any) =>
+      m?.["@_url"] &&
+      !isTrackingPixel(String(m["@_url"])) &&
+      !String(m["@_medium"] ?? m["@_type"] ?? "image").startsWith("video"),
+  );
+
+  const media = mediaCandidates.sort(
+    (a: any, b: any) =>
+      (Number.parseInt(b["@_width"], 10) || 0) -
+      (Number.parseInt(a["@_width"], 10) || 0),
+  )[0];
 
   return {
     id: text(item.guid) || link || text(item.title),

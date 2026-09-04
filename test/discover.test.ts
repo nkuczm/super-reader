@@ -22,7 +22,7 @@ test("parses an RSS 2.0 feed", async () => {
   const r = await discover(`${B}/rss`);
   assert.equal(r.title, "Example Blog");
   assert.equal(r.kind, "feed");
-  assert.equal(r.articles.length, 3);
+  assert.equal(r.articles.length, 5);
 
   const [first, second] = r.articles;
   assert.equal(first.title, "Hello & welcome", "decodes XML entities");
@@ -46,6 +46,22 @@ test("decodes numeric HTML entities, including inside URLs", async () => {
   );
 });
 
+test("ignores tracking pixels and picks the largest media image", async () => {
+  const r = await discover(`${B}/rss`);
+
+  const pixel = r.articles.find((a) => a.title.includes("tracking pixel"));
+  assert.ok(pixel, "found the article");
+  assert.equal(pixel.image, undefined, "a 1x1 beacon is not an image");
+
+  const group = r.articles.find((a) => a.title.includes("media group"));
+  assert.ok(group, "found the article");
+  assert.equal(
+    group.image,
+    "http://cdn/big.jpg",
+    "takes the widest media:content inside a media:group",
+  );
+});
+
 test("parses an Atom feed", async () => {
   const r = await discover(`${B}/atom`);
   assert.equal(r.title, "Atom Site");
@@ -57,12 +73,12 @@ test("parses an Atom feed", async () => {
 test("finds a feed declared in a page's <head>", async () => {
   const r = await discover(`${B}/declared`);
   assert.equal(r.title, "Example Blog");
-  assert.equal(r.articles.length, 3);
+  assert.equal(r.articles.length, 5);
 });
 
 test("guesses a conventional feed path when none is declared", async () => {
   const r = await discover(`${B}/silent`);
-  assert.equal(r.articles.length, 3);
+  assert.equal(r.articles.length, 5);
 });
 
 test("honors the article limit", async () => {

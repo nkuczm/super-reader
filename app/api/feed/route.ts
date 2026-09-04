@@ -7,6 +7,10 @@ import { sortNewestFirst } from "@/lib/sort";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Feed fetches plus gap-filling for several sources take a moment.
+export const maxDuration = 60;
+
+const MAX_PER_SOURCE = 40;
 
 /** Refresh one known feed URL. Accepts ?url= repeated for a batch. */
 export async function GET(request: Request) {
@@ -26,18 +30,16 @@ export async function GET(request: Request) {
 
         const { body, finalUrl } = await fetchText(url);
         // A source may be a real feed or a scraped page; the body tells us.
-        const isFeed = looksLikeFeed(body);
-        const { meta, articles } = isFeed
+        const { meta, articles } = looksLikeFeed(body)
           ? parseFeed(body, finalUrl)
           : scrapePage(body, finalUrl);
-        // Scraped pages need their summaries filled in; real feeds carry them.
-        const ready = sortNewestFirst(
-          isFeed
-            ? articles
-            : await enrichArticles(articles, {
-                siteDescription: meta.description,
-              }),
-        );
+
+        // A big archive feed can carry hundreds of entries; only the recent
+        // ones are ever read, and the cap bounds both payload and enrichment.
+        const recent = sortNewestFirst(articles).slice(0, MAX_PER_SOURCE);
+        const ready = await enrichArticles(recent, {
+          siteDescription: meta.description,
+        });
         return {
           ok: true as const,
           ...meta,

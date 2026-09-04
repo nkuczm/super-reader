@@ -1,4 +1,12 @@
-import { fetchText, stripHtml, absolute, toIso, decodeEntities } from "./feed";
+import {
+  fetchText,
+  stripHtml,
+  absolute,
+  toIso,
+  decodeEntities,
+  isTrackingPixel,
+  firstImageIn,
+} from "./feed";
 import type { Article } from "./types";
 
 /**
@@ -53,8 +61,15 @@ async function enrichOne(
     const image =
       article.image ??
       (() => {
-        const raw = metaTag(head, ["og:image", "twitter:image"]);
-        return raw ? absolute(raw, finalUrl) : undefined;
+        const raw = metaTag(head, [
+          "og:image",
+          "og:image:secure_url",
+          "twitter:image",
+          "twitter:image:src",
+        ]);
+        if (raw && !isTrackingPixel(raw)) return absolute(raw, finalUrl);
+        // No social image: fall back to the first real picture in the body.
+        return firstImageIn(body, finalUrl);
       })();
 
     const publishedAt =
@@ -74,7 +89,11 @@ async function enrichOne(
   }
 }
 
-/** Enrich in small batches so we never fan out dozens of requests at once. */
+/**
+ * Fill gaps in small batches so we never fan out dozens of requests at once.
+ * Only articles actually missing something are fetched, which keeps a feed
+ * that already carries images and summaries free.
+ */
 export async function enrichArticles(
   articles: Article[],
   {
@@ -83,15 +102,21 @@ export async function enrichArticles(
     siteDescription,
   }: { max?: number; concurrency?: number; siteDescription?: string } = {},
 ): Promise<Article[]> {
-  const targets = articles.slice(0, max);
-  const rest = articles.slice(max);
-  const done: Article[] = [];
+  const needs = (a: Article) => !a.image || !a.summary;
 
-  for (let i = 0; i < targets.length; i += concurrency) {
-    const batch = targets.slice(i, i + concurrency);
-    done.push(
-      ...(await Promise.all(batch.map((a) => enrichOne(a, siteDescription)))),
+  const byIndex = new Map<number, Article>();
+  const queue: { index: number; article: Article }[] = [];
+  articles.forEach((article, index) => {
+    if (needs(article) && queue.length < max) queue.push({ index, article });
+  });
+
+  for (let i = 0; i < queue.length; i += concurrency) {
+    const batch = queue.slice(i, i + concurrency);
+    const filled = await Promise.all(
+      batch.map((item) => enrichOne(item.article, siteDescription)),
     );
+    filled.forEach((article, offset) => byIndex.set(batch[offset].index, article));
   }
-  return [...done, ...rest];
+
+  return articles.map((article, index) => byIndex.get(index) ?? article);
 }

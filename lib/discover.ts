@@ -101,7 +101,10 @@ export async function discover(
       kind: "feed",
       total,
       favicon: faviconFor(meta.siteUrl),
-      articles,
+      // Plenty of feeds ship no images at all; fill those in from each post.
+      articles: await enrichArticles(articles, {
+        siteDescription: meta.description,
+      }),
     };
   } catch {
     /* not a feed itself — treat it as a web page below */
@@ -134,7 +137,9 @@ export async function discover(
         kind: "feed",
         total,
         favicon: faviconFor(meta.siteUrl || origin),
-        articles,
+        articles: await enrichArticles(articles, {
+          siteDescription: meta.description,
+        }),
       };
     } catch {
       /* try the next candidate */
