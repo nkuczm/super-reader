@@ -25,7 +25,11 @@ export async function GET(request: Request) {
           : scrapePage(body, finalUrl);
         // Scraped pages need their summaries filled in; real feeds carry them.
         const ready = sortNewestFirst(
-          isFeed ? articles : await enrichArticles(articles),
+          isFeed
+            ? articles
+            : await enrichArticles(articles, {
+                siteDescription: meta.description,
+              }),
         );
         return {
           ok: true as const,

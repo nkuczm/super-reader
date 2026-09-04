@@ -19,7 +19,14 @@ function metaTag(html: string, names: string[]) {
   return undefined;
 }
 
-async function enrichOne(article: Article): Promise<Article> {
+function normalize(text: string) {
+  return text.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+async function enrichOne(
+  article: Article,
+  siteDescription?: string,
+): Promise<Article> {
   try {
     const { body, finalUrl } = await fetchText(article.link, 9000);
     // Metadata lives in <head>; ignore the rest of a potentially huge page.
@@ -33,7 +40,14 @@ async function enrichOne(article: Article): Promise<Article> {
           "twitter:description",
           "description",
         ]);
-        return raw ? stripHtml(raw) : undefined;
+        if (!raw) return undefined;
+        const text = stripHtml(raw);
+        // Sites fall back to one boilerplate description for pages that have
+        // none of their own; repeating it under every headline is just noise.
+        if (siteDescription && normalize(text) === normalize(siteDescription)) {
+          return undefined;
+        }
+        return text;
       })();
 
     const image =
@@ -63,7 +77,11 @@ async function enrichOne(article: Article): Promise<Article> {
 /** Enrich in small batches so we never fan out dozens of requests at once. */
 export async function enrichArticles(
   articles: Article[],
-  { max = 15, concurrency = 5 } = {},
+  {
+    max = 15,
+    concurrency = 5,
+    siteDescription,
+  }: { max?: number; concurrency?: number; siteDescription?: string } = {},
 ): Promise<Article[]> {
   const targets = articles.slice(0, max);
   const rest = articles.slice(max);
@@ -71,7 +89,9 @@ export async function enrichArticles(
 
   for (let i = 0; i < targets.length; i += concurrency) {
     const batch = targets.slice(i, i + concurrency);
-    done.push(...(await Promise.all(batch.map(enrichOne))));
+    done.push(
+      ...(await Promise.all(batch.map((a) => enrichOne(a, siteDescription)))),
+    );
   }
   return [...done, ...rest];
 }

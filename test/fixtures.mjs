@@ -84,10 +84,16 @@ const article = `<html><head><title>Introducing Claude Opus 5</title>
 <footer><a href="/privacy">Privacy</a></footer>
 </body></html>`;
 
+const boilerplatePage = `<html><head><title>Interpretability</title>
+<meta property="og:description" content="Announcements from Anthropic">
+</head><body><article><h1>Progress on interpretability research</h1>
+<p>Body text.</p></article></body></html>`;
+
 const noFeedRoutes = {
   "/news": [200, "text/html", newsIndex],
   "/about": [200, "text/html", aboutPage],
   "/news/claude-opus-5": [200, "text/html", article],
+  "/news/interpretability-progress": [200, "text/html", boilerplatePage],
 };
 
 function serve(routeTable, port) {

@@ -140,7 +140,9 @@ export async function discover(
     // A listing page gives titles and links; summaries and exact dates come
     // from each article's own metadata.
     const enriched = sortNewestFirst(
-      await enrichArticles(articles.slice(0, limit)),
+      await enrichArticles(articles.slice(0, limit), {
+        siteDescription: meta.description,
+      }),
     );
     return {
       ...meta,

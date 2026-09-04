@@ -169,6 +169,16 @@ test("fills in missing summaries from each article's metadata", async () => {
   assert.equal(opus.image, `${N}/img/opus.png`, "card image is kept");
 });
 
+test("ignores a site-wide boilerplate description", async () => {
+  const r = await discover(`${N}/news`);
+  const item = r.articles.find((a) =>
+    a.link.endsWith("/interpretability-progress"),
+  );
+  assert.ok(item, "found the article");
+  // Its og:description is just the site's own tagline, so it is not a summary.
+  assert.equal(item.summary, undefined);
+});
+
 test("sorts every feed newest first, with undated items last", async () => {
   const r = await discover(`${N}/news`);
   const times = r.articles.map((a) =>
