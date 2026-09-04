@@ -8,6 +8,10 @@ const rss = `<?xml version="1.0"?><rss version="2.0" xmlns:dc="http://purl.org/d
 <item><title>Second post</title><link>http://127.0.0.1:8781/posts/2</link><guid>p2</guid>
 <pubDate>Mon, 01 Sep 2025 10:00:00 GMT</pubDate><description>Short summary here.</description>
 <enclosure url="http://cdn/x.jpg" type="image/jpeg"/></item>
+<item><title>Ben&amp;#8217;s take on AI &amp;#038; chips</title><link>/posts/3</link><guid>p3</guid>
+<pubDate>Sun, 31 Aug 2025 10:00:00 GMT</pubDate>
+<description>It&amp;#8217;s a test &amp;#8212; really&amp;#8230;</description>
+<enclosure url="http://cdn/i.jpg?w=10&amp;#038;ssl=1" type="image/jpeg"/></item>
 </channel></rss>`;
 
 const atom = `<?xml version="1.0" encoding="utf-8"?>

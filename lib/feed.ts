@@ -52,27 +52,66 @@ function text(node: any): string {
   return "";
 }
 
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+  hellip: "…",
+  mdash: "—",
+  ndash: "–",
+  lsquo: "\u2018",
+  rsquo: "\u2019",
+  ldquo: "\u201c",
+  rdquo: "\u201d",
+};
+
+/**
+ * Decode HTML entities. Feeds routinely double-encode, so numeric forms like
+ * &#8217; and &#038; survive XML parsing and must be handled here — including
+ * inside URLs, where a stray &#038; breaks the link.
+ */
+export function decodeEntities(input: string): string {
+  return input.replace(
+    /&(#[Xx][0-9A-Fa-f]+|#\d+|[A-Za-z][A-Za-z0-9]*);/g,
+    (match, body: string) => {
+      if (body[0] === "#") {
+        const code =
+          body[1] === "x" || body[1] === "X"
+            ? Number.parseInt(body.slice(2), 16)
+            : Number.parseInt(body.slice(1), 10);
+        if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff) return match;
+        try {
+          return String.fromCodePoint(code);
+        } catch {
+          return match;
+        }
+      }
+      return NAMED_ENTITIES[body.toLowerCase()] ?? match;
+    },
+  );
+}
+
 function stripHtml(html: string, max = 320) {
-  const plain = html
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[\s\S]*?<\/style>/gi, "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
+  const plain = decodeEntities(
+    html
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[\s\S]*?<\/style>/gi, "")
+      .replace(/<[^>]+>/g, " "),
+  )
     .replace(/\s+/g, " ")
     .trim();
   return plain.length > max ? plain.slice(0, max).trimEnd() + "…" : plain;
 }
 
 function absolute(href: string, base: string) {
+  const decoded = decodeEntities(href.trim());
   try {
-    return new URL(href, base).toString();
+    return new URL(decoded, base).toString();
   } catch {
-    return href;
+    return decoded;
   }
 }
 
@@ -175,11 +214,18 @@ function rssItem(item: any, site: string): Article {
       text(item["dc:creator"]) || stripHtml(text(item.author), 80) || undefined,
     publishedAt: toIso(text(item.pubDate) || text(item["dc:date"])),
     summary: stripHtml(content) || undefined,
-    image:
-      enclosure?.["@_url"] ??
-      media?.["@_url"] ??
-      (content ? firstImageIn(content, site) : undefined),
+    image: pickImage(
+      enclosure?.["@_url"] ?? media?.["@_url"],
+      content,
+      site,
+    ),
   };
+}
+
+/** Prefer a declared image, falling back to the first one in the body. */
+function pickImage(declared: string | undefined, content: string, site: string) {
+  if (declared) return absolute(declared, site);
+  return content ? firstImageIn(content, site) : undefined;
 }
 
 function atomEntry(entry: any, site: string): Article {
@@ -196,6 +242,6 @@ function atomEntry(entry: any, site: string): Article {
     author: text(first(asArray(entry.author))?.name) || undefined,
     publishedAt: toIso(text(entry.published) || text(entry.updated)),
     summary: stripHtml(content) || undefined,
-    image: content ? firstImageIn(content, site) : undefined,
+    image: pickImage(undefined, content, site),
   };
 }
