@@ -30,6 +30,12 @@ export const Icon = {
       <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z" />
     </svg>
   ),
+  sync: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 12a9 9 0 0 1-15.5 6.2M3 12a9 9 0 0 1 15.5-6.2" />
+      <path d="M3 20v-5h5M21 4v5h-5" />
+    </svg>
+  ),
   inbox: (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 12h5l2 3h4l2-3h5" /><path d="M4 5h16l1 7v7H3v-7z" />

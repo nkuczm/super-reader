@@ -1,17 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Article, DiscoverResult } from "@/lib/types";
 import {
   loadFeeds,
   saveFeeds,
   loadRead,
   saveRead,
+  loadSyncCode,
+  saveSyncCode,
   newId,
   type Feed,
   type Source,
 } from "@/lib/store";
 import AddSourceDialog from "./AddSourceDialog";
+import SyncDialog from "./SyncDialog";
 import ArticleReader from "./ArticleReader";
 import SourceIcon from "./SourceIcon";
 import { Icon } from "./icons";
@@ -33,16 +36,143 @@ export default function Reader() {
   const [reading, setReading] = useState<{ url: string; title: string } | null>(
     null,
   );
+  const [syncCode, setSyncCode] = useState<string | null>(null);
+  const [syncOpen, setSyncOpen] = useState(false);
+  const [syncState, setSyncState] = useState<
+    "idle" | "working" | "saved" | "error"
+  >("idle");
+  // Set while applying data pulled from the server, so the save effect below
+  // does not immediately push it straight back.
+  const applying = useRef(false);
 
   useEffect(() => {
     setFeeds(loadFeeds());
     setRead(loadRead());
+    setSyncCode(loadSyncCode());
     setReady(true);
   }, []);
+
+  const applyRemote = useCallback((payload: { feeds?: Feed[]; read?: string[] }) => {
+    applying.current = true;
+    if (Array.isArray(payload.feeds)) setFeeds(payload.feeds);
+    if (Array.isArray(payload.read)) {
+      const next = new Set(payload.read);
+      setRead(next);
+      saveRead(next);
+    }
+    // Release on the next tick, after the state updates have flushed.
+    setTimeout(() => {
+      applying.current = false;
+    }, 0);
+  }, []);
+
+  const pull = useCallback(
+    async (code: string) => {
+      const res = await fetch(`/api/sync?code=${encodeURIComponent(code)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not fetch synced feeds");
+      applyRemote(data.payload ?? {});
+    },
+    [applyRemote],
+  );
 
   useEffect(() => {
     if (ready) saveFeeds(feeds);
   }, [feeds, ready]);
+
+  // Pull once the code is known, and again whenever the window regains focus,
+  // so a device left open picks up changes made elsewhere.
+  useEffect(() => {
+    if (!ready || !syncCode) return;
+    let cancelled = false;
+
+    const sync = async () => {
+      setSyncState("working");
+      try {
+        await pull(syncCode);
+        if (!cancelled) setSyncState("saved");
+      } catch {
+        if (!cancelled) setSyncState("error");
+      }
+    };
+
+    sync();
+    window.addEventListener("focus", sync);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", sync);
+    };
+  }, [ready, syncCode, pull]);
+
+  // Push local changes, debounced so a burst of edits is one request.
+  useEffect(() => {
+    if (!ready || !syncCode || applying.current) return;
+    const timer = setTimeout(async () => {
+      setSyncState("working");
+      try {
+        const res = await fetch("/api/sync", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ code: syncCode, feeds, read: [...read] }),
+        });
+        if (!res.ok) throw new Error("save failed");
+        setSyncState("saved");
+      } catch {
+        setSyncState("error");
+      }
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [feeds, read, ready, syncCode]);
+
+  const startSync = useCallback(async () => {
+    setSyncState("working");
+    const res = await fetch("/api/sync", { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) {
+      setSyncState("error");
+      throw new Error(data.error ?? "Could not start syncing");
+    }
+
+    // Upload what this device already has *before* the code goes live,
+    // otherwise the first pull would overwrite these feeds with the empty
+    // record we just created.
+    const saved = await fetch("/api/sync", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: data.code, feeds, read: [...read] }),
+    });
+    if (!saved.ok) {
+      setSyncState("error");
+      throw new Error("Could not upload this device's feeds");
+    }
+
+    saveSyncCode(data.code);
+    setSyncCode(data.code);
+    setSyncState("saved");
+  }, [feeds, read]);
+
+  const connectSync = useCallback(
+    async (entered: string) => {
+      setSyncState("working");
+      try {
+        await pull(entered);
+      } catch (error) {
+        setSyncState("error");
+        throw error;
+      }
+      saveSyncCode(entered);
+      setSyncCode(entered);
+      setSyncState("saved");
+    },
+    [pull],
+  );
+
+  const stopSync = useCallback(() => {
+    saveSyncCode(null);
+    setSyncCode(null);
+    setSyncState("idle");
+    setSyncOpen(false);
+  }, []);
 
   const allSources = useMemo(
     () => feeds.flatMap((feed) => feed.sources),
@@ -268,6 +398,20 @@ export default function Reader() {
           <button className="btn ghost small" onClick={addFeed} style={{ width: "100%" }}>
             {Icon.plus} New feed
           </button>
+          <button
+            className="sync-btn"
+            onClick={() => setSyncOpen(true)}
+            title={syncCode ? "Syncing across devices" : "Sync across devices"}
+          >
+            <span className={`sync-dot ${syncCode ? syncState : "off"}`} />
+            {syncCode
+              ? syncState === "working"
+                ? "Syncing…"
+                : syncState === "error"
+                  ? "Sync problem"
+                  : "Synced"
+              : "Sync across devices"}
+          </button>
         </div>
       </aside>
 
@@ -407,6 +551,17 @@ export default function Reader() {
           </>
         )}
       </main>
+
+      {syncOpen && (
+        <SyncDialog
+          code={syncCode}
+          busy={syncState === "working"}
+          onCreate={startSync}
+          onConnect={connectSync}
+          onDisconnect={stopSync}
+          onClose={() => setSyncOpen(false)}
+        />
+      )}
 
       {dialogOpen && (
         <AddSourceDialog

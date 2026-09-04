@@ -31,6 +31,26 @@ export function saveFeeds(feeds: Feed[]) {
   }
 }
 
+const CODE_KEY = "super-reader:sync-code:v1";
+
+export function loadSyncCode(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(CODE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function saveSyncCode(code: string | null) {
+  try {
+    if (code) window.localStorage.setItem(CODE_KEY, code);
+    else window.localStorage.removeItem(CODE_KEY);
+  } catch {
+    /* storage unavailable; sync just won't persist across reloads */
+  }
+}
+
 const READ_KEY = "super-reader:read:v1";
 
 export function loadRead(): Set<string> {

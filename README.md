@@ -71,14 +71,44 @@ Each source shows its favicon, with a letter avatar as fallback.
 | `lib/enrich.ts` | Fill in missing summaries/dates from article metadata |
 | `lib/article.ts` | Extract + sanitize an article for the in-app reader |
 | `lib/sort.ts` | Newest-first ordering shared by every path |
+| `lib/sync-code.ts` | Sync code generation, normalising and hashing |
+| `lib/sync.ts` | Reading and writing a synced feed list |
+| `lib/db.ts` | Postgres connection and one-table schema |
 | `lib/store.ts` | `localStorage` persistence for feeds and read state |
 | `app/api/discover` | Preview endpoint used by the add dialog |
 | `app/api/feed` | Batch feed refresh |
 | `app/api/article` | Readable, sanitized article for the reader |
+| `app/api/sync` | Create / fetch / save a synced feed list |
 | `components/Reader.tsx` | Sidebar, article list, feed management |
 
 Feeds are fetched server-side, which sidesteps browser CORS restrictions —
 this is why the app needs a Node server rather than being a static page.
+
+## Syncing across devices
+
+Feeds still live in your browser by default. Turning on sync stores them
+server-side under a **sync code** — 100 bits of randomness, shown as
+`XXXXX-XXXXX-XXXXX-XXXXX`. Paste that code on another device and both stay in
+step. No account, no email, no password.
+
+The code is a bearer secret: anyone holding it can read and change your feed
+list, so treat it like a password. Rows are keyed by **SHA-256 of the code**,
+never the code itself, so a database leak does not hand out access. Codes are
+accepted however you paste them — lower case, spaces instead of dashes.
+
+Devices pull on load and whenever the window regains focus, and push changes
+after a short debounce. Conflicts resolve last-write-wins: two devices editing
+in the same moment costs one side's change, not the list.
+
+### Setting it up
+
+Sync needs a Postgres database. Without one the app works exactly as before and
+the sync dialog says it is unavailable.
+
+1. In the Vercel dashboard: **Storage → Create Database → Neon Postgres**
+   (free tier), and connect it to this project.
+2. That adds `POSTGRES_URL` to the project's environment variables.
+3. Redeploy. The table is created automatically on first use.
 
 ## Deployment
 
@@ -91,8 +121,8 @@ what avoids browser CORS limits.
 
 ## Notes
 
-- Feeds are stored per-browser. There's no sync between devices yet; an
-  OPML import/export would be the natural next step.
+- Without a database, feeds stay per-browser; with one, they sync by code.
+  OPML import/export is still the natural next step for portability.
 - Favicons come from Google's public `s2/favicons` service.
 - Scraped pages only expose what the site server-renders. `anthropic.com/news`,
   for example, ships ~11 posts in its HTML and paginates client-side, so that
