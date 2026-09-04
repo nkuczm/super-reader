@@ -3,6 +3,8 @@
 A lightweight RSS reader. Paste a website, a Substack, or an RSS link — or just
 type a topic — preview what you'd get, and keep it in a named feed.
 
+**Live:** https://super-reader-nathan-kuczmarskis-projects.vercel.app
+
 No accounts, no database, no AI. Your feeds live in your browser's
 `localStorage`; the server only fetches and parses XML.
 
@@ -50,8 +52,20 @@ Each source shows its favicon, with a letter avatar as fallback.
 Feeds are fetched server-side, which sidesteps browser CORS restrictions —
 this is why the app needs a Node server rather than being a static page.
 
+## Deployment
+
+Hosted on Vercel, linked to this GitHub repo: every push to
+`claude/feedly-clone-custom-feeds-laz6ll` (the repo's default branch) builds
+and deploys to production automatically.
+
+The API routes run on Node — they must, since fetching feeds server-side is
+what avoids browser CORS limits.
+
 ## Notes
 
 - Feeds are stored per-browser. There's no sync between devices yet; an
   OPML import/export would be the natural next step.
 - Favicons come from Google's public `s2/favicons` service.
+- The site is public (no Vercel login) so it works from any device. Nothing
+  personal is exposed by that: feeds never leave your browser, and the server
+  keeps no state.
