@@ -203,8 +203,13 @@ Three things, in the order they help:
 1. A downloaded or previously read article renders straight from IndexedDB —
    no network at all.
 2. Hovering or touching a headline fetches it before the click lands.
-3. `/api/article` responses carry `s-maxage`, so the CDN serves a repeat open
-   instead of re-fetching and re-parsing the page.
+3. `/api/article` sets `max-age` for the browser and a CDN lifetime via
+   `CDN-Cache-Control`. The browser cache is a real win on a repeat open; the
+   **edge cache is unverified** — repeat requests still reported
+   `x-vercel-cache: MISS`, which may mean dynamic route handlers are not
+   edge-cached, or simply that the tool used to check bypasses the CDN. The
+   headers are correct either way and cost nothing, but do not count on the
+   edge until a HIT is actually observed.
 
 ## Syncing across devices
 
