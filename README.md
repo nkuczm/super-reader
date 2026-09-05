@@ -30,9 +30,15 @@ npm test                     # parser + discovery tests
    in the page's `<head>`, then falls back to conventional paths (`/feed`,
    `/rss.xml`, `/index.xml`, …) that cover Substack, WordPress, Ghost, Hugo and
    Jekyll.
-4. **An X account** (`@OpenAI`, `x.com/OpenAI`, `twitter.com/OpenAI`) → the
+4. **A newsroom that hides its feed** → many sites, government ones
+   especially, link their feed as an ordinary anchor or list it only on a
+   `/feeds` page. Those are read too, and the candidates are ranked so press
+   releases and newsrooms win over comment, podcast and regional feeds. The
+   index pages are probed directly, since a site can block its HTML homepage
+   while happily serving both `/feeds` and the feeds themselves.
+5. **An X account** (`@OpenAI`, `x.com/OpenAI`, `twitter.com/OpenAI`) → the
    account's posts, via the official X API. See below.
-5. **A page with no feed at all** → the page's HTML is read directly and turned
+6. **A page with no feed at all** → the page's HTML is read directly and turned
    into a feed (`lib/scrape.ts`). This is how sites like `anthropic.com/news`,
    which never published RSS, become followable.
 

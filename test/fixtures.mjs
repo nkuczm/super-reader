@@ -145,6 +145,62 @@ export function startSectionSite(port = 8784, { sectionHasFeed = true } = {}) {
   return serve(routes, port);
 }
 
+// Mirrors fbi.gov: the HTML homepage is blocked, while /feeds and the feeds
+// themselves are served. Feed entries point at a per-feed page, not the XML.
+const feedsIndex = `<html><head><title>Feeds</title></head><body><ul>
+<li><a href="/feeds/seattle-news">Seattle Tweets</a></li>
+<li><a href="/feeds/inside-podcast">Inside the Bureau Podcast</a></li>
+<li><a href="/feeds/national-press-releases">National Press Releases</a></li>
+<li><a href="/feeds/all-wanted">All Wanted</a></li>
+</ul></body></html>`;
+
+const pressFeed = `<?xml version="1.0"?><rss version="2.0"><channel>
+<title>National Press Releases</title><link>http://127.0.0.1:8787/news</link>
+<item><title>A national press release</title><link>/news/one</link><guid>n1</guid>
+<pubDate>Thu, 04 Sep 2025 10:00:00 GMT</pubDate>
+<description>&lt;nav&gt;&lt;a&gt;Home&lt;/a&gt;&lt;a&gt;Search&lt;/a&gt;&lt;/nav&gt;&lt;form&gt;&lt;select&gt;&lt;option&gt;All News&lt;/option&gt;&lt;option&gt;Briefings&lt;/option&gt;&lt;/select&gt;&lt;/form&gt;&lt;p&gt;The Department announced today a significant enforcement action against a long running fraud scheme affecting thousands of people.&lt;/p&gt;</description>
+</item></channel></rss>`;
+
+const regionalFeed = `<?xml version="1.0"?><rss version="2.0"><channel>
+<title>Seattle Tweets</title><link>http://127.0.0.1:8787/seattle</link>
+<item><title>A regional note</title><link>/seattle/one</link><guid>s1</guid>
+<pubDate>Thu, 04 Sep 2025 09:00:00 GMT</pubDate></item></channel></rss>`;
+
+/** Homepage 403s; everything else works. */
+export function startBlockedHomepageSite(port = 8787) {
+  const routes = {
+    "/feeds": [200, "text/html", feedsIndex],
+    "/feeds/national-press-releases/rss.xml": [200, "application/rss+xml", pressFeed],
+    "/feeds/seattle-news/rss.xml": [200, "application/rss+xml", regionalFeed],
+  };
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      const path = new URL(req.url, "http://x").pathname;
+      if (path === "/") { res.writeHead(403); return res.end("Forbidden"); }
+      const hit = routes[path];
+      if (!hit) { res.writeHead(404); return res.end("nope"); }
+      res.writeHead(hit[0], { "content-type": hit[1] });
+      res.end(hit[2]);
+    });
+    server.listen(port, () => resolve({ server, close: () => server.close() }));
+  });
+}
+
+// A site that links its feed with a plain anchor instead of declaring it.
+const anchorOnlyPage = `<html><head><title>Acme News</title></head><body>
+<main><p>Welcome.</p></main>
+<footer><a href="/news/rss.xml">RSS</a></footer></body></html>`;
+
+export function startAnchorFeedSite(port = 8788) {
+  return serve(
+    {
+      "/": [200, "text/html", anchorOnlyPage],
+      "/news/rss.xml": [200, "application/rss+xml", pressFeed],
+    },
+    port,
+  );
+}
+
 const noFeedRoutes = {
   "/news": [200, "text/html", newsIndex],
   "/about": [200, "text/html", aboutPage],

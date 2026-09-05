@@ -8,3 +8,5 @@ export function startFakeX(port?: number): Promise<{
   calls: string[];
   close: () => void;
 }>;
+export function startBlockedHomepageSite(port?: number): Promise<{ close: () => void }>;
+export function startAnchorFeedSite(port?: number): Promise<{ close: () => void }>;
