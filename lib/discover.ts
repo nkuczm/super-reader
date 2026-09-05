@@ -38,6 +38,13 @@ const NEWSROOM_PATHS = [
 ];
 
 /**
+ * Pages that list a site's feeds. Probed directly, because a site can block
+ * its HTML homepage while serving these and the feeds themselves — fbi.gov
+ * does exactly that.
+ */
+const INDEX_PATHS = ["/feeds", "/rss", "/syndication", "/about/rss"];
+
+/**
  * Rank feed candidates: a site often exposes many, and the newsroom is what
  * someone pasting the bare domain almost always wants — not its jobs board or
  * comment stream.
@@ -305,19 +312,39 @@ export async function discover(
   if (siteFeed) return siteFeed;
 
   // Some sites only list their feeds on a dedicated page, e.g. fbi.gov/feeds.
-  if (pageBody) {
-    for (const indexUrl of feedIndexPages(pageBody, pageBase)) {
-      try {
-        const { body, finalUrl } = await fetchText(indexUrl, 8000);
-        const listed = [
-          ...feedLinksInHtml(body, finalUrl),
-          ...feedLinksInAnchors(body, finalUrl),
-        ];
-        const found = await tryAll(listed, "site");
-        if (found) return found;
-      } catch {
-        /* try the next index page */
-      }
+  const indexPages = [
+    ...(pageBody ? feedIndexPages(pageBody, pageBase) : []),
+    ...INDEX_PATHS.map((path) => `${origin}${path}`),
+  ];
+
+  for (const indexUrl of [...new Set(indexPages)].slice(0, 5)) {
+    try {
+      const { body, finalUrl } = await fetchText(indexUrl, 8000);
+      if (looksLikeFeed(body)) continue; // handled as a feed already
+
+      const listed = [
+        ...feedLinksInHtml(body, finalUrl),
+        ...feedLinksInAnchors(body, finalUrl),
+      ];
+
+      // Entries often point at a per-feed page rather than the XML itself
+      // (fbi.gov/feeds/<name> → fbi.gov/feeds/<name>/rss.xml).
+      const expanded = listed.flatMap((url) =>
+        /\.(xml|rss|atom)$/i.test(url)
+          ? [url]
+          : [url, `${url.replace(/\/$/, "")}/rss.xml`],
+      );
+
+      // A newsroom can list dozens of feeds; only the best-ranked are worth
+      // the requests.
+      const best = [...new Set(expanded)]
+        .sort((a, b) => scoreFeedUrl(b) - scoreFeedUrl(a))
+        .slice(0, 10);
+
+      const found = await tryAll(best, "site");
+      if (found) return found;
+    } catch {
+      /* try the next index page */
     }
   }
 
