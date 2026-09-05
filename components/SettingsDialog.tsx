@@ -61,10 +61,19 @@ export default function SettingsDialog({
   settings,
   onChange,
   onClose,
+  offline,
+  onDownload,
 }: {
   settings: Settings;
   onChange: (next: Settings) => void;
   onClose: () => void;
+  offline: {
+    state: "idle" | "working" | "done" | "error";
+    done?: number;
+    total?: number;
+    at?: number | null;
+  };
+  onDownload: () => void;
 }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -121,6 +130,39 @@ export default function SettingsDialog({
             </span>
           </label>
         </div>
+
+          <p className="field-label reading-label">Offline</p>
+          <div className="offline-box">
+            <div className="offline-status">
+              <strong>
+                {offline.state === "working"
+                  ? `Downloading… ${offline.done ?? 0} of ${offline.total ?? 0}`
+                  : offline.state === "error"
+                    ? "Download didn't finish"
+                    : offline.at
+                      ? `Saved ${new Date(offline.at).toLocaleString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}`
+                      : "Nothing downloaded yet"}
+              </strong>
+              <span>
+                The newest 15 stories from each source are saved to this device
+                so you can read them without a connection. This happens on your
+                first visit after 7am and after 4pm ET.
+              </span>
+            </div>
+            <button
+              className="btn ghost small offline-btn"
+              onClick={onDownload}
+              disabled={offline.state === "working"}
+            >
+              {offline.state === "working" ? <span className="spinner" /> : null}
+              Download now
+            </button>
+          </div>
 
         <div className="dialog-foot">
           <button className="btn ghost small" onClick={onClose}>

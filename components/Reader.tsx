@@ -23,6 +23,18 @@ import AddSourceDialog from "./AddSourceDialog";
 import SyncDialog from "./SyncDialog";
 import InlineName from "./InlineName";
 import SettingsDialog from "./SettingsDialog";
+import {
+  downloadForOffline,
+  isDownloadDue,
+  currentSlot,
+  markSlotDownloaded,
+  lastDownloadedAt,
+  readCached,
+  writeCached,
+  saveListSnapshot,
+  loadListSnapshot,
+  PER_SOURCE,
+} from "@/lib/offline";
 import ArticleReader from "./ArticleReader";
 import SourceIcon from "./SourceIcon";
 import { Icon } from "./icons";
@@ -55,6 +67,14 @@ export default function Reader() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [offline, setOffline] = useState<{
+    state: "idle" | "working" | "done" | "error";
+    done?: number;
+    total?: number;
+    at?: number | null;
+  }>({ state: "idle" });
+  const downloading = useRef(false);
+  const prefetched = useRef<Set<string>>(new Set());
   const [syncState, setSyncState] = useState<
     "idle" | "working" | "saved" | "error"
   >("idle");
@@ -69,6 +89,14 @@ export default function Reader() {
     setSettings(loadSettings());
     setCollapsed(loadCollapsed());
     setReady(true);
+  }, []);
+
+  // Lets the app open with no connection.
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    navigator.serviceWorker.register("/sw.js").catch(() => {
+      /* unsupported or blocked; everything else still works */
+    });
   }, []);
 
   const applyRemote = useCallback((payload: { feeds?: Feed[]; read?: string[] }) => {
@@ -220,7 +248,14 @@ export default function Reader() {
           merged.push({ ...article, sourceId, id: `${sourceId}:${article.id}` });
         }
       }
-      setArticles(sortNewestFirst(merged));
+      const ordered = sortNewestFirst(merged);
+      setArticles(ordered);
+      // Keep a copy so the list is still there with no connection.
+      void saveListSnapshot(ordered);
+    } catch {
+      // Offline or the feeds are unreachable: show what was last saved.
+      const snapshot = await loadListSnapshot<Loaded>();
+      if (snapshot && snapshot.length > 0) setArticles(snapshot);
     } finally {
       setRefreshing(false);
     }
@@ -312,6 +347,21 @@ export default function Reader() {
     });
   }
 
+  /** Fetch and store an article ahead of the click that opens it. */
+  const prefetch = useCallback((url: string) => {
+    if (prefetched.current.has(url)) return;
+    prefetched.current.add(url);
+    void (async () => {
+      if (await readCached(url)) return;
+      try {
+        const res = await fetch(`/api/article?url=${encodeURIComponent(url)}`);
+        if (res.ok) await writeCached(await res.json());
+      } catch {
+        /* a warm-up failing is not worth surfacing */
+      }
+    })();
+  }, []);
+
   function updateSettings(next: Settings) {
     setSettings(next);
     saveSettings(next);
@@ -334,6 +384,66 @@ export default function Reader() {
     const ids = new Set(feed?.sources.map((s) => s.id));
     return articles.filter((a) => ids.has(a.sourceId));
   }, [articles, feeds, selection]);
+
+  /** Newest N per source — what gets saved for reading offline. */
+  const offlineTargets = useCallback(() => {
+    const perSource = new Map<string, string[]>();
+    for (const article of articles) {
+      const list = perSource.get(article.sourceId) ?? [];
+      if (list.length < PER_SOURCE) list.push(article.link);
+      perSource.set(article.sourceId, list);
+    }
+    return [...perSource.values()].flat();
+  }, [articles]);
+
+  const runDownload = useCallback(async () => {
+    if (downloading.current) return;
+    const links = offlineTargets();
+    if (links.length === 0) return;
+
+    downloading.current = true;
+    setOffline({ state: "working", done: 0, total: links.length });
+    try {
+      await downloadForOffline(links, (progress) =>
+        setOffline({ state: "working", ...progress }),
+      );
+      await markSlotDownloaded(currentSlot());
+      setOffline({ state: "done", at: await lastDownloadedAt() });
+    } catch {
+      setOffline({ state: "error" });
+    } finally {
+      downloading.current = false;
+    }
+  }, [offlineTargets]);
+
+  /**
+   * A web app cannot wake itself at a fixed time on every platform, so the
+   * schedule is honoured on the next visit: if the 07:00 or 16:00 ET slot has
+   * come round since the last download, catch up now.
+   */
+  useEffect(() => {
+    if (!ready || articles.length === 0) return;
+    let cancelled = false;
+
+    const check = async () => {
+      setOffline((o) =>
+        o.state === "idle" ? { ...o, at: null } : o,
+      );
+      if (!navigator.onLine) return;
+      if (await isDownloadDue()) {
+        if (!cancelled) void runDownload();
+      } else if (!cancelled) {
+        setOffline({ state: "done", at: await lastDownloadedAt() });
+      }
+    };
+
+    void check();
+    window.addEventListener("focus", check);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", check);
+    };
+  }, [ready, articles.length, runDownload]);
 
   const shown = useMemo(
     () => (settings.hideRead ? visible.filter((a) => !read.has(a.id)) : visible),
@@ -656,6 +766,9 @@ export default function Reader() {
                     <a
                       className="article-title"
                       href={article.link}
+                      // Warm the article before the click lands.
+                      onMouseEnter={() => prefetch(article.link)}
+                      onTouchStart={() => prefetch(article.link)}
                       onClick={(event) => {
                         // Plain click reads in-app; modified clicks still open
                         // the original in a new tab.
@@ -715,6 +828,8 @@ export default function Reader() {
           settings={settings}
           onChange={updateSettings}
           onClose={() => setSettingsOpen(false)}
+          offline={offline}
+          onDownload={runDownload}
         />
       )}
 

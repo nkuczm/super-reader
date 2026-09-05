@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { ReadableArticle } from "@/lib/article";
 import { Icon } from "./icons";
+import { readCached, writeCached } from "@/lib/offline";
 import { timeAgo, hostOf } from "./format";
 
 type Props = { url: string; fallbackTitle: string; onClose: () => void };
@@ -10,21 +11,43 @@ type Props = { url: string; fallbackTitle: string; onClose: () => void };
 export default function ArticleReader({ url, fallbackTitle, onClose }: Props) {
   const [article, setArticle] = useState<ReadableArticle | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [fromCache, setFromCache] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setArticle(null);
     setError(null);
+    setFromCache(false);
 
-    fetch(`/api/article?url=${encodeURIComponent(url)}`)
-      .then(async (res) => {
+    (async () => {
+      // A downloaded article renders immediately, and is the only copy
+      // available with no connection.
+      const cached = await readCached(url);
+      if (cached && !cancelled) {
+        setArticle(cached);
+        setFromCache(true);
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/article?url=${encodeURIComponent(url)}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Could not load article");
-        if (!cancelled) setArticle(data as ReadableArticle);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed");
-      });
+        if (cancelled) return;
+        setArticle(data as ReadableArticle);
+        // Keep it, so reopening is instant and works offline.
+        void writeCached(data as ReadableArticle);
+      } catch (err) {
+        if (cancelled) return;
+        setError(
+          navigator.onLine
+            ? err instanceof Error
+              ? err.message
+              : "Failed"
+            : "You're offline, and this article hasn't been downloaded yet.",
+        );
+      }
+    })();
 
     return () => {
       cancelled = true;
@@ -65,6 +88,7 @@ export default function ArticleReader({ url, fallbackTitle, onClose }: Props) {
             article?.wordCount
               ? `${Math.max(1, Math.round(article.wordCount / 220))} min read`
               : null,
+            fromCache ? "Saved for offline" : null,
           ]
             .filter(Boolean)
             .join("  ·  ")}

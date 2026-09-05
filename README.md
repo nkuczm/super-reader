@@ -122,6 +122,8 @@ different densities, while the feeds themselves are what needs to match.
 | `lib/article.ts` | Extract + sanitize an article for the in-app reader |
 | `lib/sort.ts` | Newest-first ordering shared by every path |
 | `lib/x.ts` | Following an X account through the official API |
+| `lib/offline.ts` | Offline store, download schedule, list snapshot |
+| `public/sw.js` | Service worker: opens the app with no connection |
 | `lib/sync-code.ts` | Sync code generation, normalising and hashing |
 | `lib/sync.ts` | Reading and writing a synced feed list |
 | `lib/db.ts` | Postgres connection and one-table schema |
@@ -176,6 +178,33 @@ your own credentials.
 Then paste `@handle` or an `x.com/handle` URL like any other source. Without
 the key, everything else keeps working and the dialog explains what is missing.
 Replies are excluded, and posts carry their images and full text.
+
+## Reading offline
+
+The newest 15 stories from each source are downloaded to the device — the full
+extracted text, not just headlines — so they can be read with no connection.
+The app shell is cached by a service worker, and the article list is saved too,
+so opening it offline shows the list rather than an empty screen.
+
+**When it happens.** On the first visit after **7am ET** and after **4pm ET**.
+It is deliberately *not* a timer: iOS will not wake a web app on a schedule, so
+promising a download at exactly 7am would be a promise the platform cannot
+keep. Instead each slot is recorded, and the moment the app is opened or
+focused after a new slot begins, the download runs. Settings shows when it last
+completed and offers **Download now**.
+
+Slots are identified by name (`2026-07-15-am`) rather than by timestamp, which
+avoids converting a wall-clock time in a DST-observing zone back to UTC.
+
+## Faster articles
+
+Three things, in the order they help:
+
+1. A downloaded or previously read article renders straight from IndexedDB —
+   no network at all.
+2. Hovering or touching a headline fetches it before the click lands.
+3. `/api/article` responses carry `s-maxage`, so the CDN serves a repeat open
+   instead of re-fetching and re-parsing the page.
 
 ## Syncing across devices
 

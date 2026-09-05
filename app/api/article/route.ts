@@ -53,7 +53,15 @@ export async function GET(request: Request) {
   }
 
   try {
-    return NextResponse.json(await extractArticle(target.toString()));
+    const article = await extractArticle(target.toString());
+    return NextResponse.json(article, {
+      headers: {
+        // An article's text does not change; let the CDN serve repeat opens
+        // instead of re-fetching and re-parsing the page every time.
+        "cache-control":
+          "public, max-age=300, s-maxage=86400, stale-while-revalidate=604800",
+      },
+    });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Could not load that article";
