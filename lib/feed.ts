@@ -103,6 +103,41 @@ export function decodeEntities(input: string): string {
   );
 }
 
+/**
+ * Some feeds carry the article's whole rendered page, navigation and all, so
+ * flattening it wholesale yields "Search Select Category All News ..." as the
+ * summary. Drop the structural chrome before reading any text out of it.
+ */
+export function stripChrome(html: string) {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<nav\b[\s\S]*?<\/nav>/gi, "")
+    .replace(/<header\b[\s\S]*?<\/header>/gi, "")
+    .replace(/<footer\b[\s\S]*?<\/footer>/gi, "")
+    .replace(/<form\b[\s\S]*?<\/form>/gi, "")
+    .replace(/<select\b[\s\S]*?<\/select>/gi, "")
+    .replace(/<aside\b[\s\S]*?<\/aside>/gi, "")
+    .replace(/<figure\b[\s\S]*?<\/figure>/gi, "");
+}
+
+/**
+ * Prefer the article's own prose: with chrome gone, the paragraphs are the
+ * summary. Falls back to the whole text when a feed has no markup at all.
+ */
+export function summarize(html: string, max = 320) {
+  const cleaned = stripChrome(html);
+  const paragraphs = [...cleaned.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)]
+    .map((m) => stripHtml(m[1], Number.MAX_SAFE_INTEGER))
+    .filter((text) => text.length > 40);
+
+  if (paragraphs.length > 0) {
+    const joined = paragraphs.join(" ");
+    return joined.length > max ? `${joined.slice(0, max).trimEnd()}…` : joined;
+  }
+  return stripHtml(cleaned, max);
+}
+
 export function stripHtml(html: string, max = 320) {
   const plain = decodeEntities(
     html
@@ -259,7 +294,7 @@ function rssItem(item: any, site: string): Article {
     author:
       text(item["dc:creator"]) || stripHtml(text(item.author), 80) || undefined,
     publishedAt: toIso(text(item.pubDate) || text(item["dc:date"])),
-    summary: stripHtml(content) || undefined,
+    summary: summarize(content) || undefined,
     image: pickImage(
       enclosure?.["@_url"] ?? media?.["@_url"],
       content,
@@ -287,7 +322,7 @@ function atomEntry(entry: any, site: string): Article {
     link: absolute(link, site),
     author: text(first(asArray(entry.author))?.name) || undefined,
     publishedAt: toIso(text(entry.published) || text(entry.updated)),
-    summary: stripHtml(content) || undefined,
+    summary: summarize(content) || undefined,
     image: pickImage(undefined, content, site),
   };
 }

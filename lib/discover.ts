@@ -19,6 +19,80 @@ const COMMON_PATHS = [
   "/feeds/posts/default",
 ];
 
+/**
+ * Newsrooms — government ones especially — rarely publish at the blog-style
+ * paths above; their feed lives under a news or press-release section.
+ */
+const NEWSROOM_PATHS = [
+  "/news/rss",
+  "/news/rss.xml",
+  "/news/feed/",
+  "/newsroom/rss",
+  "/newsroom/feed",
+  "/press-releases/rss",
+  "/press-releases/feed",
+  "/news/press-releases/rss",
+  "/news/pressreleases.rss",
+  "/rss/news",
+  "/rss/all.xml",
+];
+
+/**
+ * Rank feed candidates: a site often exposes many, and the newsroom is what
+ * someone pasting the bare domain almost always wants — not its jobs board or
+ * comment stream.
+ */
+function scoreFeedUrl(url: string) {
+  const value = url.toLowerCase();
+  let score = 0;
+  if (/press[-_]?release|pressreleases/.test(value)) score += 5;
+  if (/\bnews\b|newsroom|headlines/.test(value)) score += 4;
+  if (/\ball\b|main|index|full/.test(value)) score += 1;
+  if (/blog/.test(value)) score += 1;
+  // Feeds that exist but are not what anyone means by "follow this site".
+  if (/comment|podcast|video|photo|image|job|career|event|calendar|alert|recall|tag\/|category\/|author\/|search/.test(value))
+    score -= 8;
+  // Deep field-office or regional splits are narrower than the main feed.
+  if (/field-office|local|region/.test(value)) score -= 3;
+  return score;
+}
+
+/** Anchors pointing at a feed — many sites link theirs instead of declaring it. */
+function feedLinksInAnchors(html: string, base: string) {
+  const found: string[] = [];
+  for (const match of html.matchAll(/<a\b[^>]*href=["']([^"']+)["']/gi)) {
+    const href = match[1];
+    if (!/(\.rss|\.xml|\/rss|\/feed|feed=rss|format=rss)/i.test(href)) continue;
+    // Sitemaps and stylesheets are XML too.
+    if (/sitemap|\.xsl|\.xsd/i.test(href)) continue;
+    try {
+      found.push(new URL(href, base).toString());
+    } catch {
+      /* skip malformed hrefs */
+    }
+  }
+  return found;
+}
+
+/** Pages that list a site's feeds, e.g. fbi.gov/feeds — worth one hop. */
+function feedIndexPages(html: string, base: string) {
+  const found: string[] = [];
+  for (const match of html.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]{0,80}?)<\/a>/gi)) {
+    const [, href, label] = match;
+    const looksLikeIndex =
+      /\/(feeds|rss|syndication)\/?$/i.test(href) ||
+      /\brss\b|syndicat/i.test(label.replace(/<[^>]+>/g, ""));
+    if (!looksLikeIndex) continue;
+    try {
+      const url = new URL(href, base).toString();
+      if (!found.includes(url)) found.push(url);
+    } catch {
+      /* skip malformed hrefs */
+    }
+  }
+  return found.slice(0, 3);
+}
+
 function isProbablyUrl(input: string) {
   const value = input.trim();
   if (/\s/.test(value)) return false;
@@ -151,28 +225,49 @@ export async function discover(
       ]
     : [];
 
-  const siteCandidates = [
-    ...declared.filter((c) => !sectionCandidates.includes(c)),
-    ...COMMON_PATHS.map((path) => `${origin}${path}`),
-  ];
+  // Plenty of sites link their feed as an ordinary anchor rather than
+  // declaring it in <head>, which is how the .gov newsrooms were missed.
+  const anchors = pageBody ? feedLinksInAnchors(pageBody, pageBase) : [];
 
+  const siteCandidates = [
+    ...declared,
+    ...anchors,
+    ...COMMON_PATHS.map((path) => `${origin}${path}`),
+    ...NEWSROOM_PATHS.map((path) => `${origin}${path}`),
+  ].filter((c) => !sectionCandidates.includes(c));
+
+  const asResult = async (candidate: string, resultScope: "section" | "site") => {
+    const { meta, total, articles } = await tryFeed(candidate, limit);
+    if (articles.length === 0) throw new Error("Empty feed");
+    return {
+      ...meta,
+      kind: "feed" as const,
+      scope: resultScope,
+      total,
+      favicon: faviconFor(meta.siteUrl || origin),
+      articles: await enrichArticles(articles, {
+        siteDescription: meta.description,
+      }),
+    };
+  };
+
+  /**
+   * Probe in small parallel batches, best-scoring first: trying a dozen
+   * candidates one at a time would take longer than anyone will wait.
+   */
   const tryAll = async (candidates: string[], resultScope: "section" | "site") => {
-    for (const candidate of [...new Set(candidates)]) {
-      try {
-        const { meta, total, articles } = await tryFeed(candidate, limit);
-        if (articles.length === 0) continue;
-        return {
-          ...meta,
-          kind: "feed" as const,
-          scope: resultScope,
-          total,
-          favicon: faviconFor(meta.siteUrl || origin),
-          articles: await enrichArticles(articles, {
-            siteDescription: meta.description,
-          }),
-        };
-      } catch {
-        /* try the next candidate */
+    const ranked = [...new Set(candidates)].sort(
+      (a, b) => scoreFeedUrl(b) - scoreFeedUrl(a),
+    );
+
+    for (let i = 0; i < ranked.length; i += 4) {
+      const batch = ranked.slice(i, i + 4);
+      const settled = await Promise.allSettled(
+        batch.map((candidate) => asResult(candidate, resultScope)),
+      );
+      // Keep the batch's ranking rather than whichever answered first.
+      for (const outcome of settled) {
+        if (outcome.status === "fulfilled") return outcome.value;
       }
     }
     return null;
@@ -208,6 +303,23 @@ export async function discover(
 
   const siteFeed = await tryAll(siteCandidates, "site");
   if (siteFeed) return siteFeed;
+
+  // Some sites only list their feeds on a dedicated page, e.g. fbi.gov/feeds.
+  if (pageBody) {
+    for (const indexUrl of feedIndexPages(pageBody, pageBase)) {
+      try {
+        const { body, finalUrl } = await fetchText(indexUrl, 8000);
+        const listed = [
+          ...feedLinksInHtml(body, finalUrl),
+          ...feedLinksInAnchors(body, finalUrl),
+        ];
+        const found = await tryAll(listed, "site");
+        if (found) return found;
+      } catch {
+        /* try the next index page */
+      }
+    }
+  }
 
   // 4. No feed anywhere. Read the page itself, the way Feedly does for sites
   //    that never published one.
