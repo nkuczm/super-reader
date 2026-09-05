@@ -59,8 +59,13 @@ export async function GET(request: Request) {
       headers: {
         // An article's text does not change; let the CDN serve repeat opens
         // instead of re-fetching and re-parsing the page every time.
-        "cache-control":
-          "public, max-age=300, s-maxage=86400, stale-while-revalidate=604800",
+        // Next strips s-maxage from route handlers, so the CDN lifetime has
+        // to be stated in the CDN-specific headers, which it leaves alone.
+        "cache-control": "public, max-age=300",
+        "cdn-cache-control":
+          "public, s-maxage=86400, stale-while-revalidate=604800",
+        "vercel-cdn-cache-control":
+          "public, s-maxage=86400, stale-while-revalidate=604800",
       },
     });
   } catch (error) {
