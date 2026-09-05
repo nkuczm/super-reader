@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { extractArticle } from "@/lib/article";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+// Deliberately not force-dynamic: that disables CDN caching, and an
+// extracted article is worth caching between opens.
 // Readability on a large page is not instant.
 export const maxDuration = 30;
 
