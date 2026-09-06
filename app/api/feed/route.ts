@@ -4,6 +4,7 @@ import { scrapePage } from "@/lib/scrape";
 import { enrichArticles } from "@/lib/enrich";
 import { xHandleFrom, fetchXFeed } from "@/lib/x";
 import { sortNewestFirst } from "@/lib/sort";
+import { parseApiSourceUrl, fetchApiSource } from "@/lib/apis";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,6 +23,11 @@ export async function GET(request: Request) {
   const results = await Promise.all(
     urls.map(async (url) => {
       try {
+        if (parseApiSourceUrl(url)) {
+          const { meta, articles } = await fetchApiSource(url, MAX_PER_SOURCE);
+          return { ok: true as const, ...meta, feedUrl: url, articles };
+        }
+
         const handle = xHandleFrom(url);
         if (handle) {
           const { meta, articles } = await fetchXFeed(handle);

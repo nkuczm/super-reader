@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { DiscoverResult } from "@/lib/types";
 import type { Feed } from "@/lib/store";
 import { Icon } from "./icons";
+import ApiCatalog from "./ApiCatalog";
 import SourceIcon from "./SourceIcon";
 import { timeAgo, hostOf } from "./format";
 
@@ -39,6 +40,7 @@ export default function AddSourceDialog({
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<DiscoverResult | null>(null);
   const [scope, setScope] = useState<"auto" | "site">("auto");
+  const [tab, setTab] = useState<"paste" | "apis">("paste");
   const [target, setTarget] = useState(defaultFeedId ?? feeds[0]?.id ?? NEW_FEED);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -52,9 +54,13 @@ export default function AddSourceDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onCancel]);
 
-  async function runPreview(nextScope: "auto" | "site" = scope) {
-    const value = query.trim();
+  async function runPreview(
+    nextScope: "auto" | "site" = scope,
+    override?: string,
+  ) {
+    const value = (override ?? query).trim();
     if (!value) return;
+    if (override) setQuery(override);
     setLoading(true);
     setError(null);
     setPreview(null);
@@ -86,13 +92,35 @@ export default function AddSourceDialog({
         <div className="dialog-head">
           <h2>Add a source</h2>
           <p>
-            Paste a website, a Substack, an RSS URL, an X account like
-            @OpenAI — or just type a topic. Sites without a feed are read
-            straight from the page.
+            {tab === "paste"
+              ? "Paste a website, a Substack, an RSS URL, an X account like @OpenAI — or just type a topic. Sites without a feed are read straight from the page."
+              : "Follow a data API — court opinions, federal rules, filings, papers. Fill in what you want and it becomes a source like any other."}
           </p>
+          <div className="scope-switch dialog-tabs">
+            <button
+              className={tab === "paste" ? "on" : ""}
+              onClick={() => setTab("paste")}
+            >
+              Paste a link
+            </button>
+            <button
+              className={tab === "apis" ? "on" : ""}
+              onClick={() => setTab("apis")}
+            >
+              API directory
+            </button>
+          </div>
         </div>
 
         <div className="dialog-body">
+          {tab === "apis" && (
+            <ApiCatalog
+              busy={loading}
+              onPreview={(sourceUrl) => runPreview("auto", sourceUrl)}
+            />
+          )}
+
+          {tab === "paste" && (
           <div className="row">
             <input
               ref={inputRef}
@@ -112,6 +140,7 @@ export default function AddSourceDialog({
               {loading ? <span className="spinner" /> : "Preview"}
             </button>
           </div>
+          )}
 
           {error && <p className="error">{error}</p>}
 
@@ -126,7 +155,9 @@ export default function AddSourceDialog({
                       ? "Topic feed"
                       : preview.kind === "x"
                         ? "X account"
-                        : hostOf(preview.siteUrl)}{" "}
+                        : preview.kind === "api"
+                          ? "API source"
+                          : hostOf(preview.siteUrl)}{" "}
                     · {preview.articles.length} recent articles
                     {preview.kind === "page" && (
                       <em className="badge">built from the page — no RSS</em>
@@ -134,7 +165,7 @@ export default function AddSourceDialog({
                   </span>
                 </div>
               </div>
-              {pastedASection(query) && (
+              {tab === "paste" && pastedASection(query) && (
                 <div className="scope-row">
                   <span>Covering</span>
                   <div className="scope-switch">

@@ -59,11 +59,13 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
 | `lib/enrich.ts` | Fills missing summaries/images from each article's metadata |
 | `lib/article.ts` | Readability extraction + sanitising for the reader |
 | `lib/x.ts` | Following an X account via the official API |
+| `lib/apis.ts` | The API directory — CourtListener, Federal Register, arXiv… |
 | `lib/offline.ts` | IndexedDB store, download schedule, list snapshot |
 | `lib/sync.ts` `lib/sync-code.ts` `lib/db.ts` | Cross-device sync |
 | `lib/sort.ts` | Newest-first ordering, shared by every path |
 | `components/Reader.tsx` | The whole app shell: sidebar, list, state |
-| `app/api/{discover,feed,article,sync}` | The four endpoints |
+| `app/api/{discover,feed,article,sync,apis}` | The five endpoints |
+| `components/ApiCatalog.tsx` | The API directory tab in "Add a source" |
 | `public/sw.js` | Service worker so the app opens offline |
 | `scripts/gen-icons.mjs` | Regenerates PNG app icons from the mark |
 
@@ -107,6 +109,14 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
 - **View mode and collapsed feeds are per-device, not synced.** A phone and a
   desktop want different densities; the feeds are what must match.
 - **Sync codes are stored as SHA-256 hashes**, never the code itself.
+- **API sources are one string, `api:<provider>?<fields>`**, not a new source
+  shape. Refresh, dedupe, offline storage and sync all compare on `feedUrl`;
+  keeping that a single string meant none of them changed. `lib/apis.ts` is the
+  only place that knows an API was involved.
+- **API mappers are tested against recorded response shapes, with `fetch`
+  stubbed** — the sandbox cannot reach these APIs, and a suite that depended on
+  a dozen third parties' uptime and rate limits would fail for reasons that
+  have nothing to do with this code.
 - **The reader sanitises to an allowlist.** It injects third-party HTML;
   scripts, styles, iframes, event handlers and non-http(s) URLs are stripped.
   There is a test asserting nothing executable survives — keep it.
@@ -175,6 +185,12 @@ Don't re-litigate this without the user asking.
    stored per source, so anything added before the section-scope fix or the
    Bing switch needs deleting and re-adding.
 5. **OPML import/export** never built; the natural next feature for portability.
+6. **The API directory is verified only against recorded shapes.** Every
+   provider builds the request it should and maps its fixture correctly, and
+   the dialog was driven end to end in a browser — but no live API has been
+   called, because the sandbox cannot reach them. Response shapes drift; check
+   each one against the deployment before trusting it. Congress.gov and
+   Regulations.gov need an `api.data.gov` key before they answer at all.
 
 ## Ideas raised but not built
 

@@ -2,6 +2,7 @@ import { fetchText, parseFeed, looksLikeFeed, faviconFor } from "./feed";
 import { scrapePage } from "./scrape";
 import { enrichArticles } from "./enrich";
 import { xHandleFrom, fetchXFeed } from "./x";
+import { parseApiSourceUrl, fetchApiSource } from "./apis";
 import { sortNewestFirst } from "./sort";
 import type { DiscoverResult } from "./types";
 
@@ -161,6 +162,13 @@ export async function discover(
 ): Promise<DiscoverResult> {
   const raw = input.trim();
   if (!raw) throw new Error("Nothing to look up");
+
+  // A source from the API directory: not a feed and not a page, so it is
+  // answered by its adapter rather than by fetching a URL.
+  if (parseApiSourceUrl(raw)) {
+    const { meta, articles } = await fetchApiSource(raw, limit);
+    return { ...meta, kind: "api", scope: "site", total: articles.length, articles };
+  }
 
   // An X account is neither a feed nor a scrapable page: x.com serves
   // logged-out visitors a login wall, so it goes through the API instead.

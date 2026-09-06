@@ -165,6 +165,53 @@ maskable variant keeps the mark inside the safe zone so Android can crop it to
 any shape, and the Apple touch icon is full-bleed because iOS applies its own
 rounded mask.
 
+## The API directory
+
+Not everything worth following publishes RSS. Court opinions, federal
+rulemaking, SEC filings, clinical trials, preprints — these live behind JSON
+APIs. **Add a source → API directory** lists the ones the app knows how to
+read, with the fields each one takes:
+
+| API | What it follows | Key |
+| --- | --- | --- |
+| CourtListener | Opinions, PACER filings, oral arguments, by court or search | optional |
+| Federal Register | Rules, proposed rules, notices, by agency or term | — |
+| Regulations.gov | Dockets and rulemaking documents | required |
+| Congress.gov | Bills and resolutions as they move | required |
+| SEC EDGAR | Full-text search across filings (8-K, 10-K, S-1…) | — |
+| ClinicalTrials.gov | Registered studies, newest updates first | — |
+| openFDA | Drug, device and food recalls | optional |
+| arXiv | Preprints by category, author or term | — |
+| Crossref | Newly registered journal articles | — |
+| Hacker News | Stories matching a query, with a points floor | — |
+| GitHub releases | Every release of a repository, with notes | optional |
+| NWS alerts | Active weather warnings by state | — |
+
+Fill in the fields, preview, and it joins a feed like any other source.
+Refresh, the reader, offline download and sync all treat it identically —
+an API source is stored as a single string, `api:<provider>?<fields>`, so
+nothing downstream needed to learn about APIs.
+
+Where an API wants a key, the directory says which environment variable to set
+and where to get one; `api.data.gov` issues one free key that several of the US
+government APIs accept. "Optional" above means the API answers without a key
+but rate-limits harder. Nothing is stored client-side: keys live only in the
+deployment's environment, and the catalogue the browser receives never
+contains them.
+
+### Adding another API
+
+`lib/apis.ts` is a list of providers, one object each. A new one needs: what
+the catalogue shows (name, category, description, docs link), the fields the
+user fills in, a `request()` that builds the URL and headers, an `items()` that
+finds the records in the response, and an `article()` that maps one record to a
+title, link, date and summary. Set `envKey` if it needs a credential, and
+`format: "feed"` if the API answers with RSS or Atom rather than JSON — arXiv
+does, and is handled by the existing feed parser rather than a mapper.
+
+There is a test asserting every provider is well formed, and each mapper is
+tested against a recorded response shape rather than the live API.
+
 ## Following X accounts
 
 x.com shows logged-out visitors a login wall with no posts, and the community
