@@ -11,6 +11,8 @@ type Props = {
   fallbackTitle: string;
   /** Lets the server fall back to the feed's own copy if the site blocks us. */
   feedUrl?: string;
+  /** Stop trying to read this host in-app and go to the site from now on. */
+  onAlwaysOpenOnSite?: (link: string) => void;
   onClose: () => void;
 };
 
@@ -18,6 +20,7 @@ export default function ArticleReader({
   url,
   fallbackTitle,
   feedUrl,
+  onAlwaysOpenOnSite,
   onClose,
 }: Props) {
   const [article, setArticle] = useState<ReadableArticle | null>(null);
@@ -113,14 +116,24 @@ export default function ArticleReader({
         {error && (
           <div className="reader-error">
             <p>{error}</p>
-            <a
-              className="btn small"
-              href={url}
-              target="_blank"
-              rel="noreferrer noopener"
-            >
-              Read it on the site
-            </a>
+            <div className="reader-error-actions">
+              <a
+                className="btn small"
+                href={url}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                Read it on the site
+              </a>
+              {onAlwaysOpenOnSite && (
+                <button
+                  className="btn ghost small"
+                  onClick={() => onAlwaysOpenOnSite(url)}
+                >
+                  Always open {hostOf(url)} on the site
+                </button>
+              )}
+            </div>
           </div>
         )}
 

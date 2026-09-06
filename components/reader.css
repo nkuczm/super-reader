@@ -505,3 +505,13 @@
   color: var(--text-dim); line-height: 1.5;
 }
 .offline-btn { width: auto !important; margin-top: 11px; }
+
+.reader-error-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.reader-error-actions .btn { width: auto; text-decoration: none; }
+
+.host-list { list-style: none; margin: 0; padding: 0; }
+.host-list li {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px;
+  margin-bottom: 7px; font-size: 13.5px;
+}

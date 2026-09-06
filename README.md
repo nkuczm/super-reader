@@ -191,9 +191,22 @@ page and syndicates only summaries — the reader says so and links to the
 original.
 
 This app deliberately does not route around paywalls: no archive mirrors, no
-crawler impersonation, no proxying. Using text a publisher chose to syndicate
-is fair; defeating an access control they chose to apply is not, and it is also
-what gets a reader blocked harder.
+crawler impersonation, no proxying, and no storing anyone's subscription
+credentials. Using text a publisher chose to syndicate is fair; defeating an
+access control they chose to apply is not, and it is also what gets a reader
+blocked harder.
+
+Note in particular that this deployment is **public** — Vercel Authentication
+is off so the app works from a phone. Any subscription cookie held server-side
+would therefore be usable by anyone who has the URL, which is reason enough on
+its own not to put one there.
+
+**Open on their site.** For a subscription source, the headlines, summaries and
+images still arrive in the feed; only the body needs the publisher. When reader
+view fails, the error offers **"Always open <host> on the site"**. After that,
+articles from that host go straight to the browser — where a subscription
+applies — instead of failing in the reader first. Settings lists those hosts
+and can put any of them back.
 
 ## Reading offline
 

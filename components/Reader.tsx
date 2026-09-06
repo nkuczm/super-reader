@@ -351,6 +351,42 @@ export default function Reader() {
     });
   }
 
+  /**
+   * Subscription sites only serve their text to a logged-in browser, so for
+   * those the app hands off to the site instead of failing in the reader.
+   */
+  const opensOnSite = useCallback(
+    (link: string) => settings.openOnSite.includes(hostOf(link)),
+    [settings.openOnSite],
+  );
+
+  const openArticle = useCallback(
+    (article: Loaded, feedUrl?: string) => {
+      markRead(article.id);
+      if (opensOnSite(article.link)) {
+        window.open(article.link, "_blank", "noreferrer,noopener");
+        return;
+      }
+      setReading({ url: article.link, title: article.title, feedUrl });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [opensOnSite],
+  );
+
+  const alwaysOpenOnSite = useCallback(
+    (link: string) => {
+      const host = hostOf(link);
+      updateSettings({
+        ...settings,
+        openOnSite: [...new Set([...settings.openOnSite, host])],
+      });
+      setReading(null);
+      window.open(link, "_blank", "noreferrer,noopener");
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [settings],
+  );
+
   /** Fetch and store an article ahead of the click that opens it. */
   const prefetch = useCallback((url: string, feedUrl?: string, title?: string) => {
     if (prefetched.current.has(url)) return;
@@ -663,6 +699,7 @@ export default function Reader() {
             url={reading.url}
             fallbackTitle={reading.title}
             feedUrl={reading.feedUrl}
+            onAlwaysOpenOnSite={alwaysOpenOnSite}
             onClose={() => setReading(null)}
           />
         ) : (
@@ -779,9 +816,11 @@ export default function Reader() {
                       href={article.link}
                       // Warm the article before the click lands.
                       onMouseEnter={() =>
+                        !opensOnSite(article.link) &&
                         prefetch(article.link, source?.feedUrl, article.title)
                       }
                       onTouchStart={() =>
+                        !opensOnSite(article.link) &&
                         prefetch(article.link, source?.feedUrl, article.title)
                       }
                       onClick={(event) => {
@@ -796,12 +835,7 @@ export default function Reader() {
                           return;
                         }
                         event.preventDefault();
-                        markRead(article.id);
-                        setReading({
-                          url: article.link,
-                          title: article.title,
-                          feedUrl: source?.feedUrl,
-                        });
+                        openArticle(article, source?.feedUrl);
                       }}
                     >
                       {article.title}
@@ -811,14 +845,7 @@ export default function Reader() {
                     )}
                     <button
                       className="read-btn"
-                      onClick={() => {
-                        markRead(article.id);
-                        setReading({
-                          url: article.link,
-                          title: article.title,
-                          feedUrl: source?.feedUrl,
-                        });
-                      }}
+                      onClick={() => openArticle(article, source?.feedUrl)}
                     >
                       {Icon.book} Read here
                     </button>

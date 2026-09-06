@@ -37,9 +37,19 @@ export type Settings = {
   view: ViewMode;
   /** Hide articles already opened, rather than only dimming them. */
   hideRead: boolean;
+  /**
+   * Hosts whose articles open on their own site instead of in the reader.
+   * Subscription sites are the case: the text is only available in a browser
+   * that is logged in, so attempting reader view just wastes a tap.
+   */
+  openOnSite: string[];
 };
 
-export const DEFAULT_SETTINGS: Settings = { view: "cards", hideRead: false };
+export const DEFAULT_SETTINGS: Settings = {
+  view: "cards",
+  hideRead: false,
+  openOnSite: [],
+};
 
 const SETTINGS_KEY = "super-reader:settings:v1";
 
@@ -58,6 +68,9 @@ export function loadSettings(): Settings {
         ? (parsed.view as ViewMode)
         : DEFAULT_SETTINGS.view,
       hideRead: Boolean(parsed.hideRead),
+      openOnSite: Array.isArray(parsed.openOnSite)
+        ? parsed.openOnSite.filter((h): h is string => typeof h === "string")
+        : [],
     };
   } catch {
     return DEFAULT_SETTINGS;

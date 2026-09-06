@@ -131,6 +131,36 @@ export default function SettingsDialog({
           </label>
         </div>
 
+          {settings.openOnSite.length > 0 && (
+            <>
+              <p className="field-label reading-label">Opened on their site</p>
+              <p className="hint" style={{ marginTop: 0, marginBottom: 10 }}>
+                These skip reader view, because their text is only served to a
+                browser that is signed in.
+              </p>
+              <ul className="host-list">
+                {settings.openOnSite.map((host) => (
+                  <li key={host}>
+                    <span>{host}</span>
+                    <button
+                      className="link-btn"
+                      onClick={() =>
+                        onChange({
+                          ...settings,
+                          openOnSite: settings.openOnSite.filter(
+                            (h) => h !== host,
+                          ),
+                        })
+                      }
+                    >
+                      Try reader view again
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+
           <p className="field-label reading-label">Offline</p>
           <div className="offline-box">
             <div className="offline-status">
