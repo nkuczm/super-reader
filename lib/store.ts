@@ -160,6 +160,61 @@ export function saveSyncCode(code: string | null) {
   }
 }
 
+const VAULT_KEY = "super-reader:vault:v1";
+const UNLOCKED_KEY = "super-reader:keys:v1";
+
+/**
+ * The encrypted vault. This is the copy that syncs; it is useless without the
+ * passphrase, which never leaves the browser.
+ */
+export function loadVault(): unknown | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(VAULT_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveVault(blob: unknown | null) {
+  try {
+    if (blob) window.localStorage.setItem(VAULT_KEY, JSON.stringify(blob));
+    else window.localStorage.removeItem(VAULT_KEY);
+  } catch {
+    /* storage unavailable; the vault just won't persist */
+  }
+}
+
+/**
+ * The decrypted keys, kept on this device so the passphrase is asked for once
+ * per device rather than once per launch. This is the same exposure as any
+ * other app secret on a phone you control — what the passphrase protects is
+ * the copy that travels through sync.
+ */
+export function loadUnlockedKeys(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(UNLOCKED_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveUnlockedKeys(keys: Record<string, string> | null) {
+  try {
+    if (keys && Object.keys(keys).length > 0) {
+      window.localStorage.setItem(UNLOCKED_KEY, JSON.stringify(keys));
+    } else {
+      window.localStorage.removeItem(UNLOCKED_KEY);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 const READ_KEY = "super-reader:read:v1";
 
 export function loadRead(): Set<string> {

@@ -5,6 +5,7 @@ import { enrichArticles } from "@/lib/enrich";
 import { xHandleFrom, fetchXFeed } from "@/lib/x";
 import { sortNewestFirst } from "@/lib/sort";
 import { parseApiSourceUrl, fetchApiSource } from "@/lib/apis";
+import { decodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,8 @@ const MAX_PER_SOURCE = 40;
 /** Refresh one known feed URL. Accepts ?url= repeated for a batch. */
 export async function GET(request: Request) {
   const urls = new URL(request.url).searchParams.getAll("url").filter(Boolean);
+  // Used for this request only — never logged, never stored.
+  const keys = decodeKeysHeader(request.headers.get(KEYS_HEADER));
   if (urls.length === 0) {
     return NextResponse.json({ error: "Missing ?url" }, { status: 400 });
   }
@@ -24,7 +27,7 @@ export async function GET(request: Request) {
     urls.map(async (url) => {
       try {
         if (parseApiSourceUrl(url)) {
-          const { meta, articles } = await fetchApiSource(url, MAX_PER_SOURCE);
+          const { meta, articles } = await fetchApiSource(url, MAX_PER_SOURCE, keys);
           return { ok: true as const, ...meta, feedUrl: url, articles };
         }
 

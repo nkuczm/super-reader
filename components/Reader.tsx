@@ -18,6 +18,10 @@ import {
   newId,
   loadSaved,
   saveSaved,
+  loadVault,
+  saveVault,
+  loadUnlockedKeys,
+  saveUnlockedKeys,
   type SavedArticle,
   type Feed,
   type Source,
@@ -27,6 +31,7 @@ import SyncDialog from "./SyncDialog";
 import InlineName from "./InlineName";
 import SettingsDialog from "./SettingsDialog";
 import DownloadBar from "./DownloadBar";
+import { encodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import {
   downloadForOffline,
   isDownloadDue,
@@ -51,6 +56,17 @@ import { sortNewestFirst } from "@/lib/sort";
 import "./reader.css";
 
 type Loaded = Article & { sourceId: string };
+
+/**
+ * The reader's own API keys travel in a header rather than the URL, so a key
+ * never reaches a log line or a referrer. The server uses them for that one
+ * request and keeps nothing.
+ */
+function keyHeadersFrom(keys: Record<string, string>): HeadersInit | undefined {
+  return Object.keys(keys).length === 0
+    ? undefined
+    : { [KEYS_HEADER]: encodeKeysHeader(keys) };
+}
 type Selection =
   | { type: "all" }
   | { type: "saved" }
@@ -81,6 +97,11 @@ export default function Reader() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [saved, setSaved] = useState<SavedArticle[]>([]);
+  const [vault, setVault] = useState<unknown | null>(null);
+  const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
+  // refresh() is created once and reads the keys through this, rather than
+  // being rebuilt — and re-running every feed fetch — whenever a key changes.
+  const apiKeysRef = useRef<Record<string, string>>({});
   const [offline, setOffline] = useState<{
     state: "idle" | "working" | "done" | "error";
     done?: number;
@@ -110,6 +131,8 @@ export default function Reader() {
     setSettings(loadSettings());
     setCollapsed(loadCollapsed());
     setSaved(loadSaved());
+    setVault(loadVault());
+    setApiKeys(loadUnlockedKeys());
     setReady(true);
   }, []);
 
@@ -121,9 +144,15 @@ export default function Reader() {
     });
   }, []);
 
-  const applyRemote = useCallback((payload: { feeds?: Feed[]; read?: string[] }) => {
+  const applyRemote = useCallback((payload: { feeds?: Feed[]; read?: string[]; vault?: unknown }) => {
     applying.current = true;
     if (Array.isArray(payload.feeds)) setFeeds(payload.feeds);
+    // The vault arrives encrypted; it stays locked until a passphrase is
+    // entered on this device, which is the whole point of it.
+    if (payload.vault) {
+      setVault(payload.vault);
+      saveVault(payload.vault);
+    }
     if (Array.isArray(payload.read)) {
       const next = new Set(payload.read);
       setRead(next);
@@ -182,7 +211,7 @@ export default function Reader() {
         const res = await fetch("/api/sync", {
           method: "PUT",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ code: syncCode, feeds, read: [...read] }),
+          body: JSON.stringify({ code: syncCode, feeds, read: [...read], vault }),
         });
         if (!res.ok) throw new Error("save failed");
         setSyncState("saved");
@@ -191,7 +220,7 @@ export default function Reader() {
       }
     }, 900);
     return () => clearTimeout(timer);
-  }, [feeds, read, ready, syncCode]);
+  }, [feeds, read, ready, syncCode, vault]);
 
   const startSync = useCallback(async () => {
     setSyncState("working");
@@ -258,7 +287,7 @@ export default function Reader() {
     try {
       const params = new URLSearchParams();
       for (const source of sources) params.append("url", source.feedUrl);
-      const res = await fetch(`/api/feed?${params}`);
+      const res = await fetch(`/api/feed?${params}`, { headers: keyHeadersFrom(apiKeysRef.current) });
       const data = await res.json();
 
       const byUrl = new Map(sources.map((s) => [s.feedUrl, s.id]));
@@ -476,6 +505,20 @@ export default function Reader() {
       }
     })();
   }, [markSaved]);
+
+  useEffect(() => {
+    apiKeysRef.current = apiKeys;
+  }, [apiKeys]);
+
+  /** Keys changed: keep the device copy, the vault, and the feeds in step. */
+  function updateKeys(next: { vault: unknown | null; keys: Record<string, string> }) {
+    setVault(next.vault);
+    setApiKeys(next.keys);
+    saveVault(next.vault);
+    saveUnlockedKeys(next.keys);
+    // An API source that was failing for want of a key should now work.
+    void refresh(allSources);
+  }
 
   function updateSettings(next: Settings) {
     setSettings(next);
@@ -1058,6 +1101,9 @@ export default function Reader() {
           onClose={() => setSettingsOpen(false)}
           offline={offline}
           storedCount={savedOffline.size}
+          vault={vault}
+          apiKeys={apiKeys}
+          onKeysChange={updateKeys}
           onDownload={runDownload}
         />
       )}
@@ -1076,6 +1122,7 @@ export default function Reader() {
       {dialogOpen && (
         <AddSourceDialog
           feeds={feeds}
+          keyHeaders={keyHeadersFrom(apiKeys)}
           defaultFeedId={
             selection.type === "feed" ? selection.id : feeds[0]?.id
           }

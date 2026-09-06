@@ -52,7 +52,7 @@ export async function POST() {
 export async function PUT(request: Request) {
   if (!isConfigured()) return notConfigured();
 
-  let body: { code?: string; feeds?: unknown; read?: unknown };
+  let body: { code?: string; feeds?: unknown; read?: unknown; vault?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -70,6 +70,8 @@ export async function PUT(request: Request) {
   const payload = {
     feeds: body.feeds,
     read: Array.isArray(body.read) ? (body.read as string[]).slice(-3000) : [],
+    // Opaque to this server by design; stored and handed back untouched.
+    ...(body.vault ? { vault: body.vault } : {}),
   };
   if (JSON.stringify(payload).length > MAX_PAYLOAD_BYTES) {
     return NextResponse.json({ error: "That is too much data to sync." }, { status: 413 });

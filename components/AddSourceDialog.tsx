@@ -10,6 +10,8 @@ import { timeAgo, hostOf } from "./format";
 
 type Props = {
   feeds: Feed[];
+  /** Sent with the lookup so an API source can use the reader's own key. */
+  keyHeaders?: HeadersInit;
   defaultFeedId?: string;
   onCancel: () => void;
   onAdd: (result: DiscoverResult, target: string) => void;
@@ -31,6 +33,7 @@ function pastedASection(input: string) {
 
 export default function AddSourceDialog({
   feeds,
+  keyHeaders,
   defaultFeedId,
   onCancel,
   onAdd,
@@ -69,6 +72,7 @@ export default function AddSourceDialog({
       const res = await fetch(
         `/api/discover?q=${encodeURIComponent(value)}` +
           (nextScope === "site" ? "&scope=site" : ""),
+        { headers: keyHeaders },
       );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not read that source");

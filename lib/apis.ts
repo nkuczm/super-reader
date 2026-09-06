@@ -720,14 +720,30 @@ export function getApiProvider(id: string): ApiProvider | undefined {
   return API_PROVIDERS.find((provider) => provider.id === id);
 }
 
-/** The credential for a provider, read at call time so tests can set it. */
-export function apiKeyFor(provider: ApiProvider): string | null {
+/**
+ * The credential for a provider. A key supplied by the reader — decrypted in
+ * their browser and sent for this request only — wins over the deployment's
+ * own, which is shared by everyone who opens this public URL.
+ */
+export function apiKeyFor(
+  provider: ApiProvider,
+  supplied?: Record<string, string>,
+): string | null {
   if (!provider.envKey) return null;
+  const own = supplied?.[provider.id]?.trim();
+  if (own) return own;
   return process.env[provider.envKey]?.trim() || null;
 }
 
-export function isApiConfigured(provider: ApiProvider) {
-  return !provider.envKey || provider.keyOptional === true || apiKeyFor(provider) !== null;
+export function isApiConfigured(
+  provider: ApiProvider,
+  supplied?: Record<string, string>,
+) {
+  return (
+    !provider.envKey ||
+    provider.keyOptional === true ||
+    apiKeyFor(provider, supplied) !== null
+  );
 }
 
 /**
@@ -837,6 +853,8 @@ async function fetchJson(request: ApiRequest, timeoutMs = 15000) {
 export async function fetchApiSource(
   sourceUrl: string,
   limit = 20,
+  /** Keys the reader supplied for this request; never stored. */
+  supplied?: Record<string, string>,
 ): Promise<{ meta: SourceMeta; articles: Article[] }> {
   const parsed = parseApiSourceUrl(sourceUrl);
   if (!parsed) throw new Error("Not an API source");
@@ -848,10 +866,10 @@ export async function fetchApiSource(
     }
   }
 
-  const key = apiKeyFor(provider);
+  const key = apiKeyFor(provider, supplied);
   if (provider.envKey && !key && !provider.keyOptional) {
     throw new Error(
-      `${provider.name} needs an API key. Add ${provider.envKey} to this deployment.` +
+      `${provider.name} needs an API key. Add one in Settings, or set ${provider.envKey} on this deployment.` +
         (provider.keyHint ? ` ${provider.keyHint}` : ""),
     );
   }

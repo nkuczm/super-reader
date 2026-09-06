@@ -256,3 +256,39 @@ test("providers are looked up by id", () => {
   assert.equal(getApiProvider("federal-register")?.name, "Federal Register");
   assert.equal(getApiProvider("nope"), undefined);
 });
+
+test("a reader's own key beats the deployment's", async () => {
+  process.env.COURTLISTENER_TOKEN = "the-deployment-key";
+  const calls = stubFetch({ results: [] });
+
+  await fetchApiSource("api:courtlistener?q=x", 10, {
+    courtlistener: "the-reader-key",
+  });
+  assert.equal(calls[0].headers.authorization, "Token the-reader-key");
+
+  // With none supplied, the deployment's key is still used.
+  const fallback = stubFetch({ results: [] });
+  await fetchApiSource("api:courtlistener?q=x", 10, {});
+  assert.equal(fallback[0].headers.authorization, "Token the-deployment-key");
+  delete process.env.COURTLISTENER_TOKEN;
+});
+
+test("a supplied key satisfies an API that has none on the deployment", async () => {
+  delete process.env.CONGRESS_GOV_API_KEY;
+  const calls = stubFetch({ bills: [] });
+
+  // Without a key this refuses before making a request; with one it proceeds.
+  await assert.rejects(() => fetchApiSource("api:congress"), /CONGRESS_GOV_API_KEY/);
+  await fetchApiSource("api:congress", 10, { congress: "readers-own" });
+  assert.match(calls[0].url, /api_key=readers-own/);
+});
+
+test("a key for one API is never sent to another", async () => {
+  delete process.env.COURTLISTENER_TOKEN;
+  const calls = stubFetch({ hits: [] });
+  await fetchApiSource("api:hacker-news?q=x", 10, { courtlistener: "secret" });
+  assert.ok(
+    !JSON.stringify(calls[0]).includes("secret"),
+    "Hacker News takes no key and must not receive one",
+  );
+});

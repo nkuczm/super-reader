@@ -159,6 +159,8 @@ export async function discover(
   limit = 12,
   /** "site" forces the whole-site feed even when a section was pasted. */
   scope: "auto" | "site" = "auto",
+  /** API keys the reader supplied for this request. */
+  keys?: Record<string, string>,
 ): Promise<DiscoverResult> {
   const raw = input.trim();
   if (!raw) throw new Error("Nothing to look up");
@@ -166,7 +168,7 @@ export async function discover(
   // A source from the API directory: not a feed and not a page, so it is
   // answered by its adapter rather than by fetching a URL.
   if (parseApiSourceUrl(raw)) {
-    const { meta, articles } = await fetchApiSource(raw, limit);
+    const { meta, articles } = await fetchApiSource(raw, limit, keys);
     return { ...meta, kind: "api", scope: "site", total: articles.length, articles };
   }
 

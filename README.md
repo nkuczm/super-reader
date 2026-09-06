@@ -199,6 +199,24 @@ but rate-limits harder. Nothing is stored client-side: keys live only in the
 deployment's environment, and the catalogue the browser receives never
 contains them.
 
+### Your own API keys
+
+Settings → **API keys** takes a key per provider. They are encrypted in the
+browser with a passphrase you choose, and only the ciphertext syncs, so the
+server stores bytes it cannot read — which matters because this deployment is
+public: anything the server could read would be readable by whoever has the
+URL. A key is sent, in a header, only with the request that calls that API,
+used once, and never stored server-side.
+
+On another device the vault arrives locked; entering the passphrase there
+unlocks it. The decrypted keys are then kept on that device, so the passphrase
+is asked for once per device rather than once per launch. There is no recovery:
+forgetting the passphrase means entering the keys again.
+
+Keys set in the deployment's environment still work and act as the fallback —
+but they apply to everyone who opens the URL, which is what the vault exists to
+avoid.
+
 ### Adding another API
 
 `lib/apis.ts` is a list of providers, one object each. A new one needs: what

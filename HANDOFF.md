@@ -135,6 +135,13 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
 - **View mode and collapsed feeds are per-device, not synced.** A phone and a
   desktop want different densities; the feeds are what must match.
 - **Sync codes are stored as SHA-256 hashes**, never the code itself.
+- **API keys are encrypted in the browser (`lib/vault.ts`) before they sync.**
+  AES-GCM under a PBKDF2 key from the passphrase; the server stores the blob
+  and cannot read it. Keys reach the server only in the `x-sr-api-keys` header,
+  for the one request that calls that API — never in the URL, so they cannot
+  reach a log or a referrer, and never written down server-side. This is the
+  same reasoning as the paywall decision: a public deployment must not hold a
+  secret that works for whoever opens it.
 - **API sources are one string, `api:<provider>?<fields>`**, not a new source
   shape. Refresh, dedupe, offline storage and sync all compare on `feedUrl`;
   keeping that a single string meant none of them changed. `lib/apis.ts` is the

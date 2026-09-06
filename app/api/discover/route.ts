@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { discover } from "@/lib/discover";
+import { decodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +17,8 @@ export async function GET(request: Request) {
     : 12;
   const scope = params.get("scope") === "site" ? "site" : "auto";
   try {
-    return NextResponse.json(await discover(input, limit, scope));
+    const keys = decodeKeysHeader(request.headers.get(KEYS_HEADER));
+    return NextResponse.json(await discover(input, limit, scope, keys));
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Lookup failed" },

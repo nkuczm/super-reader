@@ -4,6 +4,13 @@ import { hashCode, newSyncCode } from "./sync-code";
 export type SyncPayload = {
   feeds: unknown[];
   read?: string[];
+  /**
+   * The API-key vault, encrypted in the browser before it ever reaches here.
+   * The server stores these bytes and cannot read them: it has no passphrase,
+   * and this deployment is public, so anything it could read would be readable
+   * by whoever holds the URL.
+   */
+  vault?: unknown;
 };
 
 export type SyncRecord = {

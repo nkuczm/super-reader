@@ -1,5 +1,6 @@
 "use client";
 
+import ApiKeys from "./ApiKeys";
 import { useEffect } from "react";
 import type { Settings, ViewMode } from "@/lib/store";
 
@@ -63,6 +64,9 @@ export default function SettingsDialog({
   onClose,
   offline,
   storedCount,
+  vault,
+  apiKeys,
+  onKeysChange,
   onDownload,
 }: {
   settings: Settings;
@@ -70,6 +74,9 @@ export default function SettingsDialog({
   onClose: () => void;
   /** How many articles are on this device right now. */
   storedCount: number;
+  vault: unknown | null;
+  apiKeys: Record<string, string>;
+  onKeysChange: (next: { vault: unknown | null; keys: Record<string, string> }) => void;
   offline: {
     state: "idle" | "working" | "done" | "error";
     done?: number;
@@ -164,6 +171,9 @@ export default function SettingsDialog({
               </ul>
             </>
           )}
+
+          <p className="field-label reading-label">API keys</p>
+          <ApiKeys vault={vault} keys={apiKeys} onChange={onKeysChange} />
 
           <p className="field-label reading-label">Offline</p>
           <div className="offline-box">
