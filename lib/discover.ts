@@ -180,8 +180,8 @@ export async function discover(
       scope: "site",
       title: raw,
       description: `Latest stories about “${raw}”`,
-      siteUrl: "https://news.google.com",
-      favicon: faviconFor("news.google.com"),
+      siteUrl: "https://www.bing.com/news",
+      favicon: faviconFor("bing.com"),
       articles,
     };
   }
