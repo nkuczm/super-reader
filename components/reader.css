@@ -581,3 +581,35 @@
   margin-right: auto; color: var(--text-dim); font-size: 11.5px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+/* ---------- files attached to a story ---------- */
+.files { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.file { border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
+.file.open { background: var(--bg-sub); }
+.file-chip {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 7px 10px; background: transparent; border: 0;
+  font-size: 12.5px; color: var(--text-dim); text-align: left;
+}
+.file-chip:hover { background: var(--bg-hover); }
+.file-kind {
+  flex: none; font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em;
+  padding: 2px 6px; border-radius: 5px;
+  background: var(--accent-soft); color: var(--accent);
+}
+.file-name {
+  color: var(--text); font-weight: 550; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.file-size { flex: none; }
+.file-chev { flex: none; margin-left: auto; display: inline-flex; transition: transform 0.16s; }
+.file-chev.open { transform: rotate(90deg); }
+.file-preview { padding: 4px 12px 12px; }
+/* Enough to tell whether it is worth opening, not the whole document. */
+.file-text {
+  max-height: 260px; overflow: auto; font-size: 14.5px; line-height: 1.6;
+  border-left: 2px solid var(--border); padding-left: 12px;
+}
+.file-text table { font-size: 13px; }
+.file-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.file-actions .read-btn { margin-top: 0; text-decoration: none; }

@@ -282,6 +282,24 @@ articles from that host go straight to the browser — where a subscription
 applies — instead of failing in the reader first. Settings lists those hosts
 and can put any of them back.
 
+## Files in the feed
+
+Sources often link a file rather than write the thing itself: the PDF behind a
+notice, the CSV of the figures. Those arrive as chips under the story, the way
+an image does — tap one and it expands in place with the file's own text,
+without leaving the list.
+
+Only formats with text in them are read: PDF, plain text, Markdown, CSV (shown
+as a table) and JSON. An image or a video would need a viewer rather than an
+extractor, and pretending to read one would be worse than linking it. A scanned
+PDF with no text layer says so instead of opening blank — that needs OCR, which
+this does not do.
+
+A file is otherwise an article: **Read it all** opens it in the reader, **Save**
+puts it in Saved on its own, and a saved file downloads for offline reading like
+anything else. That is one mechanism rather than two, because `/api/article`
+reads a file URL into the same shape as an extracted page.
+
 ## Saving articles
 
 **Save** on any article puts it in the **Saved** list in the sidebar, and the

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Article, DiscoverResult } from "@/lib/types";
+import type { Article, Attachment, DiscoverResult } from "@/lib/types";
 import {
   loadFeeds,
   saveFeeds,
@@ -31,6 +31,7 @@ import SyncDialog from "./SyncDialog";
 import InlineName from "./InlineName";
 import SettingsDialog from "./SettingsDialog";
 import DownloadBar from "./DownloadBar";
+import Attachments from "./Attachments";
 import { encodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import {
   downloadForOffline,
@@ -62,6 +63,12 @@ type Loaded = Article & { sourceId: string };
  * never reaches a log line or a referrer. The server uses them for that one
  * request and keeps nothing.
  */
+/** "Final rule (PDF)" reads better in a list than "rule-2026-04.pdf". */
+function fileTitleFor(file: Attachment, parentTitle: string) {
+  const kind = file.kind === "pdf" ? "PDF" : file.kind.toUpperCase();
+  return `${parentTitle} (${kind})`;
+}
+
 function keyHeadersFrom(keys: Record<string, string>): HeadersInit | undefined {
   return Object.keys(keys).length === 0
     ? undefined
@@ -430,6 +437,37 @@ export default function Reader() {
           : [
               {
                 ...article,
+                sourceTitle: source?.title,
+                favicon: source?.favicon,
+                savedAt: Date.now(),
+              },
+              ...current,
+            ];
+        saveSaved(next);
+        return next;
+      });
+    },
+    [],
+  );
+
+  /**
+   * A file saved on its own, rather than with the story that linked it: it
+   * becomes an ordinary entry in Saved, so it downloads offline and reads
+   * exactly like an article.
+   */
+  const toggleSavedFile = useCallback(
+    (file: Attachment, parent: Loaded, source?: Source) => {
+      setSaved((current) => {
+        const next = current.some((a) => a.link === file.url)
+          ? current.filter((a) => a.link !== file.url)
+          : [
+              {
+                id: `file:${file.url}`,
+                title: file.title ?? fileTitleFor(file, parent.title),
+                link: file.url,
+                publishedAt: parent.publishedAt,
+                summary: `From “${parent.title}”`,
+                sourceId: parent.sourceId,
                 sourceTitle: source?.title,
                 favicon: source?.favicon,
                 savedAt: Date.now(),
@@ -1044,6 +1082,20 @@ export default function Reader() {
                     </a>
                     {article.summary && settings.view !== "list" && (
                       <p className="article-summary">{article.summary}</p>
+                    )}
+                    {article.attachments && article.attachments.length > 0 && (
+                      <Attachments
+                        attachments={article.attachments}
+                        onOpen={(file) =>
+                          setReading({
+                            url: file.url,
+                            title: file.title ?? article.title,
+                            feedUrl: source?.feedUrl,
+                          })
+                        }
+                        isSaved={isSaved}
+                        onToggleSave={(file) => toggleSavedFile(file, article, source)}
+                      />
                     )}
                     <div className="article-actions">
                       <button

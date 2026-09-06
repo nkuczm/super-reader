@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { extractArticle, articleFromFeedContent } from "@/lib/article";
 import { fetchFeedItemContent, unwrapRedirect } from "@/lib/feed";
 import { isUnresolvableAggregatorLink } from "@/lib/discover";
+import { fileKindFor, readFileAsArticle } from "@/lib/files";
 
 export const runtime = "nodejs";
 // Deliberately not force-dynamic: that disables CDN caching, and an
@@ -68,6 +69,31 @@ export async function GET(request: Request) {
       },
       { status: 502 },
     );
+  }
+
+  // A PDF or a text file is read rather than parsed as a page. Handling it
+  // here means the reader, the offline download and Saved all treat a file
+  // exactly like an article, with no special case of their own.
+  const declaredFile = params.get("file");
+  if (declaredFile || fileKindFor(target.toString())) {
+    try {
+      const file = await readFileAsArticle(target.toString(), title);
+      return NextResponse.json(file, {
+        headers: {
+          "cache-control": "public, max-age=3600",
+          "CDN-Cache-Control": "public, s-maxage=86400",
+          "Vercel-CDN-Cache-Control": "public, s-maxage=86400",
+        },
+      });
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error:
+            error instanceof Error ? error.message : "Could not open that file.",
+        },
+        { status: 502 },
+      );
+    }
   }
 
   try {

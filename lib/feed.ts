@@ -1,6 +1,7 @@
 import { XMLParser } from "fast-xml-parser";
 import { sortNewestFirst } from "./sort";
-import type { Article, SourceMeta } from "./types";
+import { fileKindFor } from "./files";
+import type { Article, Attachment, SourceMeta } from "./types";
 
 /**
  * Many publishers (OpenAI among them) return 403 to anything that does not
@@ -379,7 +380,32 @@ function rssItem(item: any, site: string): Article {
       content,
       site,
     ),
+    attachments: attachmentsFrom(asArray(item.enclosure), site),
   };
+}
+
+/**
+ * Enclosures that are files worth reading. A feed's declared type is the
+ * better signal than the URL, and an image enclosure is left to pickImage.
+ */
+function attachmentsFrom(nodes: any[], site: string): Attachment[] | undefined {
+  const found: Attachment[] = [];
+  for (const node of nodes) {
+    const url = node?.["@_url"] ?? node?.["@_href"];
+    if (!url) continue;
+    const kind = fileKindFor(String(url), node?.["@_type"]);
+    if (!kind) continue;
+    const absoluteUrl = absolute(String(url), site);
+    if (found.some((a) => a.url === absoluteUrl)) continue;
+    const bytes = Number.parseInt(node?.["@_length"], 10);
+    found.push({
+      url: absoluteUrl,
+      kind,
+      ...(node?.["@_title"] ? { title: String(node["@_title"]) } : {}),
+      ...(Number.isFinite(bytes) && bytes > 0 ? { bytes } : {}),
+    });
+  }
+  return found.length > 0 ? found.slice(0, 6) : undefined;
 }
 
 /** Prefer a declared image, falling back to the first one in the body. */
@@ -395,8 +421,10 @@ function atomEntry(entry: any, site: string): Article {
     links.find((l: any) => l?.["@_href"])?.["@_href"] ??
     text(entry.id);
   const content = text(entry.content) || text(entry.summary);
+  const enclosures = links.filter((l: any) => l?.["@_rel"] === "enclosure");
   return {
     id: text(entry.id) || link,
+    attachments: attachmentsFrom(enclosures, site),
     title: stripHtml(text(entry.title), 200) || "(untitled)",
     link: unwrapRedirect(absolute(link, site)),
     author: text(first(asArray(entry.author))?.name) || undefined,

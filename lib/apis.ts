@@ -211,7 +211,7 @@ export const API_PROVIDERS: ApiProvider[] = [
         per_page: String(limit),
         order: "newest",
       });
-      for (const field of ["title", "html_url", "publication_date", "abstract", "agencies", "type", "document_number"])
+      for (const field of ["title", "html_url", "publication_date", "abstract", "agencies", "type", "document_number", "pdf_url"])
         search.append("fields[]", field);
       if (q.trim()) search.set("conditions[term]", q.trim());
       if (type) search.append("conditions[type][]", type);
@@ -231,6 +231,14 @@ export const API_PROVIDERS: ApiProvider[] = [
         author: agencies.slice(0, 2).join(", ") || undefined,
         publishedAt: toIso(item.publication_date),
         summary: clean(item.abstract),
+        // The rule as published, which is what anyone citing it needs.
+        ...(item.pdf_url
+          ? {
+              attachments: [
+                { url: String(item.pdf_url), kind: "pdf" as const, title: "As published (PDF)" },
+              ],
+            }
+          : {}),
       };
     },
     title: ({ q, agency }) =>

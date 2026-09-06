@@ -4,8 +4,8 @@ import sanitizeHtml from "sanitize-html";
 import { fetchText, stripHtml, absolute, toIso, stripChrome } from "./feed";
 
 export type ReadableArticle = {
-  /** Where the text came from: the page itself, or the feed's own copy. */
-  via?: "page" | "feed";
+  /** Where the text came from: the page, the feed's own copy, or a file. */
+  via?: "page" | "feed" | "file";
   url: string;
   title: string;
   byline?: string;

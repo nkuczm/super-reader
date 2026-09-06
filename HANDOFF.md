@@ -58,6 +58,7 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
 | `lib/scrape.ts` | Builds a feed from a page that has no RSS |
 | `lib/enrich.ts` | Fills missing summaries/images from each article's metadata |
 | `lib/article.ts` | Readability extraction + sanitising for the reader |
+| `lib/files.ts` | Reading linked files — PDF, text, Markdown, CSV, JSON |
 | `lib/x.ts` | Following an X account via the official API |
 | `lib/apis.ts` | The API directory — CourtListener, Federal Register, arXiv… |
 | `lib/offline.ts` | IndexedDB store, download schedule, list snapshot |
@@ -159,6 +160,17 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   contains, a known article-body container, so a post about comments survives.
   `charThreshold` is also lowered to 250: Readability's default of 500 discards
   a genuinely short post and falls back to scraping the whole page.
+- **A file is read into the same shape as an article**, by `/api/article`
+  itself rather than a second endpoint. That is what lets the reader, the
+  offline download, the cache and Saved treat a PDF like a story with no case
+  of their own — the alternative was a parallel path through all four.
+- **`pdfjs-dist` is in `serverExternalPackages`.** It resolves its worker
+  relative to its own file on disk; bundled into a server chunk that path does
+  not exist and every PDF fails with "Setting up fake worker failed". This
+  passed tests and only broke in the built app, so check a PDF against
+  `next start`, not just `npm test`.
+- **pdf.js detaches the buffer it is handed.** Read `byteLength` before
+  parsing or the reported file size is always 0.
 - **Cached articles carry an `EXTRACT_VERSION`.** The download skips anything
   already stored, so without a version a wrongly extracted article would stay
   wrong on the device forever. Bump it whenever extraction changes what a page

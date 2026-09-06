@@ -292,3 +292,26 @@ test("a key for one API is never sent to another", async () => {
     "Hacker News takes no key and must not receive one",
   );
 });
+
+test("Federal Register hands over the published PDF as an attachment", async () => {
+  stubFetch({
+    results: [
+      {
+        document_number: "2026-0002",
+        title: "Final rule",
+        html_url: "https://www.federalregister.gov/documents/2026/0002",
+        publication_date: "2026-01-06",
+        pdf_url: "https://www.govinfo.gov/content/pkg/FR-2026-01-06/pdf/2026-0002.pdf",
+      },
+    ],
+  });
+
+  const { articles } = await fetchApiSource("api:federal-register?q=rule");
+  assert.deepEqual(articles[0].attachments, [
+    {
+      url: "https://www.govinfo.gov/content/pkg/FR-2026-01-06/pdf/2026-0002.pdf",
+      kind: "pdf",
+      title: "As published (PDF)",
+    },
+  ]);
+});

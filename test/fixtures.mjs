@@ -289,6 +289,40 @@ say why the code is shaped the way it is, which the code itself cannot say.</p>
 sight. A stale comment misleads for years after the line it described changed.</p>
 </div></article></body></html>`;
 
+/** A minimal, valid PDF carrying two lines of text. */
+const SAMPLE_PDF = Buffer.from(
+  "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgPj4gPj4gPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCAxMTIgPj4Kc3RyZWFtCkJUIC9GMSAxNCBUZiA3MiA3MjAgVGQgKE5vdGljZSBvZiBwcm9wb3NlZCBydWxlbWFraW5nKSBUaiAwIC0yMCBUZCAoVGhlIGFnZW5jeSBwcm9wb3NlcyB0byBhbWVuZCBwYXJ0IDQwLikgVGogRVQKZW5kc3RyZWFtCmVuZG9iago1IDAgb2JqCjw8IC9UeXBlIC9Gb250IC9TdWJ0eXBlIC9UeXBlMSAvQmFzZUZvbnQgL0hlbHZldGljYSA+PgplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDA0MDQgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgo0NzQKJSVFT0YK",
+  "base64",
+);
+
+/** A feed whose items enclose files, the way a government newsroom does. */
+const fileFeed = `<?xml version="1.0"?><rss version="2.0"><channel>
+<title>Agency Notices</title><link>http://127.0.0.1:8791</link>
+<item><title>Notice of proposed rulemaking</title><link>http://127.0.0.1:8791/notice</link>
+<guid>n1</guid><pubDate>Tue, 02 Sep 2025 10:00:00 GMT</pubDate>
+<description>The agency proposes to amend part 40.</description>
+<enclosure url="http://127.0.0.1:8791/notice.pdf" type="application/pdf" length="657"/>
+</item>
+<item><title>Comment period data</title><link>http://127.0.0.1:8791/data</link>
+<guid>n2</guid><pubDate>Mon, 01 Sep 2025 10:00:00 GMT</pubDate>
+<enclosure url="http://127.0.0.1:8791/rows.csv" type="text/csv" length="40"/>
+<enclosure url="http://127.0.0.1:8791/cover.jpg" type="image/jpeg" length="900"/>
+</item>
+</channel></rss>`;
+
+export function startFileSite(port = 8791) {
+  return serve(
+    {
+      "/rss": [200, "application/rss+xml", fileFeed],
+      "/notice.pdf": [200, "application/pdf", SAMPLE_PDF],
+      "/rows.csv": [200, "text/csv", "docket,comments\nEPA-2025-1,412\nEPA-2025-2,7"],
+      "/readme.txt": [200, "text/plain", "First paragraph.\n\nSecond paragraph."],
+      "/notes": [200, "text/plain", "A file with no extension at all."],
+    },
+    port,
+  );
+}
+
 export function startCommentSite(port = 8790) {
   return serve(
     {
