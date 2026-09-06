@@ -162,6 +162,71 @@ function hoistLazyImages(doc: Document) {
   }
 }
 
+/**
+ * Comment threads, which are not the article.
+ *
+ * Readability scores containers by how much text they hold, so on a short post
+ * with a busy comment section the discussion outweighs the post and gets
+ * returned as the article — a reader's comment appearing under the author's
+ * name and title. Melanie Mitchell's "On AI and Jagged Intelligence" is the
+ * case that found this: a 458-character note with 1,700 characters of replies
+ * beneath it.
+ *
+ * Removing the thread before Readability runs is the fix, rather than trying
+ * to out-score it afterwards. Every blogging platform appends comments this
+ * way, so this is not Substack-specific.
+ */
+const DISCUSSION_SELECTORS = [
+  "#comments",
+  "#substack-comments",
+  "#disqus_thread",
+  "#respond",
+  ".comments-section",
+  ".comments-area",
+  ".comment-list",
+  ".commentlist",
+  ".comment-respond",
+  ".comment-thread",
+  ".responses",
+  "[data-testid=comments]",
+];
+
+/**
+ * Containers a page uses to mark its own article body. Nothing holding one of
+ * these is a comment thread, whatever it calls itself.
+ */
+const BODY_HINTS =
+  "div.available-content, div.body.markup, [itemprop=articleBody], .post-content, .entry-content";
+
+function stripDiscussion(doc: Document) {
+  const candidates = new Set<Element>();
+
+  for (const selector of DISCUSSION_SELECTORS) {
+    try {
+      for (const el of doc.querySelectorAll(selector)) candidates.add(el);
+    } catch {
+      /* a selector this DOM will not parse is simply skipped */
+    }
+  }
+
+  // Anything else naming itself a comment container. Matched on whole words so
+  // "commentary" and "commented" are left alone.
+  for (const el of doc.querySelectorAll("[class*=comment], [id*=comment]")) {
+    const name = `${el.getAttribute("class") ?? ""} ${el.getAttribute("id") ?? ""}`;
+    if (/(^|[\s_-])comments?([\s_-]|$)/i.test(name)) candidates.add(el);
+  }
+
+  for (const el of candidates) {
+    // Never take the article with the thread: on some layouts the post lives
+    // inside a wrapper whose name mentions comments.
+    if (el.tagName === "BODY" || el.tagName === "ARTICLE") continue;
+    // The element itself may be the body — a post about comments can sit in
+    // "entry-content comment-guidance" — as well as merely contain it.
+    if (el.matches(BODY_HINTS) || el.querySelector(BODY_HINTS)) continue;
+    el.remove();
+  }
+}
+
 const MAX_CHARS = 400_000;
 
 /**
@@ -203,8 +268,12 @@ export async function extractArticle(url: string): Promise<ReadableArticle> {
   const siteName = metaOf(dom, ["og:site_name"]);
 
   hoistLazyImages(dom.window.document);
+  stripDiscussion(dom.window.document);
 
-  const parsed = new Readability(dom.window.document).parse();
+  // charThreshold defaults to 500, which makes Readability discard a genuinely
+  // short post and fall back to scraping the whole page. Short posts are
+  // ordinary — a link-out note is often two sentences.
+  const parsed = new Readability(dom.window.document, { charThreshold: 250 }).parse();
   if (!parsed?.content) {
     throw new Error("Could not extract readable text from that page.");
   }

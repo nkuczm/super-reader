@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { JSDOM, VirtualConsole } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import { fetchText, stripHtml } from "@/lib/feed";
+import { extractArticle } from "@/lib/article";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,9 +44,20 @@ export async function GET(request: Request) {
     .sort((a, b) => b.chars - a.chars)
     .slice(0, 12);
 
+  // What the app itself now returns for this page.
+  let real: Record<string, unknown>;
+  try {
+    const a = await extractArticle(url);
+    const t = stripHtml(a.html, Number.MAX_SAFE_INTEGER);
+    real = { title: a.title, words: a.wordCount, head: t.slice(0, 220), tail: t.slice(-160) };
+  } catch (error) {
+    real = { error: error instanceof Error ? error.message : "failed" };
+  }
+
   return NextResponse.json({
+    real,
     finalUrl,
-    commentish,
+    commentish: commentish.slice(0, 2),
     bodyCandidates: {
       available: textOf("div.available-content"),
       markup: textOf("div.body.markup"),

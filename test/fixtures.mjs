@@ -237,6 +237,68 @@ const noFeedRoutes = {
   "/img/opus.png": [200, "image/png", PNG],
 };
 
+/**
+ * A short post with a long comment thread under it — the shape that made
+ * Readability return a reader's comment as the article. Modelled on the
+ * Substack page that did it: a two-sentence note, 1,700 characters of replies.
+ */
+const shortPostWithComments = `<html><head><title>On AI and "Jagged Intelligence"</title>
+<meta property="og:site_name" content="A Newsletter">
+<meta property="article:published_time" content="2026-06-09T12:00:00Z"></head><body>
+<nav><a href="/">Home</a><a href="/archive">Archive</a></nav>
+<article><h1>On AI and "Jagged Intelligence"</h1>
+<div class="available-content"><div class="body markup">
+<p>I have been working on a few pieces for this newsletter and hope to post them
+soon. In the meantime, you might be interested in an article of mine just
+published in The Yale Review, titled "Jagged Intelligence".</p>
+<p>I would love to hear what you think of it.</p>
+</div></div></article>
+<div class="single-post-section comments-section" id="substack-comments">
+<h3>Comments</h3>
+<div class="comment-list post-page-root-comment-list"><div class="comment-list-items">
+<div class="comment"><div class="comment-body expanded">
+<p>I think we should all agree to switch to using the term complex information
+processing (CIP), or perhaps, for a while, "CIP formerly known as AI". This is
+such an apt description, and resolves my desire to rename AI in order to avoid
+the confusion and fear that many people experience.</p>
+<p>I understand something of the desire to anthropomorphise chatbots based on
+LLMs. Doing so makes them less scary to people who are fearful about the
+technology. I have committed many hours to personal and philosophical
+development with several LLM chatbots, to my considerable advantage. Yet I have
+no need to think of the software as though it is alive and has a self.</p>
+<p>Complex information processing is an apt description for what is actually
+required. Thank you for this article. I look forward to reading more of your
+thoughts.</p>
+</div></div>
+<div class="comment"><div class="comment-body expanded">
+<p>Agreed. The framing matters more than people admit, and the vocabulary we
+choose ends up doing a lot of the argument's work for us before anyone has
+started reasoning about the thing itself.</p>
+</div></div>
+</div></div></div>
+<footer><p>Copyright</p></footer></body></html>`;
+
+/** A post whose own body mentions comments — the strip must not eat it. */
+const postAboutComments = `<html><head><title>On code comments</title></head><body>
+<article><h1>On code comments</h1>
+<div class="entry-content comment-guidance">
+<p>A comment that restates the code is worse than no comment at all, because it
+is one more thing to keep true. The comments worth writing are the ones that
+say why the code is shaped the way it is, which the code itself cannot say.</p>
+<p>Reviewers should ask for that kind of comment, and delete the other kind on
+sight. A stale comment misleads for years after the line it described changed.</p>
+</div></article></body></html>`;
+
+export function startCommentSite(port = 8790) {
+  return serve(
+    {
+      "/p/jagged-intelligence": [200, "text/html", shortPostWithComments],
+      "/p/on-code-comments": [200, "text/html", postAboutComments],
+    },
+    port,
+  );
+}
+
 function serve(routeTable, port) {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
