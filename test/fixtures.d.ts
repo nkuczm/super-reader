@@ -10,3 +10,4 @@ export function startFakeX(port?: number): Promise<{
 }>;
 export function startBlockedHomepageSite(port?: number): Promise<{ close: () => void }>;
 export function startAnchorFeedSite(port?: number): Promise<{ close: () => void }>;
+export function startGuardedSite(port?: number): Promise<{ close: () => void }>;

@@ -33,6 +33,8 @@ import {
   writeCached,
   saveListSnapshot,
   loadListSnapshot,
+  articleEndpoint,
+  type OfflineTarget,
   PER_SOURCE,
 } from "@/lib/offline";
 import ArticleReader from "./ArticleReader";
@@ -53,9 +55,11 @@ export default function Reader() {
   const [selection, setSelection] = useState<Selection>({ type: "all" });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [reading, setReading] = useState<{ url: string; title: string } | null>(
-    null,
-  );
+  const [reading, setReading] = useState<{
+    url: string;
+    title: string;
+    feedUrl?: string;
+  } | null>(null);
   const [syncCode, setSyncCode] = useState<string | null>(null);
   const [syncOpen, setSyncOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -348,13 +352,13 @@ export default function Reader() {
   }
 
   /** Fetch and store an article ahead of the click that opens it. */
-  const prefetch = useCallback((url: string) => {
+  const prefetch = useCallback((url: string, feedUrl?: string, title?: string) => {
     if (prefetched.current.has(url)) return;
     prefetched.current.add(url);
     void (async () => {
       if (await readCached(url)) return;
       try {
-        const res = await fetch(`/api/article?url=${encodeURIComponent(url)}`);
+        const res = await fetch(articleEndpoint(url, feedUrl, title));
         if (res.ok) await writeCached(await res.json());
       } catch {
         /* a warm-up failing is not worth surfacing */
@@ -385,16 +389,27 @@ export default function Reader() {
     return articles.filter((a) => ids.has(a.sourceId));
   }, [articles, feeds, selection]);
 
+  const sourceById = useMemo(
+    () => new Map(allSources.map((s) => [s.id, s])),
+    [allSources],
+  );
+
   /** Newest N per source — what gets saved for reading offline. */
-  const offlineTargets = useCallback(() => {
-    const perSource = new Map<string, string[]>();
+  const offlineTargets = useCallback((): OfflineTarget[] => {
+    const perSource = new Map<string, OfflineTarget[]>();
     for (const article of articles) {
       const list = perSource.get(article.sourceId) ?? [];
-      if (list.length < PER_SOURCE) list.push(article.link);
+      if (list.length < PER_SOURCE) {
+        list.push({
+          url: article.link,
+          feedUrl: sourceById.get(article.sourceId)?.feedUrl,
+          title: article.title,
+        });
+      }
       perSource.set(article.sourceId, list);
     }
     return [...perSource.values()].flat();
-  }, [articles]);
+  }, [articles, sourceById]);
 
   const runDownload = useCallback(async () => {
     if (downloading.current) return;
@@ -448,11 +463,6 @@ export default function Reader() {
   const shown = useMemo(
     () => (settings.hideRead ? visible.filter((a) => !read.has(a.id)) : visible),
     [visible, settings.hideRead, read],
-  );
-
-  const sourceById = useMemo(
-    () => new Map(allSources.map((s) => [s.id, s])),
-    [allSources],
   );
 
   // On a phone the drawer covers the list, so any choice should close it.
@@ -652,6 +662,7 @@ export default function Reader() {
           <ArticleReader
             url={reading.url}
             fallbackTitle={reading.title}
+            feedUrl={reading.feedUrl}
             onClose={() => setReading(null)}
           />
         ) : (
@@ -767,8 +778,12 @@ export default function Reader() {
                       className="article-title"
                       href={article.link}
                       // Warm the article before the click lands.
-                      onMouseEnter={() => prefetch(article.link)}
-                      onTouchStart={() => prefetch(article.link)}
+                      onMouseEnter={() =>
+                        prefetch(article.link, source?.feedUrl, article.title)
+                      }
+                      onTouchStart={() =>
+                        prefetch(article.link, source?.feedUrl, article.title)
+                      }
                       onClick={(event) => {
                         // Plain click reads in-app; modified clicks still open
                         // the original in a new tab.
@@ -782,7 +797,11 @@ export default function Reader() {
                         }
                         event.preventDefault();
                         markRead(article.id);
-                        setReading({ url: article.link, title: article.title });
+                        setReading({
+                          url: article.link,
+                          title: article.title,
+                          feedUrl: source?.feedUrl,
+                        });
                       }}
                     >
                       {article.title}
@@ -794,7 +813,11 @@ export default function Reader() {
                       className="read-btn"
                       onClick={() => {
                         markRead(article.id);
-                        setReading({ url: article.link, title: article.title });
+                        setReading({
+                          url: article.link,
+                          title: article.title,
+                          feedUrl: source?.feedUrl,
+                        });
                       }}
                     >
                       {Icon.book} Read here

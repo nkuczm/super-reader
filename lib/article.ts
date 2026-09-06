@@ -1,9 +1,11 @@
 import { Readability } from "@mozilla/readability";
 import { JSDOM, VirtualConsole } from "jsdom";
 import sanitizeHtml from "sanitize-html";
-import { fetchText, stripHtml, absolute, toIso } from "./feed";
+import { fetchText, stripHtml, absolute, toIso, stripChrome } from "./feed";
 
 export type ReadableArticle = {
+  /** Where the text came from: the page itself, or the feed's own copy. */
+  via?: "page" | "feed";
   url: string;
   title: string;
   byline?: string;
@@ -162,6 +164,28 @@ function hoistLazyImages(doc: Document) {
 
 const MAX_CHARS = 400_000;
 
+/**
+ * Build a readable article from HTML the publisher already syndicated,
+ * skipping Readability: feed content is the article body, with none of the
+ * page furniture Readability exists to strip.
+ */
+export function articleFromFeedContent(
+  contentHtml: string,
+  url: string,
+  fallbackTitle: string,
+): ReadableArticle {
+  const html = sanitize(stripChrome(contentHtml).slice(0, MAX_CHARS), url);
+  const text = stripHtml(html, Number.MAX_SAFE_INTEGER);
+  return {
+    via: "feed",
+    url,
+    title: fallbackTitle,
+    html,
+    wordCount: text ? text.split(/\s+/).length : 0,
+    truncated: contentHtml.length > MAX_CHARS,
+  };
+}
+
 export async function extractArticle(url: string): Promise<ReadableArticle> {
   const { body, finalUrl } = await fetchText(url, 15000);
 
@@ -193,6 +217,7 @@ export async function extractArticle(url: string): Promise<ReadableArticle> {
 
   const text = stripHtml(html, Number.MAX_SAFE_INTEGER);
   return {
+    via: "page",
     url: finalUrl,
     title: parsed.title?.trim() || stripHtml(parsed.title ?? "", 200) || url,
     byline: parsed.byline?.trim() || undefined,

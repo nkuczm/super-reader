@@ -186,6 +186,34 @@ export function startBlockedHomepageSite(port = 8787) {
   });
 }
 
+const fullTextFeed = `<?xml version="1.0"?><rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel>
+<title>Guarded Wire</title><link>http://127.0.0.1:8789</link>
+<item><title>The blocked story</title><link>http://127.0.0.1:8789/story/one</link><guid>b1</guid>
+<pubDate>Thu, 04 Sep 2025 10:00:00 GMT</pubDate>
+<content:encoded>&lt;nav&gt;&lt;a&gt;Menu&lt;/a&gt;&lt;/nav&gt;&lt;p&gt;${"The publisher syndicates the whole article in its feed, which is why this fallback is fair game: they chose to hand it over. ".repeat(12)}&lt;/p&gt;&lt;img src="/img/photo.jpg"&gt;&lt;script&gt;alert(1)&lt;/script&gt;</content:encoded>
+</item>
+<item><title>A teaser only</title><link>http://127.0.0.1:8789/story/two</link><guid>b2</guid>
+<pubDate>Wed, 03 Sep 2025 10:00:00 GMT</pubDate>
+<description>&lt;p&gt;Just a short teaser.&lt;/p&gt;</description>
+</item>
+</channel></rss>`;
+
+/** Article pages 403, but the feed carries the full text. */
+export function startGuardedSite(port = 8789) {
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      const path = new URL(req.url, "http://x").pathname;
+      if (path === "/rss.xml") {
+        res.writeHead(200, { "content-type": "application/rss+xml" });
+        return res.end(fullTextFeed);
+      }
+      res.writeHead(403);
+      res.end("Forbidden");
+    });
+    server.listen(port, () => resolve({ server, close: () => server.close() }));
+  });
+}
+
 // A site that links its feed with a plain anchor instead of declaring it.
 const anchorOnlyPage = `<html><head><title>Acme News</title></head><body>
 <main><p>Welcome.</p></main>

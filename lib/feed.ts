@@ -195,6 +195,53 @@ export function faviconFor(siteUrl: string) {
   return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
 }
 
+/**
+ * The full article text a feed carries for one of its entries, when it has
+ * one. Publishers that syndicate full text are handing it over deliberately,
+ * which makes this the right fallback when their site refuses to be read.
+ */
+export async function fetchFeedItemContent(
+  feedUrl: string,
+  articleUrl: string,
+): Promise<string | null> {
+  const { body } = await fetchText(feedUrl, 10000);
+  if (!looksLikeFeed(body)) return null;
+
+  const doc = parser.parse(body);
+  const channel = doc.rss?.channel ?? doc["rdf:RDF"]?.channel;
+  const items = channel
+    ? asArray(channel.item ?? doc["rdf:RDF"]?.item)
+    : asArray(doc.feed?.entry);
+
+  const wanted = articleUrl.replace(/\/$/, "");
+
+  for (const item of items) {
+    const links = [
+      text(item.link),
+      item.link?.["@_href"],
+      ...asArray(item.link).map((l: any) => l?.["@_href"]),
+      text(item.guid),
+      text(item.id),
+    ].filter(Boolean) as string[];
+
+    if (!links.some((l) => decodeEntities(l).replace(/\/$/, "") === wanted)) {
+      continue;
+    }
+
+    const content =
+      text(item["content:encoded"]) ||
+      text(item.content) ||
+      text(item.description) ||
+      text(item.summary);
+
+    // A one-line teaser is not the article; only full text is worth showing
+    // in place of the page itself.
+    const plain = stripHtml(stripChrome(content), Number.MAX_SAFE_INTEGER);
+    return plain.length >= 1200 ? content : null;
+  }
+  return null;
+}
+
 export function looksLikeFeed(body: string) {
   const head = body.slice(0, 1500).toLowerCase();
   return (

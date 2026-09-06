@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { extractArticle } from "@/lib/article";
+import { extractArticle, articleFromFeedContent } from "@/lib/article";
+import { fetchFeedItemContent } from "@/lib/feed";
 
 export const runtime = "nodejs";
 // Deliberately not force-dynamic: that disables CDN caching, and an
@@ -32,7 +33,11 @@ function isPrivateHost(hostname: string) {
 }
 
 export async function GET(request: Request) {
-  const url = new URL(request.url).searchParams.get("url");
+  const params = new URL(request.url).searchParams;
+  const url = params.get("url");
+  // The source feed, so a syndicated copy can stand in when the site refuses.
+  const feed = params.get("feed");
+  const title = params.get("title") ?? "";
   if (!url?.trim()) {
     return NextResponse.json({ error: "Missing ?url" }, { status: 400 });
   }
@@ -71,12 +76,29 @@ export async function GET(request: Request) {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Could not load that article";
+
+    // The site would not give us the page. Many publishers syndicate the full
+    // text in their own feed, so use the copy they chose to hand out.
+    if (feed) {
+      try {
+        const content = await fetchFeedItemContent(feed, target.toString());
+        if (content) {
+          return NextResponse.json(
+            articleFromFeedContent(content, target.toString(), title),
+            { headers: { "cache-control": "public, max-age=300" } },
+          );
+        }
+      } catch {
+        /* the feed could not help either */
+      }
+    }
+
     // Some publishers refuse anything that is not a person in a browser.
     const blocked = /\b(401|403|429|451)\b/.test(message);
     return NextResponse.json(
       {
         error: blocked
-          ? "This site doesn't allow reader view."
+          ? "This site doesn't allow reader view, and its feed doesn't carry the full text."
           : message,
       },
       { status: 502 },

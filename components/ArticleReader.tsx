@@ -6,9 +6,20 @@ import { Icon } from "./icons";
 import { readCached, writeCached } from "@/lib/offline";
 import { timeAgo, hostOf } from "./format";
 
-type Props = { url: string; fallbackTitle: string; onClose: () => void };
+type Props = {
+  url: string;
+  fallbackTitle: string;
+  /** Lets the server fall back to the feed's own copy if the site blocks us. */
+  feedUrl?: string;
+  onClose: () => void;
+};
 
-export default function ArticleReader({ url, fallbackTitle, onClose }: Props) {
+export default function ArticleReader({
+  url,
+  fallbackTitle,
+  feedUrl,
+  onClose,
+}: Props) {
   const [article, setArticle] = useState<ReadableArticle | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fromCache, setFromCache] = useState(false);
@@ -30,7 +41,11 @@ export default function ArticleReader({ url, fallbackTitle, onClose }: Props) {
       }
 
       try {
-        const res = await fetch(`/api/article?url=${encodeURIComponent(url)}`);
+        const res = await fetch(
+          `/api/article?url=${encodeURIComponent(url)}` +
+            (feedUrl ? `&feed=${encodeURIComponent(feedUrl)}` : "") +
+            `&title=${encodeURIComponent(fallbackTitle)}`,
+        );
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Could not load article");
         if (cancelled) return;
@@ -52,7 +67,7 @@ export default function ArticleReader({ url, fallbackTitle, onClose }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [url]);
+  }, [url, feedUrl, fallbackTitle]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -89,6 +104,7 @@ export default function ArticleReader({ url, fallbackTitle, onClose }: Props) {
               ? `${Math.max(1, Math.round(article.wordCount / 220))} min read`
               : null,
             fromCache ? "Saved for offline" : null,
+            article?.via === "feed" ? "From the publisher's feed" : null,
           ]
             .filter(Boolean)
             .join("  ·  ")}

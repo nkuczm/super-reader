@@ -172,16 +172,31 @@ export const PER_SOURCE = 15;
 
 export type DownloadProgress = { done: number; total: number };
 
+/** One article to save: its feed lets the server fall back to syndicated text. */
+export type OfflineTarget = { url: string; feedUrl?: string; title?: string };
+
+export function articleEndpoint(url: string, feedUrl?: string, title?: string) {
+  const params = new URLSearchParams({ url });
+  if (feedUrl) params.set("feed", feedUrl);
+  if (title) params.set("title", title);
+  return `/api/article?${params}`;
+}
+
 /**
  * Fetch and store the newest articles so they can be read with no connection.
  * Runs a few at a time: this is a background chore, not something to saturate
  * a phone's radio for.
  */
 export async function downloadForOffline(
-  links: string[],
+  targets: OfflineTarget[],
   onProgress?: (progress: DownloadProgress) => void,
 ): Promise<{ saved: number; failed: number }> {
-  const wanted = [...new Set(links)];
+  const seen = new Set<string>();
+  const wanted = targets.filter((t) => {
+    if (seen.has(t.url)) return false;
+    seen.add(t.url);
+    return true;
+  });
   let saved = 0;
   let failed = 0;
 
@@ -189,14 +204,14 @@ export async function downloadForOffline(
   for (let i = 0; i < wanted.length; i += concurrency) {
     const batch = wanted.slice(i, i + concurrency);
     await Promise.all(
-      batch.map(async (url) => {
+      batch.map(async ({ url, feedUrl, title }) => {
         try {
           // Already stored from an earlier run — no need to fetch again.
           if (await readCached(url)) {
             saved += 1;
             return;
           }
-          const res = await fetch(`/api/article?url=${encodeURIComponent(url)}`);
+          const res = await fetch(articleEndpoint(url, feedUrl, title));
           if (!res.ok) throw new Error("failed");
           await writeCached(await res.json());
           saved += 1;
@@ -208,6 +223,6 @@ export async function downloadForOffline(
     onProgress?.({ done: Math.min(i + concurrency, wanted.length), total: wanted.length });
   }
 
-  await pruneTo(new Set(wanted));
+  await pruneTo(new Set(wanted.map((t) => t.url)));
   return { saved, failed };
 }
