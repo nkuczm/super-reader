@@ -143,6 +143,19 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   stubbed** — the sandbox cannot reach these APIs, and a suite that depended on
   a dozen third parties' uptime and rate limits would fail for reasons that
   have nothing to do with this code.
+- **Comment threads are removed before Readability runs** (`stripDiscussion`,
+  `lib/article.ts`). Readability scores containers by how much text they hold,
+  so a short post with a busy comment section comes back as somebody's comment,
+  printed under the author's name and the post's title. Melanie Mitchell's "On
+  AI and Jagged Intelligence" is the case that found it: a 458-character note
+  under 1,732 characters of replies. The strip skips anything that is, or
+  contains, a known article-body container, so a post about comments survives.
+  `charThreshold` is also lowered to 250: Readability's default of 500 discards
+  a genuinely short post and falls back to scraping the whole page.
+- **Cached articles carry an `EXTRACT_VERSION`.** The download skips anything
+  already stored, so without a version a wrongly extracted article would stay
+  wrong on the device forever. Bump it whenever extraction changes what a page
+  yields; older copies are then treated as a miss and re-fetched.
 - **The reader sanitises to an allowlist.** It injects third-party HTML;
   scripts, styles, iframes, event handlers and non-http(s) URLs are stripped.
   There is a test asserting nothing executable survives — keep it.

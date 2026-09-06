@@ -12,7 +12,22 @@ const DB_VERSION = 1;
 const ARTICLES = "articles";
 const META = "meta";
 
-export type CachedArticle = ReadableArticle & { cachedAt: number };
+/**
+ * Bumped whenever extraction changes what a page yields. A stored copy from an
+ * older version is treated as a miss, so the fixed text replaces it on the next
+ * read or download.
+ *
+ * Without this, a wrongly extracted article stays wrong on the device forever:
+ * the download skips anything already cached, so it would never be re-fetched.
+ * 2: comment threads are no longer mistaken for short posts.
+ */
+export const EXTRACT_VERSION = 2;
+
+export type CachedArticle = ReadableArticle & {
+  cachedAt: number;
+  /** Which extraction produced this copy; absent on pre-versioned records. */
+  v?: number;
+};
 
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -50,7 +65,11 @@ function run<T>(
 
 export async function readCached(url: string): Promise<CachedArticle | null> {
   try {
-    return (await run<CachedArticle>(ARTICLES, "readonly", (s) => s.get(url))) ?? null;
+    const hit = await run<CachedArticle>(ARTICLES, "readonly", (s) => s.get(url));
+    if (!hit) return null;
+    // Showing the wrong article is worse than fetching it again: a copy from
+    // an older extraction is ignored rather than served.
+    return hit.v === EXTRACT_VERSION ? hit : null;
   } catch {
     return null;
   }
@@ -63,7 +82,7 @@ export async function readCached(url: string): Promise<CachedArticle | null> {
 export async function writeCached(article: ReadableArticle, requestedUrl?: string) {
   try {
     await run(ARTICLES, "readwrite", (s) =>
-      s.put({ ...article, cachedAt: Date.now() }),
+      s.put({ ...article, cachedAt: Date.now(), v: EXTRACT_VERSION }),
     );
     await rememberLink(requestedUrl ?? article.url);
   } catch {

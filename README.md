@@ -230,6 +230,15 @@ Then paste `@handle` or an `x.com/handle` URL like any other source. Without
 the key, everything else keeps working and the dialog explains what is missing.
 Replies are excluded, and posts carry their images and full text.
 
+### Comment threads
+
+A page's comment section is removed before the text is extracted. Readability
+picks whichever container holds the most text, so a short post with a busy
+thread underneath returns a reader's comment as the article — under the
+author's name and the post's title. Containers that are, or hold, the page's
+own article body are left alone, so a post about comments still reads
+correctly.
+
 ## Paywalled and blocked articles
 
 Where a publisher syndicates full text in their feed, the reader uses it (see
