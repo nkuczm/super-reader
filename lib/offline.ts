@@ -199,6 +199,8 @@ export async function downloadForOffline(
   });
   let saved = 0;
   let failed = 0;
+  let settled = 0;
+  const step = () => onProgress?.({ done: (settled += 1), total: wanted.length });
 
   const concurrency = 3;
   for (let i = 0; i < wanted.length; i += concurrency) {
@@ -211,16 +213,20 @@ export async function downloadForOffline(
             saved += 1;
             return;
           }
+
           const res = await fetch(articleEndpoint(url, feedUrl, title));
           if (!res.ok) throw new Error("failed");
           await writeCached(await res.json());
           saved += 1;
         } catch {
           failed += 1;
+        } finally {
+          // Per article rather than per batch: a bar that moves in threes on a
+          // slow connection looks stuck between jumps.
+          step();
         }
       }),
     );
-    onProgress?.({ done: Math.min(i + concurrency, wanted.length), total: wanted.length });
   }
 
   await pruneTo(new Set(wanted.map((t) => t.url)));

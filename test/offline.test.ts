@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { currentSlot } from "../lib/offline";
+import {
+  currentSlot,
+  downloadForOffline,
+  type DownloadProgress,
+} from "../lib/offline";
 
 /**
  * The download slots are 07:00 and 16:00 America/New_York, which is five or
@@ -45,4 +49,94 @@ test("a new slot means a download is due", () => {
     morning,
     "a second visit inside the same slot does not re-download",
   );
+});
+
+/**
+ * Progress drives the bar across the top of the screen, so what matters is
+ * that it moves once per article and finishes exactly at the total — a bar
+ * that stops at 38 of 40 looks like a failure even when nothing failed.
+ *
+ * IndexedDB does not exist in Node; every store call swallows that and the
+ * download still runs, which is the same path a browser in private mode takes.
+ */
+async function withStubbedFetch<T>(
+  handler: (url: string) => { ok: boolean; delay?: number },
+  work: () => Promise<T>,
+): Promise<T> {
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (input: any) => {
+    const { ok, delay = 0 } = handler(String(input));
+    if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+    return {
+      ok,
+      status: ok ? 200 : 500,
+      json: async () => ({ url: String(input), title: "T", html: "<p>x</p>" }),
+    } as any;
+  }) as typeof fetch;
+  try {
+    return await work();
+  } finally {
+    globalThis.fetch = real;
+  }
+}
+
+test("download progress moves one article at a time and ends at the total", async () => {
+  const targets = Array.from({ length: 7 }, (_, i) => ({
+    url: `https://example.com/${i}`,
+  }));
+  const seen: DownloadProgress[] = [];
+
+  const result = await withStubbedFetch(
+    () => ({ ok: true }),
+    () => downloadForOffline(targets, (progress) => seen.push(progress)),
+  );
+
+  assert.equal(result.saved, 7);
+  assert.equal(seen.length, 7, "one update per article, not per batch");
+  assert.deepEqual(
+    seen.map((p) => p.done),
+    [1, 2, 3, 4, 5, 6, 7],
+    "progress only ever moves forwards",
+  );
+  assert.ok(seen.every((p) => p.total === 7), "the total is stable throughout");
+});
+
+test("articles that fail still advance the bar", async () => {
+  const targets = [
+    { url: "https://example.com/ok" },
+    { url: "https://example.com/blocked" },
+    { url: "https://example.com/also-ok" },
+  ];
+  const seen: DownloadProgress[] = [];
+
+  const result = await withStubbedFetch(
+    (url) => ({ ok: !url.includes("blocked") }),
+    () => downloadForOffline(targets, (progress) => seen.push(progress)),
+  );
+
+  assert.equal(result.saved, 2);
+  assert.equal(result.failed, 1);
+  assert.equal(
+    seen.at(-1)?.done,
+    3,
+    "a failed article is still one fewer to wait for",
+  );
+});
+
+test("a repeated article is counted once, so the bar cannot overshoot", async () => {
+  const targets = [
+    { url: "https://example.com/a" },
+    { url: "https://example.com/a" },
+    { url: "https://example.com/b" },
+  ];
+  const seen: DownloadProgress[] = [];
+
+  await withStubbedFetch(
+    () => ({ ok: true }),
+    () => downloadForOffline(targets, (progress) => seen.push(progress)),
+  );
+
+  assert.equal(seen.at(-1)?.total, 2, "the duplicate never counted towards the total");
+  assert.equal(seen.at(-1)?.done, 2);
+  assert.ok(seen.every((p) => p.done <= p.total));
 });

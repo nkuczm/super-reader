@@ -23,6 +23,7 @@ import AddSourceDialog from "./AddSourceDialog";
 import SyncDialog from "./SyncDialog";
 import InlineName from "./InlineName";
 import SettingsDialog from "./SettingsDialog";
+import DownloadBar from "./DownloadBar";
 import {
   downloadForOffline,
   isDownloadDue,
@@ -872,6 +873,8 @@ export default function Reader() {
           </>
         )}
       </main>
+
+      <DownloadBar state={offline.state} done={offline.done} total={offline.total} />
 
       {settingsOpen && (
         <SettingsDialog

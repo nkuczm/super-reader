@@ -257,6 +257,11 @@ and can put any of them back.
 
 ## Reading offline
 
+While that download is running, a thin progress bar sits across the top of the
+screen and fills as each article lands — it holds at full for a moment when it
+finishes, so completing looks different from stopping. Settings still carries
+the exact count and the last download time.
+
 The newest 15 stories from each source are downloaded to the device — the full
 extracted text, not just headlines — so they can be read with no connection.
 The app shell is cached by a service worker, and the article list is saved too,

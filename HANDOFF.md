@@ -64,6 +64,7 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
 | `lib/sync.ts` `lib/sync-code.ts` `lib/db.ts` | Cross-device sync |
 | `lib/sort.ts` | Newest-first ordering, shared by every path |
 | `components/Reader.tsx` | The whole app shell: sidebar, list, state |
+| `components/DownloadBar.tsx` | Top-of-screen progress for the offline download |
 | `app/api/{discover,feed,article,sync,apis}` | The five endpoints |
 | `components/ApiCatalog.tsx` | The API directory tab in "Add a source" |
 | `public/sw.js` | Service worker so the app opens offline |
@@ -103,6 +104,10 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
 - **Offline slots are named (`2026-07-15-am`), not timestamps.** This avoids
   converting a wall-clock time in a DST zone back to UTC. Tested on both sides
   of daylight saving.
+- **Offline progress is reported per article, not per batch of three.** The
+  bar is the only sign the download is running; moving in threes on a slow
+  connection reads as stuck. It also holds at 100% for 900ms before fading,
+  because a bar that vanishes at 80% looks like a failure.
 - **The download schedule is "first visit after 7am/4pm ET", not a timer.**
   iOS will not wake a web app in the background; a timer would be a promise the
   platform cannot keep.
