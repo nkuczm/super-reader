@@ -111,6 +111,32 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   scripts, styles, iframes, event handlers and non-http(s) URLs are stripped.
   There is a test asserting nothing executable survives — keep it.
 
+### Which feeds actually carry full text
+
+Measured against live feeds (median prose characters per item; the fallback
+accepts a feed copy at 1200+):
+
+| Feed | Median chars | Full text |
+| --- | --- | --- |
+| astralcodexten.substack.com | 45,846 | yes |
+| whitehouse.gov/news | 6,756 | yes |
+| stratechery.com | 3,888 | yes, on free posts only |
+| simonwillison.net | 2,680 | yes (in Atom `summary`, not `content:encoded`) |
+| arstechnica.com | 1,165 | borderline — some items pass, some do not |
+| daringfireball.net | 889 | no |
+| theverge.com | 688 | no |
+| blog.google | 277 | no |
+| sec.gov | 254 | no |
+| fbi.gov | 199 | no |
+| nytimes.com | 192 | no |
+| openai.com | 0 | no — the feed carries no body at all |
+
+The pattern: independent blogs and newsletters syndicate full text;
+advertising- and subscription-funded outlets syndicate an excerpt, because the
+pageview is the product. Government and corporate PR feeds are usually short
+announcements — whitehouse.gov is the exception only because its WordPress
+ships the whole rendered page.
+
 ## Where the line is on blocked content
 
 Settled explicitly with the user, more than once:
