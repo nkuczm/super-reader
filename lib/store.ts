@@ -1,6 +1,6 @@
 "use client";
 
-import type { SourceMeta } from "./types";
+import type { Article, SourceMeta } from "./types";
 
 export type Source = SourceMeta & { id: string; kind: "feed" | "topic" | "page" | "x" | "api" };
 export type Feed = { id: string; name: string; sources: Source[] };
@@ -28,6 +28,40 @@ export function saveFeeds(feeds: Feed[]) {
     window.localStorage.setItem(KEY, JSON.stringify(feeds));
   } catch {
     /* storage may be unavailable (private mode); the session still works */
+  }
+}
+
+/**
+ * A bookmarked article. The whole record is kept, not just its id: an article
+ * drops out of its feed after a few weeks, and a saved one has to outlive
+ * that — the point of saving it is that it is still there later.
+ */
+export type SavedArticle = Article & {
+  /** Which source it came from, for the byline when the feed no longer has it. */
+  sourceId?: string;
+  sourceTitle?: string;
+  favicon?: string;
+  savedAt: number;
+};
+
+const SAVED_KEY = "super-reader:saved:v1";
+
+export function loadSaved(): SavedArticle[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(SAVED_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? (parsed as SavedArticle[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveSaved(articles: SavedArticle[]) {
+  try {
+    window.localStorage.setItem(SAVED_KEY, JSON.stringify(articles));
+  } catch {
+    /* storage unavailable; the list just won't persist */
   }
 }
 

@@ -63,6 +63,7 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
 | `lib/offline.ts` | IndexedDB store, download schedule, list snapshot |
 | `lib/sync.ts` `lib/sync-code.ts` `lib/db.ts` | Cross-device sync |
 | `lib/sort.ts` | Newest-first ordering, shared by every path |
+| `lib/store.ts` | Feeds, settings, read state and the Saved list (localStorage) |
 | `components/Reader.tsx` | The whole app shell: sidebar, list, state |
 | `components/DownloadBar.tsx` | Top-of-screen progress for the offline download |
 | `app/api/{discover,feed,article,sync,apis}` | The five endpoints |
@@ -122,6 +123,15 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
 - **The download schedule is "first visit after 7am/4pm ET", not a timer.**
   iOS will not wake a web app in the background; a timer would be a promise the
   platform cannot keep.
+- **Saved articles are stored whole, not as ids.** An article leaves its feed
+  after a few weeks; a bookmark has to outlive that, so the record travels with
+  the bookmark and the list renders from it. They are also prepended to the
+  offline download targets, which keeps them from being pruned.
+- **Settings shows how many articles are on the device, and the last run's
+  saved/unavailable counts.** Before this, a download where every article
+  failed looked identical to one where every article succeeded — both just
+  said "Saved <time>". If offline reading is ever reported broken, that number
+  is the first thing to ask for.
 - **View mode and collapsed feeds are per-device, not synced.** A phone and a
   desktop want different densities; the feeds are what must match.
 - **Sync codes are stored as SHA-256 hashes**, never the code itself.

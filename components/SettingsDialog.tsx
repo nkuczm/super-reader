@@ -62,16 +62,20 @@ export default function SettingsDialog({
   onChange,
   onClose,
   offline,
+  storedCount,
   onDownload,
 }: {
   settings: Settings;
   onChange: (next: Settings) => void;
   onClose: () => void;
+  /** How many articles are on this device right now. */
+  storedCount: number;
   offline: {
     state: "idle" | "working" | "done" | "error";
     done?: number;
     total?: number;
     at?: number | null;
+    result?: { saved: number; failed: number };
   };
   onDownload: () => void;
 }) {
@@ -179,9 +183,28 @@ export default function SettingsDialog({
                       : "Nothing downloaded yet"}
               </strong>
               <span>
-                The newest 15 stories from each source are saved to this device
-                so you can read them without a connection. This happens on your
-                first visit after 7am and after 4pm ET.
+                {/* The count is the answer to "is this actually working?" —
+                    a run that saved nothing used to look the same as one that
+                    saved everything. */}
+                <strong className="offline-count">
+                  {storedCount} article{storedCount === 1 ? "" : "s"} on this
+                  device
+                </strong>
+                {offline.result && (
+                  <>
+                    {" · "}
+                    {offline.result.saved} saved
+                    {offline.result.failed > 0 &&
+                      `, ${offline.result.failed} unavailable`}{" "}
+                    last run
+                  </>
+                )}
+                <br />
+                The newest 15 stories from each source, plus everything in
+                Saved, are kept on this device so you can read them without a
+                connection. This happens on your first visit after 7am and
+                after 4pm ET. Downloaded articles carry a blue check in the
+                list.
               </span>
             </div>
             <button
@@ -195,6 +218,10 @@ export default function SettingsDialog({
           </div>
 
         <div className="dialog-foot">
+          {/* Which build this is, so "has it updated?" is answerable. */}
+          <span className="build-stamp">
+            {(process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? "local").slice(0, 7)}
+          </span>
           <button className="btn ghost small" onClick={onClose}>
             Done
           </button>

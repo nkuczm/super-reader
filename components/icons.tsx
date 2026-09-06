@@ -57,6 +57,16 @@ export const Icon = {
       <path d="M3 20v-5h5M21 4v5h-5" />
     </svg>
   ),
+  bookmark: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 4h12v16l-6-4.5L6 20z" />
+    </svg>
+  ),
+  bookmarkOn: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 4h12v16l-6-4.5L6 20z" />
+    </svg>
+  ),
   check: (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
       <path d="M4 12.5l5.5 5.5L20 6.5" />

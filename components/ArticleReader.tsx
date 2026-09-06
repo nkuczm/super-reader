@@ -13,6 +13,9 @@ type Props = {
   feedUrl?: string;
   /** Stop trying to read this host in-app and go to the site from now on. */
   onAlwaysOpenOnSite?: (link: string) => void;
+  /** Whether this article is bookmarked, and how to change that. */
+  saved?: boolean;
+  onToggleSave?: () => void;
   onClose: () => void;
 };
 
@@ -21,6 +24,8 @@ export default function ArticleReader({
   fallbackTitle,
   feedUrl,
   onAlwaysOpenOnSite,
+  saved,
+  onToggleSave,
   onClose,
 }: Props) {
   const [article, setArticle] = useState<ReadableArticle | null>(null);
@@ -86,6 +91,16 @@ export default function ArticleReader({
         <button className="btn ghost small" onClick={onClose}>
           {Icon.back} Back
         </button>
+        {onToggleSave && (
+          <button
+            className={`btn ghost small${saved ? " on" : ""}`}
+            aria-pressed={saved}
+            onClick={onToggleSave}
+          >
+            {saved ? Icon.bookmarkOn : Icon.bookmark}
+            {saved ? "Saved" : "Save"}
+          </button>
+        )}
         <a
           className="btn ghost small"
           href={url}

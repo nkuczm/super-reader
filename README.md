@@ -255,6 +255,15 @@ articles from that host go straight to the browser — where a subscription
 applies — instead of failing in the reader first. Settings lists those hosts
 and can put any of them back.
 
+## Saving articles
+
+**Save** on any article puts it in the **Saved** list in the sidebar, and the
+reader has the same button. Saved articles are kept whole rather than by
+reference, so one stays readable long after it has scrolled out of its feed,
+and they are always included in the offline download — a bookmark is the
+article most worth having on the device. The list is per-device, like read
+state and view mode.
+
 ## Reading offline
 
 Articles already on the device carry a small sky-blue check in their byline

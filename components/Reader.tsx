@@ -16,6 +16,9 @@ import {
   DEFAULT_SETTINGS,
   type Settings,
   newId,
+  loadSaved,
+  saveSaved,
+  type SavedArticle,
   type Feed,
   type Source,
 } from "@/lib/store";
@@ -48,7 +51,10 @@ import { sortNewestFirst } from "@/lib/sort";
 import "./reader.css";
 
 type Loaded = Article & { sourceId: string };
-type Selection = { type: "all" } | { type: "feed" | "source"; id: string };
+type Selection =
+  | { type: "all" }
+  | { type: "saved" }
+  | { type: "feed" | "source"; id: string };
 
 export default function Reader() {
   const [feeds, setFeeds] = useState<Feed[]>([]);
@@ -74,11 +80,14 @@ export default function Reader() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [saved, setSaved] = useState<SavedArticle[]>([]);
   const [offline, setOffline] = useState<{
     state: "idle" | "working" | "done" | "error";
     done?: number;
     total?: number;
     at?: number | null;
+    /** How the last run ended, so Settings can say more than "it ran". */
+    result?: { saved: number; failed: number };
   }>({ state: "idle" });
   /**
    * Which articles are on the device already. Kept as a set of links so the
@@ -100,6 +109,7 @@ export default function Reader() {
     setSyncCode(loadSyncCode());
     setSettings(loadSettings());
     setCollapsed(loadCollapsed());
+    setSaved(loadSaved());
     setReady(true);
   }, []);
 
@@ -368,6 +378,42 @@ export default function Reader() {
     );
   }, []);
 
+  const savedMeta = useCallback(
+    (link: string) => saved.find((a) => a.link === link),
+    [saved],
+  );
+
+  const isSaved = useCallback(
+    (link: string) => saved.some((a) => a.link === link),
+    [saved],
+  );
+
+  /**
+   * Bookmark an article, or take it off the list. The whole record is kept:
+   * an article falls out of its feed after a few weeks, and a saved one has
+   * to still be there afterwards.
+   */
+  const toggleSaved = useCallback(
+    (article: Loaded, source?: Source) => {
+      setSaved((current) => {
+        const next = current.some((a) => a.link === article.link)
+          ? current.filter((a) => a.link !== article.link)
+          : [
+              {
+                ...article,
+                sourceTitle: source?.title,
+                favicon: source?.favicon,
+                savedAt: Date.now(),
+              },
+              ...current,
+            ];
+        saveSaved(next);
+        return next;
+      });
+    },
+    [],
+  );
+
   const markSaved = useCallback((url: string) => {
     setSavedOffline((current) =>
       current.has(url) ? current : new Set(current).add(url),
@@ -444,15 +490,29 @@ export default function Reader() {
     });
   }
 
+  /**
+   * Saved articles are kept whole rather than looked up in the feed, so the
+   * list still shows them long after they scrolled out of their source.
+   */
+  const savedAsArticles = useMemo<Loaded[]>(
+    () =>
+      saved.map((article) => ({
+        ...article,
+        sourceId: article.sourceId ?? "",
+      })),
+    [saved],
+  );
+
   const visible = useMemo(() => {
     if (selection.type === "all") return articles;
+    if (selection.type === "saved") return savedAsArticles;
     if (selection.type === "source") {
       return articles.filter((a) => a.sourceId === selection.id);
     }
     const feed = feeds.find((f) => f.id === selection.id);
     const ids = new Set(feed?.sources.map((s) => s.id));
     return articles.filter((a) => ids.has(a.sourceId));
-  }, [articles, feeds, selection]);
+  }, [articles, feeds, selection, savedAsArticles]);
 
   const sourceById = useMemo(
     () => new Map(allSources.map((s) => [s.id, s])),
@@ -473,8 +533,18 @@ export default function Reader() {
       }
       perSource.set(article.sourceId, list);
     }
-    return [...perSource.values()].flat();
-  }, [articles, sourceById]);
+    // A bookmarked article is the one most worth having on the device, and it
+    // must not be pruned just because it aged out of its feed.
+    const bookmarks: OfflineTarget[] = saved.map((article) => ({
+      url: article.link,
+      feedUrl: article.sourceId
+        ? sourceById.get(article.sourceId)?.feedUrl
+        : undefined,
+      title: article.title,
+    }));
+
+    return [...bookmarks, ...[...perSource.values()].flat()];
+  }, [articles, sourceById, saved]);
 
   const runDownload = useCallback(async () => {
     if (downloading.current) return;
@@ -484,7 +554,7 @@ export default function Reader() {
     downloading.current = true;
     setOffline({ state: "working", done: 0, total: links.length });
     try {
-      await downloadForOffline(links, ({ saved, ...progress }) => {
+      const result = await downloadForOffline(links, ({ saved, ...progress }) => {
         setOffline({ state: "working", ...progress });
         // Tick each article's mark on as it lands, rather than all at the end.
         if (saved) markSaved(saved);
@@ -494,7 +564,7 @@ export default function Reader() {
       // marks are re-read rather than only added to.
       const [saved, keys] = await Promise.all([savedLinks(), cachedUrls()]);
       setSavedOffline(new Set([...saved, ...keys]));
-      setOffline({ state: "done", at: await lastDownloadedAt() });
+      setOffline({ state: "done", at: await lastDownloadedAt(), result });
     } catch {
       setOffline({ state: "error" });
     } finally {
@@ -515,6 +585,13 @@ export default function Reader() {
       setOffline((o) =>
         o.state === "idle" ? { ...o, at: null } : o,
       );
+      // Re-read what is stored, not only at mount: on iOS a web app resumed
+      // from the background can answer an IndexedDB read made too early with
+      // nothing, which would leave downloaded articles unmarked.
+      const [links, keys] = await Promise.all([savedLinks(), cachedUrls()]);
+      if (links.length + keys.length > 0) {
+        setSavedOffline(new Set([...links, ...keys]));
+      }
       if (!navigator.onLine) return;
       if (await isDownloadDue()) {
         if (!cancelled) void runDownload();
@@ -546,16 +623,20 @@ export default function Reader() {
   const selectedSourceCount =
     selection.type === "all"
       ? allSources.length
-      : selection.type === "source"
-        ? 1
-        : (feeds.find((f) => f.id === selection.id)?.sources.length ?? 0);
+      : selection.type === "saved"
+        ? 0
+        : selection.type === "source"
+          ? 1
+          : (feeds.find((f) => f.id === selection.id)?.sources.length ?? 0);
 
   const heading =
     selection.type === "all"
       ? "All articles"
-      : selection.type === "feed"
-        ? (feeds.find((f) => f.id === selection.id)?.name ?? "Feed")
-        : (sourceById.get(selection.id)?.title ?? "Source");
+      : selection.type === "saved"
+        ? "Saved"
+        : selection.type === "feed"
+          ? (feeds.find((f) => f.id === selection.id)?.name ?? "Feed")
+          : (sourceById.get(selection.id)?.title ?? "Source");
 
   const unread = (items: Loaded[]) =>
     items.filter((a) => !read.has(a.id)).length;
@@ -575,6 +656,15 @@ export default function Reader() {
             {Icon.inbox}
             <span className="feed-name">All articles</span>
             <span className="count">{unread(articles) || ""}</span>
+          </button>
+
+          <button
+            className={`nav-item ${selection.type === "saved" ? "active" : ""}`}
+            onClick={() => choose({ type: "saved" })}
+          >
+            {Icon.bookmark}
+            <span className="feed-name">Saved</span>
+            <span className="count">{saved.length || ""}</span>
           </button>
 
           {feeds.map((feed) => {
@@ -735,6 +825,13 @@ export default function Reader() {
             fallbackTitle={reading.title}
             feedUrl={reading.feedUrl}
             onAlwaysOpenOnSite={alwaysOpenOnSite}
+            saved={isSaved(reading.url)}
+            onToggleSave={() => {
+              const article =
+                articles.find((a) => a.link === reading.url) ??
+                savedAsArticles.find((a) => a.link === reading.url);
+              if (article) toggleSaved(article, sourceById.get(article.sourceId));
+            }}
             onClose={() => setReading(null)}
           />
         ) : (
@@ -784,7 +881,16 @@ export default function Reader() {
         ) : shown.length === 0 ? (
           <div className="state">
             <h2>{refreshing ? "Loading articles…" : "Nothing here yet."}</h2>
-            {!refreshing && <p>This selection has no articles right now.</p>}
+            {!refreshing &&
+              (selection.type === "saved" ? (
+                <p>
+                  Nothing saved yet. Use <strong>Save</strong> on any article
+                  and it will wait here — kept on this device, and downloaded
+                  for reading offline, even after it leaves its feed.
+                </p>
+              ) : (
+                <p>This selection has no articles right now.</p>
+              ))}
           </div>
         ) : (
           <div className={`articles view-${settings.view}`}>
@@ -825,14 +931,22 @@ export default function Reader() {
                     ))}
                   <div className="article-body">
                     <div className="article-meta">
-                      {source && (
+                      {(source || savedMeta(article.link)) && (
                         <SourceIcon
-                          src={source.favicon}
-                          title={source.title}
+                          src={source?.favicon ?? savedMeta(article.link)?.favicon ?? ""}
+                          title={
+                            source?.title ??
+                            savedMeta(article.link)?.sourceTitle ??
+                            hostOf(article.link)
+                          }
                           size={15}
                         />
                       )}
-                      <span>{source?.title ?? hostOf(article.link)}</span>
+                      <span>
+                        {source?.title ??
+                          savedMeta(article.link)?.sourceTitle ??
+                          hostOf(article.link)}
+                      </span>
                       {article.author && (
                         <>
                           <span className="dot">·</span>
@@ -888,12 +1002,29 @@ export default function Reader() {
                     {article.summary && settings.view !== "list" && (
                       <p className="article-summary">{article.summary}</p>
                     )}
-                    <button
-                      className="read-btn"
-                      onClick={() => openArticle(article, source?.feedUrl)}
-                    >
-                      {Icon.book} Read here
-                    </button>
+                    <div className="article-actions">
+                      <button
+                        className="read-btn"
+                        onClick={() => openArticle(article, source?.feedUrl)}
+                      >
+                        {Icon.book} Read here
+                      </button>
+                      <button
+                        className={`read-btn save-btn${
+                          isSaved(article.link) ? " on" : ""
+                        }`}
+                        aria-pressed={isSaved(article.link)}
+                        title={
+                          isSaved(article.link)
+                            ? "Remove from Saved"
+                            : "Save for later"
+                        }
+                        onClick={() => toggleSaved(article, source)}
+                      >
+                        {isSaved(article.link) ? Icon.bookmarkOn : Icon.bookmark}
+                        {isSaved(article.link) ? "Saved" : "Save"}
+                      </button>
+                    </div>
                   </div>
                   {article.image && settings.view === "cards" && (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -926,6 +1057,7 @@ export default function Reader() {
           onChange={updateSettings}
           onClose={() => setSettingsOpen(false)}
           offline={offline}
+          storedCount={savedOffline.size}
           onDownload={runDownload}
         />
       )}

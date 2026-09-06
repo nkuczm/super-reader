@@ -255,6 +255,7 @@
   border-bottom: 1px solid var(--border); margin-bottom: 26px;
 }
 .reader-bar .btn { width: auto; text-decoration: none; }
+.reader-bar .btn.on { color: var(--accent); border-color: var(--accent); }
 .reader-bar a.btn { margin-left: auto; }
 
 .reader-body h1 {
@@ -570,3 +571,13 @@
   margin-left: 1px;
 }
 .article.read .saved-check { opacity: 0.7; }
+
+.article-actions { display: flex; align-items: center; gap: 8px; }
+.save-btn.on { color: var(--accent); border-color: var(--accent); }
+.view-list .article-actions { display: none; }
+
+.offline-count { color: var(--text); }
+.build-stamp {
+  margin-right: auto; color: var(--text-dim); font-size: 11.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
