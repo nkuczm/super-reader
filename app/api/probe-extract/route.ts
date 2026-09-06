@@ -25,8 +25,21 @@ export async function GET(request: Request) {
   const parsed = new Readability(doc.cloneNode(true) as Document).parse();
   const text = stripHtml(parsed?.content ?? "", Number.MAX_SAFE_INTEGER);
 
+  const textOf = (selector: string) => {
+    const el = doc.querySelector(selector);
+    if (!el) return null;
+    const t = (el.textContent ?? "").replace(/\s+/g, " ").trim();
+    return { chars: t.length, head: t.slice(0, 200) };
+  };
+
   return NextResponse.json({
     finalUrl,
+    bodyCandidates: {
+      available: textOf("div.available-content"),
+      markup: textOf("div.body.markup"),
+      article: textOf("article"),
+    },
+    paywall: /paywall|subscribe to read|for paid subscribers/i.test(body),
     htmlLength: body.length,
     title: parsed?.title,
     byline: parsed?.byline,
