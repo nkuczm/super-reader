@@ -32,6 +32,8 @@ import {
   lastDownloadedAt,
   readCached,
   writeCached,
+  cachedUrls,
+  savedLinks,
   saveListSnapshot,
   loadListSnapshot,
   articleEndpoint,
@@ -78,6 +80,11 @@ export default function Reader() {
     total?: number;
     at?: number | null;
   }>({ state: "idle" });
+  /**
+   * Which articles are on the device already. Kept as a set of links so the
+   * list can mark them without asking IndexedDB per row on every render.
+   */
+  const [savedOffline, setSavedOffline] = useState<Set<string>>(new Set());
   const downloading = useRef(false);
   const prefetched = useRef<Set<string>>(new Set());
   const [syncState, setSyncState] = useState<
@@ -352,6 +359,21 @@ export default function Reader() {
     });
   }
 
+  // What was already on the device from an earlier visit. Both lists matter:
+  // the links the app asked for, and the URLs the articles were filed under —
+  // for most sources they are the same string.
+  useEffect(() => {
+    void Promise.all([savedLinks(), cachedUrls()]).then(([links, urls]) =>
+      setSavedOffline(new Set([...links, ...urls])),
+    );
+  }, []);
+
+  const markSaved = useCallback((url: string) => {
+    setSavedOffline((current) =>
+      current.has(url) ? current : new Set(current).add(url),
+    );
+  }, []);
+
   /**
    * Subscription sites only serve their text to a logged-in browser, so for
    * those the app hands off to the site instead of failing in the reader.
@@ -393,15 +415,21 @@ export default function Reader() {
     if (prefetched.current.has(url)) return;
     prefetched.current.add(url);
     void (async () => {
-      if (await readCached(url)) return;
+      if (await readCached(url)) {
+        markSaved(url);
+        return;
+      }
       try {
         const res = await fetch(articleEndpoint(url, feedUrl, title));
-        if (res.ok) await writeCached(await res.json());
+        if (res.ok) {
+          await writeCached(await res.json());
+          markSaved(url);
+        }
       } catch {
         /* a warm-up failing is not worth surfacing */
       }
     })();
-  }, []);
+  }, [markSaved]);
 
   function updateSettings(next: Settings) {
     setSettings(next);
@@ -456,17 +484,23 @@ export default function Reader() {
     downloading.current = true;
     setOffline({ state: "working", done: 0, total: links.length });
     try {
-      await downloadForOffline(links, (progress) =>
-        setOffline({ state: "working", ...progress }),
-      );
+      await downloadForOffline(links, ({ saved, ...progress }) => {
+        setOffline({ state: "working", ...progress });
+        // Tick each article's mark on as it lands, rather than all at the end.
+        if (saved) markSaved(saved);
+      });
       await markSlotDownloaded(currentSlot());
+      // The download prunes anything that fell out of the newest set, so the
+      // marks are re-read rather than only added to.
+      const [saved, keys] = await Promise.all([savedLinks(), cachedUrls()]);
+      setSavedOffline(new Set([...saved, ...keys]));
       setOffline({ state: "done", at: await lastDownloadedAt() });
     } catch {
       setOffline({ state: "error" });
     } finally {
       downloading.current = false;
     }
-  }, [offlineTargets]);
+  }, [offlineTargets, markSaved]);
 
   /**
    * A web app cannot wake itself at a fixed time on every platform, so the
@@ -810,6 +844,16 @@ export default function Reader() {
                           <span className="dot">·</span>
                           <span>{timeAgo(article.publishedAt)}</span>
                         </>
+                      )}
+                      {savedOffline.has(article.link) && (
+                        <span
+                          className="saved-check"
+                          title="Saved for reading offline"
+                          aria-label="Saved for reading offline"
+                          role="img"
+                        >
+                          {Icon.check}
+                        </span>
                       )}
                     </div>
                     <a

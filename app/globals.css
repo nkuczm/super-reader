@@ -8,6 +8,9 @@
   --accent: #2563eb;
   --accent-soft: #eff4ff;
   --danger: #dc2626;
+  /* Sky, for the "already downloaded" mark: distinct from the blue accent,
+     which everywhere else means something you can act on. */
+  --saved: #0ea5e9;
   --radius: 10px;
   color-scheme: light;
 }
@@ -23,6 +26,7 @@
     --accent: #6b9bff;
     --accent-soft: #172030;
     --danger: #f87171;
+    --saved: #38bdf8;
     color-scheme: dark;
   }
 }

@@ -562,3 +562,11 @@
   .download-bar > span { transition: none; }
   .download-bar.finishing { animation: none; opacity: 0; }
 }
+
+/* A story already on the device. Sky blue rather than the accent, so it reads
+   as a state of the article and not as something to click. */
+.saved-check {
+  display: inline-flex; align-items: center; color: var(--saved);
+  margin-left: 1px;
+}
+.article.read .saved-check { opacity: 0.7; }

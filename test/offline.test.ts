@@ -140,3 +140,24 @@ test("a repeated article is counted once, so the bar cannot overshoot", async ()
   assert.equal(seen.at(-1)?.done, 2);
   assert.ok(seen.every((p) => p.done <= p.total));
 });
+
+test("progress names the article that landed, so its mark can appear live", async () => {
+  const targets = [
+    { url: "https://example.com/saved" },
+    { url: "https://example.com/blocked" },
+  ];
+  const seen: DownloadProgress[] = [];
+
+  await withStubbedFetch(
+    (url) => ({ ok: !url.includes("blocked") }),
+    () => downloadForOffline(targets, (progress) => seen.push(progress)),
+  );
+
+  const marked = seen.map((p) => p.saved).filter(Boolean);
+  assert.deepEqual(marked, ["https://example.com/saved"]);
+  assert.equal(
+    seen.length,
+    2,
+    "the one that failed still advanced the bar, it just is not marked",
+  );
+});

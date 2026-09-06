@@ -57,6 +57,11 @@ export const Icon = {
       <path d="M3 20v-5h5M21 4v5h-5" />
     </svg>
   ),
+  check: (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 12.5l5.5 5.5L20 6.5" />
+    </svg>
+  ),
   inbox: (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 12h5l2 3h4l2-3h5" /><path d="M4 5h16l1 7v7H3v-7z" />

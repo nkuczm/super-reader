@@ -56,11 +56,16 @@ export async function readCached(url: string): Promise<CachedArticle | null> {
   }
 }
 
-export async function writeCached(article: ReadableArticle) {
+/**
+ * `requestedUrl` is the link the app asked for, which is not always the URL
+ * the article came back under — see the note on LINKS below.
+ */
+export async function writeCached(article: ReadableArticle, requestedUrl?: string) {
   try {
     await run(ARTICLES, "readwrite", (s) =>
       s.put({ ...article, cachedAt: Date.now() }),
     );
+    await rememberLink(requestedUrl ?? article.url);
   } catch {
     /* storage full or unavailable — reading online still works */
   }
@@ -78,16 +83,52 @@ export async function cachedUrls(): Promise<string[]> {
 }
 
 /** Drop anything no longer in the newest set, so the store cannot grow forever. */
-export async function pruneTo(keep: Set<string>) {
+export async function pruneTo(keep: Set<string>, keepLinks?: Set<string>) {
   try {
     for (const url of await cachedUrls()) {
       if (!keep.has(url)) {
         await run(ARTICLES, "readwrite", (s) => s.delete(url));
       }
     }
+    const links = keepLinks ?? keep;
+    await setMeta(
+      LINKS,
+      (await savedLinks()).filter((url) => links.has(url)),
+    );
   } catch {
     /* ignore */
   }
+}
+
+/**
+ * The links whose articles are on the device.
+ *
+ * Not the same thing as the keys in the article store: a topic source's links
+ * point at Bing's redirector, and the server resolves those to the publisher
+ * before extracting, so an article is filed under a URL the list has never
+ * seen. This records the link that was actually asked for, which is what the
+ * list can match against.
+ */
+const LINKS = "links";
+
+export async function savedLinks(): Promise<string[]> {
+  return (await meta<string[]>(LINKS)) ?? [];
+}
+
+/**
+ * Serialised, because the download saves three articles at once: two
+ * concurrent read-modify-writes of this list would each start from the same
+ * array and the last one to finish would drop the other's link.
+ */
+let linkWrites: Promise<void> = Promise.resolve();
+
+async function rememberLink(url: string) {
+  linkWrites = linkWrites.then(async () => {
+    const current = await savedLinks();
+    if (current.includes(url)) return;
+    await setMeta(LINKS, [...current, url]);
+  });
+  await linkWrites;
 }
 
 async function meta<T>(key: string): Promise<T | null> {
@@ -170,7 +211,12 @@ export async function isDownloadDue(now = new Date()) {
 /** How many of each source's newest stories are kept for offline reading. */
 export const PER_SOURCE = 15;
 
-export type DownloadProgress = { done: number; total: number };
+export type DownloadProgress = {
+  done: number;
+  total: number;
+  /** The article that just landed, when it was saved rather than missed. */
+  saved?: string;
+};
 
 /** One article to save: its feed lets the server fall back to syndicated text. */
 export type OfflineTarget = { url: string; feedUrl?: string; title?: string };
@@ -200,35 +246,47 @@ export async function downloadForOffline(
   let saved = 0;
   let failed = 0;
   let settled = 0;
-  const step = () => onProgress?.({ done: (settled += 1), total: wanted.length });
+  // What each article was actually filed under, which is not always the link
+  // it was asked for. Pruning has to compare against these, or a topic
+  // source's articles would be deleted the moment after they were saved.
+  const storedKeys = new Set<string>();
+  const step = (savedUrl?: string) =>
+    onProgress?.({ done: (settled += 1), total: wanted.length, saved: savedUrl });
 
   const concurrency = 3;
   for (let i = 0; i < wanted.length; i += concurrency) {
     const batch = wanted.slice(i, i + concurrency);
     await Promise.all(
       batch.map(async ({ url, feedUrl, title }) => {
+        let stored = false;
         try {
           // Already stored from an earlier run — no need to fetch again.
-          if (await readCached(url)) {
+          const already = await readCached(url);
+          if (already) {
+            storedKeys.add(already.url);
             saved += 1;
+            stored = true;
             return;
           }
 
           const res = await fetch(articleEndpoint(url, feedUrl, title));
           if (!res.ok) throw new Error("failed");
-          await writeCached(await res.json());
+          const article = await res.json();
+          await writeCached(article, url);
+          storedKeys.add(article.url ?? url);
           saved += 1;
+          stored = true;
         } catch {
           failed += 1;
         } finally {
           // Per article rather than per batch: a bar that moves in threes on a
           // slow connection looks stuck between jumps.
-          step();
+          step(stored ? url : undefined);
         }
       }),
     );
   }
 
-  await pruneTo(new Set(wanted.map((t) => t.url)));
+  await pruneTo(storedKeys, new Set(wanted.map((t) => t.url)));
   return { saved, failed };
 }

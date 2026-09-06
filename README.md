@@ -257,6 +257,11 @@ and can put any of them back.
 
 ## Reading offline
 
+Articles already on the device carry a small sky-blue check in their byline
+line — the mark appears as each one lands, and is still there on the next
+visit. Hovering an article warms it too, so a story you were about to open
+picks up the check on its own.
+
 While that download is running, a thin progress bar sits across the top of the
 screen and fills as each article lands — it holds at full for a moment when it
 finishes, so completing looks different from stopping. Settings still carries

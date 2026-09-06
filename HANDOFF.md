@@ -104,6 +104,17 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
 - **Offline slots are named (`2026-07-15-am`), not timestamps.** This avoids
   converting a wall-clock time in a DST zone back to UTC. Tested on both sides
   of daylight saving.
+- **Cached articles are filed under the URL they resolved to, which is not
+  always the link the list shows.** A topic source's links point at Bing's
+  redirector and the server unwraps them before extracting, so the store keys
+  and the list's links disagree for exactly those sources. `lib/offline.ts`
+  therefore also keeps the *requested* links in the meta store, and the check
+  marks match against both. Two consequences worth knowing: `pruneTo` compares
+  against the keys articles were actually stored under (before this it deleted
+  a topic source's articles immediately after saving them), and the link list
+  is written through a promise chain, because three concurrent
+  read-modify-writes drop each other's entries — measured: 3 of 5 links
+  survived without it.
 - **Offline progress is reported per article, not per batch of three.** The
   bar is the only sign the download is running; moving in threes on a slow
   connection reads as stuck. It also holds at 100% for 900ms before fading,
