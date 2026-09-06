@@ -112,9 +112,20 @@ function normalizeUrl(input: string) {
   return /^https?:\/\//i.test(value) ? value : `https://${value}`;
 }
 
+/**
+ * Bing rather than Google News: Google wraps every result in a link that only
+ * resolves in a browser, via JavaScript, so articles could not be read in the
+ * app at all. Bing's wrapper carries the publisher's URL in a query parameter,
+ * which unwrapRedirect turns back into a direct link.
+ */
 function topicFeedUrl(topic: string) {
   const query = encodeURIComponent(topic.trim());
-  return `https://news.google.com/rss/search?q=${query}&hl=en-US&gl=US&ceid=US:en`;
+  return `https://www.bing.com/news/search?q=${query}&format=RSS`;
+}
+
+/** Google News links can only be resolved by a browser running its JavaScript. */
+export function isUnresolvableAggregatorLink(url: string) {
+  return /^https?:\/\/news\.google\.com\/(rss\/)?articles\//i.test(url);
 }
 
 /** Pull <link rel="alternate" type="application/rss+xml"> targets out of a page. */

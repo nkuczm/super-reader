@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { extractArticle, articleFromFeedContent } from "@/lib/article";
-import { fetchFeedItemContent } from "@/lib/feed";
+import { fetchFeedItemContent, unwrapRedirect } from "@/lib/feed";
+import { isUnresolvableAggregatorLink } from "@/lib/discover";
 
 export const runtime = "nodejs";
 // Deliberately not force-dynamic: that disables CDN caching, and an
@@ -44,7 +45,8 @@ export async function GET(request: Request) {
 
   let target: URL;
   try {
-    target = new URL(url);
+    // A wrapped link resolves to the publisher before anything else happens.
+    target = new URL(unwrapRedirect(url));
   } catch {
     return NextResponse.json({ error: "That is not a valid URL" }, { status: 400 });
   }
@@ -56,6 +58,16 @@ export async function GET(request: Request) {
   // it is never set in the deployed app.
   if (process.env.ALLOW_PRIVATE_HOSTS !== "1" && isPrivateHost(target.hostname)) {
     return NextResponse.json({ error: "That host is not reachable" }, { status: 400 });
+  }
+
+  if (isUnresolvableAggregatorLink(target.toString())) {
+    return NextResponse.json(
+      {
+        error:
+          "Google News hides the publisher behind a link only a browser can follow. Open the original to read it.",
+      },
+      { status: 502 },
+    );
   }
 
   try {

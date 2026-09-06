@@ -185,6 +185,38 @@ export function toIso(value: string | undefined) {
   return Number.isNaN(time) ? undefined : new Date(time).toISOString();
 }
 
+/**
+ * News aggregators wrap article links in their own redirector. Most carry the
+ * real destination in a query parameter, so the reader can go straight to the
+ * publisher instead of bouncing through a middleman.
+ */
+export function unwrapRedirect(url: string): string {
+  let current = url;
+
+  for (let depth = 0; depth < 3; depth += 1) {
+    let parsed: URL;
+    try {
+      parsed = new URL(current);
+    } catch {
+      return current;
+    }
+
+    const host = parsed.hostname.replace(/^www\./, "");
+    const isRedirector =
+      /^(bing\.com|google\.com|news\.google\.com|duckduckgo\.com|l\.facebook\.com|out\.reddit\.com)$/.test(host) ||
+      /\/(apiclick\.aspx|url|redirect|r\.php)$/i.test(parsed.pathname);
+    if (!isRedirector) return current;
+
+    const target = ["url", "u", "q", "target", "redirect"]
+      .map((key) => parsed.searchParams.get(key))
+      .find((value) => value && /^https?:\/\//i.test(value));
+
+    if (!target) return current;
+    current = target;
+  }
+  return current;
+}
+
 export function faviconFor(siteUrl: string) {
   let domain = siteUrl;
   try {
@@ -337,7 +369,7 @@ function rssItem(item: any, site: string): Article {
   return {
     id: text(item.guid) || link || text(item.title),
     title: stripHtml(text(item.title), 200) || "(untitled)",
-    link: absolute(link, site),
+    link: unwrapRedirect(absolute(link, site)),
     author:
       text(item["dc:creator"]) || stripHtml(text(item.author), 80) || undefined,
     publishedAt: toIso(text(item.pubDate) || text(item["dc:date"])),
@@ -366,7 +398,7 @@ function atomEntry(entry: any, site: string): Article {
   return {
     id: text(entry.id) || link,
     title: stripHtml(text(entry.title), 200) || "(untitled)",
-    link: absolute(link, site),
+    link: unwrapRedirect(absolute(link, site)),
     author: text(first(asArray(entry.author))?.name) || undefined,
     publishedAt: toIso(text(entry.published) || text(entry.updated)),
     summary: summarize(content) || undefined,

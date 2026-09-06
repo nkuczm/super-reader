@@ -24,7 +24,11 @@ npm test                     # parser + discovery tests
 
 **Adding a source** (`lib/discover.ts`) resolves whatever you paste:
 
-1. **A topic** ("semiconductors") → a Google News search feed for that term.
+1. **A topic** ("semiconductors") → a Bing News search feed for that term.
+   Not Google News: it wraps every result in a link that only resolves inside a
+   browser running its JavaScript, so those articles cannot be opened in the
+   reader at all. Bing's wrapper carries the publisher's URL in a query
+   parameter, which is unwrapped back to a direct link.
 2. **A feed URL** → parsed directly.
 3. **A website** → looks for `<link rel="alternate" type="application/rss+xml">`
    in the page's `<head>`, then falls back to conventional paths (`/feed`,
@@ -178,6 +182,18 @@ your own credentials.
 Then paste `@handle` or an `x.com/handle` URL like any other source. Without
 the key, everything else keeps working and the dialog explains what is missing.
 Replies are excluded, and posts carry their images and full text.
+
+## Paywalled and blocked articles
+
+Where a publisher syndicates full text in their feed, the reader uses it (see
+above). Where they do not — the New York Times, for instance, which blocks the
+page and syndicates only summaries — the reader says so and links to the
+original.
+
+This app deliberately does not route around paywalls: no archive mirrors, no
+crawler impersonation, no proxying. Using text a publisher chose to syndicate
+is fair; defeating an access control they chose to apply is not, and it is also
+what gets a reader blocked harder.
 
 ## Reading offline
 

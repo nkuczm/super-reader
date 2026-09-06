@@ -50,3 +50,42 @@ test("returns nothing for an entry the feed does not have", async () => {
   const content = await fetchFeedItemContent(FEED, "http://127.0.0.1:8789/story/nope");
   assert.equal(content, null);
 });
+
+test("unwraps aggregator links to the publisher", async () => {
+  const { unwrapRedirect } = await import("../lib/feed");
+
+  // Bing puts the destination in a plain query parameter.
+  assert.equal(
+    unwrapRedirect(
+      "http://www.bing.com/news/apiclick.aspx?ref=FexRss&url=https%3a%2f%2f247wallst.com%2finvesting%2f2026%2f09%2fstory%2f&c=123",
+    ),
+    "https://247wallst.com/investing/2026/09/story/",
+  );
+
+  // Google's /url? redirector, same idea.
+  assert.equal(
+    unwrapRedirect("https://www.google.com/url?q=https://example.com/piece"),
+    "https://example.com/piece",
+  );
+
+  // An ordinary article link is returned untouched.
+  assert.equal(
+    unwrapRedirect("https://example.com/news/story"),
+    "https://example.com/news/story",
+  );
+
+  // No destination to recover: leave it alone rather than mangling it.
+  const opaque =
+    "https://news.google.com/rss/articles/CBMidkFVX3lxTE9mUGNqZnNW?oc=5";
+  assert.equal(unwrapRedirect(opaque), opaque);
+});
+
+test("recognises links only a browser can resolve", async () => {
+  const { isUnresolvableAggregatorLink } = await import("../lib/discover");
+  assert.ok(
+    isUnresolvableAggregatorLink(
+      "https://news.google.com/rss/articles/CBMidkFVX3lxTE9m?oc=5",
+    ),
+  );
+  assert.ok(!isUnresolvableAggregatorLink("https://example.com/news/story"));
+});
