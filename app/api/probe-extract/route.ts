@@ -32,8 +32,20 @@ export async function GET(request: Request) {
     return { chars: t.length, head: t.slice(0, 200) };
   };
 
+  // What the comment-ish elements are actually called, biggest first.
+  const commentish = [...doc.querySelectorAll("[class*=comment], [id*=comment]")]
+    .map((el) => ({
+      tag: el.tagName.toLowerCase(),
+      cls: (el.getAttribute("class") ?? "").slice(0, 80),
+      id: (el.getAttribute("id") ?? "").slice(0, 40),
+      chars: (el.textContent ?? "").replace(/\s+/g, " ").trim().length,
+    }))
+    .sort((a, b) => b.chars - a.chars)
+    .slice(0, 12);
+
   return NextResponse.json({
     finalUrl,
+    commentish,
     bodyCandidates: {
       available: textOf("div.available-content"),
       markup: textOf("div.body.markup"),
