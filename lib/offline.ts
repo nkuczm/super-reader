@@ -101,6 +101,33 @@ export async function cachedUrls(): Promise<string[]> {
   }
 }
 
+const VERSION_KEY = "extractVersion";
+
+/**
+ * Throw away copies made by an older extraction.
+ *
+ * readCached refuses them, so leaving them in place made the download marks
+ * lie: an article showed a check, and then went to the network anyway — or,
+ * with no connection, showed nothing at all. Clearing them also clears the
+ * slot, so the next download refills the device rather than waiting for the
+ * next 7am or 4pm.
+ */
+export async function purgeStaleVersion(): Promise<number> {
+  const stored = await meta<number>(VERSION_KEY);
+  if (stored === EXTRACT_VERSION) return 0;
+
+  const stale = (await cachedUrls()).length;
+  try {
+    await run(ARTICLES, "readwrite", (s) => s.clear());
+  } catch {
+    /* nothing stored, or storage unavailable */
+  }
+  await setMeta(LINKS, []);
+  await setMeta("slot", null);
+  await setMeta(VERSION_KEY, EXTRACT_VERSION);
+  return stale;
+}
+
 /** Drop anything no longer in the newest set, so the store cannot grow forever. */
 export async function pruneTo(keep: Set<string>, keepLinks?: Set<string>) {
   try {

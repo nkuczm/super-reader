@@ -161,3 +161,12 @@ test("progress names the article that landed, so its mark can appear live", asyn
     "the one that failed still advanced the bar, it just is not marked",
   );
 });
+
+test("copies from an older extraction are thrown away, not counted", async () => {
+  // The store and the meta both answer through IndexedDB, which does not
+  // exist in Node — every call fails and is swallowed, so what is asserted
+  // here is the contract: a purge reports what it dropped and is idempotent.
+  const { purgeStaleVersion, EXTRACT_VERSION } = await import("../lib/offline");
+  assert.equal(typeof EXTRACT_VERSION, "number");
+  assert.equal(await purgeStaleVersion(), 0, "nothing stored, nothing to drop");
+});

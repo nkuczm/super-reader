@@ -43,6 +43,7 @@ import {
   writeCached,
   cachedUrls,
   savedLinks,
+  purgeStaleVersion,
   saveListSnapshot,
   loadListSnapshot,
   articleEndpoint,
@@ -408,11 +409,14 @@ export default function Reader() {
 
   // What was already on the device from an earlier visit. Both lists matter:
   // the links the app asked for, and the URLs the articles were filed under —
-  // for most sources they are the same string.
+  // for most sources they are the same string. Copies from an older
+  // extraction go first: a mark has to mean the article is really readable.
   useEffect(() => {
-    void Promise.all([savedLinks(), cachedUrls()]).then(([links, urls]) =>
-      setSavedOffline(new Set([...links, ...urls])),
-    );
+    void (async () => {
+      await purgeStaleVersion();
+      const [links, urls] = await Promise.all([savedLinks(), cachedUrls()]);
+      setSavedOffline(new Set([...links, ...urls]));
+    })();
   }, []);
 
   const savedMeta = useCallback(

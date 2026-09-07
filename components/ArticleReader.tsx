@@ -40,12 +40,16 @@ export default function ArticleReader({
   const [article, setArticle] = useState<ReadableArticle | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fromCache, setFromCache] = useState(false);
+  /** Set when a fetch is taking long enough that silence looks like a bug. */
+  const [slow, setSlow] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setArticle(null);
     setError(null);
     setFromCache(false);
+    setSlow(false);
+    const slowTimer = setTimeout(() => !cancelled && setSlow(true), 8000);
 
     (async () => {
       // A downloaded article renders immediately, and is the only copy
@@ -62,28 +66,43 @@ export default function ArticleReader({
           `/api/article?url=${encodeURIComponent(url)}` +
             (feedUrl ? `&feed=${encodeURIComponent(feedUrl)}` : "") +
             `&title=${encodeURIComponent(fallbackTitle)}`,
-          { headers: keyHeaders },
+          {
+            headers: keyHeaders,
+            // A request that never answers used to leave the loading skeleton
+            // up for good. Better to fail and say so than to sit there.
+            // Above the route's own 30s ceiling, so a server-side failure
+            // arrives with its own message rather than as a timeout here.
+            signal: AbortSignal.timeout(35000),
+          },
         );
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Could not load article");
         if (cancelled) return;
         setArticle(data as ReadableArticle);
-        // Keep it, so reopening is instant and works offline.
-        void writeCached(data as ReadableArticle);
+        // Keep it, so reopening is instant and works offline. The link asked
+        // for is recorded alongside, which is not always the URL it came back
+        // under.
+        void writeCached(data as ReadableArticle, url);
       } catch (err) {
         if (cancelled) return;
+        const timedOut =
+          err instanceof DOMException &&
+          (err.name === "TimeoutError" || err.name === "AbortError");
         setError(
-          navigator.onLine
-            ? err instanceof Error
-              ? err.message
-              : "Failed"
-            : "You're offline, and this article hasn't been downloaded yet.",
+          !navigator.onLine
+            ? "You're offline, and this article hasn't been downloaded yet."
+            : timedOut
+              ? "This took too long to load. The site may be slow or refusing to answer."
+              : err instanceof Error
+                ? err.message
+                : "Failed",
         );
       }
     })();
 
     return () => {
       cancelled = true;
+      clearTimeout(slowTimer);
     };
   }, [url, feedUrl, fallbackTitle, keyHeaders]);
 
@@ -175,6 +194,15 @@ export default function ArticleReader({
             {Array.from({ length: 7 }).map((_, i) => (
               <span key={i} style={{ width: `${92 - (i % 3) * 14}%` }} />
             ))}
+            {slow && (
+              <p className="reader-slow">
+                Still fetching — this site is slow to answer.{" "}
+                <a href={url} target="_blank" rel="noreferrer noopener">
+                  Open it on the site
+                </a>{" "}
+                instead.
+              </p>
+            )}
           </div>
         )}
 

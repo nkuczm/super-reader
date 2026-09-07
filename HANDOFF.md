@@ -197,6 +197,16 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   `next start`, not just `npm test`.
 - **pdf.js detaches the buffer it is handed.** Read `byteLength` before
   parsing or the reported file size is always 0.
+- **A version bump has to purge, not just ignore.** `EXTRACT_VERSION` made
+  older copies unreadable, but they stayed in the store and still counted
+  towards the download marks — so an article showed a check and then went to
+  the network anyway, or showed nothing at all offline. `purgeStaleVersion`
+  clears them at startup and clears the slot too, so the next visit refills
+  the device instead of waiting for 7am.
+- **The reader must always resolve.** It had no timeout: a request that never
+  answered left the loading skeleton up for good. There is now a notice at 8s
+  with a link to the site, and a 35s timeout — above the route's own 30s
+  ceiling, so a server-side failure still arrives with its own message.
 - **Cached articles carry an `EXTRACT_VERSION`.** The download skips anything
   already stored, so without a version a wrongly extracted article would stay
   wrong on the device forever. Bump it whenever extraction changes what a page
