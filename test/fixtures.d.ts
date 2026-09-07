@@ -13,3 +13,4 @@ export function startAnchorFeedSite(port?: number): Promise<{ close: () => void 
 export function startGuardedSite(port?: number): Promise<{ close: () => void }>;
 export function startCommentSite(port?: number): Promise<{ close: () => void }>;
 export function startFileSite(port?: number): Promise<{ close: () => void }>;
+export const OPINION_HTML: string;

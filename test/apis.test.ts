@@ -345,3 +345,31 @@ function opinion(n: number) {
     dateFiled: "2026-02-03",
   };
 }
+
+test("a court opinion's preformatted slab is reflowed to wrap", async () => {
+  const { reflowPreformatted } = await import("../lib/apis");
+  const { OPINION_HTML } = await import("./fixtures.mjs");
+
+  const out = reflowPreformatted(OPINION_HTML as string);
+
+  assert.ok(!/<pre/i.test(out), "the pre wrapper is gone, so the text can wrap");
+  assert.match(
+    out,
+    /<p>UNITED STATES COURT OF APPEALS FOR THE FIFTH CIRCUIT<\/p>/,
+    "a caption split across lines becomes one line",
+  );
+  assert.match(out, /<p>No\. 24-60370<\/p>/, "blank lines still separate blocks");
+  assert.match(
+    out,
+    /The district court denied qualified immunity\. We review that denial de novo/,
+    "the court's hard line breaks are joined into flowing prose",
+  );
+  assert.match(out, /<a href="\/c\/F3d\/1\/1\/">/, "citation links survive");
+  assert.ok(!/\n\s+conclude/.test(out), "no leading indentation left mid-sentence");
+});
+
+test("markup that is not preformatted is left alone", async () => {
+  const { reflowPreformatted } = await import("../lib/apis");
+  const html = "<p>Already flowing.</p><p>Two paragraphs.</p>";
+  assert.equal(reflowPreformatted(html), html);
+});

@@ -206,6 +206,21 @@ export default function ArticleReader({
           </div>
         )}
 
+        {article?.attachments?.map((file) => (
+          // The document itself, for a phone's own viewer — which handles a
+          // court PDF better than any amount of reflowing here.
+          <a
+            key={file.url}
+            className="reader-file"
+            href={file.url}
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            <span className="file-kind">{file.kind.toUpperCase()}</span>
+            {file.title ?? "Open the file"}
+          </a>
+        ))}
+
         {article && (
           <>
             {/* Sanitized server-side: scripts, styles, iframes and event

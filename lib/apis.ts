@@ -1,6 +1,6 @@
 import { stripHtml, toIso, faviconFor, fetchText, parseFeed, looksLikeFeed } from "./feed";
 import { sortNewestFirst } from "./sort";
-import type { Article, SourceMeta } from "./types";
+import type { Article, Attachment, SourceMeta } from "./types";
 
 /**
  * A directory of data APIs — CourtListener, the Federal Register, arXiv and
@@ -61,8 +61,32 @@ export type ApiReader = {
   read: (
     url: string,
     context: { key: string | null },
-  ) => Promise<{ title?: string; html: string; byline?: string } | null>;
+  ) => Promise<{
+    title?: string;
+    html: string;
+    byline?: string;
+    /** Files the record itself points at, such as the filed PDF. */
+    attachments?: Attachment[];
+  } | null>;
 };
+
+/**
+ * Court opinions arrive as one <pre> slab: fixed-width text, hard-wrapped at
+ * whatever the court used, with citation links inside. Rendered as-is that is
+ * a horizontally scrolling wall on a phone, so the hard wrapping is undone and
+ * the paragraphs are allowed to flow. Blank lines separate paragraphs; single
+ * newlines are the court's line breaks, not the author's.
+ */
+export function reflowPreformatted(html: string): string {
+  if (!/<pre\b/i.test(html)) return html;
+  return html.replace(/<pre\b[^>]*>([\s\S]*?)<\/pre>/gi, (_match, inner: string) => {
+    const blocks = inner
+      .split(/\n\s*\n/)
+      .map((block) => block.replace(/\s*\n\s*/g, " ").trim())
+      .filter(Boolean);
+    return blocks.length > 0 ? blocks.map((b) => `<p>${b}</p>`).join("") : inner;
+  });
+}
 
 export type ApiProvider = {
   id: string;
@@ -217,8 +241,14 @@ export const API_PROVIDERS: ApiProvider[] = [
         const body: any = await res.json();
         // Opinions arrive as marked-up text, as raw text, or not at all —
         // older scanned ones have only a PDF behind download_url.
+        const marked = pick(
+          body.html_with_citations,
+          body.html,
+          body.html_columbia,
+          body.html_lawbox,
+        );
         const html: string | undefined =
-          pick(body.html_with_citations, body.html, body.html_columbia, body.html_lawbox) ||
+          (marked && reflowPreformatted(marked)) ||
           (typeof body.plain_text === "string" && body.plain_text.trim()
             ? body.plain_text
                 .split(/\n{2,}/)
@@ -228,7 +258,25 @@ export const API_PROVIDERS: ApiProvider[] = [
                 .join("")
             : undefined);
         if (!html) return null;
-        return { html, byline: pick(body.author_str, body.joined_by_str) };
+
+        // The court's own PDF, for reading in a proper viewer. This is a file
+        // the publication genuinely links, not one invented from a field.
+        const pdf = pick(
+          typeof body.download_url === "string" && /\.pdf($|\?)/i.test(body.download_url)
+            ? body.download_url
+            : undefined,
+          typeof body.local_path === "string" && /\.pdf$/i.test(body.local_path)
+            ? `https://storage.courtlistener.com/${body.local_path.replace(/^\/+/, "")}`
+            : undefined,
+        );
+
+        return {
+          html,
+          byline: pick(body.author_str, body.joined_by_str),
+          attachments: pdf
+            ? [{ url: pdf, kind: "pdf" as const, title: "The opinion as filed (PDF)" }]
+            : undefined,
+        };
       },
     },
     title: ({ q, court, type }) =>

@@ -2,6 +2,7 @@ import { Readability } from "@mozilla/readability";
 import { JSDOM, VirtualConsole } from "jsdom";
 import sanitizeHtml from "sanitize-html";
 import { fetchText, stripHtml, absolute, toIso, stripChrome } from "./feed";
+import type { Attachment } from "./types";
 
 export type ReadableArticle = {
   /** Where the text came from: the page, the feed's own copy, or a file. */
@@ -16,6 +17,8 @@ export type ReadableArticle = {
   html: string;
   wordCount: number;
   truncated: boolean;
+  /** Files this article points at — the filed PDF, say. */
+  attachments?: Attachment[];
 };
 
 /**
@@ -259,7 +262,13 @@ export function articleFromFeedContent(
 export function sanitizeArticleHtml(
   contentHtml: string,
   url: string,
-  meta: { title: string; byline?: string; siteName?: string; publishedAt?: string },
+  meta: {
+    title: string;
+    byline?: string;
+    siteName?: string;
+    publishedAt?: string;
+    attachments?: Attachment[];
+  },
 ): ReadableArticle {
   const html = sanitize(contentHtml.slice(0, MAX_CHARS), url);
   const text = stripHtml(html, Number.MAX_SAFE_INTEGER);
@@ -273,6 +282,7 @@ export function sanitizeArticleHtml(
     html,
     wordCount: text ? text.split(/\s+/).length : 0,
     truncated: contentHtml.length > MAX_CHARS,
+    attachments: meta.attachments,
   };
 }
 

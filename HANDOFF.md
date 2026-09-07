@@ -173,6 +173,14 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   preview all call that route. If a key "does not work", check which fetch is
   missing `keyHeadersFrom`. Memoise it: it goes into the reader's effect
   dependencies, and a fresh object each render refetches forever.
+- **Court opinions arrive as one `<pre>` slab.** CourtListener's
+  `html_with_citations` is fixed-width text, hard-wrapped at whatever the court
+  used, with citation links inside — unreadable on a phone whether it scrolls
+  sideways or merely wraps ragged. `reflowPreformatted` undoes the hard
+  wrapping (blank lines separate paragraphs, single newlines are the court's
+  line breaks) and keeps the links. The filed PDF is offered at the top of the
+  reader for anything the reflow cannot help with; a phone's own viewer handles
+  a court PDF better than this app will.
 - **API sources follow their own paging.** CourtListener's search returns 20
   per page whatever you ask for — measured, with a `next` cursor and 99,443
   matches behind it — so a source stopped at 20 and looked finished. Providers

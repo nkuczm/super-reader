@@ -310,6 +310,26 @@ const fileFeed = `<?xml version="1.0"?><rss version="2.0"><channel>
 </item>
 </channel></rss>`;
 
+/** A CourtListener-shaped opinion: one <pre>, hard-wrapped, with citations. */
+export const OPINION_HTML = `<pre class="inline">      UNITED STATES COURT OF APPEALS
+              FOR THE FIFTH CIRCUIT
+
+                    No. 24-60370
+
+STERLING, Plaintiff-Appellee, versus CITY OF JACKSON,
+Defendant-Appellant.
+
+     Appeal from the United States District Court
+            for the Southern District of Mississippi
+
+     Before SMITH, ELROD, and OLDHAM, Circuit Judges.
+
+     The district court denied qualified immunity. We
+review that denial de novo, see <a href="/c/F3d/1/1/">Doe v. Roe, 1 F.3d 1
+(5th Cir. 1993)</a>, and, applying the two-step framework,
+conclude that the officers are entitled to it.
+</pre>`;
+
 export function startFileSite(port = 8791) {
   return serve(
     {

@@ -252,6 +252,14 @@ Then paste `@handle` or an `x.com/handle` URL like any other source. Without
 the key, everything else keeps working and the dialog explains what is missing.
 Replies are excluded, and posts carry their images and full text.
 
+### Court opinions
+
+CourtListener serves an opinion as a single preformatted block: fixed-width
+text, hard-wrapped by the court, which on a phone is either a sideways-scrolling
+slab or a column of ragged monospace. The hard wrapping is undone so the
+paragraphs flow at reader size, citation links intact, and the opinion as filed
+is offered as a PDF at the top of the reader for reading in a proper viewer.
+
 ### Comment threads
 
 A page's comment section is removed before the text is extracted. Readability

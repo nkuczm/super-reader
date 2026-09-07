@@ -114,6 +114,7 @@ export async function GET(request: Request) {
             title: read.title ?? title ?? provider.name,
             byline: read.byline,
             siteName: provider.name,
+            attachments: read.attachments,
           }),
           { headers: { "cache-control": "public, max-age=600" } },
         );
