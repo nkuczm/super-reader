@@ -9,6 +9,7 @@ type Props = {
   /** Open a file in the full reader, the same way an article opens. */
   onOpen: (file: Attachment) => void;
   isSaved: (url: string) => boolean;
+  keyHeaders?: HeadersInit;
   onToggleSave: (file: Attachment) => void;
 };
 
@@ -50,6 +51,7 @@ export default function Attachments({
   onOpen,
   isSaved,
   onToggleSave,
+  keyHeaders,
 }: Props) {
   const [open, setOpen] = useState<string | null>(null);
   const [preview, setPreview] = useState<Record<string, string>>({});
@@ -67,7 +69,7 @@ export default function Attachments({
     setLoading(file.url);
     try {
       const params = new URLSearchParams({ url: file.url, file: "1" });
-      const res = await fetch(`/api/article?${params}`);
+      const res = await fetch(`/api/article?${params}`, { headers: keyHeaders });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not open that file.");
       setPreview((current) => ({ ...current, [file.url]: data.html as string }));

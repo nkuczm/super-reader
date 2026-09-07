@@ -255,6 +255,8 @@ export function articleEndpoint(url: string, feedUrl?: string, title?: string) {
 export async function downloadForOffline(
   targets: OfflineTarget[],
   onProgress?: (progress: DownloadProgress) => void,
+  /** API keys, for sources whose text comes from an API that needs one. */
+  headers?: HeadersInit,
 ): Promise<{ saved: number; failed: number }> {
   const seen = new Set<string>();
   const wanted = targets.filter((t) => {
@@ -288,7 +290,7 @@ export async function downloadForOffline(
             return;
           }
 
-          const res = await fetch(articleEndpoint(url, feedUrl, title));
+          const res = await fetch(articleEndpoint(url, feedUrl, title), { headers });
           if (!res.ok) throw new Error("failed");
           const article = await res.json();
           await writeCached(article, url);

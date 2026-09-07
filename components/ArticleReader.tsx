@@ -15,6 +15,11 @@ type Props = {
   onAlwaysOpenOnSite?: (link: string) => void;
   /** The list's own summary, shown when the full text cannot be fetched. */
   summary?: string;
+  /**
+   * The reader's API keys. Some sources — CourtListener — serve their text
+   * only through an API that needs one, so this request needs them too.
+   */
+  keyHeaders?: HeadersInit;
   /** Whether this article is bookmarked, and how to change that. */
   saved?: boolean;
   onToggleSave?: () => void;
@@ -27,6 +32,7 @@ export default function ArticleReader({
   feedUrl,
   onAlwaysOpenOnSite,
   summary,
+  keyHeaders,
   saved,
   onToggleSave,
   onClose,
@@ -56,6 +62,7 @@ export default function ArticleReader({
           `/api/article?url=${encodeURIComponent(url)}` +
             (feedUrl ? `&feed=${encodeURIComponent(feedUrl)}` : "") +
             `&title=${encodeURIComponent(fallbackTitle)}`,
+          { headers: keyHeaders },
         );
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Could not load article");
@@ -78,7 +85,7 @@ export default function ArticleReader({
     return () => {
       cancelled = true;
     };
-  }, [url, feedUrl, fallbackTitle]);
+  }, [url, feedUrl, fallbackTitle, keyHeaders]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

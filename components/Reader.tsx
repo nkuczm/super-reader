@@ -539,7 +539,9 @@ export default function Reader() {
         return;
       }
       try {
-        const res = await fetch(articleEndpoint(url, feedUrl, title));
+        const res = await fetch(articleEndpoint(url, feedUrl, title), {
+          headers: keyHeadersFrom(apiKeysRef.current),
+        });
         if (res.ok) {
           await writeCached(await res.json());
           markSaved(url);
@@ -553,6 +555,12 @@ export default function Reader() {
   useEffect(() => {
     apiKeysRef.current = apiKeys;
   }, [apiKeys]);
+
+  /**
+   * Memoised: this goes into the reader's fetch dependencies, and a fresh
+   * object every render would refetch the article forever.
+   */
+  const keyHeaders = useMemo(() => keyHeadersFrom(apiKeys), [apiKeys]);
 
   /** Keys changed: keep the device copy, the vault, and the feeds in step. */
   function updateKeys(next: { vault: unknown | null; keys: Record<string, string> }) {
@@ -641,11 +649,15 @@ export default function Reader() {
     downloading.current = true;
     setOffline({ state: "working", done: 0, total: links.length });
     try {
-      const result = await downloadForOffline(links, ({ saved, ...progress }) => {
-        setOffline({ state: "working", ...progress });
-        // Tick each article's mark on as it lands, rather than all at the end.
-        if (saved) markSaved(saved);
-      });
+      const result = await downloadForOffline(
+        links,
+        ({ saved, ...progress }) => {
+          setOffline({ state: "working", ...progress });
+          // Tick each article's mark on as it lands, not all at the end.
+          if (saved) markSaved(saved);
+        },
+        keyHeadersFrom(apiKeysRef.current),
+      );
       await markSlotDownloaded(currentSlot());
       // The download prunes anything that fell out of the newest set, so the
       // marks are re-read rather than only added to.
@@ -922,6 +934,7 @@ export default function Reader() {
             fallbackTitle={reading.title}
             feedUrl={reading.feedUrl}
             summary={reading.summary}
+            keyHeaders={keyHeaders}
             onAlwaysOpenOnSite={alwaysOpenOnSite}
             saved={isSaved(reading.url)}
             onToggleSave={() => {
@@ -1111,6 +1124,7 @@ export default function Reader() {
                           })
                         }
                         isSaved={isSaved}
+                        keyHeaders={keyHeaders}
                         onToggleSave={(file) => toggleSavedFile(file, article, source)}
                       />
                     )}
@@ -1191,7 +1205,7 @@ export default function Reader() {
       {dialogOpen && (
         <AddSourceDialog
           feeds={feeds}
-          keyHeaders={keyHeadersFrom(apiKeys)}
+          keyHeaders={keyHeaders}
           defaultFeedId={
             selection.type === "feed" ? selection.id : feeds[0]?.id
           }

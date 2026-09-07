@@ -166,6 +166,13 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   a token — the search endpoint does not, which is why listing worked while
   reading did not. `ApiProvider.reader` is the general hook for this: an
   article from an API gets its text from that API, before any scraping.
+- **Every request that can need an API key must send the key header.** The
+  keys reached `/api/feed` and `/api/discover` but not `/api/article`, so a
+  CourtListener source listed fine and then refused to show text with a token
+  set — the reader, the hover prefetch, the offline download and the file
+  preview all call that route. If a key "does not work", check which fetch is
+  missing `keyHeadersFrom`. Memoise it: it goes into the reader's effect
+  dependencies, and a fresh object each render refetches forever.
 - **API sources follow their own paging.** CourtListener's search returns 20
   per page whatever you ask for — measured, with a `next` cursor and 99,443
   matches behind it — so a source stopped at 20 and looked finished. Providers
