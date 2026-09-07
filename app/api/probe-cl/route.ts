@@ -8,7 +8,25 @@ export const dynamic = "force-dynamic";
 
 /** TEMPORARY: why a CourtListener opinion will not extract. Remove when done. */
 export async function GET(request: Request) {
-  const url = new URL(request.url).searchParams.get("url")!;
+  const params = new URL(request.url).searchParams;
+
+  // Does the search endpoint page, and under what key?
+  if (params.get("search")) {
+    const res = await fetch(
+      "https://www.courtlistener.com/api/rest/v4/search/?type=o&order_by=dateFiled%20desc&q=qualified%20immunity",
+      { headers: { accept: "application/json" } },
+    );
+    const body: any = await res.json();
+    return NextResponse.json({
+      status: res.status,
+      topLevelKeys: Object.keys(body ?? {}),
+      results: Array.isArray(body?.results) ? body.results.length : null,
+      next: typeof body?.next === "string" ? body.next.slice(0, 120) : body?.next ?? null,
+      count: body?.count ?? null,
+    });
+  }
+
+  const url = params.get("url")!;
   const { body, finalUrl } = await fetchText(url, 15000);
   const make = () =>
     new JSDOM(body, { url: finalUrl, virtualConsole: new VirtualConsole() }).window.document;
