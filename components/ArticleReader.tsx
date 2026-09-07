@@ -13,6 +13,8 @@ type Props = {
   feedUrl?: string;
   /** Stop trying to read this host in-app and go to the site from now on. */
   onAlwaysOpenOnSite?: (link: string) => void;
+  /** The list's own summary, shown when the full text cannot be fetched. */
+  summary?: string;
   /** Whether this article is bookmarked, and how to change that. */
   saved?: boolean;
   onToggleSave?: () => void;
@@ -24,6 +26,7 @@ export default function ArticleReader({
   fallbackTitle,
   feedUrl,
   onAlwaysOpenOnSite,
+  summary,
   saved,
   onToggleSave,
   onClose,
@@ -131,6 +134,14 @@ export default function ArticleReader({
         {error && (
           <div className="reader-error">
             <p>{error}</p>
+            {/* Whatever the feed gave is better than an empty screen, and for
+                an API source the summary is often the opening of the text. */}
+            {summary && (
+              <div className="reader-fallback">
+                <p className="prose">{summary}</p>
+                <span>From the feed — the full text could not be fetched.</span>
+              </div>
+            )}
             <div className="reader-error-actions">
               <a
                 className="btn small"

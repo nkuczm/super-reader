@@ -91,6 +91,7 @@ export default function Reader() {
     url: string;
     title: string;
     feedUrl?: string;
+    summary?: string;
   } | null>(null);
   const [syncCode, setSyncCode] = useState<string | null>(null);
   const [syncOpen, setSyncOpen] = useState(false);
@@ -503,7 +504,12 @@ export default function Reader() {
         window.open(article.link, "_blank", "noreferrer,noopener");
         return;
       }
-      setReading({ url: article.link, title: article.title, feedUrl });
+      setReading({
+        url: article.link,
+        title: article.title,
+        feedUrl,
+        summary: article.summary,
+      });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [opensOnSite],
@@ -915,6 +921,7 @@ export default function Reader() {
             url={reading.url}
             fallbackTitle={reading.title}
             feedUrl={reading.feedUrl}
+            summary={reading.summary}
             onAlwaysOpenOnSite={alwaysOpenOnSite}
             saved={isSaved(reading.url)}
             onToggleSave={() => {

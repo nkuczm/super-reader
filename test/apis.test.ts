@@ -293,7 +293,10 @@ test("a key for one API is never sent to another", async () => {
   );
 });
 
-test("Federal Register hands over the published PDF as an attachment", async () => {
+test("a record's own PDF field is not turned into an attachment", async () => {
+  // Every Federal Register document has one, so attaching it put a file chip
+  // under every item and made files look like the norm. A file shows up when a
+  // publication actually links one, not because a field exists.
   stubFetch({
     results: [
       {
@@ -307,11 +310,38 @@ test("Federal Register hands over the published PDF as an attachment", async () 
   });
 
   const { articles } = await fetchApiSource("api:federal-register?q=rule");
-  assert.deepEqual(articles[0].attachments, [
-    {
-      url: "https://www.govinfo.gov/content/pkg/FR-2026-01-06/pdf/2026-0002.pdf",
-      kind: "pdf",
-      title: "As published (PDF)",
-    },
-  ]);
+  assert.equal(articles[0].attachments, undefined);
 });
+
+test("an API source follows its own paging rather than showing one page", async () => {
+  // CourtListener returns 20 per page whatever you ask for, so a source
+  // stopped at 20 and looked like it had run out.
+  const pages = [
+    { results: Array.from({ length: 20 }, (_, i) => opinion(i)), next: "https://cl.test/page2" },
+    { results: Array.from({ length: 20 }, (_, i) => opinion(100 + i)), next: null },
+  ];
+  let call = 0;
+  const real = globalThis.fetch;
+  const urls: string[] = [];
+  globalThis.fetch = (async (input: any) => {
+    urls.push(String(input));
+    const body = pages[Math.min(call++, pages.length - 1)];
+    return { ok: true, status: 200, statusText: "", json: async () => body } as any;
+  }) as typeof fetch;
+
+  const { articles } = await fetchApiSource("api:courtlistener?q=x", 40);
+  globalThis.fetch = real;
+
+  assert.equal(articles.length, 40, "both pages are used");
+  assert.equal(urls.length, 2);
+  assert.equal(urls[1], "https://cl.test/page2", "the API's own next link is followed");
+});
+
+function opinion(n: number) {
+  return {
+    id: n,
+    caseName: `Case ${n}`,
+    absolute_url: `/opinion/${n}/case-${n}/`,
+    dateFiled: "2026-02-03",
+  };
+}

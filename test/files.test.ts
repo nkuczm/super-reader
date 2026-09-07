@@ -90,3 +90,25 @@ test("a feed's file enclosures become attachments, images stay images", async ()
   );
   assert.equal(data.image, `${F}/cover.jpg`, "and it is still used as the image");
 });
+
+test("a file linked in the story's own text becomes an attachment", async () => {
+  // What must not happen is a chip on every item because some field exists;
+  // a file shows up when the publication actually links one.
+  const feed = `<?xml version="1.0"?><rss version="2.0"><channel>
+    <title>Notices</title><link>https://agency.test</link>
+    <item><title>With a link</title><link>https://agency.test/a</link><guid>a</guid>
+    <description><![CDATA[<p>The full text is in the
+      <a href="/docs/final-rule.pdf">final rule</a>, and the
+      <a href="/press">press release</a> summarises it.</p>]]></description></item>
+    <item><title>Plain story</title><link>https://agency.test/b</link><guid>b</guid>
+    <description><![CDATA[<p>No files here, just <a href="/more">a link</a>.</p>]]></description></item>
+    </channel></rss>`;
+
+  const { parseFeed } = await import("../lib/feed");
+  const { articles } = parseFeed(feed, "https://agency.test");
+
+  assert.deepEqual(articles[0].attachments, [
+    { url: "https://agency.test/docs/final-rule.pdf", kind: "pdf" },
+  ]);
+  assert.equal(articles[1].attachments, undefined, "no file, no chip");
+});

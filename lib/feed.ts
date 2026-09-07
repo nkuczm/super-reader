@@ -380,7 +380,10 @@ function rssItem(item: any, site: string): Article {
       content,
       site,
     ),
-    attachments: attachmentsFrom(asArray(item.enclosure), site),
+    attachments: mergeAttachments(
+      attachmentsFrom(asArray(item.enclosure), site),
+      attachmentsInContent(content, site),
+    ),
   };
 }
 
@@ -388,6 +391,18 @@ function rssItem(item: any, site: string): Article {
  * Enclosures that are files worth reading. A feed's declared type is the
  * better signal than the URL, and an image enclosure is left to pickImage.
  */
+function mergeAttachments(
+  ...lists: (Attachment[] | undefined)[]
+): Attachment[] | undefined {
+  const merged: Attachment[] = [];
+  for (const list of lists) {
+    for (const file of list ?? []) {
+      if (!merged.some((a) => a.url === file.url)) merged.push(file);
+    }
+  }
+  return merged.length > 0 ? merged.slice(0, 4) : undefined;
+}
+
 function attachmentsFrom(nodes: any[], site: string): Attachment[] | undefined {
   const found: Attachment[] = [];
   for (const node of nodes) {
@@ -408,6 +423,29 @@ function attachmentsFrom(nodes: any[], site: string): Attachment[] | undefined {
   return found.length > 0 ? found.slice(0, 6) : undefined;
 }
 
+/**
+ * Files linked from the item's own text. An enclosure is a publisher saying
+ * "here is the file"; a link in the body is the same thing said in prose. What
+ * this deliberately does not do is invent one from a record's metadata, which
+ * put a PDF chip under every single item and made files look like the norm
+ * rather than the exception they are.
+ */
+function attachmentsInContent(content: string, site: string): Attachment[] {
+  const found: Attachment[] = [];
+  for (const match of content.matchAll(/<a\b[^>]*href=["']([^"']+)["']/gi)) {
+    const href = decodeEntities(match[1]);
+    const kind = fileKindFor(href);
+    if (!kind) continue;
+    try {
+      const url = absolute(href, site);
+      if (!found.some((a) => a.url === url)) found.push({ url, kind });
+    } catch {
+      /* skip malformed hrefs */
+    }
+  }
+  return found;
+}
+
 /** Prefer a declared image, falling back to the first one in the body. */
 function pickImage(declared: string | undefined, content: string, site: string) {
   if (declared) return absolute(declared, site);
@@ -424,7 +462,10 @@ function atomEntry(entry: any, site: string): Article {
   const enclosures = links.filter((l: any) => l?.["@_rel"] === "enclosure");
   return {
     id: text(entry.id) || link,
-    attachments: attachmentsFrom(enclosures, site),
+    attachments: mergeAttachments(
+      attachmentsFrom(enclosures, site),
+      attachmentsInContent(content, site),
+    ),
     title: stripHtml(text(entry.title), 200) || "(untitled)",
     link: unwrapRedirect(absolute(link, site)),
     author: text(first(asArray(entry.author))?.name) || undefined,

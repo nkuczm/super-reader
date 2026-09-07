@@ -49,6 +49,21 @@ export type ApiParams = Record<string, string>;
 
 export type ApiRequest = { url: string; headers?: Record<string, string> };
 
+/**
+ * Some sources serve their text through the API and not to a fetch of the page.
+ * CourtListener is the case that forced this: the opinion page answers a
+ * non-browser request with a 2KB stub, so scraping it yields nothing, while the
+ * API holds the whole opinion.
+ */
+export type ApiReader = {
+  /** Whether this provider owns the article at this URL. */
+  owns: (url: string) => boolean;
+  read: (
+    url: string,
+    context: { key: string | null },
+  ) => Promise<{ title?: string; html: string; byline?: string } | null>;
+};
+
 export type ApiProvider = {
   id: string;
   name: string;
@@ -73,8 +88,16 @@ export type ApiProvider = {
   items?: (body: any) => any[];
   /** JSON only: one record as an Article, or null to drop it. */
   article?: (item: any, params: ApiParams) => Article | null;
+  /**
+   * The URL of the next page, when an API pages its results. Without this a
+   * source shows one page and looks like it has stopped: CourtListener's
+   * search returns 20 whatever you ask for.
+   */
+  nextPage?: (body: any) => string | null;
   /** The name this source gets, given what the user asked for. */
   title: (params: ApiParams) => string;
+  /** How to get an article's text from the API rather than from the page. */
+  reader?: ApiReader;
 };
 
 /** First value that is a non-empty string. */
@@ -147,6 +170,7 @@ export const API_PROVIDERS: ApiProvider[] = [
       };
     },
     items: (body) => body?.results ?? [],
+    nextPage: (body) => (typeof body?.next === "string" ? body.next : null),
     article: (item) => {
       const path = pick(item.absolute_url, item.docket_absolute_url);
       const link = path
@@ -166,6 +190,46 @@ export const API_PROVIDERS: ApiProvider[] = [
         ),
         summary: clean(snippet),
       };
+    },
+    reader: {
+      owns: (url) => /^https?:\/\/(www\.)?courtlistener\.com\/opinion\/\d+\//i.test(url),
+      read: async (url, { key }) => {
+        const id = url.match(/\/opinion\/(\d+)\//)?.[1];
+        if (!id) return null;
+        if (!key) {
+          throw new Error(
+            "CourtListener serves opinion text through its API, which needs a key. " +
+              "Add one in Settings, or set COURTLISTENER_TOKEN on this deployment.",
+          );
+        }
+        const res = await fetch(
+          `https://www.courtlistener.com/api/rest/v4/opinions/${id}/`,
+          {
+            headers: { authorization: `Token ${key}`, accept: "application/json" },
+            signal: AbortSignal.timeout(15000),
+          },
+        );
+        if (res.status === 401 || res.status === 403) {
+          throw new Error("CourtListener rejected the API key.");
+        }
+        if (!res.ok) throw new Error(`CourtListener API error ${res.status}`);
+
+        const body: any = await res.json();
+        // Opinions arrive as marked-up text, as raw text, or not at all —
+        // older scanned ones have only a PDF behind download_url.
+        const html: string | undefined =
+          pick(body.html_with_citations, body.html, body.html_columbia, body.html_lawbox) ||
+          (typeof body.plain_text === "string" && body.plain_text.trim()
+            ? body.plain_text
+                .split(/\n{2,}/)
+                .map((block: string) => block.trim())
+                .filter(Boolean)
+                .map((block: string) => `<p>${block.replace(/\n/g, " ")}</p>`)
+                .join("")
+            : undefined);
+        if (!html) return null;
+        return { html, byline: pick(body.author_str, body.joined_by_str) };
+      },
     },
     title: ({ q, court, type }) =>
       [
@@ -211,7 +275,7 @@ export const API_PROVIDERS: ApiProvider[] = [
         per_page: String(limit),
         order: "newest",
       });
-      for (const field of ["title", "html_url", "publication_date", "abstract", "agencies", "type", "document_number", "pdf_url"])
+      for (const field of ["title", "html_url", "publication_date", "abstract", "agencies", "type", "document_number"])
         search.append("fields[]", field);
       if (q.trim()) search.set("conditions[term]", q.trim());
       if (type) search.append("conditions[type][]", type);
@@ -219,6 +283,8 @@ export const API_PROVIDERS: ApiProvider[] = [
       return { url: `https://www.federalregister.gov/api/v1/documents.json?${search}` };
     },
     items: (body) => body?.results ?? [],
+    nextPage: (body) =>
+      typeof body?.next_page_url === "string" ? body.next_page_url : null,
     article: (item) => {
       if (!item?.html_url || !item?.title) return null;
       const agencies = (item.agencies ?? [])
@@ -231,14 +297,6 @@ export const API_PROVIDERS: ApiProvider[] = [
         author: agencies.slice(0, 2).join(", ") || undefined,
         publishedAt: toIso(item.publication_date),
         summary: clean(item.abstract),
-        // The rule as published, which is what anyone citing it needs.
-        ...(item.pdf_url
-          ? {
-              attachments: [
-                { url: String(item.pdf_url), kind: "pdf" as const, title: "As published (PDF)" },
-              ],
-            }
-          : {}),
       };
     },
     title: ({ q, agency }) =>
@@ -724,6 +782,11 @@ export const API_PROVIDERS: ApiProvider[] = [
   },
 ];
 
+/** The provider that serves this article's text through its API, if any. */
+export function apiReaderFor(url: string): ApiProvider | undefined {
+  return API_PROVIDERS.find((provider) => provider.reader?.owns(url));
+}
+
 export function getApiProvider(id: string): ApiProvider | undefined {
   return API_PROVIDERS.find((provider) => provider.id === id);
 }
@@ -899,8 +962,15 @@ export async function fetchApiSource(
     return { meta, articles: sortNewestFirst(articles).slice(0, limit) };
   }
 
-  const body = await fetchJson(request);
-  const items = provider.items?.(body) ?? [];
+  // Follow the API's own paging until there is enough, rather than showing
+  // whatever one page happened to hold.
+  const items: any[] = [];
+  let pageUrl: string | null = request.url;
+  for (let page = 0; pageUrl && page < 4 && items.length < limit; page += 1) {
+    const body = await fetchJson({ ...request, url: pageUrl });
+    items.push(...(provider.items?.(body) ?? []));
+    pageUrl = provider.nextPage?.(body) ?? null;
+  }
   const articles = items
     .map((item) => {
       try {

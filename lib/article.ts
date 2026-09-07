@@ -251,6 +251,31 @@ export function articleFromFeedContent(
   };
 }
 
+/**
+ * An article whose HTML came from somewhere other than a scraped page — an
+ * API's own copy of the text. Same sanitising as everything else; it is still
+ * third-party HTML being injected into the reader.
+ */
+export function sanitizeArticleHtml(
+  contentHtml: string,
+  url: string,
+  meta: { title: string; byline?: string; siteName?: string; publishedAt?: string },
+): ReadableArticle {
+  const html = sanitize(contentHtml.slice(0, MAX_CHARS), url);
+  const text = stripHtml(html, Number.MAX_SAFE_INTEGER);
+  return {
+    via: "page",
+    url,
+    title: meta.title,
+    byline: meta.byline,
+    siteName: meta.siteName,
+    publishedAt: meta.publishedAt,
+    html,
+    wordCount: text ? text.split(/\s+/).length : 0,
+    truncated: contentHtml.length > MAX_CHARS,
+  };
+}
+
 export async function extractArticle(url: string): Promise<ReadableArticle> {
   const { body, finalUrl } = await fetchText(url, 15000);
 

@@ -9,6 +9,15 @@ const nextConfig: NextConfig = {
    * node_modules at runtime and resolves normally.
    */
   serverExternalPackages: ["pdfjs-dist"],
+  /**
+   * ...and the worker has to be traced into the function explicitly. It is
+   * only ever imported dynamically, so nothing static points at it and file
+   * tracing leaves it out: PDFs then fail in the deployed app while working
+   * under `next start`, which has the whole of node_modules on disk.
+   */
+  outputFileTracingIncludes: {
+    "/api/article": ["./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"],
+  },
 };
 
 export default nextConfig;

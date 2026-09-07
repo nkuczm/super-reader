@@ -3,6 +3,9 @@ import { extractArticle, articleFromFeedContent } from "@/lib/article";
 import { fetchFeedItemContent, unwrapRedirect } from "@/lib/feed";
 import { isUnresolvableAggregatorLink } from "@/lib/discover";
 import { fileKindFor, readFileAsArticle } from "@/lib/files";
+import { apiKeyFor, apiReaderFor } from "@/lib/apis";
+import { decodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
+import { sanitizeArticleHtml } from "@/lib/article";
 
 export const runtime = "nodejs";
 // Deliberately not force-dynamic: that disables CDN caching, and an
@@ -90,6 +93,36 @@ export async function GET(request: Request) {
         {
           error:
             error instanceof Error ? error.message : "Could not open that file.",
+        },
+        { status: 502 },
+      );
+    }
+  }
+
+  // An article from an API gets its text from that API. Scraping the page is
+  // the wrong move where the site serves a stub to anything but a browser.
+  const provider = apiReaderFor(target.toString());
+  if (provider?.reader) {
+    try {
+      const keys = decodeKeysHeader(request.headers.get(KEYS_HEADER));
+      const read = await provider.reader.read(target.toString(), {
+        key: apiKeyFor(provider, keys),
+      });
+      if (read) {
+        return NextResponse.json(
+          sanitizeArticleHtml(read.html, target.toString(), {
+            title: read.title ?? title ?? provider.name,
+            byline: read.byline,
+            siteName: provider.name,
+          }),
+          { headers: { "cache-control": "public, max-age=600" } },
+        );
+      }
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error:
+            error instanceof Error ? error.message : "Could not read that article.",
         },
         { status: 502 },
       );
