@@ -44,6 +44,7 @@ import {
   cachedUrls,
   savedLinks,
   purgeStaleVersion,
+  requestPersistence,
   saveListSnapshot,
   loadListSnapshot,
   articleEndpoint,
@@ -106,6 +107,8 @@ export default function Reader() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [saved, setSaved] = useState<SavedArticle[]>([]);
+  /** Whether the browser promised to keep this cache rather than evict it. */
+  const [persisted, setPersisted] = useState(false);
   const [vault, setVault] = useState<unknown | null>(null);
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
   // refresh() is created once and reads the keys through this, rather than
@@ -414,6 +417,7 @@ export default function Reader() {
   useEffect(() => {
     void (async () => {
       await purgeStaleVersion();
+      setPersisted(await requestPersistence());
       const [links, urls] = await Promise.all([savedLinks(), cachedUrls()]);
       setSavedOffline(new Set([...links, ...urls]));
     })();
@@ -676,27 +680,34 @@ export default function Reader() {
   }, [offlineTargets, markSaved]);
 
   /**
-   * A web app cannot wake itself at a fixed time on every platform, so the
-   * schedule is honoured on the next visit: if the 07:00 or 16:00 ET slot has
-   * come round since the last download, catch up now.
+   * Keep the device topped up.
+   *
+   * A web app cannot wake itself on iOS, so the twice-daily schedule is
+   * honoured on the next visit. That alone was not enough: a phone suspends
+   * the page the moment you switch away, so a run interrupted after five
+   * articles used to leave the other thirty-five until the next 7am or 4pm.
+   * Now every visit, every return to the foreground, and every reconnection
+   * downloads whatever is missing — a partial cache repairs itself instead of
+   * waiting for a slot. Articles already stored cost one lookup each and are
+   * skipped, so topping up is cheap when there is nothing to do.
    */
   useEffect(() => {
     if (!ready || articles.length === 0) return;
     let cancelled = false;
 
     const check = async () => {
-      setOffline((o) =>
-        o.state === "idle" ? { ...o, at: null } : o,
-      );
+      setOffline((o) => (o.state === "idle" ? { ...o, at: null } : o));
       // Re-read what is stored, not only at mount: on iOS a web app resumed
       // from the background can answer an IndexedDB read made too early with
       // nothing, which would leave downloaded articles unmarked.
       const [links, keys] = await Promise.all([savedLinks(), cachedUrls()]);
-      if (links.length + keys.length > 0) {
-        setSavedOffline(new Set([...links, ...keys]));
-      }
-      if (!navigator.onLine) return;
-      if (await isDownloadDue()) {
+      const stored = new Set([...links, ...keys]);
+      if (stored.size > 0) setSavedOffline(stored);
+
+      if (!navigator.onLine || cancelled) return;
+
+      const missing = offlineTargets().filter((t) => !stored.has(t.url)).length;
+      if (missing > 0 || (await isDownloadDue())) {
         if (!cancelled) void runDownload();
       } else if (!cancelled) {
         setOffline({ state: "done", at: await lastDownloadedAt() });
@@ -704,12 +715,19 @@ export default function Reader() {
     };
 
     void check();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void check();
+    };
     window.addEventListener("focus", check);
+    window.addEventListener("online", check);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
       window.removeEventListener("focus", check);
+      window.removeEventListener("online", check);
+      document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [ready, articles.length, runDownload]);
+  }, [ready, articles.length, runDownload, offlineTargets]);
 
   const shown = useMemo(
     () => (settings.hideRead ? visible.filter((a) => !read.has(a.id)) : visible),
@@ -1188,6 +1206,8 @@ export default function Reader() {
           onClose={() => setSettingsOpen(false)}
           offline={offline}
           storedCount={savedOffline.size}
+          targetCount={offlineTargets().length}
+          persisted={persisted}
           vault={vault}
           apiKeys={apiKeys}
           onKeysChange={updateKeys}

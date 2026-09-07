@@ -254,6 +254,24 @@ export async function isDownloadDue(now = new Date()) {
   return (await lastDownloadedSlot()) !== currentSlot(now);
 }
 
+/**
+ * Ask the browser to keep this cache rather than evict it under pressure.
+ *
+ * Safari clears site storage after about a week of not visiting, which is the
+ * difference between "downloaded" and "downloaded until you go on holiday".
+ * Installing to the Home Screen is what usually earns the grant; asking costs
+ * nothing when it does not.
+ */
+export async function requestPersistence(): Promise<boolean> {
+  try {
+    if (!navigator.storage?.persist) return false;
+    if (await navigator.storage.persisted()) return true;
+    return await navigator.storage.persist();
+  } catch {
+    return false;
+  }
+}
+
 /** How many of each source's newest stories are kept for offline reading. */
 export const PER_SOURCE = 15;
 

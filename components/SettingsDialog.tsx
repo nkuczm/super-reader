@@ -65,6 +65,8 @@ export default function SettingsDialog({
   onClose,
   offline,
   storedCount,
+  targetCount,
+  persisted,
   vault,
   apiKeys,
   onKeysChange,
@@ -73,8 +75,11 @@ export default function SettingsDialog({
   settings: Settings;
   onChange: (next: Settings) => void;
   onClose: () => void;
-  /** How many articles are on this device right now. */
+  /** How many articles are on this device right now, and how many are wanted. */
   storedCount: number;
+  targetCount: number;
+  /** Whether the browser agreed to keep this cache rather than evict it. */
+  persisted: boolean;
   vault: unknown | null;
   apiKeys: Record<string, string>;
   onKeysChange: (next: { vault: unknown | null; keys: Record<string, string> }) => void;
@@ -204,8 +209,8 @@ export default function SettingsDialog({
                     a run that saved nothing used to look the same as one that
                     saved everything. */}
                 <strong className="offline-count">
-                  {storedCount} article{storedCount === 1 ? "" : "s"} on this
-                  device
+                  {storedCount} of {targetCount} article
+                  {targetCount === 1 ? "" : "s"} on this device
                 </strong>
                 {offline.result && (
                   <>
@@ -219,9 +224,14 @@ export default function SettingsDialog({
                 <br />
                 The newest 15 stories from each source, plus everything in
                 Saved, are kept on this device so you can read them without a
-                connection. This happens on your first visit after 7am and
-                after 4pm ET. Downloaded articles carry a blue check in the
-                list.
+                connection. Anything missing is fetched whenever the app is
+                open, so an interrupted download finishes itself; the full
+                refresh runs on the first visit after 7am and after 4pm ET.
+                Downloaded articles carry a blue check in the list.
+                <br />
+                {persisted
+                  ? "This browser has agreed to keep the cache."
+                  : "This browser may clear the cache when space is short — adding the app to your Home Screen usually prevents that."}
               </span>
             </div>
             <button

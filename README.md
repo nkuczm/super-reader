@@ -332,6 +332,16 @@ line — the mark appears as each one lands, and is still there on the next
 visit. Hovering an article warms it too, so a story you were about to open
 picks up the check on its own.
 
+Anything missing is fetched whenever the app is open — on launch, on returning
+to it, and when a connection comes back — so a download interrupted by
+switching apps finishes itself rather than waiting for the next slot. The full
+refresh, which also prunes what has aged out, still runs on the first visit
+after 7am and after 4pm ET.
+
+The app also asks the browser to keep this cache rather than evict it. Safari
+clears site storage after about a week of not visiting unless the app is on
+your Home Screen; Settings shows which state you are in.
+
 While that download is running, a thin progress bar sits across the top of the
 screen and fills as each article lands — it holds at full for a moment when it
 finishes, so completing looks different from stopping. Settings still carries

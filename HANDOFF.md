@@ -121,6 +121,24 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   bar is the only sign the download is running; moving in threes on a slow
   connection reads as stuck. It also holds at 100% for 900ms before fading,
   because a bar that vanishes at 80% looks like a failure.
+- **The device is topped up on every visit, focus and reconnection**, not only
+  at slot boundaries. A phone suspends the page the moment you switch away, so
+  a run interrupted after five articles used to leave the rest until the next
+  7am or 4pm — the slot was already marked. Articles already stored cost one
+  lookup and are skipped, so a top-up is cheap when there is nothing to do.
+- **`navigator.storage.persist()` is requested at startup.** Safari clears site
+  storage after roughly a week of not visiting; the grant usually follows from
+  adding the app to the Home Screen. Settings says which state you are in,
+  because "downloaded" and "downloaded until you go on holiday" look identical
+  otherwise.
+- **Downloading with the app closed is not possible on iOS today**, and this is
+  the one request the platform refuses. No Background Sync, no Periodic
+  Background Sync in Safari. The only mechanism that runs code while a web app
+  is closed is Web Push (iOS 16.4+, Home Screen install, permission granted):
+  a push wakes the service worker, which can fetch and store. That needs VAPID
+  keys, a subscription table — so the Neon database — and a Vercel cron, and
+  iOS requires every push to show a notification, so the user would see one
+  twice a day. Not built; discussed with the user.
 - **The download schedule is "first visit after 7am/4pm ET", not a timer.**
   iOS will not wake a web app in the background; a timer would be a promise the
   platform cannot keep.
