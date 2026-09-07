@@ -36,6 +36,16 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
   const [busy, setBusy] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
+  /**
+   * What is in the fields versus what is actually stored. Without this the
+   * panel cannot answer the only question it is ever asked — did that save?
+   */
+  const trimmed: Secrets = {};
+  for (const [id, value] of Object.entries(draft)) {
+    if (value.trim()) trimmed[id] = value.trim();
+  }
+  const dirty = JSON.stringify(trimmed) !== JSON.stringify(keys);
+
   const locked = isVaultBlob(vault) && Object.keys(keys).length === 0;
 
   useEffect(() => {
@@ -52,7 +62,8 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
       const secrets = await decryptVault(vault as never, passphrase);
       setDraft(secrets);
       onChange({ vault, keys: secrets });
-      setPassphrase("");
+      // The passphrase stays in memory for this session: asking for it again
+      // on the next edit is what made saving feel like it had not worked.
     } catch (err) {
       setError(
         err instanceof WrongPassphrase
@@ -66,6 +77,14 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
 
   async function save() {
     const first = !isVaultBlob(vault);
+    if (!passphrase) {
+      setError(
+        first
+          ? "Choose a passphrase to protect these keys."
+          : "Enter your passphrase to save this change.",
+      );
+      return;
+    }
     if (first && passphrase !== confirmPassphrase) {
       setError("The two passphrases do not match.");
       return;
@@ -77,15 +96,10 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const secrets: Secrets = {};
-      for (const [id, value] of Object.entries(draft)) {
-        if (value.trim()) secrets[id] = value.trim();
-      }
-      // Re-encrypting with the passphrase on every save keeps one copy of the
-      // truth; there is no separate "changed" list to fall out of step.
-      const blob = await encryptVault(secrets, first ? passphrase : keyPassphrase());
-      onChange({ vault: blob, keys: secrets });
-      setPassphrase("");
+      // Re-encrypting everything on each save keeps one copy of the truth;
+      // there is no separate "changed" list to fall out of step.
+      const blob = await encryptVault(trimmed, passphrase);
+      onChange({ vault: blob, keys: trimmed });
       setConfirmPassphrase("");
       setSavedAt(Date.now());
     } catch (err) {
@@ -93,19 +107,6 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
     } finally {
       setBusy(false);
     }
-  }
-
-  /**
-   * Once unlocked, the vault is rewritten under the passphrase just entered —
-   * or, when none was, the one still in the field. Asking again on every edit
-   * would be the obvious alternative and is worse: it trains passphrase entry
-   * into a reflex.
-   */
-  function keyPassphrase() {
-    if (!passphrase) {
-      throw new Error("Enter your passphrase to save a change.");
-    }
-    return passphrase;
   }
 
   if (locked) {
@@ -143,8 +144,13 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
       <div className="offline-status">
         <strong>
           {Object.keys(keys).length > 0
-            ? `${Object.keys(keys).length} key${Object.keys(keys).length === 1 ? "" : "s"} set`
-            : "No keys set"}
+            ? `${Object.keys(keys).length} key${Object.keys(keys).length === 1 ? "" : "s"} saved`
+            : "No keys saved"}
+          {dirty ? (
+            <em className="badge warn">unsaved changes</em>
+          ) : savedAt ? (
+            <em className="badge ok">{Icon.check} saved</em>
+          ) : null}
         </strong>
         <span>
           Encrypted with your passphrase in this browser before it syncs, so
@@ -195,9 +201,9 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
           />
         )}
         <small>
-          There is no way to recover this. Forgetting it means entering the
-          keys again, which is the cost of the server not being able to read
-          them.
+          {isVaultBlob(vault)
+            ? "Needed to save a change, and to unlock these keys on another device."
+            : "There is no way to recover this. Forgetting it means entering the keys again, which is the cost of the server not being able to read them."}
         </small>
       </label>
 
@@ -216,9 +222,9 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
             Remove all keys
           </button>
         )}
-        <button className="btn small" disabled={busy} onClick={save}>
+        <button className="btn small" disabled={busy || !dirty} onClick={save}>
           {busy ? <span className="spinner" /> : Icon.check}
-          {savedAt ? "Saved" : "Save keys"}
+          {dirty ? "Save keys" : "Saved"}
         </button>
       </div>
     </div>

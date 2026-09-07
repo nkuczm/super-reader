@@ -144,6 +144,10 @@ different densities, while the feeds themselves are what needs to match.
 Feeds are fetched server-side, which sidesteps browser CORS restrictions —
 this is why the app needs a Node server rather than being a static page.
 
+Every dialog closes three ways: the X in its header, the button in its footer,
+and a tap outside it. Opening one from the sidebar drawer puts the drawer away
+with it, so closing it returns you to the articles rather than to the drawer.
+
 ## On a phone
 
 The layout adapts below 860px: the sidebar becomes an off-canvas drawer behind

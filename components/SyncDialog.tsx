@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Icon } from "./icons";
 
 type Props = {
@@ -53,6 +53,14 @@ export default function SyncDialog({
     }
   }
 
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
     <div className="overlay" onMouseDown={onClose}>
       <div
@@ -63,6 +71,13 @@ export default function SyncDialog({
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="dialog-head">
+          <button
+            className="dialog-close"
+            aria-label="Close"
+            onClick={onClose}
+          >
+            {Icon.close}
+          </button>
           <h2>Sync across devices</h2>
           <p>
             Your feeds live in this browser. Turn on sync to read them

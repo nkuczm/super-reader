@@ -175,6 +175,18 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   already stored, so without a version a wrongly extracted article would stay
   wrong on the device forever. Bump it whenever extraction changes what a page
   yields; older copies are then treated as a miss and re-fetched.
+- **Every dialog's content must live inside `.dialog-body`.** It is the only
+  part that scrolls; anything placed between it and `.dialog-foot` overflows a
+  sheet that is `overflow: hidden` and pushes the footer — the way out — off
+  the bottom of the screen. That is what trapped a phone user in Settings: the
+  Offline block had always been outside, and adding the API-key panel made the
+  Done button unreachable. `.dialog-body` also needs `min-height: 0`, because a
+  flex item defaults to `min-height: auto` and refuses to shrink.
+- **Check dialogs at phone size, and check position rather than visibility.**
+  Playwright's `isVisible()` returns true for an element sitting 700px below
+  the fold; compare its `boundingBox()` against the viewport height instead.
+  Every dialog now also carries a header close button, so there is a way out
+  that does not depend on the footer being reachable.
 - **The reader sanitises to an allowlist.** It injects third-party HTML;
   scripts, styles, iframes, event handlers and non-http(s) URLs are stripped.
   There is a test asserting nothing executable survives — keep it.

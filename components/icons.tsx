@@ -67,6 +67,11 @@ export const Icon = {
       <path d="M6 4h12v16l-6-4.5L6 20z" />
     </svg>
   ),
+  close: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+      <path d="M6 6l12 12M18 6L6 18" />
+    </svg>
+  ),
   check: (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
       <path d="M4 12.5l5.5 5.5L20 6.5" />

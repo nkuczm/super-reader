@@ -128,13 +128,33 @@
   width: 100%; max-width: 620px; max-height: 78vh; display: flex; flex-direction: column;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28); overflow: hidden;
 }
-.dialog-head { padding: 18px 20px 14px; border-bottom: 1px solid var(--border); }
+.dialog-head {
+  position: relative; flex: none;
+  padding: 18px 52px 14px 20px; border-bottom: 1px solid var(--border);
+}
+/* Always one obvious way out, whatever is scrolled where. */
+.dialog-close {
+  position: absolute; top: 12px; right: 12px;
+  width: 34px; height: 34px; display: inline-flex;
+  align-items: center; justify-content: center;
+  border: 0; border-radius: 9px; background: transparent; color: var(--text-dim);
+}
+.dialog-close:hover { background: var(--bg-hover); color: var(--text); }
 .dialog-head h2 { margin: 0 0 4px; font-size: 17px; letter-spacing: -0.01em; }
 .dialog-head p { margin: 0; font-size: 13px; color: var(--text-dim); }
-.dialog-body { padding: 16px 20px; overflow-y: auto; }
+/* min-height:0 is what actually lets this shrink: a flex item defaults to
+   min-height:auto, so a tall panel pushed the footer — and its Done button —
+   off the bottom of a phone screen with no way back. */
+.dialog-body {
+  flex: 1 1 auto; min-height: 0; padding: 16px 20px;
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  /* Don't scroll the article list behind the sheet once this hits its end. */
+  overscroll-behavior: contain;
+}
 .dialog-foot {
-  padding: 13px 20px; border-top: 1px solid var(--border);
+  flex: none; padding: 13px 20px; border-top: 1px solid var(--border);
   display: flex; gap: 8px; justify-content: flex-end; align-items: center;
+  background: var(--bg);
 }
 .row { display: flex; gap: 8px; }
 .input {
@@ -613,3 +633,11 @@
 .file-text table { font-size: 13px; }
 .file-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .file-actions .read-btn { margin-top: 0; text-decoration: none; }
+
+.badge.ok { background: rgba(22, 163, 74, 0.14); color: #15803d; }
+.badge.warn { background: rgba(217, 119, 6, 0.16); color: #b45309; }
+.badge svg { vertical-align: -2px; margin-right: 3px; }
+@media (prefers-color-scheme: dark) {
+  .badge.ok { color: #4ade80; }
+  .badge.warn { color: #fbbf24; }
+}

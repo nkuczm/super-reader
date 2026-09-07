@@ -695,6 +695,16 @@ export default function Reader() {
   );
 
   // On a phone the drawer covers the list, so any choice should close it.
+  /**
+   * Open a dialog and put the drawer away with it: on a phone the sidebar sits
+   * above the list, so leaving it open means the dialog closes onto a drawer
+   * rather than onto the articles.
+   */
+  function openPanel(open: (value: boolean) => void) {
+    setMenuOpen(false);
+    open(true);
+  }
+
   const choose = useCallback((next: Selection) => {
     setSelection(next);
     setMenuOpen(false);
@@ -869,14 +879,14 @@ export default function Reader() {
           )}
           <button
             className="sync-btn"
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => openPanel(setSettingsOpen)}
           >
             {Icon.gear}
             Settings
           </button>
           <button
             className="sync-btn"
-            onClick={() => setSyncOpen(true)}
+            onClick={() => openPanel(setSyncOpen)}
             title={syncCode ? "Syncing across devices" : "Sync across devices"}
           >
             <span className={`sync-dot ${syncCode ? syncState : "off"}`} />
@@ -942,7 +952,7 @@ export default function Reader() {
               {refreshing ? <span className="spinner" /> : Icon.refresh}
               Refresh
             </button>
-            <button className="btn small" onClick={() => setDialogOpen(true)}>
+            <button className="btn small" onClick={() => openPanel(setDialogOpen)}>
               {Icon.plus} Add source
             </button>
           </div>
@@ -955,7 +965,7 @@ export default function Reader() {
               Paste a website, a Substack, or an RSS URL — or just type a topic.
               You’ll see a preview of what lands in your feed before you keep it.
             </p>
-            <button className="btn small" onClick={() => setDialogOpen(true)}>
+            <button className="btn small" onClick={() => openPanel(setDialogOpen)}>
               {Icon.plus} Add your first source
             </button>
           </div>

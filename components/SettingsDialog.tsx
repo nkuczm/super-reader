@@ -1,6 +1,7 @@
 "use client";
 
 import ApiKeys from "./ApiKeys";
+import { Icon } from "./icons";
 import { useEffect } from "react";
 import type { Settings, ViewMode } from "@/lib/store";
 
@@ -104,6 +105,13 @@ export default function SettingsDialog({
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="dialog-head">
+          <button
+            className="dialog-close"
+            aria-label="Close"
+            onClick={onClose}
+          >
+            {Icon.close}
+          </button>
           <h2>Settings</h2>
           <p>How your articles are laid out on this device.</p>
         </div>
@@ -140,7 +148,6 @@ export default function SettingsDialog({
               <em>Otherwise they stay in the list, dimmed.</em>
             </span>
           </label>
-        </div>
 
           {settings.openOnSite.length > 0 && (
             <>
@@ -226,6 +233,7 @@ export default function SettingsDialog({
               Download now
             </button>
           </div>
+        </div>
 
         <div className="dialog-foot">
           {/* Which build this is, so "has it updated?" is answerable. */}

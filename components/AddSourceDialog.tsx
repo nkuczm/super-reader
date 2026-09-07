@@ -94,6 +94,13 @@ export default function AddSourceDialog({
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="dialog-head">
+          <button
+            className="dialog-close"
+            aria-label="Close"
+            onClick={onCancel}
+          >
+            {Icon.close}
+          </button>
           <h2>Add a source</h2>
           <p>
             {tab === "paste"
