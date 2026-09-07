@@ -178,7 +178,7 @@ read, with the fields each one takes:
 
 | API | What it follows | Key |
 | --- | --- | --- |
-| CourtListener | Opinions, PACER filings, oral arguments, by court or search | optional |
+| CourtListener | Opinions, PACER filings, oral arguments, by court or search | listing free; **text needs a key** |
 | Federal Register | Rules, proposed rules, notices, by agency or term | — |
 | Regulations.gov | Dockets and rulemaking documents | required |
 | Congress.gov | Bills and resolutions as they move | required |
@@ -292,6 +292,10 @@ Sources often link a file rather than write the thing itself: the PDF behind a
 notice, the CSV of the figures. Those arrive as chips under the story, the way
 an image does — tap one and it expands in place with the file's own text,
 without leaving the list.
+
+A file appears only where a publication actually links one — an RSS enclosure,
+or a link in the item's own text. Files are the exception, not a fixture of
+every story.
 
 Only formats with text in them are read: PDF, plain text, Markdown, CSV (shown
 as a table) and JSON. An image or a video would need a viewer rather than an

@@ -160,6 +160,25 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   contains, a known article-body container, so a post about comments survives.
   `charThreshold` is also lowered to 250: Readability's default of 500 discards
   a genuinely short post and falls back to scraping the whole page.
+- **CourtListener's opinion pages cannot be scraped.** A non-browser request
+  gets a 2KB stub, so Readability had nothing to work with and the reader was
+  blank. The text lives in the API (`/api/rest/v4/opinions/<id>/`), which needs
+  a token — the search endpoint does not, which is why listing worked while
+  reading did not. `ApiProvider.reader` is the general hook for this: an
+  article from an API gets its text from that API, before any scraping.
+- **API sources follow their own paging.** CourtListener's search returns 20
+  per page whatever you ask for — measured, with a `next` cursor and 99,443
+  matches behind it — so a source stopped at 20 and looked finished. Providers
+  declare `nextPage` and `fetchApiSource` follows it up to four pages.
+- **Attachments come only from what a publication actually links** — an
+  enclosure, or a file link in the item's own text. Deriving one from a record
+  field (the Federal Register's `pdf_url`) put a chip under every single item
+  and made files look like the norm.
+- **`pdfjs-dist` also needs `outputFileTracingIncludes`.** Marking it external
+  is not enough: the worker is only ever imported dynamically, so file tracing
+  leaves it out of the function and every PDF fails in the deployed app while
+  passing under `next start`. Both settings are load-bearing; check a PDF
+  against the deployment, not just locally.
 - **A file is read into the same shape as an article**, by `/api/article`
   itself rather than a second endpoint. That is what lets the reader, the
   offline download, the cache and Saved treat a PDF like a story with no case
