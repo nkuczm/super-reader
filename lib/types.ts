@@ -18,6 +18,8 @@ export type Article = {
   summary?: string;
   image?: string;
   attachments?: Attachment[];
+  /** Where the discussion of this item lives, when it is not the item itself. */
+  comments?: string;
 };
 
 export type SourceMeta = {

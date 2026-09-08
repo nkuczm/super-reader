@@ -1283,6 +1283,18 @@ export default function Reader() {
                       >
                         {Icon.book} Read here
                       </button>
+                      {article.comments && (
+                        // Following a subreddit for the links but losing the
+                        // thread would miss the point of it.
+                        <a
+                          className="read-btn"
+                          href={article.comments}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                        >
+                          {Icon.chat} Discussion
+                        </a>
+                      )}
                       <button
                         className={`read-btn save-btn${
                           isSaved(article.link) ? " on" : ""

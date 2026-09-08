@@ -3,6 +3,7 @@ import { scrapePage } from "./scrape";
 import { enrichArticles } from "./enrich";
 import { xHandleFrom, fetchXFeed } from "./x";
 import { parseApiSourceUrl, fetchApiSource } from "./apis";
+import { subredditFrom, subredditFeedUrl, subredditPageUrl } from "./reddit";
 import { sortNewestFirst } from "./sort";
 import type { DiscoverResult } from "./types";
 
@@ -178,6 +179,24 @@ export async function discover(
   if (handle) {
     const { meta, articles } = await fetchXFeed(handle, limit);
     return { ...meta, kind: "x", scope: "site", total: articles.length, articles };
+  }
+
+  // A subreddit, however it was pasted. This has to come before both the URL
+  // and the topic branches: "r/programming" is not a URL and would otherwise
+  // become a news search, and a reddit.com URL would be scraped as a page.
+  const sub = subredditFrom(raw);
+  if (sub) {
+    const { meta, total, articles } = await tryFeed(subredditFeedUrl(sub), limit);
+    return {
+      ...meta,
+      kind: "feed",
+      scope: "section",
+      total,
+      title: `r/${sub.name}${sub.sort ? ` · ${sub.sort}` : ""}`,
+      siteUrl: subredditPageUrl(sub),
+      favicon: faviconFor("reddit.com"),
+      articles: await enrichArticles(articles, { siteDescription: meta.description }),
+    };
   }
 
   if (!isProbablyUrl(raw)) {

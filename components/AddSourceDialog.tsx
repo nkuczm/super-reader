@@ -104,7 +104,7 @@ export default function AddSourceDialog({
           <h2>Add a source</h2>
           <p>
             {tab === "paste"
-              ? "Paste a website, a Substack, an RSS URL, an X account like @OpenAI — or just type a topic. Sites without a feed are read straight from the page."
+              ? "Paste a website, a Substack, an RSS URL, a subreddit like r/AskHistorians, an X account like @OpenAI — or just type a topic. Sites without a feed are read straight from the page."
               : "Follow a data API — court opinions, federal rules, filings, papers. Fill in what you want and it becomes a source like any other."}
           </p>
           <div className="scope-switch dialog-tabs">
@@ -136,7 +136,7 @@ export default function AddSourceDialog({
             <input
               ref={inputRef}
               className="input"
-              placeholder="stratechery.com, @OpenAI, or a topic"
+              placeholder="stratechery.com, r/programming, @OpenAI, or a topic"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => {

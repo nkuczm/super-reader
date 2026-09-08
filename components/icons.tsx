@@ -67,6 +67,11 @@ export const Icon = {
       <path d="M6 4h12v16l-6-4.5L6 20z" />
     </svg>
   ),
+  chat: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-5.5A8 8 0 0 1 11 4h2a8 8 0 0 1 8 8z" />
+    </svg>
+  ),
   grip: (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <circle cx="9" cy="6" r="1.7" /><circle cx="15" cy="6" r="1.7" />

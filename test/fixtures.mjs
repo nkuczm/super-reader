@@ -330,6 +330,36 @@ review that denial de novo, see <a href="/c/F3d/1/1/">Doe v. Roe, 1 F.3d 1
 conclude that the officers are entitled to it.
 </pre>`;
 
+/**
+ * A subreddit feed in Reddit's own shape: a link post, a self post, and the
+ * footer Reddit appends to every entry.
+ */
+const redditFeed = `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
+<category term="testsub" label="r/testsub"/>
+<title>testsub</title><subtitle>A test subreddit</subtitle>
+<link rel="alternate" href="https://www.reddit.com/r/testsub/" type="text/html" />
+<entry>
+  <author><name>/u/linkposter</name></author>
+  <title>How branch prediction makes sorted data faster</title>
+  <link href="https://www.reddit.com/r/testsub/comments/aaa/how_branch_prediction/" rel="alternate"/>
+  <id>t3_aaa</id><updated>2026-09-08T20:05:25+00:00</updated>
+  <media:thumbnail url="https://b.thumbs.redditmedia.com/tiny.png" />
+  <content type="html">&lt;!-- SC_OFF --&gt;&lt;div class="md"&gt;&lt;/div&gt;&lt;!-- SC_ON --&gt; &amp;#32; submitted by &amp;#32; &lt;a href="https://www.reddit.com/user/linkposter"&gt; /u/linkposter &lt;/a&gt; &lt;br/&gt; &lt;span&gt;&lt;a href="https://example.test/branch-prediction"&gt;[link]&lt;/a&gt;&lt;/span&gt; &amp;#32; &lt;span&gt;&lt;a href="https://www.reddit.com/r/testsub/comments/aaa/how_branch_prediction/"&gt;[comments]&lt;/a&gt;&lt;/span&gt;</content>
+</entry>
+<entry>
+  <author><name>/u/asker</name></author>
+  <title>What is the history of using "ass" as an intensifier?</title>
+  <link href="https://www.reddit.com/r/testsub/comments/bbb/history_of_ass/" rel="alternate"/>
+  <id>t3_bbb</id><updated>2026-09-08T18:00:00+00:00</updated>
+  <content type="html">&lt;!-- SC_OFF --&gt;&lt;div class="md"&gt;&lt;p&gt;Despite its original meaning of donkey, the word is frequently used in English as an intensifier for other words: badass, dumbass, goofy-ass.&lt;/p&gt; &lt;p&gt;Has anyone traced the historical development of this usage?&lt;/p&gt;&lt;/div&gt;&lt;!-- SC_ON --&gt; &amp;#32; submitted by &amp;#32; &lt;a href="https://www.reddit.com/user/asker"&gt; /u/asker &lt;/a&gt; &lt;br/&gt; &lt;span&gt;&lt;a href="https://www.reddit.com/r/testsub/comments/bbb/history_of_ass/"&gt;[link]&lt;/a&gt;&lt;/span&gt; &amp;#32; &lt;span&gt;&lt;a href="https://www.reddit.com/r/testsub/comments/bbb/history_of_ass/"&gt;[comments]&lt;/a&gt;&lt;/span&gt;</content>
+</entry>
+</feed>`;
+
+export function startRedditSite(port = 8792) {
+  return serve({ "/r/testsub/.rss": [200, "application/atom+xml", redditFeed] }, port);
+}
+
 export function startFileSite(port = 8791) {
   return serve(
     {

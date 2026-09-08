@@ -1,6 +1,7 @@
 import { XMLParser } from "fast-xml-parser";
 import { sortNewestFirst } from "./sort";
 import { fileKindFor } from "./files";
+import { isRedditFeed, tidyRedditPost } from "./reddit";
 import type { Article, Attachment, SourceMeta } from "./types";
 
 /**
@@ -453,6 +454,14 @@ function pickImage(declared: string | undefined, content: string, site: string) 
 }
 
 function atomEntry(entry: any, site: string): Article {
+  const article = atomEntryRaw(entry, site);
+  // Reddit's entries carry the post, the author's footer and the discussion
+  // link all in one blob; unpicked, they read as boilerplate.
+  const content = text(entry.content) || text(entry.summary);
+  return isRedditFeed(site) ? tidyRedditPost(article, content) : article;
+}
+
+function atomEntryRaw(entry: any, site: string): Article {
   const links = asArray(entry.link);
   const link =
     links.find((l: any) => l?.["@_rel"] === "alternate")?.["@_href"] ??

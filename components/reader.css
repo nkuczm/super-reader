@@ -710,3 +710,5 @@
   /* No hover on a phone, so the grip has to be visible to be findable. */
   .drag-grip { opacity: 0.6; width: 30px; height: 38px; }
 }
+
+.article-actions a.read-btn { text-decoration: none; }
