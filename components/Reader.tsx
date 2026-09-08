@@ -16,6 +16,7 @@ import {
   DEFAULT_SETTINGS,
   type Settings,
   newId,
+  moveSourceBetweenFeeds,
   loadSaved,
   saveSaved,
   loadVault,
@@ -34,6 +35,7 @@ import InlineName from "./InlineName";
 import SettingsDialog from "./SettingsDialog";
 import DownloadBar from "./DownloadBar";
 import Attachments from "./Attachments";
+import { useSourceDrag } from "./useSourceDrag";
 import { encodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import {
   downloadForOffline,
@@ -444,6 +446,27 @@ export default function Reader() {
     setSelection({ type: "feed", id: feed.id });
     setAdding(false);
   }
+
+  /** Move a source into another feed, and show the feed it landed in. */
+  const moveSource = useCallback(
+    (sourceId: string, fromFeedId: string, toFeedId: string) => {
+      setFeeds((current) =>
+        moveSourceBetweenFeeds(current, sourceId, fromFeedId, toFeedId),
+      );
+      // A feed you just dropped something into should show what it now holds.
+      setCollapsed((current) => {
+        if (!current.has(toFeedId)) return current;
+        const next = new Set(current);
+        next.delete(toFeedId);
+        saveCollapsed(next);
+        return next;
+      });
+    },
+    [],
+  );
+
+  const { drag, onPointerDown, onPointerMove, onPointerUp, onPointerCancel } =
+    useSourceDrag(moveSource);
 
   function removeFeed(id: string) {
     setFeeds((current) => current.filter((f) => f.id !== id));
@@ -876,7 +899,15 @@ export default function Reader() {
             const ids = new Set(feed.sources.map((s) => s.id));
             const count = unread(articles.filter((a) => ids.has(a.sourceId)));
             return (
-              <div className="feed-group" key={feed.id}>
+              <div
+                className={`feed-group${
+                  drag && drag.overFeedId === feed.id && drag.fromFeedId !== feed.id
+                    ? " drop-target"
+                    : ""
+                }`}
+                key={feed.id}
+                data-feed-id={feed.id}
+              >
                 <div className="feed-head">
                   {editing === feed.id ? (
                     <InlineName
@@ -949,7 +980,27 @@ export default function Reader() {
 
                 {!collapsed.has(feed.id) &&
                   feed.sources.map((source) => (
-                  <div className="source-row" key={source.id}>
+                  <div
+                    className={`source-row${
+                      drag?.sourceId === source.id ? " dragging" : ""
+                    }`}
+                    key={source.id}
+                  >
+                    <button
+                      className="drag-grip"
+                      aria-label={`Move ${source.title} to another feed`}
+                      title="Drag into another feed"
+                      onPointerDown={(event) =>
+                        onPointerDown(event, source, feed.id)
+                      }
+                      onPointerMove={onPointerMove}
+                      onPointerUp={onPointerUp}
+                      onPointerCancel={onPointerCancel}
+                      // The row is a click target; a grip drag is not a click.
+                      onClick={(event) => event.preventDefault()}
+                    >
+                      {Icon.grip}
+                    </button>
                     <button
                       className={`nav-item ${
                         selection.type === "source" && selection.id === source.id
@@ -1271,6 +1322,17 @@ export default function Reader() {
           </>
         )}
       </main>
+
+      {drag && (
+        <div
+          className="drag-ghost"
+          style={{ left: drag.x + 14, top: drag.y - 14 }}
+          aria-hidden="true"
+        >
+          <SourceIcon src={drag.favicon ?? ""} title={drag.title} size={15} />
+          <span>{drag.title}</span>
+        </div>
+      )}
 
       <DownloadBar state={offline.state} done={offline.done} total={offline.total} />
 

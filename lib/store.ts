@@ -65,6 +65,39 @@ export function saveSaved(articles: SavedArticle[]) {
   }
 }
 
+/**
+ * Move a source into another feed.
+ *
+ * A move, not a copy: it leaves the feed it came from. If the target already
+ * follows the same URL the two are merged rather than duplicated — dragging
+ * something onto a feed that already has it should tidy up, not create a
+ * second copy that then refreshes twice.
+ */
+export function moveSourceBetweenFeeds(
+  feeds: Feed[],
+  sourceId: string,
+  fromFeedId: string,
+  toFeedId: string,
+): Feed[] {
+  if (fromFeedId === toFeedId) return feeds;
+  const source = feeds
+    .find((feed) => feed.id === fromFeedId)
+    ?.sources.find((s) => s.id === sourceId);
+  if (!source) return feeds;
+  if (!feeds.some((feed) => feed.id === toFeedId)) return feeds;
+
+  return feeds.map((feed) => {
+    if (feed.id === fromFeedId) {
+      return { ...feed, sources: feed.sources.filter((s) => s.id !== sourceId) };
+    }
+    if (feed.id === toFeedId) {
+      const already = feed.sources.some((s) => s.feedUrl === source.feedUrl);
+      return already ? feed : { ...feed, sources: [...feed.sources, source] };
+    }
+    return feed;
+  });
+}
+
 export type ViewMode = "magazine" | "cards" | "list";
 
 export type Settings = {

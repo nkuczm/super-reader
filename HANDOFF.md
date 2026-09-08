@@ -151,6 +151,20 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   failed looked identical to one where every article succeeded — both just
   said "Saved <time>". If offline reading is ever reported broken, that number
   is the first thing to ask for.
+- **Dragging a source between feeds is pointer events, not HTML5 drag-and-drop**
+  (`components/useSourceDrag.ts`). `dragstart`/`drop` never fire on iOS, and
+  this app is used on a phone. It starts from a grip rather than the whole row,
+  so a finger on the row still scrolls the sidebar and a tap still selects the
+  source.
+- **`touch-action` does not inherit.** `touch-action: none` on the grip button
+  was not enough: the finger lands on the SVG inside it, which still said
+  `auto`, so the browser claimed the gesture and the drag died on
+  `pointercancel` after the first move. The icon needs it too (and
+  `pointer-events: none`, so the button is what gets hit).
+- **Measure the drawer after it has settled.** It slides in over 0.22s; a
+  Playwright `boundingBox()` taken straight after opening it reports the
+  sidebar where it *was* (x of -177 on a 390px screen), so synthetic touches
+  land on nothing and the failure looks exactly like a broken drag.
 - **View mode and collapsed feeds are per-device, not synced.** A phone and a
   desktop want different densities; the feeds are what must match.
 - **Sync resolves by most recent change, not last write.** Each device stamps

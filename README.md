@@ -100,6 +100,16 @@ Which feeds are collapsed is remembered per device. A collapsed feed still
 shows its unread count and is still selectable, and collapsing on a phone does
 not close the drawer.
 
+### Moving a source between feeds
+
+Each source in the sidebar has a grip on its left. Drag it onto another feed to
+move it there — with a mouse, or with a finger on a phone. The feed under the
+pointer is outlined as you go, Escape abandons the drag, and dropping into a
+collapsed feed opens it so you can see what landed.
+
+It is a move rather than a copy, and dropping a source onto a feed that already
+follows the same URL merges the two rather than leaving it listed twice.
+
 ## View modes
 
 Settings (bottom of the sidebar) chooses how articles are laid out:

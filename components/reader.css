@@ -669,3 +669,44 @@
   .prose pre { white-space: pre-wrap; word-break: break-word; }
   .file-text { font-size: 14px; }
 }
+
+/* ---------- dragging a source between feeds ---------- */
+.drag-grip {
+  flex: none; width: 22px; height: 26px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 6px; background: transparent;
+  color: var(--text-dim); opacity: 0.35; cursor: grab;
+  /* The browser must not claim this gesture as a scroll before we do. */
+  touch-action: none;
+}
+/* touch-action does not inherit, and the finger lands on the icon rather than
+   the button: without this the SVG still allowed panning, the browser started
+   a scroll, and the drag died on pointercancel after the first move. */
+.drag-grip svg { touch-action: none; pointer-events: none; }
+.source-row:hover .drag-grip { opacity: 0.8; }
+.drag-grip:hover { background: var(--bg-hover); opacity: 1; }
+.drag-grip:active { cursor: grabbing; }
+.source-row.dragging { opacity: 0.4; }
+
+.feed-group.drop-target {
+  background: var(--accent-soft);
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.drag-ghost {
+  position: fixed; z-index: 70; pointer-events: none;
+  display: flex; align-items: center; gap: 8px;
+  max-width: 240px; padding: 6px 10px;
+  background: var(--bg); border: 1px solid var(--accent);
+  border-radius: 9px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  font-size: 13px; font-weight: 600;
+}
+.drag-ghost span {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+@media (max-width: 860px) {
+  /* No hover on a phone, so the grip has to be visible to be findable. */
+  .drag-grip { opacity: 0.6; width: 30px; height: 38px; }
+}

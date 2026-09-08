@@ -67,6 +67,13 @@ export const Icon = {
       <path d="M6 4h12v16l-6-4.5L6 20z" />
     </svg>
   ),
+  grip: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <circle cx="9" cy="6" r="1.7" /><circle cx="15" cy="6" r="1.7" />
+      <circle cx="9" cy="12" r="1.7" /><circle cx="15" cy="12" r="1.7" />
+      <circle cx="9" cy="18" r="1.7" /><circle cx="15" cy="18" r="1.7" />
+    </svg>
+  ),
   close: (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
       <path d="M6 6l12 12M18 6L6 18" />
