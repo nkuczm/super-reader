@@ -11,6 +11,13 @@ export type SyncPayload = {
    * by whoever holds the URL.
    */
   vault?: unknown;
+  /**
+   * When this data last changed, on the device that changed it. The rule is
+   * "most recent change wins" rather than "last write wins": a device that has
+   * been closed for a week must not overwrite what happened since, however
+   * long after the fact it reconnects.
+   */
+  updatedAt?: number;
 };
 
 export type SyncRecord = {
@@ -47,15 +54,32 @@ export async function readSync(code: string): Promise<SyncRecord | null> {
   };
 }
 
+export class StaleWrite extends Error {
+  constructor(readonly current: SyncRecord) {
+    super("This device's copy is older than what is already synced.");
+    this.name = "StaleWrite";
+  }
+}
+
 /**
- * Last write wins. Devices pull on load and on focus, so conflicting edits
- * need two devices changing feeds in the same moment; the cost of that is one
- * side's change, not the whole list.
+ * Most recent change wins. A write carrying an older change time than the one
+ * already stored is refused, and the caller is handed what is there instead —
+ * which is what a device that has been away needs anyway.
+ *
+ * Two devices editing within the same moment still resolve by whichever
+ * change is stamped later; the cost of that is one side's edit, not the list.
  */
 export async function writeSync(
   code: string,
   payload: SyncPayload,
 ): Promise<SyncRecord | null> {
+  const existing = await readSync(code);
+  if (existing) {
+    const theirs = Number(existing.payload?.updatedAt ?? 0);
+    const ours = Number(payload.updatedAt ?? 0);
+    if (theirs > ours) throw new StaleWrite(existing);
+  }
+
   await ensureSchema();
   const sql = getSql();
   const rows = await sql`

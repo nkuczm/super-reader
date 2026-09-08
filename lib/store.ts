@@ -215,6 +215,30 @@ export function saveUnlockedKeys(keys: Record<string, string> | null) {
   }
 }
 
+const UPDATED_KEY = "super-reader:updated-at:v1";
+
+/**
+ * When the synced data last changed on this device. Sync resolves by this
+ * rather than by who wrote last, so a device that has been closed for a week
+ * cannot overwrite what happened while it was away.
+ */
+export function loadUpdatedAt(): number {
+  if (typeof window === "undefined") return 0;
+  try {
+    return Number(window.localStorage.getItem(UPDATED_KEY)) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function saveUpdatedAt(at: number) {
+  try {
+    window.localStorage.setItem(UPDATED_KEY, String(at));
+  } catch {
+    /* storage unavailable; sync falls back to whatever the server holds */
+  }
+}
+
 const READ_KEY = "super-reader:read:v1";
 
 export function loadRead(): Set<string> {

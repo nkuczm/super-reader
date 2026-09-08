@@ -393,6 +393,12 @@ Devices pull on load and whenever the window regains focus, and push changes
 after a short debounce. Conflicts resolve last-write-wins: two devices editing
 in the same moment costs one side's change, not the list.
 
+Conflicts resolve by **most recent change**, not most recent write. Each device
+records when its data actually changed; a device that has been closed for a
+week cannot overwrite what happened while it was away, and instead picks up
+what is current. Nothing is sent until the first pull has answered, so opening
+a stale device is safe.
+
 ### Setting it up
 
 Sync needs a Postgres database. Without one the app works exactly as before and

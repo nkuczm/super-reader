@@ -20,6 +20,8 @@ import {
   saveSaved,
   loadVault,
   saveVault,
+  loadUpdatedAt,
+  saveUpdatedAt,
   loadUnlockedKeys,
   saveUnlockedKeys,
   type SavedArticle,
@@ -135,6 +137,22 @@ export default function Reader() {
   // Set while applying data pulled from the server, so the save effect below
   // does not immediately push it straight back.
   const applying = useRef(false);
+  /**
+   * When this device's synced data last changed. Held in a ref as well as
+   * state: the stamping effect reads it, and depending on the state it sets
+   * would make it re-stamp on every render.
+   */
+  const [updatedAt, setUpdatedAt] = useState(0);
+  const updatedAtRef = useRef(0);
+  /**
+   * Nothing may be pushed until the first pull has answered. Without this the
+   * debounced save fires ~900ms after load, carrying whatever was in local
+   * storage — which is how a desktop left closed for a week overwrote a
+   * phone's newer feeds the moment it was opened.
+   */
+  const pulled = useRef(false);
+  const hydrated = useRef(false);
+  const pushedAt = useRef(0);
 
   useEffect(() => {
     setFeeds(loadFeeds());
@@ -145,6 +163,8 @@ export default function Reader() {
     setSaved(loadSaved());
     setVault(loadVault());
     setApiKeys(loadUnlockedKeys());
+    updatedAtRef.current = loadUpdatedAt();
+    setUpdatedAt(updatedAtRef.current);
     setReady(true);
   }, []);
 
@@ -156,7 +176,7 @@ export default function Reader() {
     });
   }, []);
 
-  const applyRemote = useCallback((payload: { feeds?: Feed[]; read?: string[]; vault?: unknown }) => {
+  const applyRemote = useCallback((payload: { feeds?: Feed[]; read?: string[]; vault?: unknown; updatedAt?: number }) => {
     applying.current = true;
     if (Array.isArray(payload.feeds)) setFeeds(payload.feeds);
     // The vault arrives encrypted; it stays locked until a passphrase is
@@ -170,6 +190,12 @@ export default function Reader() {
       setRead(next);
       saveRead(next);
     }
+    if (typeof payload.updatedAt === "number" && payload.updatedAt > 0) {
+      updatedAtRef.current = payload.updatedAt;
+      setUpdatedAt(payload.updatedAt);
+      saveUpdatedAt(payload.updatedAt);
+      pushedAt.current = payload.updatedAt;
+    }
     // Release on the next tick, after the state updates have flushed.
     setTimeout(() => {
       applying.current = false;
@@ -180,8 +206,15 @@ export default function Reader() {
     async (code: string) => {
       const res = await fetch(`/api/sync?code=${encodeURIComponent(code)}`);
       const data = await res.json();
+      // Even a failed pull opens the gate: a device that cannot read must not
+      // be stuck unable to write for the rest of the session.
+      pulled.current = true;
       if (!res.ok) throw new Error(data.error ?? "Could not fetch synced feeds");
-      applyRemote(data.payload ?? {});
+
+      const remote = data.payload ?? {};
+      const theirs = Number(remote.updatedAt ?? 0);
+      // Older than what this device has? Keep ours; the push below sends it.
+      if (theirs >= loadUpdatedAt()) applyRemote(remote);
     },
     [applyRemote],
   );
@@ -189,6 +222,27 @@ export default function Reader() {
   useEffect(() => {
     if (ready) saveFeeds(feeds);
   }, [feeds, ready]);
+
+  /**
+   * Stamp a real local change. The first run is the load from storage, which
+   * is not a change — stamping it would make a stale device look like the
+   * freshest one.
+   */
+  useEffect(() => {
+    if (!ready) return;
+    if (!hydrated.current) {
+      hydrated.current = true;
+      return;
+    }
+    if (applying.current) return;
+    // Always outrank what this device last saw. Wall clocks disagree between
+    // devices, and a stamp pulled from one running ahead would otherwise
+    // freeze this device out of syncing anything ever again.
+    const now = Math.max(Date.now(), updatedAtRef.current + 1);
+    updatedAtRef.current = now;
+    setUpdatedAt(now);
+    saveUpdatedAt(now);
+  }, [feeds, read, vault, ready]);
 
   // Pull once the code is known, and again whenever the window regains focus,
   // so a device left open picks up changes made elsewhere.
@@ -217,22 +271,39 @@ export default function Reader() {
   // Push local changes, debounced so a burst of edits is one request.
   useEffect(() => {
     if (!ready || !syncCode || applying.current) return;
+    if (!pulled.current) return; // never before knowing what is out there
+    if (updatedAt === 0 || updatedAt <= pushedAt.current) return;
+
     const timer = setTimeout(async () => {
       setSyncState("working");
       try {
         const res = await fetch("/api/sync", {
           method: "PUT",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ code: syncCode, feeds, read: [...read], vault }),
+          body: JSON.stringify({
+            code: syncCode,
+            feeds,
+            read: [...read],
+            vault,
+            updatedAt,
+          }),
         });
+        if (res.status === 409) {
+          // Something newer arrived while this device was away; take it.
+          const data = await res.json();
+          applyRemote(data.payload ?? {});
+          setSyncState("saved");
+          return;
+        }
         if (!res.ok) throw new Error("save failed");
+        pushedAt.current = updatedAt;
         setSyncState("saved");
       } catch {
         setSyncState("error");
       }
     }, 900);
     return () => clearTimeout(timer);
-  }, [feeds, read, ready, syncCode, vault]);
+  }, [feeds, read, ready, syncCode, vault, updatedAt, applyRemote]);
 
   const startSync = useCallback(async () => {
     setSyncState("working");
@@ -748,6 +819,9 @@ export default function Reader() {
   const choose = useCallback((next: Selection) => {
     setSelection(next);
     setMenuOpen(false);
+    // Picking a feed means going back to the list; staying in the article you
+    // were reading made the sidebar look unresponsive.
+    setReading(null);
   }, []);
 
   // Count the sources behind whatever is selected, not every source there is.
@@ -957,6 +1031,7 @@ export default function Reader() {
             feedUrl={reading.feedUrl}
             summary={reading.summary}
             keyHeaders={keyHeaders}
+            onOpenMenu={() => setMenuOpen(true)}
             onAlwaysOpenOnSite={alwaysOpenOnSite}
             saved={isSaved(reading.url)}
             onToggleSave={() => {

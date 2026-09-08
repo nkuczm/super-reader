@@ -4,6 +4,7 @@ import {
   createSync,
   readSync,
   writeSync,
+  StaleWrite,
   MAX_PAYLOAD_BYTES,
 } from "@/lib/sync";
 import { isValidCode } from "@/lib/sync-code";
@@ -52,7 +53,13 @@ export async function POST() {
 export async function PUT(request: Request) {
   if (!isConfigured()) return notConfigured();
 
-  let body: { code?: string; feeds?: unknown; read?: unknown; vault?: unknown };
+  let body: {
+    code?: string;
+    feeds?: unknown;
+    read?: unknown;
+    vault?: unknown;
+    updatedAt?: unknown;
+  };
   try {
     body = await request.json();
   } catch {
@@ -72,6 +79,7 @@ export async function PUT(request: Request) {
     read: Array.isArray(body.read) ? (body.read as string[]).slice(-3000) : [],
     // Opaque to this server by design; stored and handed back untouched.
     ...(body.vault ? { vault: body.vault } : {}),
+    updatedAt: Number.isFinite(Number(body.updatedAt)) ? Number(body.updatedAt) : 0,
   };
   if (JSON.stringify(payload).length > MAX_PAYLOAD_BYTES) {
     return NextResponse.json({ error: "That is too much data to sync." }, { status: 413 });
@@ -83,7 +91,15 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: "No feeds found for that code." }, { status: 404 });
     }
     return NextResponse.json(record);
-  } catch {
+  } catch (error) {
+    // Not a failure: this device is behind, and gets what is current so it can
+    // catch up rather than clobber.
+    if (error instanceof StaleWrite) {
+      return NextResponse.json(
+        { error: "A newer change is already synced.", ...error.current },
+        { status: 409 },
+      );
+    }
     return NextResponse.json({ error: "Could not reach sync storage." }, { status: 502 });
   }
 }

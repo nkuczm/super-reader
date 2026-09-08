@@ -91,3 +91,62 @@ test("codes are stored only as hashes", async () => {
     "the code itself is never stored",
   );
 });
+
+test("a device that has been away cannot overwrite a newer change", async () => {
+  const { code } = await createSync();
+
+  // The phone adds a feed now.
+  await writeSync(code, {
+    feeds: [{ id: "phone", name: "Added on the phone", sources: [] }],
+    updatedAt: 2_000,
+  });
+
+  // The desktop, closed for a week, wakes up and pushes what it remembers.
+  await assert.rejects(
+    () =>
+      writeSync(code, {
+        feeds: [{ id: "old", name: "Stale desktop copy", sources: [] }],
+        updatedAt: 1_000,
+      }),
+    (error: Error) => error.name === "StaleWrite",
+  );
+
+  const record = await readSync(code);
+  assert.equal(
+    (record?.payload.feeds?.[0] as { name: string }).name,
+    "Added on the phone",
+    "the newer change survives",
+  );
+
+  // And the refusal hands back what is current, so the stale device can catch up.
+  try {
+    await writeSync(code, { feeds: [], updatedAt: 1_000 });
+    assert.fail("should have been refused");
+  } catch (error: any) {
+    assert.equal(
+      (error.current.payload.feeds[0] as { name: string }).name,
+      "Added on the phone",
+    );
+  }
+});
+
+test("a later change from any device is accepted", async () => {
+  const { code } = await createSync();
+  await writeSync(code, { feeds: [{ id: "a", name: "First", sources: [] }], updatedAt: 5_000 });
+  await writeSync(code, { feeds: [{ id: "b", name: "Second", sources: [] }], updatedAt: 6_000 });
+
+  const record = await readSync(code);
+  assert.equal((record?.payload.feeds?.[0] as { name: string }).name, "Second");
+  assert.equal(record?.payload.updatedAt, 6_000);
+});
+
+test("a write with the same change time is allowed through", async () => {
+  // Re-sending after a dropped connection must not be mistaken for staleness.
+  const { code } = await createSync();
+  await writeSync(code, { feeds: [], updatedAt: 9_000 });
+  const again = await writeSync(code, {
+    feeds: [{ id: "x", name: "Retry", sources: [] }],
+    updatedAt: 9_000,
+  });
+  assert.equal((again?.payload.feeds?.[0] as { name: string }).name, "Retry");
+});

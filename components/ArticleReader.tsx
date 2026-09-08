@@ -20,6 +20,8 @@ type Props = {
    * only through an API that needs one, so this request needs them too.
    */
   keyHeaders?: HeadersInit;
+  /** Opens the feed drawer, which on a phone the reader otherwise hides. */
+  onOpenMenu?: () => void;
   /** Whether this article is bookmarked, and how to change that. */
   saved?: boolean;
   onToggleSave?: () => void;
@@ -33,6 +35,7 @@ export default function ArticleReader({
   onAlwaysOpenOnSite,
   summary,
   keyHeaders,
+  onOpenMenu,
   saved,
   onToggleSave,
   onClose,
@@ -117,6 +120,11 @@ export default function ArticleReader({
   return (
     <div className="reader">
       <div className="reader-bar">
+        {onOpenMenu && (
+          <button className="menu-btn" onClick={onOpenMenu} aria-label="Open feeds">
+            {Icon.menu}
+          </button>
+        )}
         <button className="btn ghost small" onClick={onClose}>
           {Icon.back} Back
         </button>

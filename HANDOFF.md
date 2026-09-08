@@ -153,6 +153,18 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   is the first thing to ask for.
 - **View mode and collapsed feeds are per-device, not synced.** A phone and a
   desktop want different densities; the feeds are what must match.
+- **Sync resolves by most recent change, not last write.** Each device stamps
+  its synced data when the user changes it, the server refuses a write carrying
+  an older stamp (409, handing back what is current), and a device applies a
+  remote copy only when it is newer than its own. Two guards make it hold:
+  nothing is pushed before the first pull has answered — the debounced save
+  used to fire ~900ms after load carrying stale local storage, which is exactly
+  how a desktop left closed for a week overwrote a phone — and a local change
+  stamps `max(now, lastSeen + 1)`, because a stamp pulled from a device whose
+  clock runs ahead would otherwise freeze this one out of syncing forever.
+- **The stamp lives in a ref as well as state.** An effect that depends on the
+  value it sets re-stamps on every render, and the debounced push never
+  survives long enough to fire — which looks exactly like sync being broken.
 - **Sync codes are stored as SHA-256 hashes**, never the code itself.
 - **API keys are encrypted in the browser (`lib/vault.ts`) before they sync.**
   AES-GCM under a PBKDF2 key from the passphrase; the server stores the blob
