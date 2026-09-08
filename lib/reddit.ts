@@ -38,8 +38,22 @@ export function subredditFrom(input: string): Subreddit | null {
   const value = input.trim();
   if (!value) return null;
 
-  const bare = value.match(new RegExp(`^/?r/(${NAME})/?$`, "i"));
-  if (bare) return { name: bare[1] };
+  // The bare form takes a sort too: "r/news/top" is what someone types, and
+  // falling through to a news search for it is worse than useless.
+  const [path, query = ""] = value.split("?");
+  const bare = path.match(new RegExp(`^/?r/(${NAME})(?:/([a-z]+))?/?$`, "i"));
+  if (bare) {
+    const sort = SORTS.find((s) => s === bare[2]?.toLowerCase());
+    // A trailing segment that is not a sort is not a subreddit — a comments
+    // permalink, say, which should be read as an ordinary page.
+    if (bare[2] && !sort) return null;
+    const window = new URLSearchParams(query).get("t") ?? undefined;
+    return {
+      name: bare[1],
+      ...(sort ? { sort } : {}),
+      ...(sort === "top" && window ? { window } : {}),
+    };
+  }
 
   let url: URL;
   try {

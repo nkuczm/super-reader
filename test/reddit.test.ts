@@ -17,6 +17,14 @@ test("recognises a subreddit however it is pasted", () => {
   }
 
   assert.deepEqual(subredditFrom("r/programming+rust"), { name: "programming+rust" });
+  // Typed with a sort, which is what someone reaching for the week's best does.
+  assert.deepEqual(subredditFrom("r/news/top"), { name: "news", sort: "top" });
+  assert.deepEqual(subredditFrom("r/news/top?t=week"), {
+    name: "news",
+    sort: "top",
+    window: "week",
+  });
+  assert.deepEqual(subredditFrom("/r/news/new/"), { name: "news", sort: "new" });
   assert.deepEqual(subredditFrom("reddit.com/r/news/new"), { name: "news", sort: "new" });
   assert.deepEqual(subredditFrom("https://www.reddit.com/r/news/top/?t=week"), {
     name: "news",
@@ -30,6 +38,7 @@ test("does not mistake other things for a subreddit", () => {
     "reddit.com",
     "https://www.reddit.com/user/someone",
     "https://www.reddit.com/r/news/comments/abc/story/",
+    "r/news/comments",
     "programming",
     "https://example.com/r/news",
     "@OpenAI",
