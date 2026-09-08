@@ -60,6 +60,7 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
 | `lib/article.ts` | Readability extraction + sanitising for the reader |
 | `lib/files.ts` | Reading linked files — PDF, text, Markdown, CSV, JSON |
 | `lib/x.ts` | Following an X account via the official API |
+| `lib/reddit.ts` | Subreddits: input parsing, and unpicking Reddit's entries |
 | `lib/apis.ts` | The API directory — CourtListener, Federal Register, arXiv… |
 | `lib/offline.ts` | IndexedDB store, download schedule, list snapshot |
 | `lib/sync.ts` `lib/sync-code.ts` `lib/db.ts` | Cross-device sync |
@@ -195,6 +196,14 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   stubbed** — the sandbox cannot reach these APIs, and a suite that depended on
   a dozen third parties' uptime and rate limits would fail for reasons that
   have nothing to do with this code.
+- **Reddit's feeds work from Vercel** — measured, not assumed; no key, no
+  OAuth, just `reddit.com/r/<name>/.rss`. What does not work is its comments
+  page: it refuses reader view, so pointing articles there (as the feed does)
+  would make every item unreadable. `tidyRedditPost` unpicks each entry
+  instead: a link post is pointed at what it links to and enrichment then
+  fetches a real summary and image from the destination, a self post keeps its
+  own text, and the thread is kept on `Article.comments` for the Discussion
+  link. Without this every summary reads "submitted by /u/x [link] [comments]".
 - **Comment threads are removed before Readability runs** (`stripDiscussion`,
   `lib/article.ts`). Readability scores containers by how much text they hold,
   so a short post with a busy comment section comes back as somebody's comment,

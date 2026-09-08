@@ -244,6 +244,19 @@ does, and is handled by the existing feed parser rather than a mapper.
 There is a test asserting every provider is well formed, and each mapper is
 tested against a recorded response shape rather than the live API.
 
+## Subreddits
+
+Paste `r/AskHistorians`, or any reddit.com URL for a subreddit, and it becomes
+a source. A sort comes with it — `reddit.com/r/news/top/?t=week` follows the
+week's top posts.
+
+Reddit's entries need unpicking to read well. A **link post** is pointed at what
+it links to, so opening it gives the article rather than Reddit's comments page
+(which refuses reader view), and its summary and image come from the
+destination. A **self post** keeps the text the author wrote. Either way the
+thread is a **Discussion** link beside the article, so following a subreddit
+for the links does not lose the comments.
+
 ## Following X accounts
 
 x.com shows logged-out visitors a login wall with no posts, and the community

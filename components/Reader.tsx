@@ -1283,9 +1283,10 @@ export default function Reader() {
                       >
                         {Icon.book} Read here
                       </button>
-                      {article.comments && (
+                      {article.comments && article.comments !== article.link && (
                         // Following a subreddit for the links but losing the
-                        // thread would miss the point of it.
+                        // thread would miss the point of it. On a self post the
+                        // thread is the article, so there is nothing to add.
                         <a
                           className="read-btn"
                           href={article.comments}
