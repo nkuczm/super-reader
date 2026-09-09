@@ -10,6 +10,31 @@ export const maxDuration = 60;
 
 /** TEMPORARY: how well the reader does on real articles. Remove when done. */
 export async function GET(request: Request) {
+  // Is a raw endpoint reachable from here at all, and what does it answer?
+  const raw = new URL(request.url).searchParams.get("raw");
+  if (raw) {
+    try {
+      const res = await fetch(raw, {
+        headers: {
+          "user-agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          accept: "application/json,text/html;q=0.9,*/*;q=0.8",
+        },
+      });
+      const body = await res.text();
+      return NextResponse.json({
+        status: res.status,
+        contentType: res.headers.get("content-type"),
+        length: body.length,
+        head: body.slice(0, 900),
+      });
+    } catch (error) {
+      return NextResponse.json({
+        error: error instanceof Error ? error.message : "failed",
+      });
+    }
+  }
+
   const urls = (new URL(request.url).searchParams.get("urls") ?? "")
     .split(",")
     .map((u) => u.trim())

@@ -5,8 +5,11 @@ import { fetchText, stripHtml, absolute, toIso, stripChrome } from "./feed";
 import type { Attachment } from "./types";
 
 export type ReadableArticle = {
-  /** Where the text came from: the page, the feed's own copy, or a file. */
-  via?: "page" | "feed" | "file";
+  /**
+   * Where the text came from: the page, the feed's own copy, a file, or —
+   * when none of those could be read — the page's own description of itself.
+   */
+  via?: "page" | "feed" | "file" | "preview";
   url: string;
   title: string;
   byline?: string;
@@ -70,9 +73,15 @@ function sanitize(html: string, baseUrl: string) {
         return { tagName, attribs: next };
       },
     },
-    // Drop empty leftovers so the reader doesn't show gaps.
+    /**
+     * Drop empty leftovers so the reader doesn't show gaps — but only the
+     * tags that actually leave one. `mediaChildren` counts direct children,
+     * so a wrapper like Substack's `div > picture > img` looked empty and was
+     * removed with the photo inside it: eight images became none. An empty
+     * div or span renders as nothing anyway, so there is nothing to tidy.
+     */
     exclusiveFilter: (frame) =>
-      ["p", "div", "span", "figcaption"].includes(frame.tag) &&
+      ["p", "figcaption"].includes(frame.tag) &&
       !frame.text.trim() &&
       !frame.mediaChildren.length,
   });
@@ -233,6 +242,21 @@ function stripDiscussion(doc: Document) {
 const MAX_CHARS = 400_000;
 
 /**
+ * The picture a page declares for itself. Publishers put the lead photo in
+ * og:image even when it sits outside the article body — the Guardian and AP
+ * both do, which is why their articles arrived as walls of text.
+ */
+function leadImageFrom(dom: JSDOM) {
+  const src = metaOf(dom, ["og:image", "og:image:url", "twitter:image", "twitter:image:src"]);
+  if (!src || isPlaceholder(src)) return undefined;
+  // Site logos and avatars are declared this way too and are not worth a
+  // full-width slot at the top of the article.
+  if (/(logo|avatar|icon|default[-_]?share)/i.test(src)) return undefined;
+  const alt = metaOf(dom, ["og:image:alt", "twitter:image:alt"]) ?? "";
+  return { src, alt };
+}
+
+/**
  * Build a readable article from HTML the publisher already syndicated,
  * skipping Readability: feed content is the article body, with none of the
  * page furniture Readability exists to strip.
@@ -286,6 +310,39 @@ export function sanitizeArticleHtml(
   };
 }
 
+/**
+ * What a page says about itself, for the cases Readability cannot read at all
+ * — a video, a gallery, an app shell. A title, a picture and a description is
+ * far better than "could not extract readable text", and it is exactly what
+ * every other app shows when it unfurls a link.
+ */
+export async function previewFromMetadata(url: string): Promise<ReadableArticle | null> {
+  const { body, finalUrl } = await fetchText(url, 15000);
+  const dom = new JSDOM(body, { url: finalUrl, virtualConsole: new VirtualConsole() });
+
+  const title = metaOf(dom, ["og:title", "twitter:title"]) ?? dom.window.document.title?.trim();
+  const description = metaOf(dom, ["og:description", "twitter:description", "description"]);
+  const lead = leadImageFrom(dom);
+  const siteName = metaOf(dom, ["og:site_name"]);
+  if (!title && !description && !lead) return null;
+
+  const parts = [
+    lead ? `<figure><img src="${lead.src}" alt="" /></figure>` : "",
+    description ? `<p>${description}</p>` : "",
+  ].join("");
+
+  return {
+    via: "preview",
+    url: finalUrl,
+    title: title || url,
+    siteName,
+    publishedAt: toIso(metaOf(dom, ["article:published_time", "datePublished"])),
+    html: sanitize(parts, finalUrl),
+    wordCount: description ? description.split(/\s+/).length : 0,
+    truncated: false,
+  };
+}
+
 export async function extractArticle(url: string): Promise<ReadableArticle> {
   const { body, finalUrl } = await fetchText(url, 15000);
 
@@ -314,10 +371,23 @@ export async function extractArticle(url: string): Promise<ReadableArticle> {
   }
 
   const truncated = parsed.content.length > MAX_CHARS;
-  const html = sanitize(
+  let html = sanitize(
     truncated ? parsed.content.slice(0, MAX_CHARS) : parsed.content,
     finalUrl,
   );
+
+  // An article that came out with no picture at all gets the one the page
+  // declares for itself, rather than opening as a wall of text.
+  if (!/<img\b/i.test(html)) {
+    const lead = leadImageFrom(dom);
+    if (lead) {
+      html =
+        sanitize(
+          `<figure><img src="${lead.src}" alt="${lead.alt.replace(/"/g, "&quot;")}" /></figure>`,
+          finalUrl,
+        ) + html;
+    }
+  }
 
   const text = stripHtml(html, Number.MAX_SAFE_INTEGER);
   return {
