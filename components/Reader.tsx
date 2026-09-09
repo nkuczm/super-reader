@@ -1287,14 +1287,21 @@ export default function Reader() {
                         // Following a subreddit for the links but losing the
                         // thread would miss the point of it. On a self post the
                         // thread is the article, so there is nothing to add.
-                        <a
+                        <button
                           className="read-btn"
-                          href={article.comments}
-                          target="_blank"
-                          rel="noreferrer noopener"
+                          // In the reader, not the browser: a Reddit thread is
+                          // rendered here now, post and replies together.
+                          onClick={() =>
+                            setReading({
+                              url: article.comments!,
+                              title: article.title,
+                              feedUrl: source?.feedUrl,
+                              summary: article.summary,
+                            })
+                          }
                         >
                           {Icon.chat} Discussion
-                        </a>
+                        </button>
                       )}
                       <button
                         className={`read-btn save-btn${

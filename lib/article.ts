@@ -316,7 +316,50 @@ export function sanitizeArticleHtml(
  * far better than "could not extract readable text", and it is exactly what
  * every other app shows when it unfurls a link.
  */
+/**
+ * Video hosts serve a script shell to anything that is not a browser, so their
+ * page metadata is generic boilerplate — YouTube's says "- YouTube". Their
+ * oEmbed endpoints are public, need no key, and give the real title, author
+ * and thumbnail.
+ */
+async function oEmbedPreview(url: string): Promise<ReadableArticle | null> {
+  const endpoint = /(^|\.)(youtube\.com|youtu\.be)$/i.test(new URL(url).hostname)
+    ? `https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(url)}`
+    : /(^|\.)vimeo\.com$/i.test(new URL(url).hostname)
+      ? `https://vimeo.com/api/oembed.json?url=${encodeURIComponent(url)}`
+      : null;
+  if (!endpoint) return null;
+
+  const res = await fetch(endpoint, { signal: AbortSignal.timeout(10000) });
+  if (!res.ok) return null;
+  const data: any = await res.json();
+  if (!data?.title) return null;
+
+  const thumb = typeof data.thumbnail_url === "string" ? data.thumbnail_url : "";
+  return {
+    via: "preview",
+    url,
+    title: String(data.title),
+    byline: data.author_name ? String(data.author_name) : undefined,
+    siteName: data.provider_name ? String(data.provider_name) : undefined,
+    html: sanitize(
+      thumb ? `<figure><img src="${thumb}" alt="" /></figure>` : "",
+      url,
+    ),
+    wordCount: 0,
+    truncated: false,
+  };
+}
+
 export async function previewFromMetadata(url: string): Promise<ReadableArticle | null> {
+  // A video's own oEmbed beats whatever its page says to a crawler.
+  try {
+    const embed = await oEmbedPreview(url);
+    if (embed) return embed;
+  } catch {
+    /* not an embeddable host, or it would not answer */
+  }
+
   const { body, finalUrl } = await fetchText(url, 15000);
   const dom = new JSDOM(body, { url: finalUrl, virtualConsole: new VirtualConsole() });
 
