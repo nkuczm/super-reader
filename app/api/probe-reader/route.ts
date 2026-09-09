@@ -26,7 +26,7 @@ export async function GET(request: Request) {
         status: res.status,
         contentType: res.headers.get("content-type"),
         length: body.length,
-        head: body.slice(0, 900),
+        head: body.slice(0, Number(new URL(request.url).searchParams.get("len") ?? 900)),
       });
     } catch (error) {
       return NextResponse.json({
