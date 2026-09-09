@@ -292,6 +292,16 @@ author's name and the post's title. Containers that are, or hold, the page's
 own article body are left alone, so a post about comments still reads
 correctly.
 
+### What the reader shows when a page will not cooperate
+
+Not every link is an article. In order: a **Reddit post** is read from Reddit's
+own feed for it, so the post and its replies appear in the reader rather than a
+page that refuses reader view. A link that is **itself a picture** is shown as
+one. A **video** becomes a card with its real title, channel and thumbnail,
+from oEmbed. Anything else with no extractable text falls back to what the page
+says about itself — title, picture, description — labelled as a preview rather
+than passed off as the article.
+
 ## Paywalled and blocked articles
 
 Where a publisher syndicates full text in their feed, the reader uses it (see

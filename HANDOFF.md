@@ -196,6 +196,25 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   stubbed** — the sandbox cannot reach these APIs, and a suite that depended on
   a dozen third parties' uptime and rate limits would fail for reasons that
   have nothing to do with this code.
+- **Reddit posts are read from the post's own `.rss`** (`readRedditPost`). The
+  comments page refuses reader view and `www.reddit.com/....json` answers a
+  datacenter request with 403 — both measured — but `<permalink>/.rss` is
+  served happily and carries the post as the first entry (`t3_`) and every
+  reply after it (`t1_`). Bots are filtered; a comment's text is the SC_OFF
+  block, not a pattern match on the footer, which by then has been decoded.
+- **The sanitiser used to eat nested images.** `exclusiveFilter` dropped
+  "empty" containers using `mediaChildren`, which counts only *direct*
+  children — so Substack's `div > picture > img` looked empty and went, taking
+  eight photos with it. Measured before and after on a real article: 0 images
+  became 8. Only `p` and `figcaption` are filtered now; an empty div renders
+  as nothing anyway.
+- **An article with no picture gets the page's own `og:image`** as a lead. The
+  Guardian and AP both keep the lead photo outside the article body, so their
+  stories arrived as walls of text.
+- **A page with nothing to extract falls back to a preview card** rather than
+  an error: title, picture and description from its metadata. For YouTube and
+  Vimeo the card comes from oEmbed, because their pages serve a script shell
+  whose og:title is literally "- YouTube".
 - **Reddit's feeds work from Vercel** — measured, not assumed; no key, no
   OAuth, just `reddit.com/r/<name>/.rss`. What does not work is its comments
   page: it refuses reader view, so pointing articles there (as the feed does)

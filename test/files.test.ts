@@ -112,3 +112,35 @@ test("a file linked in the story's own text becomes an attachment", async () => 
   ]);
   assert.equal(articles[1].attachments, undefined, "no file, no chip");
 });
+
+test("a wrapper around a picture is not mistaken for an empty one", async () => {
+  // Substack nests images as div > picture > img. The sanitiser dropped
+  // "empty" containers by looking only at direct children, so eight images
+  // became none — measured on a real article before this was fixed.
+  const { sanitizeArticleHtml } = await import("../lib/article");
+  const html = `<figure><a href="https://x.test/big"><div class="image2-inset"><picture>
+    <source srcset="https://x.test/wide.webp 1456w">
+    <img src="https://x.test/photo.jpg" alt="A diagram">
+  </picture></div></a><figcaption>How it fits together</figcaption></figure>`;
+
+  const out = sanitizeArticleHtml(html, "https://x.test/p", { title: "t" }).html;
+  assert.match(out, /<img[^>]+src="https:\/\/x\.test\/photo\.jpg"/, "the photo survives");
+  assert.match(out, /How it fits together/, "and so does its caption");
+});
+
+test("an article with no picture of its own gets the one the page declares", async () => {
+  const { extractArticle } = await import("../lib/article");
+  const { startRedditSite } = await import("./fixtures.mjs");
+  const site = await startRedditSite(8795);
+  try {
+    const article = await extractArticle("http://127.0.0.1:8795/story");
+    assert.match(
+      article.html,
+      /<img[^>]+src="https:\/\/cdn\.test\/lead\.jpg"/,
+      "the og:image leads the article",
+    );
+    assert.match(article.html, /narrow grounds/, "and the text is still there");
+  } finally {
+    site.close();
+  }
+});

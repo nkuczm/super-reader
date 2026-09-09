@@ -101,3 +101,43 @@ test("a self post keeps its own text and stays on Reddit", async () => {
     site.close();
   }
 });
+
+test("a post URL is recognised, and other reddit pages are not", async () => {
+  const { redditPostUrl } = await import("../lib/reddit");
+  assert.equal(
+    redditPostUrl("https://www.reddit.com/r/news/comments/abc123/some_slug/"),
+    "https://www.reddit.com/r/news/comments/abc123/some_slug/.rss",
+  );
+  assert.equal(
+    redditPostUrl("https://old.reddit.com/r/news/comments/abc123/some_slug"),
+    "https://www.reddit.com/r/news/comments/abc123/some_slug/.rss",
+    "old. is normalised to the host that answers",
+  );
+  assert.equal(redditPostUrl("https://www.reddit.com/r/news/"), null);
+  assert.equal(redditPostUrl("https://example.com/r/news/comments/a/b/"), null);
+});
+
+test("a post is read from its own feed, with the replies", async () => {
+  const { readRedditPost, redditPostHtml } = await import("../lib/reddit");
+  const site = await startRedditSite(8794);
+  try {
+    // The reader normalises to www; the fixture stands in for it.
+    const post = await readRedditPost("http://127.0.0.1:8794/r/testsub/comments/bbb/history/");
+    assert.ok(post, "the post was read");
+    assert.equal(post!.title, 'What is the history of using "ass" as an intensifier?');
+    assert.equal(post!.author, "/u/asker");
+    assert.match(post!.body, /Despite its original meaning of donkey/);
+    assert.equal(post!.destination, undefined, "a self post links only to itself");
+
+    assert.equal(post!.comments.length, 1, "AutoModerator is not the discussion");
+    assert.equal(post!.comments[0].author, "/u/linguist");
+
+    const html = redditPostHtml(post!);
+    assert.match(html, /<h2>Comments<\/h2>/);
+    assert.match(html, /<strong>\/u\/linguist<\/strong>/);
+    assert.match(html, /attested from the 1940s/);
+    assert.ok(!/submitted by/i.test(html), "Reddit's footer is not part of a comment");
+  } finally {
+    site.close();
+  }
+});

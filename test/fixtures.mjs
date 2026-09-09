@@ -356,8 +356,54 @@ const redditFeed = `<?xml version="1.0" encoding="UTF-8"?>
 </entry>
 </feed>`;
 
+/** What Reddit serves for a single post: the post (t3_), then replies (t1_). */
+const redditPostFeed = `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+<title>What is the history of using "ass" as an intensifier? : testsub</title>
+<entry>
+  <author><name>/u/asker</name></author>
+  <id>t3_bbb</id>
+  <title>What is the history of using "ass" as an intensifier?</title>
+  <link href="https://www.reddit.com/r/testsub/comments/bbb/history/" />
+  <published>2026-09-08T18:00:00+00:00</published>
+  <content type="html">&lt;!-- SC_OFF --&gt;&lt;div class="md"&gt;&lt;p&gt;Despite its original meaning of donkey, the word is used as an intensifier.&lt;/p&gt;&lt;/div&gt;&lt;!-- SC_ON --&gt; &amp;#32; submitted by &amp;#32; &lt;a href="https://www.reddit.com/user/asker"&gt; /u/asker &lt;/a&gt; &lt;br/&gt; &lt;span&gt;&lt;a href="https://www.reddit.com/r/testsub/comments/bbb/history/"&gt;[link]&lt;/a&gt;&lt;/span&gt;</content>
+</entry>
+<entry>
+  <author><name>/u/AutoModerator</name></author>
+  <id>t1_bot</id>
+  <title>/u/AutoModerator on What is the history</title>
+  <published>2026-09-08T18:01:00+00:00</published>
+  <content type="html">&lt;!-- SC_OFF --&gt;&lt;div class="md"&gt;&lt;p&gt;Please read our rules before commenting.&lt;/p&gt;&lt;/div&gt;&lt;!-- SC_ON --&gt;</content>
+</entry>
+<entry>
+  <author><name>/u/linguist</name></author>
+  <id>t1_ccc</id>
+  <title>/u/linguist on What is the history</title>
+  <link href="https://www.reddit.com/r/testsub/comments/bbb/history/ccc/" />
+  <published>2026-09-08T19:00:00+00:00</published>
+  <content type="html">&lt;!-- SC_OFF --&gt;&lt;div class="md"&gt;&lt;p&gt;It is a suffixed intensifier attested from the 1940s.&lt;/p&gt;&lt;/div&gt;&lt;!-- SC_ON --&gt; &amp;#32; submitted by &amp;#32; &lt;a href="https://www.reddit.com/user/linguist"&gt; /u/linguist &lt;/a&gt;</content>
+</entry>
+</feed>`;
+
+/** A story whose only picture is the one it declares for itself. */
+const ogOnlyPage = `<html><head><title>A quiet story</title>
+<meta property="og:image" content="https://cdn.test/lead.jpg">
+<meta property="og:image:alt" content="A glass of water">
+</head><body><article>
+<h1>A quiet story</h1>
+<p>${"The court decided the case on narrow grounds, and the reasoning matters more than the result. ".repeat(6)}</p>
+<p>${"Lawyers for both sides said they were considering their options after the ruling. ".repeat(6)}</p>
+</article></body></html>`;
+
 export function startRedditSite(port = 8792) {
-  return serve({ "/r/testsub/.rss": [200, "application/atom+xml", redditFeed] }, port);
+  return serve(
+    {
+      "/r/testsub/.rss": [200, "application/atom+xml", redditFeed],
+      "/r/testsub/comments/bbb/history/.rss": [200, "application/atom+xml", redditPostFeed],
+      "/story": [200, "text/html", ogOnlyPage],
+    },
+    port,
+  );
 }
 
 export function startFileSite(port = 8791) {

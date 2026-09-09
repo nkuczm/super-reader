@@ -140,10 +140,13 @@ export function tidyRedditPost(article: Article, content: string): Article {
 export function redditPostUrl(url: string): string | null {
   try {
     const parsed = new URL(url);
-    if (!/(^|\.)reddit\.com$/i.test(parsed.hostname)) return null;
     if (!/^\/r\/[^/]+\/comments\/[a-z0-9]+/i.test(parsed.pathname)) return null;
+    // Reddit only; a local fixture stands in for it under test.
+    const local = /^127\.0\.0\.1$|^localhost$/i.test(parsed.hostname);
+    if (!local && !/(^|\.)reddit\.com$/i.test(parsed.hostname)) return null;
     // www is the host that answers; old. serves the same feed.
-    return `https://www.reddit.com${parsed.pathname.replace(/\/$/, "")}/.rss`;
+    const origin = local ? parsed.origin : "https://www.reddit.com";
+    return `${origin}${parsed.pathname.replace(/\/$/, "")}/.rss`;
   } catch {
     return null;
   }
@@ -237,19 +240,24 @@ export function redditPostHtml(post: RedditPost): string {
   const parts: string[] = [];
   if (post.body.trim()) parts.push(post.body);
   if (post.destination) {
+    let host = post.destination;
+    try {
+      host = new URL(post.destination).hostname.replace(/^www\./, "");
+    } catch {
+      /* keep the raw string */
+    }
     parts.push(
-      `<p><a href="${post.destination}">${escapeHtml(post.destination)}</a></p>`,
+      `<p><a href="${post.destination}">Read the linked article on ${escapeHtml(host)}</a></p>`,
     );
   }
 
   if (post.comments.length > 0) {
     parts.push(`<h2>Comments</h2>`);
     for (const comment of post.comments) {
-      // Reddit's own footer is stripped; what is left is what they wrote.
-      const said = comment.html
-        .replace(/<!--\s*SC_OFF\s*-->/g, "")
-        .replace(/<!--\s*SC_ON\s*-->/g, "")
-        .replace(/&#32;\s*submitted by[\s\S]*$/i, "");
+      // The md block is exactly what they wrote; everything after it is
+      // Reddit's "submitted by" footer, which by this point has already been
+      // decoded, so matching on the entity would never have caught it.
+      const said = selfText(comment.html) || comment.html;
       parts.push(
         `<blockquote><p><strong>${escapeHtml(comment.author)}</strong></p>${said}</blockquote>`,
       );
