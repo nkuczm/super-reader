@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { extractArticle } from "@/lib/article";
 import { fetchText, stripHtml } from "@/lib/feed";
+import { JSDOM, VirtualConsole } from "jsdom";
+import { Readability } from "@mozilla/readability";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,6 +35,24 @@ export async function GET(request: Request) {
         report.leadStripped = stripHtml(article.html, 90);
       } catch (error) {
         report.error = error instanceof Error ? error.message : "failed";
+      }
+
+      // Which stage loses them: Readability, or our sanitising?
+      try {
+        const { body, finalUrl } = await fetchText(url, 15000);
+        const doc = new JSDOM(body, { url: finalUrl, virtualConsole: new VirtualConsole() })
+          .window.document;
+        const parsed = new Readability(doc, { charThreshold: 250 }).parse();
+        const raw = parsed?.content ?? "";
+        report.readabilityImages = (raw.match(/<img\b/gi) ?? []).length;
+        report.readabilityFigures = (raw.match(/<figure\b/gi) ?? []).length;
+        // The shape of the first images on the page, to see what lazy markup
+        // they use.
+        report.pageImgTags = [...body.matchAll(/<img\b[^>]*>/gi)]
+          .slice(0, 3)
+          .map((m) => m[0].replace(/\s+/g, " ").slice(0, 220));
+      } catch (error) {
+        report.readabilityImages = `failed: ${error instanceof Error ? error.message : "?"}`;
       }
 
       // What the page itself holds, for comparison.
