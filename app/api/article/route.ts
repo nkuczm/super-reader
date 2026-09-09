@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
-import { extractArticle, articleFromFeedContent } from "@/lib/article";
+import {
+  extractArticle,
+  articleFromFeedContent,
+  previewFromMetadata,
+} from "@/lib/article";
 import { fetchFeedItemContent, unwrapRedirect } from "@/lib/feed";
 import { isUnresolvableAggregatorLink } from "@/lib/discover";
-import { fileKindFor, readFileAsArticle } from "@/lib/files";
+import { fileKindFor, fileNameFrom, imageUrlFor, readFileAsArticle } from "@/lib/files";
 import { apiKeyFor, apiReaderFor } from "@/lib/apis";
+import { readRedditPost, redditPostHtml, redditPostUrl } from "@/lib/reddit";
 import { decodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import { sanitizeArticleHtml } from "@/lib/article";
 
@@ -99,6 +104,42 @@ export async function GET(request: Request) {
     }
   }
 
+  // A link that is itself a picture — which is most of what an image-heavy
+  // subreddit links — is shown rather than parsed for prose it does not have.
+  const picture = imageUrlFor(target.toString());
+  if (picture) {
+    return NextResponse.json(
+      sanitizeArticleHtml(
+        `<figure><img src="${picture}" alt="" /></figure>`,
+        target.toString(),
+        { title: title || fileNameFrom(picture, "Image") },
+      ),
+      { headers: { "cache-control": "public, max-age=3600" } },
+    );
+  }
+
+  // A Reddit post is read from Reddit's own feed for it: the comments page
+  // refuses reader view and the JSON API 403s a datacenter request, but the
+  // per-post .rss carries the post and every reply.
+  if (redditPostUrl(target.toString())) {
+    try {
+      const post = await readRedditPost(target.toString());
+      if (post) {
+        return NextResponse.json(
+          sanitizeArticleHtml(redditPostHtml(post), target.toString(), {
+            title: post.title || title || "Reddit post",
+            byline: post.author,
+            siteName: "Reddit",
+            publishedAt: post.publishedAt,
+          }),
+          { headers: { "cache-control": "public, max-age=300" } },
+        );
+      }
+    } catch {
+      /* fall through: the page itself is still worth a try */
+    }
+  }
+
   // An article from an API gets its text from that API. Scraping the page is
   // the wrong move where the site serves a stub to anything but a browser.
   const provider = apiReaderFor(target.toString());
@@ -163,6 +204,21 @@ export async function GET(request: Request) {
       } catch {
         /* the feed could not help either */
       }
+    }
+
+    // Nothing readable, but nearly every page says something about itself —
+    // a title, a picture, a sentence. A video or a gallery has no prose to
+    // extract and used to fail outright; this is what every other app shows
+    // when it unfurls a link, and it beats an error message.
+    try {
+      const preview = await previewFromMetadata(target.toString());
+      if (preview) {
+        return NextResponse.json(preview, {
+          headers: { "cache-control": "public, max-age=600" },
+        });
+      }
+    } catch {
+      /* the page would not answer at all */
     }
 
     // Some publishers refuse anything that is not a person in a browser.

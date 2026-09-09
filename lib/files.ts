@@ -69,6 +69,19 @@ export function fileKindFor(url: string, mime?: string): FileKind | null {
 }
 
 /** A readable name for the file, since feeds rarely give one. */
+/** An article URL that is itself a picture — i.redd.it, imgur, a CDN link. */
+export function imageUrlFor(url: string, mime?: string): string | null {
+  const declared = mime?.split(";")[0]?.trim().toLowerCase();
+  if (declared?.startsWith("image/")) return url;
+  if (declared) return null;
+  try {
+    const path = new URL(url).pathname.toLowerCase();
+    return /\.(jpe?g|png|gif|webp|avif)$/.test(path) ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 export function fileNameFrom(url: string, fallback = "File") {
   try {
     const path = new URL(url).pathname;

@@ -1,4 +1,5 @@
-import { decodeEntities, stripHtml, summarize } from "./feed";
+import { XMLParser } from "fast-xml-parser";
+import { decodeEntities, fetchText, stripHtml, summarize, toIso } from "./feed";
 import type { Article } from "./types";
 
 /**
@@ -132,4 +133,128 @@ export function tidyRedditPost(article: Article, content: string): Article {
     // real image from the destination during enrichment.
     image: isLinkPost ? undefined : article.image,
   };
+}
+
+
+/** A reddit post permalink: /r/<sub>/comments/<id>/<slug>. */
+export function redditPostUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (!/(^|\.)reddit\.com$/i.test(parsed.hostname)) return null;
+    if (!/^\/r\/[^/]+\/comments\/[a-z0-9]+/i.test(parsed.pathname)) return null;
+    // www is the host that answers; old. serves the same feed.
+    return `https://www.reddit.com${parsed.pathname.replace(/\/$/, "")}/.rss`;
+  } catch {
+    return null;
+  }
+}
+
+const parser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: "@_",
+  parseTagValue: false,
+  trimValues: true,
+});
+
+function textOf(node: any): string {
+  if (node === undefined || node === null) return "";
+  if (typeof node === "string") return node;
+  if (typeof node === "object" && "#text" in node) return String(node["#text"]);
+  return "";
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** Bots that greet every thread; they are not the discussion. */
+const BOTS = /^\/u\/(AutoModerator|RemindMeBot|sneakpeekbot|B0tRank|WikiTextBot)$/i;
+
+export type RedditPost = {
+  title: string;
+  author?: string;
+  publishedAt?: string;
+  /** The post's own text, already unescaped HTML. */
+  body: string;
+  /** Where a link post points, when it is not the post itself. */
+  destination?: string;
+  comments: { author: string; html: string; at?: string; url?: string }[];
+};
+
+/**
+ * Read a post and its replies from Reddit's own feed for it.
+ *
+ * Reddit's comments page refuses reader view, and its JSON API answers a
+ * datacenter request with a 403 — both measured. The per-post .rss is served
+ * happily and carries the whole thing: the first entry (t3_) is the post, and
+ * every entry after it (t1_) is a comment.
+ */
+export async function readRedditPost(url: string): Promise<RedditPost | null> {
+  const feedUrl = redditPostUrl(url);
+  if (!feedUrl) return null;
+
+  const { body } = await fetchText(feedUrl, 15000);
+  const feed = parser.parse(body)?.feed;
+  const entries: any[] = Array.isArray(feed?.entry)
+    ? feed.entry
+    : feed?.entry
+      ? [feed.entry]
+      : [];
+  if (entries.length === 0) return null;
+
+  const postEntry =
+    entries.find((entry) => String(textOf(entry.id)).startsWith("t3_")) ?? entries[0];
+  const content = decodeEntities(textOf(postEntry.content));
+
+  const md = content.match(/<!--\s*SC_OFF\s*-->([\s\S]*?)<!--\s*SC_ON\s*-->/);
+  const destination = content.match(
+    /<a\b[^>]*href=["']([^"']+)["'][^>]*>\s*\[link\]\s*<\/a>/i,
+  )?.[1];
+
+  const comments = entries
+    .filter((entry) => String(textOf(entry.id)).startsWith("t1_"))
+    .map((entry) => ({
+      author: textOf(entry.author?.name),
+      html: decodeEntities(textOf(entry.content)),
+      at: toIso(textOf(entry.updated) || textOf(entry.published)),
+      url: entry.link?.["@_href"] as string | undefined,
+    }))
+    .filter((comment) => !BOTS.test(comment.author))
+    .slice(0, 40);
+
+  return {
+    title: stripHtml(textOf(postEntry.title), 300) || "Reddit post",
+    author: textOf(postEntry.author?.name) || undefined,
+    publishedAt: toIso(textOf(postEntry.published) || textOf(postEntry.updated)),
+    body: md ? md[1] : "",
+    destination: destination && !destination.includes("/comments/") ? destination : undefined,
+    comments,
+  };
+}
+
+/** The post, then the discussion, as one article body. */
+export function redditPostHtml(post: RedditPost): string {
+  const parts: string[] = [];
+  if (post.body.trim()) parts.push(post.body);
+  if (post.destination) {
+    parts.push(
+      `<p><a href="${post.destination}">${escapeHtml(post.destination)}</a></p>`,
+    );
+  }
+
+  if (post.comments.length > 0) {
+    parts.push(`<h2>Comments</h2>`);
+    for (const comment of post.comments) {
+      // Reddit's own footer is stripped; what is left is what they wrote.
+      const said = comment.html
+        .replace(/<!--\s*SC_OFF\s*-->/g, "")
+        .replace(/<!--\s*SC_ON\s*-->/g, "")
+        .replace(/&#32;\s*submitted by[\s\S]*$/i, "");
+      parts.push(
+        `<blockquote><p><strong>${escapeHtml(comment.author)}</strong></p>${said}</blockquote>`,
+      );
+    }
+  }
+
+  return parts.join("\n");
 }

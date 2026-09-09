@@ -160,6 +160,7 @@ export default function ArticleReader({
               : null,
             fromCache ? "Saved for offline" : null,
             article?.via === "feed" ? "From the publisher's feed" : null,
+            article?.via === "preview" ? "Preview" : null,
           ]
             .filter(Boolean)
             .join("  ·  ")}
@@ -237,6 +238,16 @@ export default function ArticleReader({
               className="prose"
               dangerouslySetInnerHTML={{ __html: article.html }}
             />
+            {article.via === "preview" && (
+              <p className="reader-note">
+                This page has no article to extract — a video or a gallery,
+                most likely — so this is what it says about itself.{" "}
+                <a href={url} target="_blank" rel="noreferrer noopener">
+                  Open it on the site
+                </a>
+                .
+              </p>
+            )}
             {article.truncated && (
               <p className="reader-note">
                 This article was long and has been trimmed —{" "}

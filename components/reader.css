@@ -712,3 +712,9 @@
 }
 
 .article-actions a.read-btn { text-decoration: none; }
+
+/* A Reddit thread: the post reads as the article, replies as quoted voices. */
+.prose h2 + blockquote { margin-top: 12px; }
+.prose blockquote p strong { color: var(--text); font-style: normal; }
+.prose blockquote { font-style: normal; }
+.prose blockquote > p:first-child { margin-bottom: 6px; font-size: 13.5px; }
