@@ -177,19 +177,28 @@ class Union {
 export type Cluster<T> = { key: string; members: T[] };
 
 /**
- * Above this the two headlines are effectively the same sentence, and the
- * pair is joined whether or not either side had a better match elsewhere.
+ * What share of the pairs between two established clusters must clear the
+ * similarity threshold before the clusters are merged. Half means a
+ * majority of each side recognises the other; one bridging headline out of
+ * six pairs does not.
  */
-const CERTAIN = 0.75;
+const MUTUAL_SHARE = 0.5;
 
 /**
- * Group stories that tell the same story. `threshold` is the similarity two
- * headlines must clear; 0.5 is loose enough to join a wire brief to a feature
- * and tight enough to keep two same-day Fed stories apart.
+ * Group stories that tell the same story.
+ *
+ * The default threshold was chosen by measurement, not by feel: swept over
+ * the real fixture (test/fixtures/headlines.mjs), everything from 0.42 to
+ * 0.47 joins every story that should be joined, and the only false merge
+ * anywhere in that band is between two filings from the *same* newsroom —
+ * which cannot overstate breadth, since breadth counts newsrooms. At 0.48
+ * the Supreme Court decision copies (0.491 and 0.494 apart) start falling
+ * out and real stories get undercounted. 0.46 sits in the middle of the
+ * band that works.
  */
 export function clusterStories<T extends Clusterable>(
   stories: T[],
-  { threshold = 0.5, blockLimit = 40 }: { threshold?: number; blockLimit?: number } = {},
+  { threshold = 0.46, blockLimit = 40 }: { threshold?: number; blockLimit?: number } = {},
 ): Cluster<T>[] {
   const tokens = new Map<string, string[]>();
   for (const story of stories) tokens.set(story.id, tokensOf(story.title));
@@ -236,7 +245,6 @@ export function clusterStories<T extends Clusterable>(
   // visited first, and that is what put an oil-price story inside a Red Sea
   // port story.
   const edges: { a: string; b: string; score: number }[] = [];
-  const bestEdge = new Map<string, number>();
   for (const [, bucket] of blocks) {
     // A word used by hundreds of headlines says nothing on its own, and its
     // bucket would cost a full pairwise pass.
@@ -250,31 +258,71 @@ export function clusterStories<T extends Clusterable>(
         const value = score(a, b);
         if (value < threshold) continue;
         edges.push({ a, b, score: value });
-        bestEdge.set(a, Math.max(bestEdge.get(a) ?? 0, value));
-        bestEdge.set(b, Math.max(bestEdge.get(b) ?? 0, value));
       }
     }
   }
 
   /**
-   * Each headline gets to vote for the story it belongs to *once* — its best
-   * match — and near-identical pairs are always believed.
+   * Join strongest pair first, and refuse a merge that would be much weaker
+   * than the two clusters' own internal agreement.
    *
    * This is the fix for chaining. "Red Sea shipping disrupted as Houthis
    * take Mokha and oil prices climb" is genuinely about two stories and
-   * matches both; joining every pair it appears in welded the port story to
-   * the oil-price story. Letting it count only where it fits best puts it in
-   * one of them and leaves the other alone. Copies of one story still chain
-   * into a single cluster, because each of them independently votes for a
-   * sibling — which is how seven newsrooms on the same event stay together
-   * while two different events do not.
+   * matches both; joining every pair it turns up in welded the port story to
+   * the oil-price story. Because the strongest pairs go first, such a
+   * headline lands in whichever story it fits best while it is still a
+   * single item — and the later, weaker edge into the other story is then a
+   * merge of two established clusters, which has to clear their cohesion to
+   * happen.
+   *
+   * Measured against real headlines (test/fixtures/headlines.mjs), the
+   * highest-scoring pair that must NOT merge sits at 0.497 and the weakest
+   * link that must hold a story together at 0.502. There is no daylight
+   * between them, which is why mutual recognition decides the close calls
+   * rather than a threshold on its own.
    */
   const union = new Union();
+  const members = new Map<string, string[]>(stories.map((story) => [story.id, [story.id]]));
+
+  /**
+   * Do most members of the two clusters recognise each other?
+   *
+   * Strength is the wrong test, and trying it proved so: four copies of one
+   * story phrased two ways ("Iran restarts ballistic missile production" /
+   * "Iran producing ballistic missiles again") form two tight pairs joined
+   * only moderately, and a strength bar kept them apart. Density separates
+   * the cases properly — in that story every copy matches every other copy,
+   * while a bridge headline is the single connection between two clusters
+   * whose other members score near zero against each other.
+   */
+  const mutual = (listA: string[], listB: string[]) => {
+    const sampleA = listA.slice(0, 4);
+    const sampleB = listB.slice(0, 4);
+    let clearing = 0;
+    for (const a of sampleA) {
+      for (const b of sampleB) if (score(a, b) >= threshold) clearing += 1;
+    }
+    return clearing / (sampleA.length * sampleB.length);
+  };
+
+  edges.sort((a, b) => b.score - a.score || (a.a < b.a ? -1 : 1));
   for (const edge of edges) {
-    const isBest =
-      edge.score >= (bestEdge.get(edge.a) ?? 0) ||
-      edge.score >= (bestEdge.get(edge.b) ?? 0);
-    if (isBest || edge.score >= CERTAIN) union.join(edge.a, edge.b);
+    const [rootA, rootB] = [union.find(edge.a), union.find(edge.b)];
+    if (rootA === rootB) continue;
+    const listA = members.get(rootA) ?? [rootA];
+    const listB = members.get(rootB) ?? [rootB];
+
+    // Two established clusters merge only on mutual recognition, not on one
+    // link between them.
+    if (listA.length > 1 && listB.length > 1 && mutual(listA, listB) < MUTUAL_SHARE) {
+      continue;
+    }
+
+    union.join(edge.a, edge.b);
+    const merged = [...listA, ...listB];
+    members.delete(rootA);
+    members.delete(rootB);
+    members.set(union.find(edge.a), merged);
   }
 
   const grouped = new Map<string, T[]>();
