@@ -708,7 +708,7 @@ export function startFakeInstagram(port = 8795) {
       res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
     };
-    if (url.searchParams.get("access_token") !== "ig-token") {
+    if ((req.headers.authorization ?? "") !== "Bearer ig-token") {
       return json(401, { error: { message: "Invalid OAuth access token." } });
     }
     const fields = url.searchParams.get("fields") ?? "";

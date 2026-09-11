@@ -1,4 +1,5 @@
 import { stripHtml, toIso, faviconFor, fetchText, parseFeed, looksLikeFeed } from "./feed";
+import { assertPublicUrl } from "./net";
 import { sortNewestFirst } from "./sort";
 import type { Article, Attachment, SourceMeta } from "./types";
 
@@ -946,6 +947,10 @@ async function fetchJson(request: ApiRequest, timeoutMs = 15000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    // These URLs are built from this app's own provider list, so the host is
+    // never the caller's to choose — but the fields they carry are, and a
+    // check that costs a resolved hostname is worth keeping uniform.
+    await assertPublicUrl(request.url);
     const res = await fetch(request.url, {
       headers: { accept: "application/json", ...request.headers },
       redirect: "follow",

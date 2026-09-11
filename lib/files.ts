@@ -1,4 +1,6 @@
 import { stripHtml } from "./feed";
+import { safeFetchBytes } from "./net";
+import { httpUrlOrNull } from "./url";
 import type { ReadableArticle } from "./article";
 
 /**
@@ -60,7 +62,13 @@ export function fileKindFor(url: string, mime?: string): FileKind | null {
   if (declared && declared.startsWith("text/html")) return null;
 
   try {
-    const path = new URL(url, "https://example.invalid").pathname.toLowerCase();
+    const parsed = new URL(url, "https://example.invalid");
+    // A scheme this app will never open. Without this, "javascript:alert(1)
+    // //x.pdf" read as a PDF and became an attachment chip: the server would
+    // refuse to fetch it, and React refuses to render the href, but a URL
+    // nothing can use has no business in the data model.
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    const path = parsed.pathname.toLowerCase();
     const extension = path.split(".").pop() ?? "";
     return BY_EXTENSION[extension] ?? null;
   } catch {
@@ -71,6 +79,10 @@ export function fileKindFor(url: string, mime?: string): FileKind | null {
 /** A readable name for the file, since feeds rarely give one. */
 /** An article URL that is itself a picture — i.redd.it, imgur, a CDN link. */
 export function imageUrlFor(url: string, mime?: string): string | null {
+  // Same rule as fileKindFor: a scheme the app cannot open is not a picture,
+  // whatever the path ends in.
+  const safe = httpUrlOrNull(url);
+  if (!safe) return null;
   const declared = mime?.split(";")[0]?.trim().toLowerCase();
   if (declared?.startsWith("image/")) return url;
   if (declared) return null;
@@ -163,33 +175,21 @@ async function pdfToText(bytes: Uint8Array): Promise<string> {
   return pages.filter(Boolean).join("\n\n");
 }
 
+/**
+ * A file, bounded and checked.
+ *
+ * This reads a URL chosen by whoever is using the app, so it goes through the
+ * same public-web guard as everything else — and the size limit is enforced
+ * while reading rather than after: the old version trusted content-length and
+ * then called arrayBuffer(), so a server that understated its size (or said
+ * nothing) was buffered whole before the check could run.
+ */
 export async function fetchFile(url: string, timeoutMs = 20000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, {
-      headers: { accept: "*/*" },
-      redirect: "follow",
-      signal: controller.signal,
-    });
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-
-    const declared = Number(res.headers.get("content-length") ?? "0");
-    if (declared > MAX_FILE_BYTES) {
-      throw new Error("That file is too large to open here.");
-    }
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    if (bytes.byteLength > MAX_FILE_BYTES) {
-      throw new Error("That file is too large to open here.");
-    }
-    return {
-      bytes,
-      contentType: res.headers.get("content-type") ?? undefined,
-      finalUrl: res.url || url,
-    };
-  } finally {
-    clearTimeout(timer);
-  }
+  return safeFetchBytes(url, {
+    timeoutMs,
+    maxBytes: MAX_FILE_BYTES,
+    headers: { accept: "*/*" },
+  });
 }
 
 /**

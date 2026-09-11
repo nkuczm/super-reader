@@ -87,6 +87,26 @@ function rankOf(node: any) {
 }
 
 /**
+ * How much of a page is searched for structured data, and how many blocks are
+ * read. JSON-LD sits in <head> or just after it; a megabyte is far past any
+ * real one, and both bounds exist to keep a hostile page cheap.
+ */
+const SCAN_BYTES = 1_000_000;
+const MAX_BLOCKS = 20;
+
+/**
+ * `[^>]{0,400}` rather than `[^>]*`, and it matters more here than it looks.
+ * An unbounded run before a literal backtracks from every position the
+ * literal fails at, so a page carrying twenty thousand `<script` tags that
+ * never close turned this quadratic: measured at 91.7 seconds of CPU on a 4MB
+ * page, against a route with a 30-second limit. This app fetches pages chosen
+ * by whoever is using it, and a feed can point at one without anyone clicking,
+ * so that is a way to burn the deployment's compute from the outside.
+ */
+const LD_BLOCK =
+  /<script\b[^>]{0,400}type=["']application\/ld\+json["'][^>]{0,400}>([\s\S]{0,2000000}?)<\/script>/gi;
+
+/**
  * JSON-LD blocks, parsed leniently.
  *
  * Publishers ship invalid JSON more often than anyone would like: a stray
@@ -96,11 +116,12 @@ function rankOf(node: any) {
  */
 export function jsonLdNodes(html: string): any[] {
   const nodes: any[] = [];
-  const blocks = html.matchAll(
-    /<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi,
-  );
+  const blocks = html.slice(0, SCAN_BYTES).matchAll(LD_BLOCK);
 
+  let seen = 0;
   for (const [, raw] of blocks) {
+    if (seen >= MAX_BLOCKS) break;
+    seen += 1;
     const text = raw
       .replace(/^\s*<!--/, "")
       .replace(/-->\s*$/, "")

@@ -92,8 +92,16 @@ export function instagramProfileUrl(handle: string) {
   return `https://www.instagram.com/${handle}/`;
 }
 
-async function callInstagram(path: string) {
+/**
+ * The token goes in the Authorization header, not in the query string.
+ *
+ * Meta documents `?access_token=`, and it works, but a credential in a URL is
+ * a credential in every access log, proxy log and error report that URL
+ * touches. The header form is supported and costs nothing.
+ */
+async function callInstagram(path: string, token: string) {
   const res = await fetch(`${apiBase()}${path}`, {
+    headers: { authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(12000),
   });
   const body: any = await res.json().catch(() => null);
@@ -144,8 +152,8 @@ export async function fetchInstagramFeed(
     "{id,caption,permalink,media_url,thumbnail_url,media_type,timestamp,comments_count}}";
 
   const body = await callInstagram(
-    `/${encodeURIComponent(account)}?fields=${encodeURIComponent(fields)}` +
-      `&access_token=${encodeURIComponent(token)}`,
+    `/${encodeURIComponent(account)}?fields=${encodeURIComponent(fields)}`,
+    token,
   );
 
   const profile = body?.business_discovery;

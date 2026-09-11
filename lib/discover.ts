@@ -79,7 +79,7 @@ function scoreFeedUrl(url: string) {
 /** Anchors pointing at a feed — many sites link theirs instead of declaring it. */
 function feedLinksInAnchors(html: string, base: string) {
   const found: string[] = [];
-  for (const match of html.matchAll(/<a\b[^>]*href=["']([^"']+)["']/gi)) {
+  for (const match of html.matchAll(/<a\b[^>]{0,400}href=["']([^"']+)["']/gi)) {
     const href = match[1];
     if (!/(\.rss|\.xml|\/rss|\/feed|feed=rss|format=rss)/i.test(href)) continue;
     // Sitemaps and stylesheets are XML too.
@@ -96,7 +96,9 @@ function feedLinksInAnchors(html: string, base: string) {
 /** Pages that list a site's feeds, e.g. fbi.gov/feeds — worth one hop. */
 function feedIndexPages(html: string, base: string) {
   const found: string[] = [];
-  for (const match of html.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]{0,80}?)<\/a>/gi)) {
+  for (const match of html.matchAll(
+    /<a\b[^>]{0,400}href=["']([^"']+)["'][^>]{0,400}>([\s\S]{0,80}?)<\/a>/gi,
+  )) {
     const [, href, label] = match;
     const looksLikeIndex =
       /\/(feeds|rss|syndication)\/?$/i.test(href) ||

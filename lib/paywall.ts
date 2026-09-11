@@ -20,7 +20,7 @@
 
 /** Meta tags where a publisher declares the tier a page sits behind. */
 const TIER_META =
-  /<meta\b[^>]*(?:property|name)=["'](?:article:content_tier|article:content-tier|tier)["'][^>]*content=["']([^"']+)["']/i;
+  /<meta\b[^>]{0,200}(?:property|name)=["'](?:article:content_tier|article:content-tier|tier)["'][^>]{0,200}content=["']([^"']+)["']/i;
 
 /**
  * Markup that is the wall itself. Matched on whole words: "paywall-free" and

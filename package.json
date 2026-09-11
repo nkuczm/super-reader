@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "tsx --test test/*.test.ts"
+    "test": "ALLOW_PRIVATE_HOSTS=1 tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",

@@ -1,4 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
+import { safeFetchText } from "./net";
+import { httpUrlOrNull } from "./url";
 import { sortNewestFirst } from "./sort";
 import { fileKindFor } from "./files";
 import { isRedditFeed, tidyRedditPost } from "./reddit";
@@ -13,26 +15,23 @@ const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
+/**
+ * Every read of the outside world goes through here, which is why the
+ * public-web check lives in safeFetchText rather than in the routes: there
+ * were three routes fetching arbitrary URLs and only one of them checked.
+ */
 export async function fetchText(url: string, timeoutMs = 12000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, {
-      headers: {
-        "user-agent": UA,
-        accept:
-          "text/html,application/xhtml+xml,application/rss+xml,application/atom+xml," +
-          "application/xml;q=0.9,*/*;q=0.8",
-        "accept-language": "en-US,en;q=0.9",
-      },
-      redirect: "follow",
-      signal: controller.signal,
-    });
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    return { body: await res.text(), finalUrl: res.url || url };
-  } finally {
-    clearTimeout(timer);
-  }
+  const { body, finalUrl } = await safeFetchText(url, {
+    timeoutMs,
+    headers: {
+      "user-agent": UA,
+      accept:
+        "text/html,application/xhtml+xml,application/rss+xml,application/atom+xml," +
+        "application/xml;q=0.9,*/*;q=0.8",
+      "accept-language": "en-US,en;q=0.9",
+    },
+  });
+  return { body, finalUrl };
 }
 
 const parser = new XMLParser({
@@ -418,7 +417,8 @@ function attachmentsFrom(nodes: any[], site: string): Attachment[] | undefined {
     if (!url) continue;
     const kind = fileKindFor(String(url), node?.["@_type"]);
     if (!kind) continue;
-    const absoluteUrl = absolute(String(url), site);
+    const absoluteUrl = httpUrlOrNull(absolute(String(url), site));
+    if (!absoluteUrl) continue;
     if (found.some((a) => a.url === absoluteUrl)) continue;
     const bytes = Number.parseInt(node?.["@_length"], 10);
     found.push({
@@ -440,12 +440,13 @@ function attachmentsFrom(nodes: any[], site: string): Attachment[] | undefined {
  */
 function attachmentsInContent(content: string, site: string): Attachment[] {
   const found: Attachment[] = [];
-  for (const match of content.matchAll(/<a\b[^>]*href=["']([^"']+)["']/gi)) {
+  for (const match of content.matchAll(/<a\b[^>]{0,400}href=["']([^"']+)["']/gi)) {
     const href = decodeEntities(match[1]);
     const kind = fileKindFor(href);
     if (!kind) continue;
     try {
-      const url = absolute(href, site);
+      const url = httpUrlOrNull(absolute(href, site));
+      if (!url) continue;
       if (!found.some((a) => a.url === url)) found.push({ url, kind });
     } catch {
       /* skip malformed hrefs */

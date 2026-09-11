@@ -30,14 +30,15 @@ function stubFetch(body: unknown, options: { text?: string; status?: number } = 
       ),
     });
     const status = options.status ?? 200;
-    return {
-      ok: status >= 200 && status < 300,
+    // A real Response, not an object shaped like one: the fetch layer reads
+    // headers and streams the body to enforce its size cap, and a double that
+    // skips those is a double that hides whether any of it works.
+    const res = new Response(options.text ?? JSON.stringify(body), {
       status,
-      statusText: "",
-      url: String(input),
-      json: async () => body,
-      text: async () => options.text ?? JSON.stringify(body),
-    } as any;
+      headers: { "content-type": "application/json" },
+    });
+    Object.defineProperty(res, "url", { value: String(input) });
+    return res;
   }) as typeof fetch;
   return calls;
 }

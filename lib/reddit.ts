@@ -1,5 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
 import { decodeEntities, fetchText, stripHtml, summarize, toIso } from "./feed";
+import { httpUrlOrNull } from "./url";
 import type { Article } from "./types";
 
 /**
@@ -102,7 +103,10 @@ function selfText(content: string) {
 
 function anchorLabelled(content: string, label: string) {
   const match = content.match(
-    new RegExp(`<a\\b[^>]*href=["']([^"']+)["'][^>]*>\\s*\\[${label}\\]\\s*</a>`, "i"),
+    new RegExp(
+      `<a\\b[^>]{0,400}href=["']([^"']+)["'][^>]{0,400}>\\s*\\[${label}\\]\\s*</a>`,
+      "i",
+    ),
   );
   return match ? decodeEntities(match[1]) : undefined;
 }
@@ -113,8 +117,11 @@ function anchorLabelled(content: string, label: string) {
  * the summary rather than Reddit's boilerplate.
  */
 export function tidyRedditPost(article: Article, content: string): Article {
-  const destination = anchorLabelled(content, "link");
-  const comments = anchorLabelled(content, "comments") ?? article.link;
+  // Both of these are hrefs lifted out of third-party HTML and put straight
+  // into the article's own link fields, so they are held to the same rule as
+  // any other link the app shows: http(s) or nothing.
+  const destination = httpUrlOrNull(anchorLabelled(content, "link")) ?? undefined;
+  const comments = httpUrlOrNull(anchorLabelled(content, "comments")) ?? article.link;
   const own = selfText(content);
   // A link post still carries an empty <div class="md">, so the markup is not
   // the test — the words inside it are.
@@ -376,7 +383,7 @@ export async function readRedditPost(url: string): Promise<RedditPost | null> {
 
   const md = content.match(/<!--\s*SC_OFF\s*-->([\s\S]*?)<!--\s*SC_ON\s*-->/);
   const destination = content.match(
-    /<a\b[^>]*href=["']([^"']+)["'][^>]*>\s*\[link\]\s*<\/a>/i,
+    /<a\b[^>]{0,400}href=["']([^"']+)["'][^>]{0,400}>\s*\[link\]\s*<\/a>/i,
   )?.[1];
 
   const comments = entries
@@ -395,7 +402,10 @@ export async function readRedditPost(url: string): Promise<RedditPost | null> {
     author: textOf(postEntry.author?.name) || undefined,
     publishedAt: toIso(textOf(postEntry.published) || textOf(postEntry.updated)),
     body: md ? md[1] : "",
-    destination: destination && !destination.includes("/comments/") ? destination : undefined,
+    destination:
+      destination && !destination.includes("/comments/")
+        ? (httpUrlOrNull(destination) ?? undefined)
+        : undefined,
     comments,
   };
 }

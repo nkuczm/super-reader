@@ -31,7 +31,14 @@ const SKIP_SEGMENTS = new Set([
   "contact", "about", "careers", "pricing", "legal", "rss", "feed",
 ]);
 
-const ANCHOR = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+/**
+ * `[^>]{0,400}` rather than `[^>]*`: an unbounded run before a literal makes
+ * this quadratic on a page whose tags never close, and every regex here runs
+ * on HTML fetched from wherever the reader was pointed. Measured at 92
+ * seconds on a 4MB page built to do it. No real tag's attributes come close
+ * to 400 characters.
+ */
+const ANCHOR = /<a\b[^>]{0,400}href=["']([^"']+)["'][^>]{0,400}>([\s\S]*?)<\/a>/gi;
 
 /** Strip chrome that never contains the article list. */
 function stripNonContent(html: string) {

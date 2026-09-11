@@ -29,3 +29,31 @@ export function canonicalUrl(input: string) {
   }
 }
 
+
+/**
+ * A URL that is safe to put in an href, or to hand to the server to fetch.
+ *
+ * Everything the app links comes out of a feed, which is third-party text: an
+ * enclosure URL, a link in an item's body, the destination of a Reddit post.
+ * `javascript:` and `data:` belong to none of them, and a feed is free to
+ * contain either.
+ *
+ * React 19 does refuse to render a `javascript:` href, which is a real
+ * backstop and not one to lean on: it covers exactly one scheme, in exactly
+ * one place, and these URLs are also passed to the server to fetch. Keeping
+ * them out of the data model in the first place is cheaper than remembering
+ * every place they come out of it.
+ */
+export function httpUrlOrNull(input: string | undefined | null): string | null {
+  if (!input) return null;
+  const value = String(input).trim();
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    // Not absolute: a relative href is resolved against its feed before it
+    // gets here, so anything still relative at this point is unusable.
+    return null;
+  }
+}
