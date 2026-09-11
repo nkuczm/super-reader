@@ -12,7 +12,7 @@
  */
 
 import { fetchText, parseFeed, looksLikeFeed } from "./feed";
-import { subredditFeedUrl } from "./reddit";
+import { subredditFeedUrl, fetchRedditFeed } from "./reddit";
 import { panelOutlets, panelSubreddits } from "./outlets";
 import type { Outlet, SubredditEntry } from "./outlets";
 import {
@@ -172,7 +172,7 @@ async function withRedditRetry<T>(read: () => Promise<T>): Promise<T> {
 
 async function readSubreddit(entry: SubredditEntry): Promise<CorpusRedditHit[]> {
   const url = subredditFeedUrl({ name: entry.name, sort: "top", window: "day" });
-  const { body, finalUrl } = await fetchText(url, 12000);
+  const { body, finalUrl } = await fetchRedditFeed(url, 12000);
   if (!looksLikeFeed(body)) throw new Error("Not a feed");
   const { articles } = parseFeed(body, finalUrl);
 

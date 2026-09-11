@@ -8,10 +8,12 @@ import {
   titleFromSlug,
 } from "@/lib/sitemap";
 import { enrichArticles } from "@/lib/enrich";
-import { xHandleFrom, fetchXFeed } from "@/lib/x";
+import { xSourceFrom, fetchXSource } from "@/lib/x";
+import { instagramHandleFrom, fetchInstagramFeed } from "@/lib/instagram";
 import { sortNewestFirst } from "@/lib/sort";
 import { parseApiSourceUrl, fetchApiSource } from "@/lib/apis";
 import { decodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
+import { fetchRedditFeed, isRedditFeed } from "@/lib/reddit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,13 +39,21 @@ export async function GET(request: Request) {
           return { ok: true as const, ...meta, feedUrl: url, articles };
         }
 
-        const handle = xHandleFrom(url);
-        if (handle) {
-          const { meta, articles } = await fetchXFeed(handle);
+        const igHandle = instagramHandleFrom(url);
+        if (igHandle) {
+          const { meta, articles } = await fetchInstagramFeed(igHandle, MAX_PER_SOURCE);
           return { ok: true as const, ...meta, feedUrl: url, articles };
         }
 
-        const { body, finalUrl } = await fetchText(url);
+        const xSource = xSourceFrom(url);
+        if (xSource) {
+          const { meta, articles } = await fetchXSource(xSource, MAX_PER_SOURCE);
+          return { ok: true as const, ...meta, feedUrl: url, articles };
+        }
+
+        const { body, finalUrl } = isRedditFeed(url)
+          ? await fetchRedditFeed(url)
+          : await fetchText(url);
 
         // A sitemap source refreshes by re-reading the sitemap. It has to be
         // tested before looksLikeFeed, which only asks whether the body opens

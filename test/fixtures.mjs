@@ -691,3 +691,62 @@ export function startSitemapSite(port = 8794) {
     port,
   );
 }
+
+
+/**
+ * Stands in for graph.instagram.com. Business Discovery answers with the
+ * profile and its media nested under one field, which is the shape worth
+ * testing — and the error shape matters just as much, since "not a business
+ * account" is the common failure.
+ */
+export function startFakeInstagram(port = 8795) {
+  const calls = [];
+  const server = http.createServer((req, res) => {
+    calls.push(req.url);
+    const url = new URL(req.url, "http://x");
+    const json = (status, body) => {
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify(body));
+    };
+    if (url.searchParams.get("access_token") !== "ig-token") {
+      return json(401, { error: { message: "Invalid OAuth access token." } });
+    }
+    const fields = url.searchParams.get("fields") ?? "";
+    if (fields.includes("username(nosuchaccount)")) return json(200, {});
+    if (!fields.includes("username(nasa)")) return json(404, {});
+
+    return json(200, {
+      business_discovery: {
+        username: "nasa",
+        name: "NASA",
+        biography: "Exploring the universe.",
+        profile_picture_url: "https://cdn.instagram.com/nasa.jpg",
+        media: {
+          data: [
+            {
+              id: "18001",
+              caption: "A new image of the Carina Nebula, captured last week.",
+              permalink: "https://www.instagram.com/p/ABC123/",
+              media_url: "https://cdn.instagram.com/carina.jpg",
+              media_type: "IMAGE",
+              timestamp: "2026-09-10T12:00:00+0000",
+              comments_count: 412,
+            },
+            {
+              id: "18000",
+              caption: "Launch footage from Tuesday.",
+              permalink: "https://www.instagram.com/p/ABC122/",
+              media_url: "https://cdn.instagram.com/launch.mp4",
+              thumbnail_url: "https://cdn.instagram.com/launch-thumb.jpg",
+              media_type: "VIDEO",
+              timestamp: "2026-09-08T12:00:00+0000",
+            },
+          ],
+        },
+      },
+    });
+  });
+  return new Promise((resolve) => {
+    server.listen(port, () => resolve({ server, calls, close: () => server.close() }));
+  });
+}

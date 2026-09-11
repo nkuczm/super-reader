@@ -1,9 +1,16 @@
 import { fetchText, parseFeed, looksLikeFeed, faviconFor } from "./feed";
 import { scrapePage } from "./scrape";
 import { enrichArticles } from "./enrich";
-import { xHandleFrom, fetchXFeed } from "./x";
+import { xSourceFrom, fetchXSource } from "./x";
+import { instagramHandleFrom, fetchInstagramFeed } from "./instagram";
 import { parseApiSourceUrl, fetchApiSource } from "./apis";
-import { subredditFrom, subredditFeedUrl, subredditPageUrl } from "./reddit";
+import {
+  redditSourceFrom,
+  redditFeedUrl,
+  redditSourceUrl,
+  redditSourceTitle,
+  fetchRedditFeed,
+} from "./reddit";
 import { knownFeedFor } from "./publishers";
 import { sitemapSource, titleFromSlug } from "./sitemap";
 import { sortNewestFirst } from "./sort";
@@ -200,27 +207,54 @@ export async function discover(
 
   // An X account is neither a feed nor a scrapable page: x.com serves
   // logged-out visitors a login wall, so it goes through the API instead.
-  const handle = xHandleFrom(raw);
-  if (handle) {
-    const { meta, articles } = await fetchXFeed(handle, limit);
-    return { ...meta, kind: "x", scope: "site", total: articles.length, articles };
-  }
-
-  // A subreddit, however it was pasted. This has to come before both the URL
-  // and the topic branches: "r/programming" is not a URL and would otherwise
-  // become a news search, and a reddit.com URL would be scraped as a page.
-  const sub = subredditFrom(raw);
-  if (sub) {
-    const { meta, total, articles } = await tryFeed(subredditFeedUrl(sub), limit);
+  const xSource = xSourceFrom(raw);
+  if (xSource) {
+    const { meta, articles } = await fetchXSource(xSource, limit);
     return {
       ...meta,
+      kind: "x",
+      // A list or a search is a slice of X, not the whole of an account.
+      scope: xSource.kind === "account" ? "site" : "section",
+      total: articles.length,
+      articles,
+    };
+  }
+
+  // An Instagram account, which like X has no public feed at all and goes
+  // through the official API.
+  const igHandle = instagramHandleFrom(raw);
+  if (igHandle) {
+    const { meta, articles } = await fetchInstagramFeed(igHandle, limit);
+    return { ...meta, kind: "instagram", scope: "site", total: articles.length, articles };
+  }
+
+  // Anything on Reddit, however it was pasted — a subreddit, a user, a
+  // multireddit, a publication's submissions, a standing search. This has to
+  // come before both the URL and the topic branches: "r/programming" is not a
+  // URL and would otherwise become a news search, and a reddit.com URL would
+  // be scraped as a page.
+  const redditSource = redditSourceFrom(raw);
+  if (redditSource) {
+    const feedUrl = redditFeedUrl(redditSource);
+    // www.reddit.com throttles datacenter requests; old.reddit.com serves the
+    // same feed and is often answering when www is not.
+    const { body, finalUrl } = await fetchRedditFeed(feedUrl);
+    if (!looksLikeFeed(body)) throw new Error("Reddit did not answer with a feed");
+    const { meta, articles } = parseFeed(body, finalUrl);
+    return {
+      ...meta,
+      // The feed URL stays canonical (www), whichever host answered: it is the
+      // source's identity, and every fetch retries the same way.
+      feedUrl,
       kind: "feed",
       scope: "section",
-      total,
-      title: `r/${sub.name}${sub.sort ? ` · ${sub.sort}` : ""}`,
-      siteUrl: subredditPageUrl(sub),
+      total: articles.length,
+      title: redditSourceTitle(redditSource),
+      siteUrl: redditSourceUrl(redditSource),
       favicon: faviconFor("reddit.com"),
-      articles: await enrichArticles(articles, { siteDescription: meta.description }),
+      articles: await enrichArticles(articles.slice(0, limit), {
+        siteDescription: meta.description,
+      }),
     };
   }
 

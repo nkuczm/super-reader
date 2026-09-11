@@ -68,6 +68,10 @@ export function subredditFrom(input: string): Subreddit | null {
   if (!match) return null;
 
   const sort = SORTS.find((s) => s === match[2]?.toLowerCase());
+  // The bare form already refused a trailing segment that is not a sort; the
+  // URL form did not, so /r/science/search came back as the whole subreddit
+  // with the query silently dropped.
+  if (match[2] && !sort) return null;
   const window = url.searchParams.get("t") ?? undefined;
   return { name: match[1], ...(sort ? { sort } : {}), ...(sort === "top" && window ? { window } : {}) };
 }
@@ -135,6 +139,167 @@ export function tidyRedditPost(article: Article, content: string): Article {
   };
 }
 
+
+/**
+ * Everything else on Reddit worth following.
+ *
+ * A subreddit is the obvious source and was the only one; it is not the only
+ * thing people follow. An author's posts across Reddit, a curated multireddit,
+ * every submission linking a particular publication, and a standing search are
+ * all things someone pastes — and all of them have an RSS feed, at the same
+ * `.rss` suffix the subreddit feeds use. Without this they fell through to the
+ * topic branch and quietly became a Bing News search for the word "u".
+ */
+export type RedditSource =
+  | { kind: "subreddit"; sub: Subreddit }
+  | { kind: "user"; name: string }
+  | { kind: "multi"; user: string; name: string }
+  | { kind: "domain"; host: string }
+  | { kind: "search"; query: string; sub?: string; sort?: string };
+
+const USER = "[A-Za-z0-9_\\-]{2,20}";
+
+/** Read any Reddit source out of what was pasted, subreddits included. */
+export function redditSourceFrom(input: string): RedditSource | null {
+  const value = input.trim();
+  if (!value) return null;
+
+  const sub = subredditFrom(value);
+  if (sub) return { kind: "subreddit", sub };
+
+  // The bare forms people type: u/name, /u/name, u/name/m/best.
+  const bareMulti = value.match(new RegExp(`^/?u(?:ser)?/(${USER})/m/(${USER})/?$`, "i"));
+  if (bareMulti) return { kind: "multi", user: bareMulti[1], name: bareMulti[2] };
+  const bareUser = value.match(new RegExp(`^/?u(?:ser)?/(${USER})/?$`, "i"));
+  if (bareUser) return { kind: "user", name: bareUser[1] };
+
+  let url: URL;
+  try {
+    url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+  } catch {
+    return null;
+  }
+  if (!/(^|\.)reddit\.com$/i.test(url.hostname)) return null;
+
+  const path = url.pathname.replace(/\/$/, "");
+
+  const multi = path.match(new RegExp(`^/u(?:ser)?/(${USER})/m/(${USER})$`, "i"));
+  if (multi) return { kind: "multi", user: multi[1], name: multi[2] };
+
+  // A user's own page, with or without a listing tab.
+  const user = path.match(
+    new RegExp(`^/u(?:ser)?/(${USER})(?:/(submitted|posts|comments|overview))?$`, "i"),
+  );
+  if (user) return { kind: "user", name: user[1] };
+
+  const domain = path.match(/^\/domain\/([A-Za-z0-9.\-]+)$/i);
+  if (domain) return { kind: "domain", host: domain[1] };
+
+  // A search, either across Reddit or restricted to one subreddit.
+  const query = url.searchParams.get("q")?.trim();
+  if (query) {
+    const scoped = path.match(new RegExp(`^/r/(${NAME})/search$`, "i"));
+    if (path === "/search" || scoped) {
+      const restricted = url.searchParams.get("restrict_sr");
+      return {
+        kind: "search",
+        query,
+        // "restrict_sr=0" on a subreddit search means the whole site.
+        ...(scoped && restricted !== "0" && restricted !== "false"
+          ? { sub: scoped[1] }
+          : {}),
+        ...(url.searchParams.get("sort") ? { sort: url.searchParams.get("sort")! } : {}),
+      };
+    }
+  }
+
+  return null;
+}
+
+export function redditFeedUrl(source: RedditSource) {
+  const base = "https://www.reddit.com";
+  switch (source.kind) {
+    case "subreddit":
+      return subredditFeedUrl(source.sub);
+    case "user":
+      // The submitted listing, not the overview: an overview feed is mostly
+      // the author's comments, which are not articles.
+      return `${base}/user/${source.name}/submitted/.rss`;
+    case "multi":
+      return `${base}/user/${source.user}/m/${source.name}/.rss`;
+    case "domain":
+      return `${base}/domain/${source.host}/.rss`;
+    case "search": {
+      const params = new URLSearchParams({ q: source.query });
+      // Newest first unless asked otherwise: a search source is a standing
+      // query, and "relevance" makes it look frozen.
+      params.set("sort", source.sort ?? "new");
+      if (source.sub) params.set("restrict_sr", "1");
+      const path = source.sub ? `/r/${source.sub}/search` : "/search";
+      return `${base}${path}/.rss?${params}`;
+    }
+  }
+}
+
+export function redditSourceUrl(source: RedditSource) {
+  const base = "https://www.reddit.com";
+  switch (source.kind) {
+    case "subreddit":
+      return subredditPageUrl(source.sub);
+    case "user":
+      return `${base}/user/${source.name}/`;
+    case "multi":
+      return `${base}/user/${source.user}/m/${source.name}/`;
+    case "domain":
+      return `${base}/domain/${source.host}/`;
+    case "search":
+      return `${base}${source.sub ? `/r/${source.sub}` : ""}/search/?q=${encodeURIComponent(source.query)}`;
+  }
+}
+
+/** What the source is called in the sidebar. */
+export function redditSourceTitle(source: RedditSource) {
+  switch (source.kind) {
+    case "subreddit":
+      return `r/${source.sub.name}${source.sub.sort ? ` · ${source.sub.sort}` : ""}`;
+    case "user":
+      return `u/${source.name}`;
+    case "multi":
+      return `m/${source.name}`;
+    case "domain":
+      return `Reddit · ${source.host}`;
+    case "search":
+      return `Reddit · “${source.query}”${source.sub ? ` in r/${source.sub}` : ""}`;
+  }
+}
+
+/**
+ * Read a Reddit feed, falling back to old.reddit.com.
+ *
+ * www.reddit.com answers a datacenter request with 429 or 403 often enough to
+ * matter — it is the same throttle the sweep spaces its requests around. The
+ * old front end serves the identical feed from a different tier and is
+ * frequently answering when www is not, so it is worth the second request
+ * before telling someone their source is broken.
+ */
+export async function fetchRedditFeed(url: string, timeoutMs = 12000) {
+  try {
+    return await fetchText(url, timeoutMs);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (!/\b(403|429|503)\b/.test(message)) throw error;
+    let alternate: string;
+    try {
+      const parsed = new URL(url);
+      if (!/^www\.reddit\.com$/i.test(parsed.hostname)) throw error;
+      parsed.hostname = "old.reddit.com";
+      alternate = parsed.toString();
+    } catch {
+      throw error;
+    }
+    return fetchText(alternate, timeoutMs);
+  }
+}
 
 /** A reddit post permalink: /r/<sub>/comments/<id>/<slug>. */
 export function redditPostUrl(url: string): string | null {

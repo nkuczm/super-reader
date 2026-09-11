@@ -46,6 +46,14 @@ function pastedASection(input: string) {
   }
 }
 
+/** What a previewed source is called, where the host is not the answer. */
+const KIND_LABELS: Partial<Record<DiscoverResult["kind"], string>> = {
+  topic: "Topic feed",
+  x: "X",
+  instagram: "Instagram",
+  api: "API source",
+};
+
 export default function AddSourceDialog({
   feeds,
   keyHeaders,
@@ -206,13 +214,7 @@ export default function AddSourceDialog({
                 <div>
                   <strong>{preview.title}</strong>
                   <span>
-                    {preview.kind === "topic"
-                      ? "Topic feed"
-                      : preview.kind === "x"
-                        ? "X account"
-                        : preview.kind === "api"
-                          ? "API source"
-                          : hostOf(preview.siteUrl)}{" "}
+                    {KIND_LABELS[preview.kind] ?? hostOf(preview.siteUrl)}{" "}
                     · {preview.articles.length} recent articles
                     {preview.kind === "page" && (
                       <em className="badge">built from the page — no RSS</em>
