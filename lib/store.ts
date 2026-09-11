@@ -1,5 +1,6 @@
 "use client";
 
+import { canonicalUrl } from "./url";
 import type { Article, SourceMeta } from "./types";
 
 export type Source = SourceMeta & { id: string; kind: "feed" | "topic" | "page" | "sitemap" | "x" | "instagram" | "api" };
@@ -44,7 +45,32 @@ export type SavedArticle = Article & {
   savedAt: number;
 };
 
+/**
+ * A record that an article was *un*saved, and when.
+ *
+ * Saved articles sync as a union of what every device has, which is the only
+ * merge that never loses a bookmark someone made while another device was
+ * offline. The cost of a union is that removing something cannot be expressed
+ * — the other device still has it, so it comes straight back. A tombstone is
+ * how the removal travels: the newest of "saved at" and "unsaved at" wins.
+ */
+export type SavedTombstone = { link: string; at: number };
+
+/** After this, a tombstone has done its job on every device that is still in use. */
+const TOMBSTONE_DAYS = 90;
+
+/**
+ * How many saved articles are sent to the server.
+ *
+ * They are stored whole — headline, summary, image, source — so the list is
+ * far heavier than the feed list beside it, and the payload has a ceiling.
+ * The newest are the ones a second device wants; anything past this stays on
+ * the device that saved it rather than being deleted anywhere.
+ */
+export const MAX_SYNCED_SAVED = 400;
+
 const SAVED_KEY = "super-reader:saved:v1";
+const UNSAVED_KEY = "super-reader:unsaved:v1";
 
 export function loadSaved(): SavedArticle[] {
   if (typeof window === "undefined") return [];
@@ -63,6 +89,88 @@ export function saveSaved(articles: SavedArticle[]) {
   } catch {
     /* storage unavailable; the list just won't persist */
   }
+}
+
+export function loadUnsaved(): SavedTombstone[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(UNSAVED_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? (parsed as SavedTombstone[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveUnsaved(tombstones: SavedTombstone[]) {
+  try {
+    window.localStorage.setItem(UNSAVED_KEY, JSON.stringify(tombstones));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/** One key per article, so the same story saved from two feeds is one entry. */
+function savedKey(link: string) {
+  return canonicalUrl(link);
+}
+
+/**
+ * Bring two devices' Saved lists together.
+ *
+ * Everything else in the synced document resolves by "most recent change
+ * wins", which is right for the feed list — it is edited rarely and
+ * deliberately. Bookmarks are not like that: they are added a few at a time,
+ * on whichever device is to hand, and often while the other one is asleep. A
+ * whole-document replace would mean saving something on a phone in the
+ * morning and losing it the moment a laptop that had not pulled yet saved
+ * something of its own. That is the bug people would actually hit.
+ *
+ * So Saved merges instead: the union of both lists, each article at its
+ * earliest save, minus anything a device has since removed. Removals travel
+ * as tombstones, and the newest timestamp decides — save it again after
+ * removing it and it stays.
+ */
+export function mergeSaved(
+  mine: SavedArticle[],
+  theirs: SavedArticle[],
+  myTombstones: SavedTombstone[] = [],
+  theirTombstones: SavedTombstone[] = [],
+  now = Date.now(),
+): { saved: SavedArticle[]; unsaved: SavedTombstone[] } {
+  const removed = new Map<string, number>();
+  for (const tombstone of [...myTombstones, ...theirTombstones]) {
+    if (!tombstone?.link) continue;
+    const key = savedKey(tombstone.link);
+    const at = Number(tombstone.at) || 0;
+    if (at > (removed.get(key) ?? 0)) removed.set(key, at);
+  }
+
+  const kept = new Map<string, SavedArticle>();
+  for (const article of [...mine, ...theirs]) {
+    if (!article?.link) continue;
+    const key = savedKey(article.link);
+    const savedAt = Number(article.savedAt) || 0;
+    // Removed more recently than it was saved: the removal is the later word.
+    if ((removed.get(key) ?? 0) > savedAt) continue;
+    const existing = kept.get(key);
+    // The earliest save is the true one — re-saving on a second device should
+    // not reorder a list the reader has been building.
+    if (!existing || savedAt < (Number(existing.savedAt) || 0)) kept.set(key, article);
+  }
+
+  const cutoff = now - TOMBSTONE_DAYS * 24 * 60 * 60 * 1000;
+  const unsaved = [...removed.entries()]
+    .filter(([, at]) => at >= cutoff)
+    .map(([link, at]) => ({ link, at }))
+    .sort((a, b) => b.at - a.at);
+
+  return {
+    saved: [...kept.values()].sort(
+      (a, b) => (Number(b.savedAt) || 0) - (Number(a.savedAt) || 0),
+    ),
+    unsaved,
+  };
 }
 
 /**

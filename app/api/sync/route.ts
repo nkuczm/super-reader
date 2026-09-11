@@ -12,6 +12,9 @@ import { isValidCode } from "@/lib/sync-code";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/** A ceiling on the bookmark list, matching what the client agrees to send. */
+const MAX_SAVED = 500;
+
 function notConfigured() {
   return NextResponse.json(
     { error: "Sync is not set up on this deployment yet." },
@@ -57,6 +60,8 @@ export async function PUT(request: Request) {
     code?: string;
     feeds?: unknown;
     read?: unknown;
+    saved?: unknown;
+    unsaved?: unknown;
     vault?: unknown;
     updatedAt?: unknown;
   };
@@ -77,6 +82,11 @@ export async function PUT(request: Request) {
   const payload = {
     feeds: body.feeds,
     read: Array.isArray(body.read) ? (body.read as string[]).slice(-3000) : [],
+    // Stored and handed back as given: what a saved article is, and how two
+    // devices' lists are reconciled, is the client's business. The server
+    // only bounds how much of it there can be.
+    saved: Array.isArray(body.saved) ? body.saved.slice(0, MAX_SAVED) : [],
+    unsaved: Array.isArray(body.unsaved) ? body.unsaved.slice(0, MAX_SAVED) : [],
     // Opaque to this server by design; stored and handed back untouched.
     ...(body.vault ? { vault: body.vault } : {}),
     updatedAt: Number.isFinite(Number(body.updatedAt)) ? Number(body.updatedAt) : 0,

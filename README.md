@@ -603,8 +603,10 @@ reads a file URL into the same shape as an extracted page.
 reader has the same button. Saved articles are kept whole rather than by
 reference, so one stays readable long after it has scrolled out of its feed,
 and they are always included in the offline download — a bookmark is the
-article most worth having on the device. The list is per-device, like read
-state and view mode.
+article most worth having on the device.
+
+The list syncs across your devices along with your feeds, and it merges
+rather than being replaced — see **Syncing across devices** below.
 
 ## Reading offline
 
@@ -673,6 +675,27 @@ accepted however you paste them — lower case, spaces instead of dashes.
 Devices pull on load and whenever the window regains focus, and push changes
 after a short debounce. Conflicts resolve last-write-wins: two devices editing
 in the same moment costs one side's change, not the list.
+
+### Saved articles merge, they do not replace
+
+Everything else in the synced document resolves by "most recent change wins",
+which is right for a feed list: it is edited rarely, and deliberately.
+Bookmarks are not like that. They are added a few at a time, on whichever
+device is to hand, often while the other one is asleep — so a whole-document
+replace would mean saving something on your phone in the morning and losing
+it the moment a laptop that had not pulled yet saved something of its own.
+
+So Saved is the union of every device's list: each article at its earliest
+save, newest first. Removing one is recorded as a removal and travels with the
+list, because otherwise the union would simply put it back from the device
+that still had it. Save it again after removing it and it stays — the later
+action is the one that counts. Removal records are dropped after 90 days, by
+which time every device in use has seen them.
+
+The newest 400 bookmarks sync. They are stored whole — headline, summary,
+image, source — so that the article outlives the feed it came from, which
+makes the list far heavier than the feeds beside it; anything past that stays
+on the device that saved it rather than being deleted anywhere.
 
 Conflicts resolve by **most recent change**, not most recent write. Each device
 records when its data actually changed; a device that has been closed for a

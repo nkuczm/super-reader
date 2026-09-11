@@ -183,6 +183,20 @@ the host's own feed on those domains.
   land on nothing and the failure looks exactly like a broken drag.
 - **View mode and collapsed feeds are per-device, not synced.** A phone and a
   desktop want different densities; the feeds are what must match.
+- **Saved articles merge; everything else in the document replaces.** They
+  were not synced at all to begin with — `saved` was simply never in the
+  payload — and adding them wholesale would have been worse than leaving them
+  out: bookmarks are added a few at a time on whichever device is to hand, so
+  "most recent change wins" means one device's morning bookmarks vanish when
+  the other saves something. `mergeSaved` (lib/store.ts) takes the union, each
+  article at its earliest save, and removals travel as tombstones because a
+  union cannot express a deletion — the device that still has it would put it
+  straight back. Tombstones expire at 90 days. The merge is commutative, and
+  there is a test asserting both devices settle on the same list.
+- **A device can now hold bookmarks and no sources.** That made the first-run
+  "Start with one link" state reachable on top of a non-empty Saved list,
+  which reads as the bookmarks having been lost. The empty state is now
+  conditional on there being nothing to show as well as no sources.
 - **Sync resolves by most recent change, not last write.** Each device stamps
   its synced data when the user changes it, the server refuses a write carrying
   an older stamp (409, handing back what is current), and a device applies a

@@ -12,6 +12,15 @@ export type SyncPayload = {
    */
   vault?: unknown;
   /**
+   * Bookmarks, stored whole so they outlive the feed they came from — and
+   * merged rather than replaced on conflict, because two devices add to this
+   * list independently and a whole-document replace would throw one side's
+   * bookmarks away. See mergeSaved in lib/store.ts.
+   */
+  saved?: unknown[];
+  /** Removals, so an unsave travels instead of being undone by the union. */
+  unsaved?: unknown[];
+  /**
    * When this data last changed, on the device that changed it. The rule is
    * "most recent change wins" rather than "last write wins": a device that has
    * been closed for a week must not overwrite what happened since, however
@@ -25,8 +34,15 @@ export type SyncRecord = {
   updatedAt: string;
 };
 
-/** Keeps one device from filling the table with an oversized document. */
-export const MAX_PAYLOAD_BYTES = 512 * 1024;
+/**
+ * Keeps one device from filling the table with an oversized document.
+ *
+ * Raised when Saved joined the payload: bookmarks are kept whole — headline,
+ * summary, image, source — so a few hundred of them are a different order of
+ * size from the feed list they travel with. The client sends only its newest
+ * MAX_SYNCED_SAVED, so this is headroom rather than the limit that bites.
+ */
+export const MAX_PAYLOAD_BYTES = 1024 * 1024;
 
 export async function createSync(): Promise<{ code: string }> {
   await ensureSchema();

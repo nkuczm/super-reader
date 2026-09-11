@@ -19,6 +19,10 @@ import {
   moveSourceBetweenFeeds,
   loadSaved,
   saveSaved,
+  loadUnsaved,
+  saveUnsaved,
+  mergeSaved,
+  MAX_SYNCED_SAVED,
   loadVault,
   saveVault,
   loadUpdatedAt,
@@ -26,6 +30,7 @@ import {
   loadUnlockedKeys,
   saveUnlockedKeys,
   type SavedArticle,
+  type SavedTombstone,
   type Feed,
   type Source,
 } from "@/lib/store";
@@ -168,6 +173,45 @@ export default function Reader() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [saved, setSaved] = useState<SavedArticle[]>([]);
+  /** Bookmarks removed on this device, so the removal survives a merge. */
+  const [unsaved, setUnsaved] = useState<SavedTombstone[]>([]);
+  /**
+   * The same two lists, readable without waiting for a render.
+   *
+   * A merge needs what this device holds *now*, and it runs from a pull that
+   * was started by an effect — where the state captured in the closure can be
+   * a render behind. The refs are what the merge reads; the state is what the
+   * list renders from.
+   */
+  const savedRef = useRef<SavedArticle[]>([]);
+  const unsavedRef = useRef<SavedTombstone[]>([]);
+
+  /**
+   * Removing a bookmark leaves a note saying so; saving one clears it.
+   *
+   * Without the note, the next merge would take the union with a device that
+   * still has the article and put it straight back — the removal would look
+   * like it had not happened.
+   */
+  const tombstonesFor = useCallback((link: string, removing: boolean) => {
+    const others = unsavedRef.current.filter(
+      (tombstone) => canonicalUrl(tombstone.link) !== canonicalUrl(link),
+    );
+    return removing ? [{ link, at: Date.now() }, ...others] : others;
+  }, []);
+
+  /** The one place both lists are written, so they can never disagree. */
+  const applySaved = useCallback(
+    (next: SavedArticle[], tombstones: SavedTombstone[]) => {
+      savedRef.current = next;
+      unsavedRef.current = tombstones;
+      setSaved(next);
+      setUnsaved(tombstones);
+      saveSaved(next);
+      saveUnsaved(tombstones);
+    },
+    [],
+  );
   /** Whether the browser promised to keep this cache rather than evict it. */
   const [persisted, setPersisted] = useState(false);
   const [vault, setVault] = useState<unknown | null>(null);
@@ -219,7 +263,12 @@ export default function Reader() {
     setSyncCode(loadSyncCode());
     setSettings(loadSettings());
     setCollapsed(loadCollapsed());
-    setSaved(loadSaved());
+    const storedSaved = loadSaved();
+    const storedUnsaved = loadUnsaved();
+    savedRef.current = storedSaved;
+    unsavedRef.current = storedUnsaved;
+    setSaved(storedSaved);
+    setUnsaved(storedUnsaved);
     setVault(loadVault());
     setApiKeys(loadUnlockedKeys());
     updatedAtRef.current = loadUpdatedAt();
@@ -235,7 +284,15 @@ export default function Reader() {
     });
   }, []);
 
-  const applyRemote = useCallback((payload: { feeds?: Feed[]; read?: string[]; vault?: unknown; updatedAt?: number }) => {
+  const applyRemote = useCallback(
+    (payload: {
+      feeds?: Feed[];
+      read?: string[];
+      saved?: SavedArticle[];
+      unsaved?: SavedTombstone[];
+      vault?: unknown;
+      updatedAt?: number;
+    }) => {
     applying.current = true;
     if (Array.isArray(payload.feeds)) setFeeds(payload.feeds);
     // The vault arrives encrypted; it stays locked until a passphrase is
@@ -248,6 +305,21 @@ export default function Reader() {
       const next = new Set(payload.read);
       setRead(next);
       saveRead(next);
+    }
+    /**
+     * Saved merges; it does not get replaced. Everything else here resolves
+     * by "most recent change wins", which would mean a bookmark made on a
+     * phone this morning disappearing the moment a laptop that had not pulled
+     * yet saved something of its own.
+     */
+    if (Array.isArray(payload.saved) || Array.isArray(payload.unsaved)) {
+      const merged = mergeSaved(
+        savedRef.current,
+        (payload.saved ?? []) as SavedArticle[],
+        unsavedRef.current,
+        (payload.unsaved ?? []) as SavedTombstone[],
+      );
+      applySaved(merged.saved, merged.unsaved);
     }
     if (typeof payload.updatedAt === "number" && payload.updatedAt > 0) {
       updatedAtRef.current = payload.updatedAt;
@@ -301,7 +373,7 @@ export default function Reader() {
     updatedAtRef.current = now;
     setUpdatedAt(now);
     saveUpdatedAt(now);
-  }, [feeds, read, vault, ready]);
+  }, [feeds, read, saved, unsaved, vault, ready]);
 
   // Pull once the code is known, and again whenever the window regains focus,
   // so a device left open picks up changes made elsewhere.
@@ -343,6 +415,10 @@ export default function Reader() {
             code: syncCode,
             feeds,
             read: [...read],
+            // Newest first already; only the newest are sent, because a
+            // bookmark is stored whole and the payload has a ceiling.
+            saved: saved.slice(0, MAX_SYNCED_SAVED),
+            unsaved,
             vault,
             updatedAt,
           }),
@@ -362,7 +438,7 @@ export default function Reader() {
       }
     }, 900);
     return () => clearTimeout(timer);
-  }, [feeds, read, ready, syncCode, vault, updatedAt, applyRemote]);
+  }, [feeds, read, saved, unsaved, ready, syncCode, vault, updatedAt, applyRemote]);
 
   const startSync = useCallback(async () => {
     setSyncState("working");
@@ -376,12 +452,18 @@ export default function Reader() {
     // Upload what this device already has *before* the code goes live,
     // otherwise the first pull would overwrite these feeds with the empty
     // record we just created.
-    const saved = await fetch("/api/sync", {
+    const uploaded = await fetch("/api/sync", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code: data.code, feeds, read: [...read] }),
+      body: JSON.stringify({
+        code: data.code,
+        feeds,
+        read: [...read],
+        saved: saved.slice(0, MAX_SYNCED_SAVED),
+        unsaved,
+      }),
     });
-    if (!saved.ok) {
+    if (!uploaded.ok) {
       setSyncState("error");
       throw new Error("Could not upload this device's feeds");
     }
@@ -389,7 +471,7 @@ export default function Reader() {
     saveSyncCode(data.code);
     setSyncCode(data.code);
     setSyncState("saved");
-  }, [feeds, read]);
+  }, [feeds, read, saved, unsaved]);
 
   const connectSync = useCallback(
     async (entered: string) => {
@@ -653,8 +735,10 @@ export default function Reader() {
    */
   const toggleSaved = useCallback(
     (article: Loaded, source?: Source) => {
-      setSaved((current) => {
-        const next = current.some((a) => a.link === article.link)
+      const current = savedRef.current;
+      const already = current.some((a) => a.link === article.link);
+      applySaved(
+        already
           ? current.filter((a) => a.link !== article.link)
           : [
               {
@@ -664,12 +748,11 @@ export default function Reader() {
                 savedAt: Date.now(),
               },
               ...current,
-            ];
-        saveSaved(next);
-        return next;
-      });
+            ],
+        tombstonesFor(article.link, already),
+      );
     },
-    [],
+    [applySaved],
   );
 
   /**
@@ -679,8 +762,10 @@ export default function Reader() {
    */
   const toggleSavedFile = useCallback(
     (file: Attachment, parent: Loaded, source?: Source) => {
-      setSaved((current) => {
-        const next = current.some((a) => a.link === file.url)
+      const current = savedRef.current;
+      const already = current.some((a) => a.link === file.url);
+      applySaved(
+        already
           ? current.filter((a) => a.link !== file.url)
           : [
               {
@@ -695,12 +780,11 @@ export default function Reader() {
                 savedAt: Date.now(),
               },
               ...current,
-            ];
-        saveSaved(next);
-        return next;
-      });
+            ],
+        tombstonesFor(file.url, already),
+      );
     },
-    [],
+    [applySaved],
   );
 
   const markSaved = useCallback((url: string) => {
@@ -1483,7 +1567,12 @@ export default function Reader() {
           </div>
         </div>
 
-        {!ready ? null : allSources.length === 0 ? (
+        {/* "No sources" is the right first-run screen, but it must not hide
+            the Saved list: a device that syncs can now receive bookmarks
+            before it has a single source of its own, and showing it "start
+            with one link" over a list that has something in it reads as the
+            bookmarks having been lost. */}
+        {!ready ? null : allSources.length === 0 && shown.length === 0 ? (
           <div className="state">
             <h2>Start with one link.</h2>
             <p>
@@ -1501,8 +1590,9 @@ export default function Reader() {
               (selection.type === "saved" ? (
                 <p>
                   Nothing saved yet. Use <strong>Save</strong> on any article
-                  and it will wait here — kept on this device, and downloaded
-                  for reading offline, even after it leaves its feed.
+                  and it will wait here — synced to your other devices, and
+                  downloaded for reading offline, even after it leaves its
+                  feed.
                 </p>
               ) : (
                 <p>This selection has no articles right now.</p>

@@ -150,3 +150,27 @@ test("a write with the same change time is allowed through", async () => {
   });
   assert.equal((again?.payload.feeds?.[0] as { name: string }).name, "Retry");
 });
+
+test("saved articles make the round trip, and removals travel with them", async () => {
+  // The reported bug: bookmarks stayed on the device that made them, because
+  // `saved` was never part of the stored document.
+  const { code } = await createSync();
+  await writeSync(code, {
+    feeds: [],
+    saved: [
+      { id: "1", title: "Kept", link: "https://a.test/one", savedAt: 1 },
+      { id: "2", title: "Also kept", link: "https://a.test/two", savedAt: 2 },
+    ],
+    unsaved: [{ link: "https://a.test/gone", at: 3 }],
+    updatedAt: 10,
+  });
+
+  const record = await readSync(code);
+  assert.equal((record?.payload.saved as unknown[])?.length, 2);
+  assert.equal(
+    (record?.payload.saved as { title: string }[])[0].title,
+    "Kept",
+    "stored whole, so it outlives the feed it came from",
+  );
+  assert.deepEqual(record?.payload.unsaved, [{ link: "https://a.test/gone", at: 3 }]);
+});
