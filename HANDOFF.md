@@ -43,9 +43,11 @@ npx next build
 hosts in production so the deployed app cannot be used to probe its own
 network. Fixtures live on 127.0.0.1, hence the escape hatch.
 
-**Kill stale fixture servers before running tests.** Ports 8781/8783–8795 and
-9101–9104 are used by fixtures; a leftover process causes `EADDRINUSE` and every test hangs
-or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
+**Fixture ports** are 8781/8783–8795 and 9101–9104. A fixture server now waits
+out a port the previous run has not finished releasing (up to five seconds),
+which is what used to turn two back-to-back `npm test` runs into ten cancelled
+tests in whichever file lost the race. If a port is held by something that is
+not going away, that still fails — `fuser -k <port>/tcp` clears it.
 
 ---
 

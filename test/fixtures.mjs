@@ -1,5 +1,31 @@
 import http from "node:http";
 
+/**
+ * Start a fixture server, waiting out a port the previous run has not let go.
+ *
+ * These listen on fixed ports, and two `npm test` runs back to back collide:
+ * the earlier run's process is still closing its sockets when the next one
+ * starts, and an EADDRINUSE inside a `before` hook cancels every test in that
+ * file — which reads as ten unrelated failures. Retrying for a few seconds
+ * costs nothing when the port is free and turns the collision into a pause.
+ */
+function listenWithRetry(server, port, attempts = 25) {
+  return new Promise((resolve, reject) => {
+    const attempt = (left) => {
+      const onError = (error) => {
+        if (error.code !== "EADDRINUSE" || left <= 0) return reject(error);
+        setTimeout(() => attempt(left - 1), 200);
+      };
+      server.once("error", onError);
+      server.listen(port, () => {
+        server.removeListener("error", onError);
+        resolve(server);
+      });
+    };
+    attempt(attempts);
+  });
+}
+
 const rss = `<?xml version="1.0"?><rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:media="http://search.yahoo.com/mrss/">
 <channel><title>Example Blog</title><link>http://127.0.0.1:8781</link><description>A test blog</description>
 <item><title>Hello &amp; welcome</title><link>/posts/1</link><guid>p1</guid><dc:creator>Ada</dc:creator>
@@ -173,7 +199,7 @@ export function startBlockedHomepageSite(port = 8787) {
     "/feeds/national-press-releases/rss.xml": [200, "application/rss+xml", pressFeed],
     "/feeds/seattle-news/rss.xml": [200, "application/rss+xml", regionalFeed],
   };
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
       const path = new URL(req.url, "http://x").pathname;
       if (path === "/") { res.writeHead(403); return res.end("Forbidden"); }
@@ -182,7 +208,10 @@ export function startBlockedHomepageSite(port = 8787) {
       res.writeHead(hit[0], { "content-type": hit[1] });
       res.end(hit[2]);
     });
-    server.listen(port, () => resolve({ server, close: () => server.close() }));
+    listenWithRetry(server, port).then(
+      () => resolve({ server, close: () => server.close() }),
+      reject,
+    );
   });
 }
 
@@ -200,7 +229,7 @@ const fullTextFeed = `<?xml version="1.0"?><rss version="2.0" xmlns:content="htt
 
 /** Article pages 403, but the feed carries the full text. */
 export function startGuardedSite(port = 8789) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
       const path = new URL(req.url, "http://x").pathname;
       if (path === "/rss.xml") {
@@ -210,7 +239,10 @@ export function startGuardedSite(port = 8789) {
       res.writeHead(403);
       res.end("Forbidden");
     });
-    server.listen(port, () => resolve({ server, close: () => server.close() }));
+    listenWithRetry(server, port).then(
+      () => resolve({ server, close: () => server.close() }),
+      reject,
+    );
   });
 }
 
@@ -430,7 +462,7 @@ export function startCommentSite(port = 8790) {
 }
 
 function serve(routeTable, port) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
       const path = new URL(req.url, "http://x").pathname;
       const hit = routeTable[path];
@@ -438,7 +470,7 @@ function serve(routeTable, port) {
       res.writeHead(hit[0], { "content-type": hit[1] });
       res.end(hit[2]);
     });
-    server.listen(port, () => resolve(server));
+    listenWithRetry(server, port).then(resolve, reject);
   });
 }
 
@@ -447,7 +479,7 @@ export function startNoFeedSite(port = 8783) {
 }
 
 export function startFixtures(port = 8781) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
       const path = new URL(req.url, "http://x").pathname;
       const hit = routes[path];
@@ -455,7 +487,7 @@ export function startFixtures(port = 8781) {
       res.writeHead(hit[0], { "content-type": hit[1] });
       res.end(hit[2]);
     });
-    server.listen(port, () => resolve(server));
+    listenWithRetry(server, port).then(resolve, reject);
   });
 }
 
@@ -511,8 +543,11 @@ export function startFakeX(port = 8785) {
     }
     return json(404, { title: "Not Found" });
   });
-  return new Promise((resolve) => {
-    server.listen(port, () => resolve({ server, calls, close: () => server.close() }));
+  return new Promise((resolve, reject) => {
+    listenWithRetry(server, port).then(
+      () => resolve({ server, calls, close: () => server.close() }),
+      reject,
+    );
   });
 }
 
@@ -746,7 +781,10 @@ export function startFakeInstagram(port = 8795) {
       },
     });
   });
-  return new Promise((resolve) => {
-    server.listen(port, () => resolve({ server, calls, close: () => server.close() }));
+  return new Promise((resolve, reject) => {
+    listenWithRetry(server, port).then(
+      () => resolve({ server, calls, close: () => server.close() }),
+      reject,
+    );
   });
 }
