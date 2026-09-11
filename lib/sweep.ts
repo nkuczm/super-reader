@@ -20,6 +20,8 @@ import type { CorpusRedditHit, CorpusStory } from "./pulse";
 
 /** Feeds per slice: enough to be worth a request, few enough to finish. */
 const PER_SLICE = 8;
+/** Spacing between Reddit requests, which are rate-limited per address. */
+const REDDIT_GAP_MS = 1200;
 /** How deep into a feed placement is recorded. */
 const DEPTH = 25;
 
@@ -60,28 +62,47 @@ export async function sweepSlice(slice: number, now = Date.now()): Promise<Sweep
   const hits: CorpusRedditHit[] = [];
   const sources: SweepResult["sources"] = [];
 
+  // Outlets go in parallel: different hosts, no shared limit. Reddit does
+  // not — it answers 429 to a handful of requests arriving together, and a
+  // parallel slice lost five of six subreddits to throttling. They go one at
+  // a time, spaced, with a single retry, because the engagement signal is
+  // worth a few seconds of a background sweep.
+  const outletJobs = mine.filter((job) => job.kind === "outlet");
+  const redditJobs = mine.filter((job) => job.kind === "subreddit");
+
   await Promise.all(
-    mine.map(async (job) => {
-      const id = job.kind === "outlet" ? job.outlet.id : `r/${job.entry.name}`;
+    outletJobs.map(async (job) => {
+      if (job.kind !== "outlet") return;
       try {
-        if (job.kind === "outlet") {
-          const items = await readOutlet(job.outlet, now);
-          stories.push(...items);
-          sources.push({ id, ok: true, items: items.length });
-        } else {
-          const items = await readSubreddit(job.entry);
-          hits.push(...items);
-          sources.push({ id, ok: true, items: items.length });
-        }
+        const items = await readOutlet(job.outlet, now);
+        stories.push(...items);
+        sources.push({ id: job.outlet.id, ok: true, items: items.length });
       } catch (error) {
         sources.push({
-          id,
+          id: job.outlet.id,
           ok: false,
           error: error instanceof Error ? error.message : "failed",
         });
       }
     }),
   );
+
+  for (const [index, job] of redditJobs.entries()) {
+    if (job.kind !== "subreddit") continue;
+    const id = `r/${job.entry.name}`;
+    if (index > 0) await pause(REDDIT_GAP_MS);
+    try {
+      const items = await withRedditRetry(() => readSubreddit(job.entry));
+      hits.push(...items);
+      sources.push({ id, ok: true, items: items.length });
+    } catch (error) {
+      sources.push({
+        id,
+        ok: false,
+        error: error instanceof Error ? error.message : "failed",
+      });
+    }
+  }
 
   const written = await recordStories(stories);
   const wroteHits = await recordRedditHits(hits);
@@ -125,6 +146,20 @@ async function readOutlet(outlet: Outlet, now: number): Promise<CorpusStory[]> {
  * community's own verdict and is what gets recorded. Self posts are skipped:
  * a discussion with no article behind it is not coverage of anything.
  */
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** One retry after a longer wait, for the throttle specifically. */
+async function withRedditRetry<T>(read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (!/429|too many requests/i.test(message)) throw error;
+    await pause(3000);
+    return read();
+  }
+}
+
 async function readSubreddit(entry: SubredditEntry): Promise<CorpusRedditHit[]> {
   const url = subredditFeedUrl({ name: entry.name, sort: "top", window: "day" });
   const { body, finalUrl } = await fetchText(url, 12000);
@@ -185,4 +220,52 @@ export async function catchUpSweeps(limit = 2) {
     }
   }
   return due.length;
+}
+
+export type AuditResult = {
+  slice: number;
+  slices: number;
+  checked: { id: string; feedUrl: string; ok: boolean; items?: number; error?: string }[];
+};
+
+/** Feeds per audit slice — nothing is written, so these can go wider. */
+const AUDIT_PER_SLICE = 12;
+
+/**
+ * Check the directory against reality, writing nothing.
+ *
+ * A menu of a hundred and fifty feeds rots: outlets move their RSS, kill it,
+ * or start refusing anything that is not a browser. This is how that gets
+ * found — the sweep reports cover only the panel, and the rest of the
+ * directory would fail silently in someone's sidebar instead.
+ */
+export async function auditSlice(slice: number): Promise<AuditResult> {
+  const { OUTLETS } = await import("./outlets");
+  const slices = Math.ceil(OUTLETS.length / AUDIT_PER_SLICE);
+  const mine = OUTLETS.slice(slice * AUDIT_PER_SLICE, slice * AUDIT_PER_SLICE + AUDIT_PER_SLICE);
+
+  const checked = await Promise.all(
+    mine.map(async (outlet) => {
+      try {
+        const { body, finalUrl } = await fetchText(outlet.feedUrl, 12000);
+        if (!looksLikeFeed(body)) throw new Error("Not a feed");
+        const { articles } = parseFeed(body, finalUrl);
+        if (articles.length === 0) throw new Error("Feed is empty");
+        return { id: outlet.id, feedUrl: outlet.feedUrl, ok: true, items: articles.length };
+      } catch (error) {
+        return {
+          id: outlet.id,
+          feedUrl: outlet.feedUrl,
+          ok: false,
+          error: error instanceof Error ? error.message : "failed",
+        };
+      }
+    }),
+  );
+
+  return { slice, slices, checked };
+}
+
+export function auditSliceCount() {
+  return Math.ceil(sweepJobs().filter((job) => job.kind === "outlet").length / AUDIT_PER_SLICE);
 }

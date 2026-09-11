@@ -40,6 +40,15 @@ export type OutletCategory =
   | "sports"
   | "aggregator";
 
+/**
+ * Four newsrooms are missing on purpose, and it is the first thing anyone
+ * will notice: the Associated Press, Reuters, USA Today and PBS NewsHour.
+ * Each was checked from the deployment — AP answers 403 to anything that is
+ * not a browser, Reuters retired its feeds (404), and USA Today and PBS
+ * serve HTML where their feed used to be. A directory entry that can never
+ * load is worse than an absence, so the wires are absent until they publish
+ * something fetchable again. `/api/outlets/audit` is how that gets rechecked.
+ */
 export type Outlet = {
   id: string;
   name: string;
@@ -58,8 +67,6 @@ export type Outlet = {
 /* eslint-disable prettier/prettier */
 export const OUTLETS: Outlet[] = [
   // ---- Wires and agenda-setting general news (tier 1, the ranking panel) --
-  { id: "ap-top", name: "Associated Press", section: "Top news", feedUrl: "https://apnews.com/index.rss", siteUrl: "https://apnews.com", category: "general", region: "US", tier: 1, panel: true, front: true },
-  { id: "reuters-top", name: "Reuters", section: "Top news", feedUrl: "https://www.reutersagency.com/feed/?best-topics=top-news&post_type=best", siteUrl: "https://www.reuters.com", category: "general", region: "Global", tier: 1, panel: true, front: true },
   { id: "nyt-home", name: "The New York Times", section: "Front page", feedUrl: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml", siteUrl: "https://www.nytimes.com", category: "general", region: "US", tier: 1, panel: true, front: true },
   { id: "nyt-world", name: "The New York Times", section: "World", feedUrl: "https://rss.nytimes.com/services/xml/rss/nyt/World.xml", siteUrl: "https://www.nytimes.com/section/world", category: "world", region: "US", tier: 1, panel: true },
   { id: "nyt-politics", name: "The New York Times", section: "Politics", feedUrl: "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml", siteUrl: "https://www.nytimes.com/section/politics", category: "politics", region: "US", tier: 1, panel: true },
@@ -99,15 +106,13 @@ export const OUTLETS: Outlet[] = [
   { id: "cbs-news", name: "CBS News", section: "Top stories", feedUrl: "https://www.cbsnews.com/latest/rss/main", siteUrl: "https://www.cbsnews.com", category: "general", region: "US", tier: 1, panel: true, front: true },
   { id: "abc-news", name: "ABC News", section: "Top stories", feedUrl: "https://abcnews.go.com/abcnews/topstories", siteUrl: "https://abcnews.go.com", category: "general", region: "US", tier: 1, panel: true, front: true },
   { id: "fox-news", name: "Fox News", section: "Latest", feedUrl: "https://moxie.foxnews.com/google-publisher/latest.xml", siteUrl: "https://www.foxnews.com", category: "general", region: "US", tier: 1, panel: true, front: true },
-  { id: "usatoday", name: "USA Today", section: "Top stories", feedUrl: "https://rssfeeds.usatoday.com/usatoday-newstopstories", siteUrl: "https://www.usatoday.com", category: "general", region: "US", tier: 1, panel: true, front: true },
   { id: "latimes", name: "Los Angeles Times", section: "Top stories", feedUrl: "https://www.latimes.com/rss2.0.xml", siteUrl: "https://www.latimes.com", category: "general", region: "US", tier: 1, panel: true, front: true },
   { id: "politico", name: "Politico", section: "Politics", feedUrl: "https://rss.politico.com/politics-news.xml", siteUrl: "https://www.politico.com", category: "politics", region: "US", tier: 1, panel: true },
   { id: "thehill", name: "The Hill", section: "News", feedUrl: "https://thehill.com/news/feed/", siteUrl: "https://thehill.com", category: "politics", region: "US", tier: 2, panel: true },
   { id: "axios", name: "Axios", section: "All", feedUrl: "https://api.axios.com/feed/", siteUrl: "https://www.axios.com", category: "general", region: "US", tier: 2, panel: true, front: true },
   { id: "semafor", name: "Semafor", section: "All", feedUrl: "https://www.semafor.com/rss.xml", siteUrl: "https://www.semafor.com", category: "general", region: "US", tier: 2 },
-  { id: "newsweek", name: "Newsweek", section: "Latest", feedUrl: "https://www.newsweek.com/rss", siteUrl: "https://www.newsweek.com", category: "general", region: "US", tier: 2, panel: true },
+  { id: "newsweek", name: "Newsweek", section: "Latest", feedUrl: "https://www.newsweek.com/rss.xml", siteUrl: "https://www.newsweek.com", category: "general", region: "US", tier: 2, panel: true },
   { id: "time", name: "TIME", section: "Latest", feedUrl: "https://time.com/feed/", siteUrl: "https://time.com", category: "general", region: "US", tier: 2, panel: true },
-  { id: "pbs-newshour", name: "PBS NewsHour", section: "All", feedUrl: "https://www.pbs.org/newshour/feeds/rss/headlines", siteUrl: "https://www.pbs.org/newshour", category: "general", region: "US", tier: 2, panel: true, front: true },
   { id: "voa", name: "Voice of America", section: "All", feedUrl: "https://www.voanews.com/api/zq$omekvi_", siteUrl: "https://www.voanews.com", category: "world", region: "US", tier: 3 },
 
   // ---- World and regional --------------------------------------------------
