@@ -15,7 +15,14 @@ import { fetchText, parseFeed, looksLikeFeed } from "./feed";
 import { subredditFeedUrl } from "./reddit";
 import { panelOutlets, panelSubreddits } from "./outlets";
 import type { Outlet, SubredditEntry } from "./outlets";
-import { recordRedditHits, recordStories, noteSweep, pruneCorpus, lastSweeps } from "./corpus";
+import {
+  recordRedditHits,
+  recordStories,
+  noteSweep,
+  pruneCorpus,
+  lastSweeps,
+  invalidatePulse,
+} from "./corpus";
 import type { CorpusRedditHit, CorpusStory } from "./pulse";
 
 /** Feeds per slice: enough to be worth a request, few enough to finish. */
@@ -106,6 +113,9 @@ export async function sweepSlice(slice: number, now = Date.now()): Promise<Sweep
 
   const written = await recordStories(stories);
   const wroteHits = await recordRedditHits(hits);
+  // New evidence means the built ranking is out of date.
+  if (written > 0 || wroteHits > 0) await invalidatePulse();
+
   const failed = sources.filter((source) => !source.ok).length;
   await noteSweep(
     `slice-${slice}`,

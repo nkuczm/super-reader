@@ -163,6 +163,18 @@ export async function lastSweeps() {
   }));
 }
 
+/**
+ * Mark the built ranking as stale, so the next read rebuilds it.
+ *
+ * Without this a sweep's new stories sit unused until the cache expires —
+ * most visible on an empty corpus, where the first sweep would land and the
+ * app would still say it had nothing for another ten minutes.
+ */
+export async function invalidatePulse() {
+  const sql = getSql();
+  await sql`UPDATE corpus_pulse SET built_at = 'epoch' WHERE id = 'current'`;
+}
+
 /** Drop what has aged out. Cheap, and keeps the table from growing forever. */
 export async function pruneCorpus() {
   const sql = getSql();
