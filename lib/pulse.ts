@@ -71,7 +71,17 @@ export type PulseCluster = {
   tokens: string[];
 };
 
+/**
+ * The shape of a cached ranking. Bumped whenever a field is added to
+ * PulseCluster: the built payload lives in the database and outlives a
+ * deploy, so without this a new build serves its own older cache and the
+ * app reads fields that are not there. The score page did exactly that.
+ */
+export const PULSE_SHAPE = 2;
+
 export type PulsePayload = {
+  /** PULSE_SHAPE at the time it was built. */
+  shape?: number;
   builtAt: number;
   /** Stories swept, before clustering — for the "what is this built on" note. */
   storyCount: number;
@@ -173,6 +183,7 @@ export function buildPulsePayload(
 
   ranked.sort((a, b) => b.score - a.score || b.firstSeen - a.firstSeen);
   return {
+    shape: PULSE_SHAPE,
     builtAt: now,
     storyCount: stories.length,
     outletCount: new Set(stories.map((story) => story.outletId)).size,
@@ -234,11 +245,15 @@ export type RankedArticle = {
   newsroomNames: string[];
   /** Which cluster it matched, so the app can group a story's copies. */
   key: string;
-  /** Everything behind the number, so the app can show its working. */
-  parts: PulseCluster["parts"];
-  evidence: PulseCluster["evidence"];
+  /**
+   * Everything behind the number, so the app can show its working. Optional
+   * because a ranking cached by an older build can still be in the database
+   * — see PULSE_SHAPE.
+   */
+  parts?: PulseCluster["parts"];
+  evidence?: PulseCluster["evidence"];
   /** "Newsroom: headline" for each copy — the count, spelled out. */
-  titles: string[];
+  titles?: string[];
   firstSeen: number;
   /** How the match was made, which is worth being honest about in the UI. */
   via: "url" | "headline";

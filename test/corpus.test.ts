@@ -11,6 +11,7 @@ import {
   lastSweeps,
 } from "../lib/corpus";
 import type { CorpusStory } from "../lib/pulse";
+import { PULSE_SHAPE } from "../lib/pulse";
 
 // The real SQL against a real Postgres, in-process — same approach as the
 // sync tests, because the interesting part here is the upsert behaviour.
@@ -107,4 +108,30 @@ test("records what each sweep did, for checking the directory's health", async (
   const mine = sweeps.filter((sweep) => sweep.slice === "slice-0");
   assert.equal(mine.length, 1, "one row per slice, updated in place");
   assert.equal(mine[0].note, "125 stories");
+});
+
+test("ignores a ranking cached by an older build", async () => {
+  // The built payload lives in the database and outlives the deploy that
+  // wrote it, so a new build would otherwise serve its own older cache and
+  // read fields that are not in it — which is how the score page could get
+  // a cluster with no evidence attached.
+  const sql = (await import("../lib/db")).getSql();
+  await sql`
+    INSERT INTO corpus_pulse (id, payload, built_at)
+    VALUES ('current', ${JSON.stringify({
+      builtAt: Date.now(),
+      storyCount: 1,
+      outletCount: 1,
+      clusters: [{ key: "stale", title: "From an older build" }],
+    })}::jsonb, now())
+    ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload, built_at = now()
+  `;
+
+  const payload = await readPulse();
+  assert.equal(
+    payload.clusters.some((cluster) => cluster.key === "stale"),
+    false,
+    "a payload with no shape marker must be rebuilt, not served",
+  );
+  assert.equal(payload.shape, PULSE_SHAPE);
 });

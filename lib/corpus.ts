@@ -12,7 +12,7 @@
  */
 
 import { ensureSchema as ensureSyncSchema, getSql, isConfigured } from "./db";
-import { buildPulsePayload } from "./pulse";
+import { buildPulsePayload, PULSE_SHAPE } from "./pulse";
 import type { CorpusRedditHit, CorpusStory, PulsePayload } from "./pulse";
 import { canonicalUrl } from "./pulse";
 
@@ -252,8 +252,12 @@ export async function readPulse({ force = false } = {}): Promise<PulsePayload> {
       SELECT payload, built_at FROM corpus_pulse WHERE id = 'current'
     `;
     if (cached) {
+      const payload = cached.payload as PulsePayload;
       const age = Date.now() - new Date(cached.built_at).getTime();
-      if (age < PULSE_TTL_MS) return cached.payload as PulsePayload;
+      // A cache built by an older build may not carry the fields this one
+      // reads, and it outlives the deploy that wrote it.
+      const current = payload?.shape === PULSE_SHAPE;
+      if (current && age < PULSE_TTL_MS) return payload;
     }
   }
 

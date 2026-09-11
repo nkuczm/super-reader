@@ -59,7 +59,13 @@ export default function ScoreExplainer({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const { parts, evidence } = rank;
+  // Defensive: the ranking is cached server-side and a payload from an older
+  // build can reach a newer page. The shape check in lib/corpus.ts should
+  // prevent it; this makes the failure a thinner page rather than a crash.
+  const parts = rank.parts ?? { breadth: 0, placement: 0, engagement: 0, velocity: 0 };
+  const evidence =
+    rank.evidence ?? { weighted: 0, ceiling: 9, subreddits: [], comments: 0, ageHours: 0 };
+  const copies = rank.titles ?? [];
   const rows = [
     {
       id: "breadth",
@@ -179,11 +185,11 @@ export default function ScoreExplainer({
         </div>
 
         <h2 className="score-h2">
-          The {rank.titles.length} cop{rank.titles.length === 1 ? "y" : "ies"} this is
-          counted from
+          The {copies.length} cop{copies.length === 1 ? "y" : "ies"} this is counted
+          from
         </h2>
         <ul className="score-copies">
-          {rank.titles.map((entry) => (
+          {copies.map((entry) => (
             <li key={entry}>{entry}</li>
           ))}
         </ul>
