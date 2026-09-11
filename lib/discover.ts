@@ -4,6 +4,7 @@ import { enrichArticles } from "./enrich";
 import { xHandleFrom, fetchXFeed } from "./x";
 import { parseApiSourceUrl, fetchApiSource } from "./apis";
 import { subredditFrom, subredditFeedUrl, subredditPageUrl } from "./reddit";
+import { knownFeedFor } from "./publishers";
 import { sortNewestFirst } from "./sort";
 import type { DiscoverResult } from "./types";
 
@@ -171,6 +172,28 @@ export async function discover(
   if (parseApiSourceUrl(raw)) {
     const { meta, articles } = await fetchApiSource(raw, limit, keys);
     return { ...meta, kind: "api", scope: "site", total: articles.length, articles };
+  }
+
+  // A publisher whose feed cannot be found by looking — see lib/publishers.ts.
+  // This comes before every other branch: wsj.com would otherwise be crawled
+  // (and get a 403), and "wsj" would become a news search.
+  const known = knownFeedFor(raw);
+  if (known) {
+    // "Follow the whole site" on a section URL means the paper, not the page.
+    const wanted = scope === "site" ? knownFeedFor(new URL(known.siteUrl).origin)! : known;
+    const { meta, total, articles } = await tryFeed(wanted.feedUrl, limit);
+    return {
+      ...meta,
+      kind: "feed",
+      scope: wanted.scope,
+      total,
+      title: wanted.title,
+      siteUrl: wanted.siteUrl,
+      favicon: faviconFor(wanted.faviconHost),
+      // No enrichment: these feeds already carry summaries, and the only
+      // place an image could come from is a site that answers 403.
+      articles,
+    };
   }
 
   // An X account is neither a feed nor a scrapable page: x.com serves

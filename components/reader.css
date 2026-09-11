@@ -718,3 +718,17 @@
 .prose blockquote p strong { color: var(--text); font-style: normal; }
 .prose blockquote { font-style: normal; }
 .prose blockquote > p:first-child { margin-bottom: 6px; font-size: 13.5px; }
+
+/* Section shortcuts under the add-source box (WSJ and friends). */
+.section-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+.section-chips > span {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-right: 2px;
+}

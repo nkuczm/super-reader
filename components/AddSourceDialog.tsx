@@ -7,6 +7,7 @@ import { Icon } from "./icons";
 import ApiCatalog from "./ApiCatalog";
 import SourceIcon from "./SourceIcon";
 import { timeAgo, hostOf } from "./format";
+import { knownFeedFor, WSJ_CHOICES } from "@/lib/publishers";
 
 type Props = {
   feeds: Feed[];
@@ -18,6 +19,16 @@ type Props = {
 };
 
 const NEW_FEED = "__new__";
+
+/**
+ * WSJ has no feed anyone can find by hand — its sections are worth offering
+ * outright once someone types its name.
+ */
+function sectionChoicesFor(input: string) {
+  const known = knownFeedFor(input);
+  if (!known || known.faviconHost !== "wsj.com") return null;
+  return WSJ_CHOICES;
+}
 
 /** True when the pasted URL points at a section rather than a whole site. */
 function pastedASection(input: string) {
@@ -151,6 +162,22 @@ export default function AddSourceDialog({
               {loading ? <span className="spinner" /> : "Preview"}
             </button>
           </div>
+          )}
+
+          {tab === "paste" && sectionChoicesFor(query) && (
+            <div className="section-chips">
+              <span>Sections</span>
+              {sectionChoicesFor(query)!.map((choice) => (
+                <button
+                  key={choice.slug}
+                  className="btn ghost small"
+                  disabled={loading}
+                  onClick={() => runPreview("auto", choice.url)}
+                >
+                  {choice.title.replace(/^WSJ · /, "")}
+                </button>
+              ))}
+            </div>
           )}
 
           {error && <p className="error">{error}</p>}
