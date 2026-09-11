@@ -71,11 +71,15 @@ function subredditAsSource(entry: SubredditEntry): PickedSource {
  * pasted URL is — the first refresh fills them in.
  */
 export default function OutletCatalog({
-  onAddMany,
-  busy,
+  onPicked,
 }: {
-  onAddMany: (sources: PickedSource[]) => void;
-  busy: boolean;
+  /**
+   * Called with the current selection on every change. The button that acts
+   * on it lives in the dialog's footer, where it stays put while this list
+   * scrolls — at the bottom of a list of a hundred and fifty outlets it was
+   * somewhere nobody would find it.
+   */
+  onPicked: (sources: PickedSource[]) => void;
 }) {
   const [dir, setDir] = useState<Directory | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +98,13 @@ export default function OutletCatalog({
     };
   }, []);
 
-  const pickedCount = Object.keys(picked).length;
+  // The dialog footer owns the button, so it needs the selection.
+  useEffect(() => {
+    onPicked(Object.values(picked));
+    // onPicked is a fresh closure each render in the parent; depending on it
+    // would loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [picked]);
 
   function toggle(key: string, source: PickedSource) {
     setPicked((current) => {
@@ -105,19 +115,38 @@ export default function OutletCatalog({
     });
   }
 
-  function addPack(pack: Directory["packs"][number]) {
-    if (!dir) return;
+  /** The keys a bundle covers, skipping anything the directory lacks. */
+  function packKeys(pack: Directory["packs"][number]) {
+    if (!dir) return [];
+    const keys: [string, PickedSource][] = [];
+    for (const id of pack.outlets) {
+      const outlet = dir.outlets.find((o) => o.id === id);
+      if (outlet) keys.push([`o:${outlet.id}`, outletAsSource(outlet)]);
+    }
+    for (const name of pack.subreddits ?? []) {
+      const entry = dir.subreddits.find(
+        (s) => s.name.toLowerCase() === name.toLowerCase(),
+      );
+      if (entry) keys.push([`r:${entry.name}`, subredditAsSource(entry)]);
+    }
+    return keys;
+  }
+
+  /**
+   * Tapping a bundle selects all of it, and tapping it again lets go — so a
+   * mis-tap is undoable at the same button, and the button's own state says
+   * whether the tap landed. Before this, a bundle ticked boxes far down a
+   * scrolling list and looked like it had done nothing at all.
+   */
+  function togglePack(pack: Directory["packs"][number]) {
+    const keys = packKeys(pack);
+    if (keys.length === 0) return;
+    const allPicked = keys.every(([key]) => picked[key]);
     setPicked((current) => {
       const next = { ...current };
-      for (const id of pack.outlets) {
-        const outlet = dir.outlets.find((o) => o.id === id);
-        if (outlet) next[`o:${outlet.id}`] = outletAsSource(outlet);
-      }
-      for (const name of pack.subreddits ?? []) {
-        const entry = dir.subreddits.find(
-          (s) => s.name.toLowerCase() === name.toLowerCase(),
-        );
-        if (entry) next[`r:${entry.name}`] = subredditAsSource(entry);
+      for (const [key, source] of keys) {
+        if (allPicked) delete next[key];
+        else next[key] = source;
       }
       return next;
     });
@@ -167,18 +196,27 @@ export default function OutletCatalog({
         onChange={(event) => setQuery(event.target.value)}
       />
 
+      <p className="field-label">Whole beats</p>
       <div className="outlet-packs">
-        {dir.packs.map((pack) => (
-          <button
-            key={pack.id}
-            className="btn ghost small"
-            title={pack.blurb}
-            onClick={() => addPack(pack)}
-          >
-            {Icon.plus} {pack.name}
-          </button>
-        ))}
+        {dir.packs.map((pack) => {
+          const keys = packKeys(pack);
+          const on = keys.length > 0 && keys.every(([key]) => picked[key]);
+          return (
+            <button
+              key={pack.id}
+              className={`chip pack-chip ${on ? "on" : ""}`}
+              title={`${pack.blurb} — ${keys.length} sources`}
+              aria-pressed={on}
+              onClick={() => togglePack(pack)}
+            >
+              {on ? Icon.check : Icon.plus} {pack.name}
+              <em>{keys.length}</em>
+            </button>
+          );
+        })}
       </div>
+
+      <p className="field-label">Or pick them one by one</p>
 
       <div className="outlet-cats">
         {(["all", "reddit", ...Object.keys(CATEGORY_LABELS)] as (OutletCategory | "all" | "reddit")[]).map(
@@ -243,23 +281,6 @@ export default function OutletCatalog({
         )}
       </ul>
 
-      <div className="outlet-add">
-        <button
-          className="btn small"
-          disabled={pickedCount === 0 || busy}
-          onClick={() => {
-            onAddMany(Object.values(picked));
-            setPicked({});
-          }}
-        >
-          {Icon.plus} Add {pickedCount || ""} {pickedCount === 1 ? "source" : "sources"}
-        </button>
-        {pickedCount > 0 && (
-          <button className="btn ghost small" onClick={() => setPicked({})}>
-            Clear
-          </button>
-        )}
-      </div>
     </div>
   );
 }

@@ -61,6 +61,8 @@ export default function AddSourceDialog({
   const [scope, setScope] = useState<"auto" | "site">("auto");
   const [tab, setTab] = useState<"paste" | "outlets" | "apis">("paste");
   const [target, setTarget] = useState(defaultFeedId ?? feeds[0]?.id ?? NEW_FEED);
+  /** What the outlet directory currently has ticked, for the footer button. */
+  const [pickedOutlets, setPickedOutlets] = useState<PickedSource[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => inputRef.current?.focus(), []);
@@ -148,12 +150,7 @@ export default function AddSourceDialog({
         </div>
 
         <div className="dialog-body">
-          {tab === "outlets" && (
-            <OutletCatalog
-              busy={loading}
-              onAddMany={(sources) => onAddMany(sources, target)}
-            />
-          )}
+          {tab === "outlets" && <OutletCatalog onPicked={setPickedOutlets} />}
 
           {tab === "apis" && (
             <ApiCatalog
@@ -279,7 +276,18 @@ export default function AddSourceDialog({
           <button className="btn ghost small" onClick={onCancel}>
             Cancel
           </button>
-          {tab !== "outlets" && (
+          {tab === "outlets" ? (
+            <button
+              className="btn small"
+              disabled={pickedOutlets.length === 0}
+              onClick={() => onAddMany(pickedOutlets, target)}
+            >
+              {Icon.plus}
+              {pickedOutlets.length > 0
+                ? `Add ${pickedOutlets.length} source${pickedOutlets.length === 1 ? "" : "s"}`
+                : "Add sources"}
+            </button>
+          ) : (
             <button
               className="btn small"
               disabled={!preview}

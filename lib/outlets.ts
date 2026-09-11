@@ -331,7 +331,7 @@ export const SUBREDDITS: SubredditEntry[] = [
 
 /** Ready-made bundles, so a reader can follow a beat in one tap. */
 export const PACKS: { id: string; name: string; blurb: string; outlets: string[]; subreddits?: string[] }[] = [
-  { id: "front-pages", name: "Front pages", blurb: "What the big newsrooms are leading with today.", outlets: ["ap-top", "reuters-top", "nyt-home", "wapo-national", "wsj-world", "bbc-top", "guardian-front", "npr-news", "aljazeera"] },
+  { id: "front-pages", name: "Front pages", blurb: "What the big newsrooms are leading with today.", outlets: ["nyt-home", "wapo-national", "wsj-world", "bbc-top", "guardian-front", "npr-news", "aljazeera", "cnn-top", "nbc-news"] },
   { id: "us-politics", name: "U.S. politics", blurb: "Washington from several directions at once.", outlets: ["politico", "thehill", "npr-politics", "nyt-politics", "wapo-politics", "axios", "nationalreview", "motherjones", "thedispatch"], subreddits: ["politics"] },
   { id: "markets", name: "Markets & business", blurb: "Markets, earnings and the economy.", outlets: ["wsj-markets", "ft-home", "cnbc-top", "bloomberg-markets", "marketwatch", "businessinsider", "economist"], subreddits: ["Economics", "investing"] },
   { id: "tech", name: "Technology", blurb: "The industry, its politics and its hardware.", outlets: ["verge", "arstechnica", "techcrunch", "wired", "404media", "techmeme", "hn-frontpage", "bloomberg-tech"], subreddits: ["technology", "programming"] },

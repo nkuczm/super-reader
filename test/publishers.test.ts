@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { knownFeedFor, WSJ_CHOICES } from "../lib/publishers";
+import { OUTLETS, SUBREDDITS, PACKS } from "../lib/outlets";
 
 test("recognises the WSJ however it is asked for", () => {
   for (const input of [
@@ -74,5 +75,44 @@ test("leaves everything else to ordinary discovery", () => {
 test("every offered section resolves to a feed", () => {
   for (const choice of WSJ_CHOICES) {
     assert.equal(knownFeedFor(choice.url)?.feedUrl.endsWith(choice.slug), true, choice.url);
+  }
+});
+
+test("every bundle in the directory resolves to real sources", () => {
+  // Removing AP and Reuters — neither has a fetchable feed any more — left
+  // the "Front pages" bundle pointing at two outlets that no longer exist,
+  // so tapping it silently picked seven of the nine it claimed. A bundle
+  // naming something absent is a bundle that quietly under-delivers.
+  const outletIds = new Set(OUTLETS.map((outlet) => outlet.id));
+  const subredditNames = new Set(SUBREDDITS.map((entry) => entry.name.toLowerCase()));
+
+  for (const pack of PACKS) {
+    assert.ok(pack.outlets.length > 0, `${pack.id} has no outlets`);
+    for (const id of pack.outlets) {
+      assert.ok(outletIds.has(id), `${pack.id} names a missing outlet: ${id}`);
+    }
+    for (const name of pack.subreddits ?? []) {
+      assert.ok(
+        subredditNames.has(name.toLowerCase()),
+        `${pack.id} names a missing subreddit: ${name}`,
+      );
+    }
+  }
+});
+
+test("no two directory entries claim the same id or feed", () => {
+  const ids = new Set<string>();
+  const feeds = new Set<string>();
+  for (const outlet of OUTLETS) {
+    assert.ok(!ids.has(outlet.id), `duplicate outlet id: ${outlet.id}`);
+    ids.add(outlet.id);
+    assert.ok(!feeds.has(outlet.feedUrl), `duplicate feed: ${outlet.feedUrl}`);
+    feeds.add(outlet.feedUrl);
+  }
+  const names = new Set<string>();
+  for (const entry of SUBREDDITS) {
+    const key = entry.name.toLowerCase();
+    assert.ok(!names.has(key), `duplicate subreddit: ${entry.name}`);
+    names.add(key);
   }
 });
