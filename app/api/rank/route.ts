@@ -1,5 +1,5 @@
 import { NextResponse, after } from "next/server";
-import { corpusAvailable, readPulse } from "@/lib/corpus";
+import { corpusAvailable, readPulse, WINDOW_HOURS } from "@/lib/corpus";
 import { rankAgainstPulse } from "@/lib/pulse";
 import { catchUpSweeps } from "@/lib/sweep";
 
@@ -62,6 +62,8 @@ export async function POST(request: Request) {
       builtAt: payload.builtAt,
       outletCount: payload.outletCount,
       storyCount: payload.storyCount,
+      // The score page says what the number was measured against.
+      windowHours: WINDOW_HOURS,
       // A corpus that has just started filling can rank almost nothing, and
       // saying so is better than showing an empty result as if it were an
       // answer.

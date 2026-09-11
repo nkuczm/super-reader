@@ -14,6 +14,9 @@
  */
 
 import { clusterStories, tokensOf, idfOver, similarity } from "./cluster";
+import { canonicalUrl } from "./url";
+
+export { canonicalUrl };
 import { scoreCluster, importanceBand } from "./importance";
 import type { ClusterEvidence, Importance, RedditEvidence, StoryEvidence } from "./importance";
 
@@ -51,6 +54,10 @@ export type PulseCluster = {
   band: ReturnType<typeof importanceBand>;
   reasons: string[];
   breadth: number;
+  /** The four parts of the score, 0..1 each. */
+  parts: Importance["parts"];
+  /** What produced those parts, for explaining the number to the reader. */
+  evidence: Importance["evidence"];
   firstSeen: number;
   /** Canonical URLs of every copy, for exact matching. */
   urls: string[];
@@ -71,34 +78,6 @@ export type PulsePayload = {
   outletCount: number;
   clusters: PulseCluster[];
 };
-
-/**
- * Strip the parts of a URL that identify the reader or the referrer rather
- * than the story: the same article arrives from a feed, from Reddit and from
- * a search wrapper with three different query strings, and they all have to
- * collapse to one row for any of the counting to work.
- */
-const JUNK_PARAMS =
-  /^(utm_|ito$|mod$|ref$|referrer$|smid$|partner$|cmpid$|cmp$|srnd$|taid$|at_|fbclid$|gclid$|mc_cid$|mc_eid$|sh$|s$|share|guccounter|__twitter|_ga$|igshid$|spm$|xtor)/i;
-
-export function canonicalUrl(input: string) {
-  try {
-    const url = new URL(input.trim());
-    url.hash = "";
-    url.protocol = "https:";
-    url.hostname = url.hostname.replace(/^www\./i, "").toLowerCase();
-    // AMP copies are the same story as the page they mirror.
-    url.pathname = url.pathname.replace(/\/amp\/?$/i, "/").replace(/\.amp$/i, "");
-    for (const key of [...url.searchParams.keys()]) {
-      if (JUNK_PARAMS.test(key)) url.searchParams.delete(key);
-    }
-    url.search = url.searchParams.toString();
-    const text = url.toString();
-    return text.endsWith("/") && url.pathname !== "/" ? text.slice(0, -1) : text;
-  } catch {
-    return input.trim();
-  }
-}
 
 /** Newsrooms that syndicate: a copy here is not an independent decision. */
 const AGGREGATORS = new Set(["Hacker News", "Techmeme", "Lobsters", "Slashdot"]);
@@ -183,6 +162,8 @@ export function buildPulsePayload(
       band: importanceBand(importance.score),
       reasons: importance.reasons,
       breadth: importance.breadth,
+      parts: importance.parts,
+      evidence: importance.evidence,
       firstSeen: Math.min(...members.map((story) => story.seenAt)),
       urls: members.map((story) => story.url),
       titles: members.slice(0, 12).map((story) => `${story.newsroom}: ${story.title}`),
@@ -253,6 +234,12 @@ export type RankedArticle = {
   newsroomNames: string[];
   /** Which cluster it matched, so the app can group a story's copies. */
   key: string;
+  /** Everything behind the number, so the app can show its working. */
+  parts: PulseCluster["parts"];
+  evidence: PulseCluster["evidence"];
+  /** "Newsroom: headline" for each copy — the count, spelled out. */
+  titles: string[];
+  firstSeen: number;
   /** How the match was made, which is worth being honest about in the UI. */
   via: "url" | "headline";
 };
@@ -328,6 +315,10 @@ function asRanked(id: string, cluster: PulseCluster, via: "url" | "headline"): R
     newsrooms: cluster.newsrooms.length,
     newsroomNames: cluster.newsrooms.slice(0, 12),
     key: cluster.key,
+    parts: cluster.parts,
+    evidence: cluster.evidence,
+    titles: cluster.titles,
+    firstSeen: cluster.firstSeen,
     via,
   };
 }

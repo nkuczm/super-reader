@@ -60,9 +60,35 @@ export type Importance = {
   breadth: number;
   newsrooms: number;
   parts: { breadth: number; placement: number; engagement: number; velocity: number };
+  /** The evidence behind the parts, for explaining the number. */
+  evidence: {
+    /** Weighted newsroom count, and the ceiling it is measured against. */
+    weighted: number;
+    ceiling: number;
+    /** Best placement seen, when any copy sat in a front-page feed. */
+    front?: { newsroom: string; position: number };
+    /** Best placement in a section feed, for when there is no front page. */
+    section?: { newsroom: string; position: number };
+    subreddits: { subreddit: string; position: number }[];
+    comments: number;
+    /** Hours between the first copy seen and now. */
+    ageHours: number;
+  };
   /** Short phrases, strongest first, for the badge and its tooltip. */
   reasons: string[];
 };
+
+/**
+ * What each signal is worth. Exported because the app explains the score to
+ * the reader, and the explanation has to be the arithmetic that actually ran
+ * rather than a second copy of it that can drift.
+ */
+export const WEIGHTS = {
+  breadth: 0.45,
+  placement: 0.2,
+  engagement: 0.25,
+  velocity: 0.1,
+} as const;
 
 /** Twelve tier-1 newsrooms on one story is the practical ceiling. */
 const BREADTH_CEILING = 9;
@@ -140,7 +166,10 @@ export function scoreCluster(
 
   const score =
     100 *
-    (0.45 * breadth + 0.2 * placement + 0.25 * engagement + 0.1 * velocity);
+    (WEIGHTS.breadth * breadth +
+      WEIGHTS.placement * placement +
+      WEIGHTS.engagement * engagement +
+      WEIGHTS.velocity * velocity);
 
   const reasons: string[] = [];
   if (byNewsroom.size > 1) {
@@ -167,9 +196,28 @@ export function scoreCluster(
   if (commentTotal >= 50) reasons.push(`${plural(commentTotal, "comment")}`);
   if (velocity > 0.55 && hours < 12) reasons.push("picked up fast");
 
+  const bestSection = [...cluster.stories]
+    .filter((story) => !story.front)
+    .sort((a, b) => a.position - b.position)[0];
+
   return {
     score: Math.round(score),
     breadth: Math.round(weighted * 10) / 10,
+    evidence: {
+      weighted: Math.round(weighted * 10) / 10,
+      ceiling: BREADTH_CEILING,
+      front: bestFront
+        ? { newsroom: bestFront.newsroom, position: bestFront.position }
+        : undefined,
+      section: bestSection
+        ? { newsroom: bestSection.newsroom, position: bestSection.position }
+        : undefined,
+      subreddits: [...reddit]
+        .sort((a, b) => a.position - b.position)
+        .map((hit) => ({ subreddit: hit.subreddit, position: hit.position })),
+      comments: commentTotal,
+      ageHours: Math.round(hours * 10) / 10,
+    },
     newsrooms: byNewsroom.size,
     parts: {
       breadth: Math.round(breadth * 100) / 100,

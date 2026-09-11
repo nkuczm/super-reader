@@ -106,9 +106,16 @@ export type ViewMode = "magazine" | "cards" | "list";
  */
 export type SortMode = "new" | "top";
 
+/**
+ * What the circle beside a big story's headline shows: the score out of 100,
+ * or the plainer number it mostly rests on — how many newsrooms ran it.
+ */
+export type BigStoryMetric = "score" | "newsrooms";
+
 export type Settings = {
   view: ViewMode;
   sort: SortMode;
+  bigStoryMetric: BigStoryMetric;
   /** Hide articles already opened, rather than only dimming them. */
   hideRead: boolean;
   /**
@@ -122,6 +129,7 @@ export type Settings = {
 export const DEFAULT_SETTINGS: Settings = {
   view: "cards",
   sort: "new",
+  bigStoryMetric: "score",
   hideRead: false,
   openOnSite: [],
 };
@@ -143,6 +151,10 @@ export function loadSettings(): Settings {
         ? (parsed.view as ViewMode)
         : DEFAULT_SETTINGS.view,
       sort: parsed.sort === "top" ? "top" : DEFAULT_SETTINGS.sort,
+      bigStoryMetric:
+        parsed.bigStoryMetric === "newsrooms"
+          ? "newsrooms"
+          : DEFAULT_SETTINGS.bigStoryMetric,
       hideRead: Boolean(parsed.hideRead),
       openOnSite: Array.isArray(parsed.openOnSite)
         ? parsed.openOnSite.filter((h): h is string => typeof h === "string")

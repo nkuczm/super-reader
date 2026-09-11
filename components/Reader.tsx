@@ -62,6 +62,9 @@ import { timeAgo, hostOf } from "./format";
 import { sortNewestFirst, timeOf } from "@/lib/sort";
 import type { RankedArticle } from "@/lib/pulse";
 import type { PickedSource } from "./OutletCatalog";
+import ScoreExplainer from "./ScoreExplainer";
+import type { CorpusStats } from "./ScoreExplainer";
+import { canonicalUrl } from "@/lib/url";
 import "./reader.css";
 
 type Loaded = Article & { sourceId: string };
@@ -72,6 +75,14 @@ type Loaded = Article & { sourceId: string };
  * request and keeps nothing.
  */
 /** "Final rule (PDF)" reads better in a list than "rule-2026-04.pdf". */
+/** What each band is called where the number alone is not enough. */
+const BAND_LABELS: Record<"major" | "big" | "notable" | "quiet", string> = {
+  major: "Major story",
+  big: "Big story",
+  notable: "Notable",
+  quiet: "No wider coverage found",
+};
+
 function fileTitleFor(file: Attachment, parentTitle: string) {
   const kind = file.kind === "pdf" ? "PDF" : file.kind.toUpperCase();
   return `${parentTitle} (${kind})`;
@@ -118,6 +129,14 @@ export default function Reader() {
    * and a corpus of N stories from M feeds.
    */
   const [rankState, setRankState] = useState<"unavailable" | "warming" | string | null>(null);
+  /** What the ranking was measured against, shown on the score page. */
+  const [corpusStats, setCorpusStats] = useState<CorpusStats | null>(null);
+  /** The article whose score is being explained, if any. */
+  const [explaining, setExplaining] = useState<string | null>(null);
+  /** The scrolling column: pull-to-refresh and jump-to-top both need it. */
+  const listRef = useRef<HTMLElement | null>(null);
+  /** How far the list has been dragged past its top, in pixels. */
+  const [pullDistance, setPullDistance] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [saved, setSaved] = useState<SavedArticle[]>([]);
@@ -394,7 +413,17 @@ export default function Reader() {
           merged.push({ ...article, sourceId, id: `${sourceId}:${article.id}` });
         }
       }
-      const ordered = sortNewestFirst(merged);
+      // One article, once. Two of a paper's feeds carry the same story with
+      // different tracking parameters, which is how the list ended up showing
+      // the same WSJ piece twice in a row.
+      const seen = new Set<string>();
+      const unique = merged.filter((article) => {
+        const key = canonicalUrl(article.link);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      const ordered = sortNewestFirst(unique);
       setArticles(ordered);
       // Keep a copy so the list is still there with no connection.
       void saveListSnapshot(ordered);
@@ -899,6 +928,7 @@ export default function Reader() {
             ranked?: RankedArticle[];
             outletCount?: number;
             storyCount?: number;
+            windowHours?: number;
           }) => {
             if (!live) return;
             if (!data.available) {
@@ -910,6 +940,11 @@ export default function Reader() {
               return;
             }
             setRanking(new Map((data.ranked ?? []).map((entry) => [entry.id, entry])));
+            setCorpusStats({
+              storyCount: data.storyCount ?? 0,
+              outletCount: data.outletCount ?? 0,
+              windowHours: data.windowHours,
+            });
             setRankState(
               data.warming
                 ? "warming"
@@ -939,6 +974,14 @@ export default function Reader() {
     });
   }, [visible, settings.hideRead, settings.sort, read, ranking]);
 
+  /** The article whose score page is open, with its ranking. */
+  const explainRank = useMemo(() => {
+    if (!explaining) return null;
+    const rank = ranking.get(explaining);
+    const article = articles.find((entry) => entry.id === explaining);
+    return rank && article ? { rank, title: article.title } : null;
+  }, [explaining, ranking, articles]);
+
   /** How many of the shown articles the corpus had something to say about. */
   const rankedCount = useMemo(
     () => shown.filter((article) => ranking.has(article.id)).length,
@@ -956,13 +999,92 @@ export default function Reader() {
     open(true);
   }
 
-  const choose = useCallback((next: Selection) => {
-    setSelection(next);
-    setMenuOpen(false);
-    // Picking a feed means going back to the list; staying in the article you
-    // were reading made the sidebar look unresponsive.
-    setReading(null);
+  /** Back to the first headline. */
+  const scrollToTop = useCallback(() => {
+    listRef.current?.scrollTo({ top: 0, behavior: "auto" });
   }, []);
+
+  const choose = useCallback(
+    (next: Selection) => {
+      setSelection(next);
+      setMenuOpen(false);
+      // Picking a feed means going back to the list; staying in the article you
+      // were reading made the sidebar look unresponsive.
+      setReading(null);
+      setExplaining(null);
+      // A new feed starts at its own top, not at whatever scroll position the
+      // last one was left at — which on a long list meant landing in the
+      // middle of a feed you had just opened.
+      scrollToTop();
+    },
+    [scrollToTop],
+  );
+
+  /**
+   * Pull the list past its top to refresh.
+   *
+   * There is no Refresh button any more, so this is the gesture that replaces
+   * it. It only engages when the list is already scrolled to the very top and
+   * the drag is downward, so it can never fight an ordinary scroll; and the
+   * indicator only promises a refresh once the pull is past the threshold,
+   * rather than firing on any stray touch.
+   */
+  const PULL_TRIGGER = 72;
+  const pullFrom = useRef<number | null>(null);
+
+  const onListTouchStart = useCallback((event: React.TouchEvent<HTMLElement>) => {
+    const list = listRef.current;
+    if (!list || list.scrollTop > 0 || refreshing) {
+      pullFrom.current = null;
+      return;
+    }
+    pullFrom.current = event.touches[0].clientY;
+  }, [refreshing]);
+
+  const onListTouchMove = useCallback(
+    (event: React.TouchEvent<HTMLElement>) => {
+      if (pullFrom.current === null) return;
+      const travelled = event.touches[0].clientY - pullFrom.current;
+      // An upward drag is a scroll, not a pull: let go of the gesture.
+      if (travelled <= 0) {
+        pullFrom.current = null;
+        setPullDistance(0);
+        return;
+      }
+      // Rubber-band it, so the list follows the finger without racing it.
+      setPullDistance(Math.min(travelled * 0.45, PULL_TRIGGER * 1.6));
+    },
+    [],
+  );
+
+  const onListTouchEnd = useCallback(() => {
+    const travelled = pullDistance;
+    pullFrom.current = null;
+    setPullDistance(0);
+    if (travelled >= PULL_TRIGGER && !refreshing) void refresh(allSources);
+  }, [pullDistance, refreshing, refresh, allSources]);
+
+  // The same gesture with a trackpad or wheel: keep scrolling up once the
+  // list is already at the top and it refreshes, so this is not a
+  // touch-only feature.
+  const wheelPull = useRef(0);
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const onWheel = (event: WheelEvent) => {
+      if (list.scrollTop > 0 || event.deltaY >= 0 || refreshing) {
+        wheelPull.current = 0;
+        return;
+      }
+      wheelPull.current += -event.deltaY;
+      if (wheelPull.current > 240) {
+        wheelPull.current = 0;
+        void refresh(allSources);
+      }
+    };
+    list.addEventListener("wheel", onWheel, { passive: true });
+    return () => list.removeEventListener("wheel", onWheel);
+  }, [refresh, allSources, refreshing]);
 
   // Count the sources behind whatever is selected, not every source there is.
   const selectedSourceCount =
@@ -1191,8 +1313,23 @@ export default function Reader() {
         />
       )}
 
-      <main className="main">
-        {reading ? (
+      <main
+        className="main"
+        ref={listRef}
+        onTouchStart={onListTouchStart}
+        onTouchMove={onListTouchMove}
+        onTouchEnd={onListTouchEnd}
+        onTouchCancel={onListTouchEnd}
+      >
+        {explainRank ? (
+          <ScoreExplainer
+            rank={explainRank.rank}
+            title={explainRank.title}
+            corpus={corpusStats}
+            onClose={() => setExplaining(null)}
+            onOpenMenu={() => setMenuOpen(true)}
+          />
+        ) : reading ? (
           <ArticleReader
             url={reading.url}
             fallbackTitle={reading.title}
@@ -1212,6 +1349,26 @@ export default function Reader() {
           />
         ) : (
           <>
+        {/* The pull-to-refresh indicator. It says what will happen, and only
+            promises a refresh once the pull is far enough to cause one. */}
+        {(pullDistance > 0 || refreshing) && (
+          <div
+            className="pull-note"
+            style={{ height: refreshing ? 34 : Math.round(pullDistance) }}
+            aria-live="polite"
+          >
+            {refreshing ? (
+              <>
+                <span className="spinner" /> Refreshing…
+              </>
+            ) : pullDistance >= 72 ? (
+              "Release to refresh"
+            ) : (
+              "Pull to refresh"
+            )}
+          </div>
+        )}
+
         <div className="main-head">
           <button
             className="menu-btn"
@@ -1262,15 +1419,12 @@ export default function Reader() {
               </button>
             </div>
             <button
-              className="btn ghost small"
-              onClick={() => refresh(allSources)}
-              disabled={refreshing || allSources.length === 0}
+              className="btn small add-btn"
+              onClick={() => openPanel(setDialogOpen)}
+              aria-label="Add a source"
+              title="Add a source"
             >
-              {refreshing ? <span className="spinner" /> : Icon.refresh}
-              Refresh
-            </button>
-            <button className="btn small" onClick={() => openPanel(setDialogOpen)}>
-              {Icon.plus} Add source
+              {Icon.plus}
             </button>
           </div>
         </div>
@@ -1350,7 +1504,7 @@ export default function Reader() {
                           size={15}
                         />
                       )}
-                      <span>
+                      <span className="meta-name">
                         {source?.title ??
                           savedMeta(article.link)?.sourceTitle ??
                           hostOf(article.link)}
@@ -1358,13 +1512,15 @@ export default function Reader() {
                       {article.author && (
                         <>
                           <span className="dot">·</span>
-                          <span>{article.author}</span>
+                          <span className="meta-author">{article.author}</span>
                         </>
                       )}
                       {article.publishedAt && (
                         <>
                           <span className="dot">·</span>
-                          <span>{timeAgo(article.publishedAt)}</span>
+                          <span className="meta-when">
+                            {timeAgo(article.publishedAt)}
+                          </span>
                         </>
                       )}
                       {savedOffline.has(article.link) && (
@@ -1377,42 +1533,8 @@ export default function Reader() {
                           {Icon.check}
                         </span>
                       )}
-                      {(() => {
-                        const rank = ranking.get(article.id);
-                        // Only bands that mean something get a badge: marking
-                        // most of a feed "notable" would say nothing at all.
-                        if (!rank || rank.band === "quiet") return null;
-                        return (
-                          <span
-                            className={`rank-badge rank-${rank.band}`}
-                            // The whole claim, in the tooltip: the score, what
-                            // earned it, and which newsrooms — so "8
-                            // newsrooms" can be checked rather than believed.
-                            title={[
-                              `${rank.score}/100`,
-                              rank.reasons.join(" · "),
-                              rank.newsroomNames?.length
-                                ? `Covered by: ${rank.newsroomNames.join(", ")}`
-                                : "",
-                              rank.via === "headline"
-                                ? "Matched to this story by headline, not by link."
-                                : "",
-                            ]
-                              .filter(Boolean)
-                              .join("\n")}
-                          >
-                            {rank.band === "major"
-                              ? "Major story"
-                              : rank.band === "big"
-                                ? "Big story"
-                                : "Notable"}
-                            {rank.newsrooms > 1 && (
-                              <em> · {rank.newsrooms} newsrooms</em>
-                            )}
-                          </span>
-                        );
-                      })()}
                     </div>
+                    <div className="title-row">
                     <a
                       className="article-title"
                       href={article.link}
@@ -1442,6 +1564,27 @@ export default function Reader() {
                     >
                       {article.title}
                     </a>
+                    {(() => {
+                      const rank = ranking.get(article.id);
+                      // Only a story with wider coverage behind it gets a
+                      // circle. Marking most of a feed would say nothing.
+                      if (!rank || rank.band === "quiet") return null;
+                      const shown =
+                        settings.bigStoryMetric === "newsrooms"
+                          ? rank.newsrooms
+                          : rank.score;
+                      return (
+                        <button
+                          className={`score-dot rank-${rank.band}`}
+                          onClick={() => setExplaining(article.id)}
+                          aria-label={`${BAND_LABELS[rank.band]}, scoring ${rank.score} out of 100 — how this was worked out`}
+                          title={`${BAND_LABELS[rank.band]} · ${rank.reasons.join(" · ")}\nTap for how this number was worked out`}
+                        >
+                          {shown}
+                        </button>
+                      );
+                    })()}
+                    </div>
                     {article.summary && settings.view !== "list" && (
                       <p className="article-summary">{article.summary}</p>
                     )}
@@ -1461,12 +1604,6 @@ export default function Reader() {
                       />
                     )}
                     <div className="article-actions">
-                      <button
-                        className="read-btn"
-                        onClick={() => openArticle(article, source?.feedUrl)}
-                      >
-                        {Icon.book} Read here
-                      </button>
                       {article.comments && article.comments !== article.link && (
                         // Following a subreddit for the links but losing the
                         // thread would miss the point of it. On a self post the

@@ -93,10 +93,25 @@
 }
 .article.read .article-title { color: var(--text-dim); font-weight: 500; }
 .article-body { min-width: 0; flex: 1; }
+/*
+ * One line, always. The parts are short enough that wrapping only ever
+ * produced the odd result in the screenshot — "The Wall Street / Journal"
+ * beside "1d / ago" — so nothing wraps and the outlet name, the only part
+ * with any length to it, is what gives way when the row is tight.
+ */
 .article-meta {
-  display: flex; align-items: center; gap: 7px;
+  display: flex; align-items: center; gap: 7px; flex-wrap: nowrap;
   font-size: 12.5px; color: var(--text-dim); margin-bottom: 5px;
+  white-space: nowrap; min-width: 0;
 }
+/* The outlet, then the byline: both elastic, the outlet last to go. */
+.article-meta > .meta-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.article-meta > .meta-author {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto;
+}
+/* Times and marks keep their space; they are what the row is for. */
+.article-meta > .meta-when, .article-meta .favicon, .article-meta .saved-check,
+.article-meta > .dot { flex: none; }
 .article-meta .favicon { width: 15px; height: 15px; }
 .dot { opacity: 0.5; }
 .article-title {
@@ -219,9 +234,17 @@
   }
   .main-head h1 { font-size: 19px; }
   .head-actions { width: 100%; margin-left: 0; }
-  .head-actions .btn { flex: 1; justify-content: center; min-height: 40px; }
+  /* The sort switch takes the room; the + stays a square. */
+  .head-actions .sort-switch { flex: 1; }
+  .head-actions .sort-switch button { flex: 1; min-height: 40px; }
+  .head-actions .btn { min-height: 40px; justify-content: center; }
+  .add-btn { flex: none; width: 44px; }
 
   .articles { padding: 4px 16px 64px; }
+  .score-body { padding: 0 0 80px; }
+  .score-hero { gap: 12px; }
+  .score-dot.big { width: 54px; height: 54px; line-height: 54px; font-size: 20px; }
+  .score-hero h1 { font-size: 19px; }
   .article { gap: 12px; padding: 15px 0; }
   .thumb { width: 84px; height: 62px; }
   .article-title { font-size: 16px; }
@@ -735,36 +758,97 @@
 
 /* ---- Story ranking ------------------------------------------------------ */
 
-/* Newest / Top stories, beside Refresh. Shrinks first on a narrow header. */
+/* Newest / Top stories. Shrinks first when the header runs out of room. */
 .sort-switch { flex: 0 1 auto; min-width: 0; }
 .sort-switch button { white-space: nowrap; }
 
+/* The + is an icon button, so it must not stretch like a labelled one. */
+.add-btn { flex: none; width: 40px; padding: 0; justify-content: center; }
+
 /*
- * The badge says how big a story is and, in its tooltip, why. Bands are
- * coloured by weight rather than by subject: one accent for the day's story,
- * something quieter for the merely notable.
+ * The headline row. The circle is trailing rather than leading so that every
+ * headline starts at the same left edge — a leading circle indented the
+ * ranked stories and left the rest ragged, which read as a mistake. It sits
+ * against the first line and keeps its size while the headline wraps.
  */
-.rank-badge {
-  display: inline-flex; align-items: baseline; gap: 4px;
-  padding: 1px 7px; border-radius: 999px;
-  font-size: 11px; font-weight: 700; letter-spacing: 0.01em;
-  border: 1px solid transparent; cursor: help;
+.title-row { display: flex; align-items: flex-start; gap: 10px; }
+.title-row .article-title { flex: 1; min-width: 0; }
+
+.score-dot {
+  flex: none;
+  width: 34px; height: 34px; border-radius: 999px;
+  display: inline-flex; align-items: baseline; justify-content: center;
+  gap: 1px; padding: 0;
+  font-size: 13.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+  border: 1.5px solid transparent; cursor: pointer;
+  /* Optically centred: the digits sit a shade high without this. */
+  line-height: 34px;
 }
-.rank-badge em { font-style: normal; font-weight: 600; opacity: 0.8; }
+.score-dot em { font-style: normal; font-size: 9.5px; font-weight: 600; opacity: 0.75; }
+.score-dot:hover { filter: brightness(1.08); }
 .rank-major {
-  background: color-mix(in srgb, var(--danger) 14%, transparent);
-  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
   color: var(--danger);
 }
 .rank-big {
   background: var(--accent-soft);
-  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
   color: var(--accent);
 }
 .rank-notable {
   background: var(--bg-sub); border-color: var(--border); color: var(--text-dim);
 }
-.article.read .rank-badge { opacity: 0.65; }
+.article.read .score-dot { opacity: 0.6; }
+
+/* ---- Pull to refresh ---------------------------------------------------- */
+
+/*
+ * Sits above the sticky header and grows with the drag, so the list itself
+ * does not have to move — transforming the whole column fights the sticky
+ * header on iOS.
+ */
+.pull-note {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  overflow: hidden;
+  font-size: 12.5px; font-weight: 600; color: var(--text-dim);
+  background: var(--bg-sub);
+  transition: height 0.14s ease-out;
+}
+
+/* ---- The score page ----------------------------------------------------- */
+
+.score-body { max-width: 680px; margin: 0 auto; padding: 0 0 90px; }
+.score-hero { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+.score-hero h1 { margin: 0; font-size: 22px; letter-spacing: -0.02em; }
+.score-dot.big {
+  width: 62px; height: 62px; line-height: 62px; font-size: 23px; border-width: 2px;
+  cursor: default;
+}
+.score-sub { margin: 4px 0 0; font-size: 13px; color: var(--text-dim); }
+.score-lede { margin: 0 0 6px; font-size: 15.5px; line-height: 1.45; }
+.score-note { margin: 0 0 26px; font-size: 13.5px; color: var(--text-dim); line-height: 1.5; }
+
+.score-rows { display: flex; flex-direction: column; gap: 22px; }
+.score-row header {
+  display: flex; align-items: baseline; gap: 10px; margin-bottom: 7px;
+}
+.score-row header strong { font-size: 15px; }
+.score-weight { font-size: 11.5px; color: var(--text-dim); margin-left: auto; }
+.score-meter {
+  height: 7px; border-radius: 999px; background: var(--bg-hover); overflow: hidden;
+}
+.score-meter span { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+.score-reading { margin: 8px 0 4px; font-size: 13.5px; font-weight: 600; }
+.score-reading em { font-style: normal; font-weight: 500; color: var(--text-dim); }
+.score-detail { margin: 0; font-size: 13.5px; color: var(--text-dim); line-height: 1.55; }
+
+.score-h2 {
+  margin: 30px 0 10px; font-size: 15px; letter-spacing: -0.01em;
+  padding-top: 20px; border-top: 1px solid var(--border);
+}
+.score-copies { margin: 0 0 4px; padding-left: 18px; }
+.score-copies li { font-size: 13.5px; line-height: 1.5; margin-bottom: 6px; }
 
 /* ---- Outlet directory --------------------------------------------------- */
 

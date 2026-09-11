@@ -139,6 +139,33 @@ export default function SettingsDialog({
             ))}
           </div>
 
+          <p className="field-label reading-label">Big stories</p>
+          <div
+            className="scope-switch metric-switch"
+            role="radiogroup"
+            aria-label="What the circle beside a big story shows"
+          >
+            <button
+              role="radio"
+              aria-checked={settings.bigStoryMetric === "score"}
+              className={settings.bigStoryMetric === "score" ? "on" : ""}
+              onClick={() => onChange({ ...settings, bigStoryMetric: "score" })}
+            >
+              Score /100
+            </button>
+            <button
+              role="radio"
+              aria-checked={settings.bigStoryMetric === "newsrooms"}
+              className={settings.bigStoryMetric === "newsrooms" ? "on" : ""}
+              onClick={() => onChange({ ...settings, bigStoryMetric: "newsrooms" })}
+            >
+              Newsrooms
+            </button>
+          </div>
+          <p className="field-note">
+            Tap the circle on any article to see how the number was worked out.
+          </p>
+
           <p className="field-label reading-label">Reading</p>
           <label className="check-row">
             <input
