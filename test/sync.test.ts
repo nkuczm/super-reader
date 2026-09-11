@@ -150,3 +150,93 @@ test("a write with the same change time is allowed through", async () => {
   });
   assert.equal((again?.payload.feeds?.[0] as { name: string }).name, "Retry");
 });
+
+// Bookmark stamps are wall-clock times in production, and the tombstone TTL
+// is measured against the clock — so these use real times, not 1000/2000,
+// which the TTL would treat as ancient.
+const NOW = Date.now();
+const ago = (minutes: number) => NOW - minutes * 60_000;
+
+test("one device's bookmarks never delete another's", async () => {
+  // The bug this fixes: the whole document resolved by "most recent change
+  // wins", so whichever device pushed second replaced the other's bookmark
+  // list wholesale. Bookmarks merge instead.
+  const { code } = await createSync();
+
+  await writeSync(code, {
+    feeds: [],
+    updatedAt: 1000,
+    saved: [{ id: "a", title: "Desktop find", link: "https://a.example/1", savedAt: ago(240) }],
+  });
+  const after = await writeSync(code, {
+    feeds: [],
+    updatedAt: 2000,
+    saved: [{ id: "b", title: "Phone find", link: "https://b.example/2", savedAt: ago(10) }],
+  });
+
+  assert.deepEqual(
+    (after?.payload.saved ?? []).map((article) => article.link).sort(),
+    ["https://a.example/1", "https://b.example/2"],
+    "both survive the second write",
+  );
+
+  const stored = await readSync(code);
+  assert.equal(stored?.payload.saved?.length, 2);
+});
+
+test("an un-save travels, instead of being undone by the other device", async () => {
+  const { code } = await createSync();
+  await writeSync(code, {
+    feeds: [],
+    updatedAt: 1000,
+    saved: [
+      { id: "a", title: "Saved then dropped", link: "https://a.example/1", savedAt: ago(240) },
+    ],
+  });
+
+  // The other device removes it and pushes the tombstone.
+  const after = await writeSync(code, {
+    feeds: [],
+    updatedAt: 2000,
+    saved: [],
+    savedRemovals: [{ link: "https://a.example/1", at: ago(60) }],
+  });
+  assert.deepEqual(after?.payload.saved, [], "the removal wins over the older save");
+  assert.equal(after?.payload.savedRemovals?.length, 1, "and keeps travelling");
+
+  // A device that still holds the article pushes it again: it does not
+  // resurrect, because its save is older than the removal.
+  const later = await writeSync(code, {
+    feeds: [],
+    updatedAt: 3000,
+    saved: [
+      { id: "a", title: "Saved then dropped", link: "https://a.example/1", savedAt: ago(240) },
+    ],
+  });
+  assert.deepEqual(later?.payload.saved, []);
+
+  // Saving it again, now, does bring it back — an un-save is not permanent.
+  const resaved = await writeSync(code, {
+    feeds: [],
+    updatedAt: 4000,
+    saved: [{ id: "a", title: "Saved again", link: "https://a.example/1", savedAt: ago(1) }],
+  });
+  assert.deepEqual((resaved?.payload.saved ?? []).map((a) => a.link), ["https://a.example/1"]);
+});
+
+test("bookmarks survive a feed list arriving from another device", async () => {
+  // Feeds still resolve by most-recent-change; that must not take the
+  // bookmarks with it.
+  const { code } = await createSync();
+  await writeSync(code, {
+    feeds: [{ id: "f1", name: "Old", sources: [] }],
+    updatedAt: 1000,
+    saved: [{ id: "a", title: "Keep me", link: "https://a.example/1", savedAt: ago(30) }],
+  });
+  const after = await writeSync(code, {
+    feeds: [{ id: "f2", name: "New arrangement", sources: [] }],
+    updatedAt: 2000,
+  });
+  assert.equal((after?.payload.feeds[0] as { name: string }).name, "New arrangement");
+  assert.deepEqual((after?.payload.saved ?? []).map((a) => a.link), ["https://a.example/1"]);
+});

@@ -1,6 +1,7 @@
 "use client";
 
 import type { Article, SourceMeta } from "./types";
+import type { SavedArticle, SavedRemoval } from "./saved";
 
 export type Source = SourceMeta & { id: string; kind: "feed" | "topic" | "page" | "x" | "api" };
 export type Feed = { id: string; name: string; sources: Source[] };
@@ -31,18 +32,7 @@ export function saveFeeds(feeds: Feed[]) {
   }
 }
 
-/**
- * A bookmarked article. The whole record is kept, not just its id: an article
- * drops out of its feed after a few weeks, and a saved one has to outlive
- * that — the point of saving it is that it is still there later.
- */
-export type SavedArticle = Article & {
-  /** Which source it came from, for the byline when the feed no longer has it. */
-  sourceId?: string;
-  sourceTitle?: string;
-  favicon?: string;
-  savedAt: number;
-};
+export type { SavedArticle, SavedRemoval } from "./saved";
 
 const SAVED_KEY = "super-reader:saved:v1";
 
@@ -62,6 +52,31 @@ export function saveSaved(articles: SavedArticle[]) {
     window.localStorage.setItem(SAVED_KEY, JSON.stringify(articles));
   } catch {
     /* storage unavailable; the list just won't persist */
+  }
+}
+
+const REMOVED_KEY = "super-reader:saved-removed:v1";
+
+/**
+ * Un-saves, dated. Without these a device that still holds the article puts
+ * it straight back on the next sync — see lib/saved.ts.
+ */
+export function loadSavedRemovals(): SavedRemoval[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(REMOVED_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? (parsed as SavedRemoval[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveSavedRemovals(removals: SavedRemoval[]) {
+  try {
+    window.localStorage.setItem(REMOVED_KEY, JSON.stringify(removals));
+  } catch {
+    /* storage unavailable; an un-save may come back after a sync */
   }
 }
 

@@ -8,6 +8,7 @@ import {
   MAX_PAYLOAD_BYTES,
 } from "@/lib/sync";
 import { isValidCode } from "@/lib/sync-code";
+import type { SavedArticle, SavedRemoval } from "@/lib/saved";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,6 +58,8 @@ export async function PUT(request: Request) {
     code?: string;
     feeds?: unknown;
     read?: unknown;
+    saved?: unknown;
+    savedRemovals?: unknown;
     vault?: unknown;
     updatedAt?: unknown;
   };
@@ -77,6 +80,12 @@ export async function PUT(request: Request) {
   const payload = {
     feeds: body.feeds,
     read: Array.isArray(body.read) ? (body.read as string[]).slice(-3000) : [],
+    // Merged with what is stored rather than replacing it; writeSync does the
+    // merging, since it is the only place that sees both sides.
+    saved: Array.isArray(body.saved) ? (body.saved as SavedArticle[]) : [],
+    savedRemovals: Array.isArray(body.savedRemovals)
+      ? (body.savedRemovals as SavedRemoval[])
+      : [],
     // Opaque to this server by design; stored and handed back untouched.
     ...(body.vault ? { vault: body.vault } : {}),
     updatedAt: Number.isFinite(Number(body.updatedAt)) ? Number(body.updatedAt) : 0,
