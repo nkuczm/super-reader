@@ -391,6 +391,16 @@ export default function Reader() {
     [feeds],
   );
 
+  /**
+   * Sources whose last refresh failed, and why.
+   *
+   * A source that has stopped answering used to be invisible: it kept its
+   * place in the sidebar, showed no unread count, and read as quiet. The
+   * whole point of a reader is not missing things, so a broken source has to
+   * say so rather than look like a slow week.
+   */
+  const [sourceErrors, setSourceErrors] = useState<Record<string, string>>({});
+
   /** Fetch every known feed and merge the results newest-first. */
   const refresh = useCallback(async (sources: Source[]) => {
     if (sources.length === 0) {
@@ -406,13 +416,19 @@ export default function Reader() {
 
       const byUrl = new Map(sources.map((s) => [s.feedUrl, s.id]));
       const merged: Loaded[] = [];
+      const failed: Record<string, string> = {};
       for (const result of data.results ?? []) {
         const sourceId = byUrl.get(result.feedUrl);
         if (!sourceId) continue;
+        if (result.ok === false) {
+          failed[sourceId] = result.error ?? "This source could not be fetched";
+          continue;
+        }
         for (const article of result.articles as Article[]) {
           merged.push({ ...article, sourceId, id: `${sourceId}:${article.id}` });
         }
       }
+      setSourceErrors(failed);
       // One article, once. Two of a paper's feeds carry the same story with
       // different tracking parameters, which is how the list ended up showing
       // the same WSJ piece twice in a row.
@@ -1250,6 +1266,15 @@ export default function Reader() {
                     >
                       <SourceIcon src={source.favicon} title={source.title} />
                       <span className="feed-name">{source.title}</span>
+                      {sourceErrors[source.id] && (
+                        <span
+                          className="source-broken"
+                          title={`Last refresh failed: ${sourceErrors[source.id]}`}
+                          aria-label={`${source.title} could not be fetched`}
+                        >
+                          !
+                        </span>
+                      )}
                     </button>
                     <button
                       className="icon-btn danger"

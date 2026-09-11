@@ -70,6 +70,17 @@ export function ensureCorpusSchema() {
         )
       `;
       await sql`
+        CREATE TABLE IF NOT EXISTS corpus_sources (
+          id          TEXT PRIMARY KEY,
+          ok          BOOLEAN NOT NULL,
+          items       INTEGER,
+          error       TEXT,
+          fails       INTEGER NOT NULL DEFAULT 0,
+          last_ok_at  TIMESTAMPTZ,
+          checked_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `;
+      await sql`
         CREATE TABLE IF NOT EXISTS corpus_sweeps (
           slice   TEXT PRIMARY KEY,
           ran_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -148,6 +159,76 @@ export async function recordRedditHits(hits: CorpusRedditHit[]) {
     );
   }
   return hits.length;
+}
+
+/**
+ * What each panel source did, the last time it was asked.
+ *
+ * Breadth is a count of newsrooms, so a panel feed that quietly stops
+ * answering does not produce an error anyone sees — it lowers every score by
+ * a little and keeps doing so. Recording the outcome per source is what makes
+ * that visible: a feed with a growing failure count and a last-success time
+ * from three days ago has rotted, and the directory entry needs fixing rather
+ * than the ranking being mistrusted.
+ *
+ * `fails` counts consecutive failures, so one timeout reads differently from
+ * a feed that has been gone all week.
+ */
+export async function recordSourceHealth(
+  entries: { id: string; ok: boolean; items?: number; error?: string }[],
+) {
+  if (entries.length === 0) return;
+  await ensureCorpusSchema();
+  const sql = getSql();
+
+  await Promise.all(
+    entries.map(
+      (entry) => sql`
+        INSERT INTO corpus_sources (id, ok, items, error, fails, last_ok_at, checked_at)
+        VALUES (
+          ${entry.id}, ${entry.ok}, ${entry.items ?? null}, ${entry.error ?? null},
+          ${entry.ok ? 0 : 1}, ${entry.ok ? new Date().toISOString() : null}, now()
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          ok         = EXCLUDED.ok,
+          items      = EXCLUDED.items,
+          error      = EXCLUDED.error,
+          fails      = CASE WHEN EXCLUDED.ok THEN 0 ELSE corpus_sources.fails + 1 END,
+          last_ok_at = CASE WHEN EXCLUDED.ok THEN now() ELSE corpus_sources.last_ok_at END,
+          checked_at = now()
+      `,
+    ),
+  );
+}
+
+export type SourceHealth = {
+  id: string;
+  ok: boolean;
+  items?: number;
+  error?: string;
+  fails: number;
+  lastOkAt?: string;
+  checkedAt: string;
+};
+
+/** Every panel source's last outcome, the most broken first. */
+export async function sourceHealth(): Promise<SourceHealth[]> {
+  await ensureCorpusSchema();
+  const sql = getSql();
+  const rows = await sql`
+    SELECT id, ok, items, error, fails, last_ok_at, checked_at
+    FROM corpus_sources
+    ORDER BY fails DESC, id
+  `;
+  return rows.map((row) => ({
+    id: String(row.id),
+    ok: Boolean(row.ok),
+    items: row.items == null ? undefined : Number(row.items),
+    error: row.error ? String(row.error) : undefined,
+    fails: Number(row.fails),
+    lastOkAt: row.last_ok_at ? new Date(row.last_ok_at).toISOString() : undefined,
+    checkedAt: new Date(row.checked_at).toISOString(),
+  }));
 }
 
 export async function noteSweep(slice: string, note: string) {

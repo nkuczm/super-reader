@@ -19,6 +19,7 @@ import {
   recordRedditHits,
   recordStories,
   noteSweep,
+  recordSourceHealth,
   pruneCorpus,
   lastSweeps,
   invalidatePulse,
@@ -81,7 +82,7 @@ export async function sweepSlice(slice: number, now = Date.now()): Promise<Sweep
     outletJobs.map(async (job) => {
       if (job.kind !== "outlet") return;
       try {
-        const items = await readOutlet(job.outlet, now);
+        const items = await withRetry(() => readOutlet(job.outlet, now));
         stories.push(...items);
         sources.push({ id: job.outlet.id, ok: true, items: items.length });
       } catch (error) {
@@ -110,6 +111,10 @@ export async function sweepSlice(slice: number, now = Date.now()): Promise<Sweep
       });
     }
   }
+
+  // What each source did, so a feed that has quietly stopped answering is
+  // visible rather than just lowering every score a little.
+  await recordSourceHealth(sources);
 
   const written = await recordStories(stories);
   const wroteHits = await recordRedditHits(hits);
@@ -157,6 +162,26 @@ async function readOutlet(outlet: Outlet, now: number): Promise<CorpusStory[]> {
  * a discussion with no article behind it is not coverage of anything.
  */
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * One retry, briefly, for a failure that is probably the network.
+ *
+ * A panel outlet that times out once costs its whole newsroom's coverage for
+ * the next half hour, which shows up as a story looking smaller than it is.
+ * A second attempt is far cheaper than that, and an outlet that is genuinely
+ * gone fails twice and gets recorded as failing.
+ */
+async function withRetry<T>(read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    // A refusal is a decision, not a hiccup: asking again changes nothing.
+    if (/\b(401|403|404|410|451)\b/.test(message)) throw error;
+    await pause(600);
+    return read();
+  }
+}
 
 /** One retry after a longer wait, for the throttle specifically. */
 async function withRedditRetry<T>(read: () => Promise<T>): Promise<T> {

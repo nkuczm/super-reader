@@ -893,3 +893,27 @@
   .outlet-tags { display: none; }
   .outlet-list label { grid-template-columns: auto 1fr; }
 }
+
+/* A source whose last refresh failed. Small and orange rather than red: it
+   is worth noticing, and it is not an error the reader caused. */
+.source-broken {
+  flex: none;
+  margin-left: auto;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: #7c3a00;
+  background: #fcd9a4;
+}
+
+@media (prefers-color-scheme: dark) {
+  .source-broken {
+    color: #ffd9a8;
+    background: #6b3c05;
+  }
+}
