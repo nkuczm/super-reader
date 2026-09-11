@@ -7,7 +7,7 @@ and it becomes a source in a named feed. Built from scratch in one session.
 - **Repo:** `nkuczm/super-reader`, branch `claude/feedly-clone-custom-feeds-laz6ll`
   (this branch is the repo's default; every push deploys to production)
 - **Vercel project:** `super-reader` — team `nathan-kuczmarskis-projects`
-- 183 tests, all passing.
+- 200 tests, all passing.
 
 ---
 
@@ -15,7 +15,7 @@ and it becomes a source in a named feed. Built from scratch in one session.
 
 ```bash
 npm install
-npm test          # 183 tests, ~40s
+npm test          # 200 tests, ~45s
 npm run dev       # but see "the sandbox can't do this" below
 ```
 
@@ -43,8 +43,8 @@ npx next build
 hosts in production so the deployed app cannot be used to probe its own
 network. Fixtures live on 127.0.0.1, hence the escape hatch.
 
-**Kill stale fixture servers before running tests.** Ports 8781/8783–8795 are
-used by fixtures; a leftover process causes `EADDRINUSE` and every test hangs
+**Kill stale fixture servers before running tests.** Ports 8781/8783–8795 and
+9101–9104 are used by fixtures; a leftover process causes `EADDRINUSE` and every test hangs
 or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
 
 ---
@@ -65,6 +65,7 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
 | `lib/sitemap.ts` | Building a feed from a site's sitemap when it has no RSS |
 | `lib/structured.ts` | A page's schema.org JSON-LD — body, byline, date, tier |
 | `lib/paywall.ts` | Whether what arrived is the article or the free part of it |
+| `lib/net.ts` | The public-web guard every outbound fetch goes through |
 | `lib/reddit.ts` | Reddit sources — subreddits, users, multis, domains, searches |
 | `lib/apis.ts` | The API directory — CourtListener, Federal Register, arXiv… |
 | `lib/offline.ts` | IndexedDB store, download schedule, list snapshot |
@@ -368,6 +369,35 @@ the host's own feed on those domains.
   request with 403/429 often enough to matter; old serves the identical feed
   from a different tier. The stored `feedUrl` stays the canonical www one —
   it is the source's identity, and every fetch retries the same way.
+- **Every outbound fetch goes through `lib/net.ts`, and that is load-bearing.**
+  The check used to live in `/api/article`, which was three kinds of not
+  enough: `/api/discover` and `/api/feed` fetch arbitrary URLs and had none,
+  `fetch` followed redirects so the checked URL was not the fetched one, and
+  the IPv6 test matched `::1` only — so `[::ffff:a9fe:a9fe]`, the cloud
+  metadata address as IPv4-mapped IPv6, went through. All three were
+  reproduced against the built app first. If you add a code path that reaches
+  the network, route it through `safeFetchText`/`safeFetchBytes` rather than
+  calling `fetch`; the guard is below the callers precisely so nobody has to
+  remember.
+- **The guard resolves DNS, so it fails closed on an unresolvable host.** That
+  is deliberate — a host that cannot be checked cannot be fetched — and it is
+  why `npm test` sets `ALLOW_PRIVATE_HOSTS=1`: the fixtures are on 127.0.0.1,
+  which is exactly what it blocks. `test/net.test.ts` clears the variable so
+  the guard is actually exercised, and asserts on the *message* for the DNS
+  case, because "unresolvable" and "resolves to something private" are both
+  refusals and a test that accepted either would pass without resolving
+  anything.
+- **`[^>]{0,400}`, never `[^>]*`, in a tag regex followed by a literal.** The
+  unbounded form backtracks from every position the literal fails at, which is
+  quadratic on a page whose tags never close: measured at 91,774ms on a 4MB
+  page against routes allowed 30 seconds, and these parsers run on whatever a
+  feed points at, so nobody has to click anything. Bounded it is 13ms.
+  `test/security.test.ts` holds the regression at a deliberately loose 5s —
+  the failure it catches is three orders of magnitude, not a few percent.
+- **A stubbed `fetch` in a test must return a real `Response`.** The API tests
+  used an object shaped like one, which had no `headers` and no `body`, so it
+  sailed past the streaming size cap the real code depends on. A double that
+  skips the part under test hides whether it works.
 - **Slices have different deadlines, and their order is what sets them.**
   Front pages lead, then subreddits, then section timelines, so a slice holds
   one kind of thing and can have one deadline: 15 minutes, 30, 45. Sweeping is
@@ -412,6 +442,30 @@ advertising- and subscription-funded outlets syndicate an excerpt, because the
 pageview is the product. Government and corporate PR feeds are usually short
 announcements — whitehouse.gov is the exception only because its WordPress
 ships the whole rendered page.
+
+## Security, and what is still open
+
+Reviewed in full before this was handed to colleagues; the findings and their
+fixes are in the commit "Close the SSRF, and stop a hostile page burning 92
+seconds of CPU". What remains open, in the order it would matter:
+
+1. **Nothing is rate-limited, and the deployment is public.** A serverless
+   in-process limiter would be theatre — instances are not shared — so the
+   answer is platform-level: Vercel project → Settings → Deployment
+   Protection. Until that is on, anyone with the URL can spend the
+   deployment's compute fetching pages. This is the single highest-value
+   thing the user can do, and it is a dashboard toggle, not code.
+2. **DNS rebinding is not stopped.** `lib/net.ts` resolves, validates, then
+   fetches; a name whose answer changes in between defeats that. Fixing it
+   properly means pinning the connection to the checked address, which needs
+   `undici`'s `Agent` with a custom `connect.lookup` — a dependency this
+   project does not have. Worth doing if the app ever sits inside a network
+   with anything sensitive on it.
+3. **API keys in the deployment's environment apply to everyone who opens the
+   URL.** That is what the browser-side vault exists to avoid, and it is
+   unchanged; behind access control it stops mattering.
+4. **`npm audit` is clean** and there are no secrets in the repository
+   history — both checked, both worth rechecking before a release.
 
 ## Where the line is on blocked content
 

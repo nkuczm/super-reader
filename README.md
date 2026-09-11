@@ -675,6 +675,69 @@ the sync dialog says it is unavailable.
 2. That adds `POSTGRES_URL` to the project's environment variables.
 3. Redeploy. The table is created automatically on first use.
 
+## Security
+
+This app fetches URLs on behalf of whoever is using it and renders HTML it
+did not write, so both of those are treated as hostile input.
+
+**Outbound requests are restricted to the public internet** (`lib/net.ts`).
+Every fetch — a feed, a page, a sitemap, a linked file, an API — goes through
+one guard that resolves the hostname rather than trusting how it is spelled,
+refuses private, loopback, link-local and carrier-NAT addresses in both IPv4
+and IPv6 (including the IPv4-mapped, 6to4 and NAT64 forms that hide one inside
+the other), follows redirects by hand so every hop is checked, and caps how
+much it will read. Without this the app is an open proxy into whatever network
+it is deployed in — cloud metadata endpoints included, which on most providers
+hand out credentials.
+
+**Known residual:** the guard resolves, validates, then fetches, so a name
+whose DNS answer changes between those two moments — DNS rebinding — is not
+stopped. Closing it needs the connection pinned to the address that was
+checked, which Node's `fetch` will not do without a custom dispatcher.
+
+**Third-party HTML is sanitised to an allowlist** before it reaches the page:
+scripts, styles, iframes, forms, objects, event handlers and non-http(s) URLs
+are removed, whether the body came from the page, the publisher's structured
+data, their feed, or an API. A content security policy backs that up, so even
+a sanitiser failure cannot load script from anywhere else. Links that the app
+could never open — `javascript:`, `data:` — are kept out of the article model
+at the point it is built, rather than filtered at each place they are shown.
+
+**Parsers are bounded.** Reading pages chosen by someone else means every
+regex is a potential denial of service: an unbounded scan before a literal
+backtracks from every position the literal fails at, and a page carrying
+twenty thousand unterminated tags cost 92 seconds of CPU against routes that
+are allowed 30. Tag scans are bounded, responses are capped at 8MB, files at
+their own limit, and `/api/feed` takes a bounded number of sources per call.
+
+**Secrets.** Sync codes are stored as SHA-256 hashes, never the code itself.
+API keys are encrypted in the browser before they sync, and travel in a header
+for the one request that needs them — never in a URL, where they would reach
+logs and referrers. SQL is parameterised throughout.
+
+### Before you share the URL
+
+The deployment is **public by default** — there is no login in front of it —
+and several of this app's design decisions follow from that: no subscription
+cookies server-side, no server-readable API keys, nothing personal stored.
+
+If you are sharing it with colleagues rather than the world, turn on access
+control at the platform, in the Vercel project's **Settings → Deployment
+Protection** (Vercel Authentication, or a shared password). That is worth more
+than anything in this repository can do for you:
+
+- It removes the anonymous-caller problem entirely. Nothing here is
+  rate-limited, and a serverless in-process limiter would be theatre — so
+  until the URL is restricted, anyone who has it can use the deployment to
+  fetch pages at your expense.
+- Keys set in the deployment's environment apply to whoever opens the URL.
+  Behind access control, that is your colleagues instead of everyone.
+- A sync code is a bearer secret. Anyone holding one can read and change that
+  feed list, so treat it like a password and share it deliberately.
+
+Note that Vercel Authentication also blocks the app on a phone unless each
+person signs in, which is why it is off by default here.
+
 ## Deployment
 
 Hosted on Vercel, linked to this GitHub repo: every push to
