@@ -234,6 +234,9 @@
   }
   .main-head h1 { font-size: 19px; }
   .head-actions { width: 100%; margin-left: 0; }
+  /* No refresh button here: pulling the list down is the gesture, and a
+     button competing with it would only crowd the row. */
+  .refresh-btn { display: none; }
   /* The sort switch takes the room; the + stays a square. */
   .head-actions .sort-switch { flex: 1; }
   .head-actions .sort-switch button { flex: 1; min-height: 40px; }

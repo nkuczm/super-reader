@@ -137,6 +137,8 @@ export default function Reader() {
   const listRef = useRef<HTMLElement | null>(null);
   /** How far the list has been dragged past its top, in pixels. */
   const [pullDistance, setPullDistance] = useState(0);
+  /** Whether the refresh in flight was started by pulling the list. */
+  const [pullRefresh, setPullRefresh] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [saved, setSaved] = useState<SavedArticle[]>([]);
@@ -1061,30 +1063,17 @@ export default function Reader() {
     const travelled = pullDistance;
     pullFrom.current = null;
     setPullDistance(0);
-    if (travelled >= PULL_TRIGGER && !refreshing) void refresh(allSources);
+    if (travelled >= PULL_TRIGGER && !refreshing) {
+      setPullRefresh(true);
+      void refresh(allSources);
+    }
   }, [pullDistance, refreshing, refresh, allSources]);
 
-  // The same gesture with a trackpad or wheel: keep scrolling up once the
-  // list is already at the top and it refreshes, so this is not a
-  // touch-only feature.
-  const wheelPull = useRef(0);
+  // The note above the list belongs to the pull. A refresh started from the
+  // desktop button reports itself in the button instead.
   useEffect(() => {
-    const list = listRef.current;
-    if (!list) return;
-    const onWheel = (event: WheelEvent) => {
-      if (list.scrollTop > 0 || event.deltaY >= 0 || refreshing) {
-        wheelPull.current = 0;
-        return;
-      }
-      wheelPull.current += -event.deltaY;
-      if (wheelPull.current > 240) {
-        wheelPull.current = 0;
-        void refresh(allSources);
-      }
-    };
-    list.addEventListener("wheel", onWheel, { passive: true });
-    return () => list.removeEventListener("wheel", onWheel);
-  }, [refresh, allSources, refreshing]);
+    if (!refreshing) setPullRefresh(false);
+  }, [refreshing]);
 
   // Count the sources behind whatever is selected, not every source there is.
   const selectedSourceCount =
@@ -1351,7 +1340,7 @@ export default function Reader() {
           <>
         {/* The pull-to-refresh indicator. It says what will happen, and only
             promises a refresh once the pull is far enough to cause one. */}
-        {(pullDistance > 0 || refreshing) && (
+        {(pullDistance > 0 || (refreshing && pullRefresh)) && (
           <div
             className="pull-note"
             style={{ height: refreshing ? 34 : Math.round(pullDistance) }}
@@ -1418,6 +1407,17 @@ export default function Reader() {
                 Top stories
               </button>
             </div>
+            {/* Desktop keeps a button: there is no pull gesture with a mouse.
+                Hidden on a phone, where the pull is the gesture and a button
+                would only crowd the row. */}
+            <button
+              className="btn ghost small refresh-btn"
+              onClick={() => refresh(allSources)}
+              disabled={refreshing || allSources.length === 0}
+            >
+              {refreshing ? <span className="spinner" /> : Icon.refresh}
+              Refresh
+            </button>
             <button
               className="btn small add-btn"
               onClick={() => openPanel(setDialogOpen)}
