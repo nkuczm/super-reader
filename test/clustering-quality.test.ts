@@ -109,7 +109,7 @@ test("a story's cluster never gains a newsroom that did not cover it", () => {
   const failures: string[] = [];
 
   for (const [label, group] of Object.entries(SAME_STORY)) {
-    const expected = new Set(group.map(([newsroom]: [string, string]) => newsroom));
+    const expected = new Set((group as string[][]).map(([newsroom]) => newsroom));
     const ids = corpus.filter((story) => story.label === label).map((story) => story.id);
     const cluster = clusters.find((entry) =>
       entry.members.some((member) => member.id === ids[0]),
