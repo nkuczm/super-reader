@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { corpusAvailable, lastSweeps } from "@/lib/corpus";
-import { sweepSlice, sliceCount, dueSlices, SWEEP_INTERVAL_MS } from "@/lib/sweep";
+import { sweepSlice, sliceCount, dueSlices, sliceInterval } from "@/lib/sweep";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,7 +44,9 @@ export async function GET(request: Request) {
   if (!force) {
     const last = (await lastSweeps()).find((sweep) => sweep.slice === `slice-${slice}`);
     const age = last ? Date.now() - Date.parse(last.ranAt) : Infinity;
-    if (age < SWEEP_INTERVAL_MS) {
+    // Each slice has its own deadline: front pages are due four times an
+    // hour, section timelines every three quarters of one.
+    if (age < sliceInterval(slice)) {
       return NextResponse.json({ skipped: "swept recently", slice, ageMs: age });
     }
   }

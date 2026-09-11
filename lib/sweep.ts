@@ -40,16 +40,50 @@ type Job =
 /**
  * The full sweep, in a fixed order so slice numbers are stable — a slice
  * number is what the schedule and the catch-up both refer to.
+ *
+ * Front pages lead, then the communities, then the section timelines. The
+ * order is what decides how often each is swept: a front page is where a
+ * breaking story appears first and it is the only place the editorial
+ * placement signal comes from, while a section feed is a timeline that
+ * mostly tells you what is recent. Grouping them means the fast interval can
+ * apply to the slices that are worth it rather than to all 78 jobs.
  */
 export function sweepJobs(): Job[] {
+  const outlets = panelOutlets();
   return [
-    ...panelOutlets().map((outlet) => ({ kind: "outlet" as const, outlet })),
+    ...outlets.filter((outlet) => outlet.front).map((outlet) => ({ kind: "outlet" as const, outlet })),
     ...panelSubreddits().map((entry) => ({ kind: "subreddit" as const, entry })),
+    ...outlets.filter((outlet) => !outlet.front).map((outlet) => ({ kind: "outlet" as const, outlet })),
   ];
 }
 
 export function sliceCount() {
   return Math.ceil(sweepJobs().length / PER_SLICE);
+}
+
+/** The jobs a slice number covers. */
+function jobsIn(slice: number, jobs = sweepJobs()) {
+  return jobs.slice(slice * PER_SLICE, slice * PER_SLICE + PER_SLICE);
+}
+
+/**
+ * How stale a slice may get before it is due again.
+ *
+ * Sweeping is driven by traffic — two slices per request — so with ten slices
+ * a quiet day leaves the last of them hours behind. Spending that budget
+ * evenly was the wrong call: a front page changes several times an hour and
+ * is where a story is first visible, while a section timeline that has not
+ * been read for an hour has usually gained a couple of items in order.
+ */
+export function sliceInterval(slice: number): number {
+  const jobs = jobsIn(slice);
+  if (jobs.some((job) => job.kind === "outlet" && job.outlet.front)) {
+    return 15 * 60 * 1000;
+  }
+  // Reddit's top-of-day ranking is a day's worth of voting; it does not turn
+  // over in a quarter of an hour, and its requests are rate-limited.
+  if (jobs.every((job) => job.kind === "subreddit")) return 30 * 60 * 1000;
+  return 45 * 60 * 1000;
 }
 
 export type SweepResult = {
@@ -219,11 +253,8 @@ async function readSubreddit(entry: SubredditEntry): Promise<CorpusRedditHit[]> 
   return hits;
 }
 
-/** How stale a slice may get before it is swept again. */
-export const SWEEP_INTERVAL_MS = 30 * 60 * 1000;
-
 /**
- * Which slices are overdue, oldest first.
+ * Which slices are overdue, furthest past their own deadline first.
  *
  * Sweeping is driven by use rather than only by a schedule: a reader opening
  * the app runs the slices that have gone stale, in the background, after the
@@ -234,12 +265,17 @@ export async function dueSlices(now = Date.now()): Promise<number[]> {
   const ran = new Map(
     (await lastSweeps()).map((sweep) => [sweep.slice, Date.parse(sweep.ranAt)]),
   );
-  const due: { slice: number; last: number }[] = [];
+  const due: { slice: number; overdue: number }[] = [];
   for (let slice = 0; slice < sliceCount(); slice++) {
     const last = ran.get(`slice-${slice}`) ?? 0;
-    if (now - last > SWEEP_INTERVAL_MS) due.push({ slice, last });
+    const interval = sliceInterval(slice);
+    // How far past its own deadline, as a multiple of it. Comparing raw ages
+    // would always run the slowest-moving slices first simply because they
+    // are allowed to be older.
+    const overdue = (now - last) / interval;
+    if (overdue > 1) due.push({ slice, overdue });
   }
-  return due.sort((a, b) => a.last - b.last).map((entry) => entry.slice);
+  return due.sort((a, b) => b.overdue - a.overdue).map((entry) => entry.slice);
 }
 
 /**

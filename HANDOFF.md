@@ -368,6 +368,16 @@ the host's own feed on those domains.
   request with 403/429 often enough to matter; old serves the identical feed
   from a different tier. The stored `feedUrl` stays the canonical www one —
   it is the source's identity, and every fetch retries the same way.
+- **Slices have different deadlines, and their order is what sets them.**
+  Front pages lead, then subreddits, then section timelines, so a slice holds
+  one kind of thing and can have one deadline: 15 minutes, 30, 45. Sweeping is
+  driven by traffic at two slices a request, so on a quiet day the budget is
+  real — and a front page changes several times an hour while a section
+  timeline gains a couple of items in order. `dueSlices` sorts by how far past
+  its *own* deadline a slice is, not by age; raw age would always run the
+  slowest-moving slices first simply because they are allowed to be older.
+  Note this reordering changes which sources a given slice number covers, so
+  the first cycle after deploying it re-sweeps against stale `slice-N` marks.
 - **A sweep records per-source health.** Breadth is a count, so a dead panel
   feed lowers every score silently and forever. `/api/outlets/health` is how
   that is found; `/api/outlets/audit` cannot, because a single live check

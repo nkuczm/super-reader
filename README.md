@@ -530,6 +530,14 @@ the press covered the same event. Tapping the score opens a page showing the
 whole calculation — every signal, what produced it, and the headline of each
 copy counted, so "8 newsrooms" can be checked rather than taken.
 
+Sweeping is driven by traffic rather than by a cron plan — a couple of slices
+run after each request, in the background — so the budget is real on a quiet
+day. It is not spent evenly: front pages are swept four times an hour, because
+that is where a story is first visible and the only place the placement signal
+comes from; communities every half hour, since a day's voting does not turn
+over in fifteen minutes; section timelines every three quarters of an hour,
+because an hour of one is a few more items in order.
+
 ### When a source stops answering
 
 Breadth is a count, so a panel feed that quietly stops answering produces no
