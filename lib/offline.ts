@@ -21,7 +21,7 @@ const META = "meta";
  * the download skips anything already cached, so it would never be re-fetched.
  * 2: comment threads are no longer mistaken for short posts.
  */
-export const EXTRACT_VERSION = 2;
+export const EXTRACT_VERSION = 3;
 
 export type CachedArticle = ReadableArticle & {
   cachedAt: number;

@@ -160,6 +160,8 @@ export default function ArticleReader({
               : null,
             fromCache ? "Saved for offline" : null,
             article?.via === "feed" ? "From the publisher's feed" : null,
+            article?.via === "amp" ? "The publisher's AMP copy" : null,
+            article?.partial ? "Free excerpt" : null,
             article?.via === "preview" ? "Preview" : null,
           ]
             .filter(Boolean)
@@ -246,6 +248,16 @@ export default function ArticleReader({
                   Open it on the site
                 </a>
                 .
+              </p>
+            )}
+            {article.partial && (
+              <p className="reader-note">
+                {article.partialReason ??
+                  "The rest of this article is behind a subscription."}{" "}
+                <a href={url} target="_blank" rel="noreferrer noopener">
+                  Open it on the site
+                </a>{" "}
+                to read the rest.
               </p>
             )}
             {article.truncated && (

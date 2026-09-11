@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import {
   extractArticle,
   articleFromFeedContent,
+  preferSyndicated,
   previewFromMetadata,
 } from "@/lib/article";
+import { SHORT_ARTICLE_WORDS } from "@/lib/paywall";
 import { fetchFeedItemContent, unwrapRedirect } from "@/lib/feed";
 import { isUnresolvableAggregatorLink } from "@/lib/discover";
 import { fileKindFor, fileNameFrom, imageUrlFor, readFileAsArticle } from "@/lib/files";
@@ -172,7 +174,25 @@ export async function GET(request: Request) {
   }
 
   try {
-    const article = await extractArticle(target.toString());
+    let article = await extractArticle(target.toString());
+
+    /**
+     * The page answered, but with less than an article. A metered site serves
+     * its first few paragraphs to everyone and they extract perfectly, so
+     * "it worked" is not the same as "that was all of it" — and where the
+     * publisher syndicates the full text in their own feed, that copy is
+     * both fuller and freely given. Only fetched when there is a reason to:
+     * a normal article never costs the extra request.
+     */
+    if (feed && (article.partial || article.wordCount < SHORT_ARTICLE_WORDS)) {
+      try {
+        const content = await fetchFeedItemContent(feed, target.toString());
+        if (content) article = preferSyndicated(article, content, title);
+      } catch {
+        /* the feed could not help; what the page gave still stands */
+      }
+    }
+
     return NextResponse.json(article, {
       headers: {
         // An article's text does not change; let the CDN serve repeat opens

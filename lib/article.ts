@@ -2,6 +2,8 @@ import { Readability } from "@mozilla/readability";
 import { JSDOM, VirtualConsole } from "jsdom";
 import sanitizeHtml from "sanitize-html";
 import { fetchText, stripHtml, absolute, toIso, stripChrome } from "./feed";
+import { structuredArticle } from "./structured";
+import { endsAtWall, paywallVerdict, SHORT_ARTICLE_WORDS } from "./paywall";
 import type { Attachment } from "./types";
 
 export type ReadableArticle = {
@@ -9,7 +11,7 @@ export type ReadableArticle = {
    * Where the text came from: the page, the feed's own copy, a file, or —
    * when none of those could be read — the page's own description of itself.
    */
-  via?: "page" | "feed" | "file" | "preview";
+  via?: "page" | "feed" | "file" | "preview" | "data" | "amp";
   url: string;
   title: string;
   byline?: string;
@@ -22,6 +24,15 @@ export type ReadableArticle = {
   truncated: boolean;
   /** Files this article points at — the filed PDF, say. */
   attachments?: Attachment[];
+  /**
+   * What arrived is the free part of a subscriber article, not all of it.
+   * Set from the publisher's own declaration wherever they made one.
+   */
+  partial?: boolean;
+  /** Why it is partial, in terms the reader can act on. */
+  partialReason?: string;
+  /** Subjects the publisher tagged it with — kept for grouping and search. */
+  topics?: string[];
 };
 
 /**
@@ -279,6 +290,46 @@ export function articleFromFeedContent(
 }
 
 /**
+ * Take the publisher's syndicated copy when it is the fuller one.
+ *
+ * The reader used to reach for the feed only when the page refused outright,
+ * which missed the more common case by a distance: the page answers, extracts
+ * cleanly, and holds three paragraphs of a nine-paragraph story. Where a feed
+ * carries `content:encoded` — and independent blogs, newsletters and most
+ * Substacks do — that is the whole article, syndicated by the publisher for
+ * exactly this.
+ *
+ * The page still wins at comparable length, because it brings the pictures.
+ */
+export function preferSyndicated(
+  article: ReadableArticle,
+  contentHtml: string,
+  fallbackTitle = "",
+): ReadableArticle {
+  const syndicated = articleFromFeedContent(
+    contentHtml,
+    article.url,
+    article.title || fallbackTitle,
+  );
+  const better =
+    syndicated.wordCount >= article.wordCount * 1.5 &&
+    syndicated.wordCount >= article.wordCount + 80;
+  if (!better) return article;
+
+  return {
+    ...article,
+    via: "feed",
+    html: syndicated.html,
+    wordCount: syndicated.wordCount,
+    truncated: syndicated.truncated,
+    // The wall was on the page. What the publisher handed out in their own
+    // feed is not behind it.
+    partial: undefined,
+    partialReason: undefined,
+  };
+}
+
+/**
  * An article whose HTML came from somewhere other than a scraped page — an
  * API's own copy of the text. Same sanitising as everything else; it is still
  * third-party HTML being injected into the reader.
@@ -386,21 +437,129 @@ export async function previewFromMetadata(url: string): Promise<ReadableArticle 
   };
 }
 
-export async function extractArticle(url: string): Promise<ReadableArticle> {
+/** Prose length, which is the only fair way to compare two bodies. */
+function proseWords(html: string) {
+  const text = stripHtml(html, Number.MAX_SAFE_INTEGER).trim();
+  return text ? text.split(/\s+/).length : 0;
+}
+
+/**
+ * The publisher's own AMP copy of the page.
+ *
+ * AMP pages are a representation the publisher declares in their own markup
+ * for anyone who wants it, and they are plain server-rendered HTML by
+ * definition — no client-side assembly, which is exactly the failure mode
+ * that leaves the reader with an empty shell. It is only worth a request when
+ * the ordinary page came back thin, so it stays a second try rather than a
+ * second fetch on every article.
+ */
+function ampUrlFrom(dom: JSDOM, pageUrl: string) {
+  const href = dom.window.document
+    .querySelector('link[rel="amphtml"], link[rel="amphtml alternate"]')
+    ?.getAttribute("href");
+  if (!href) return null;
+  let amp: URL;
+  let page: URL;
+  try {
+    amp = new URL(href, pageUrl);
+    page = new URL(pageUrl);
+  } catch {
+    return null;
+  }
+  if (amp.protocol !== "https:" && amp.protocol !== "http:") return null;
+  // Follow it only to the same site or to an AMP cache. A page is free to
+  // declare any URL it likes here, and this route fetches whatever it is told.
+  const sameSite =
+    amp.hostname === page.hostname ||
+    registrable(amp.hostname) === registrable(page.hostname) ||
+    /(^|\.)ampproject\.org$/i.test(amp.hostname);
+  if (!sameSite) return null;
+  if (amp.toString() === page.toString()) return null;
+  return amp.toString();
+}
+
+/** Enough of a hostname to tell "same publisher" from "somewhere else". */
+function registrable(hostname: string) {
+  return hostname.toLowerCase().split(".").slice(-2).join(".");
+}
+
+/** One possible article body, with where it came from. */
+type BodyCandidate = {
+  via: NonNullable<ReadableArticle["via"]>;
+  html: string;
+  words: number;
+};
+
+/**
+ * Which body to show.
+ *
+ * The page's own extraction is preferred at equal length: it carries the
+ * photographs, the pull quotes and the links, where a syndicated copy or a
+ * structured-data field is prose alone. But it is only preferred at *equal*
+ * length — a metered page hands over three paragraphs and Readability
+ * extracts them flawlessly, which is how a teaser used to be shown as the
+ * article while the publisher's own feed carried the whole thing.
+ *
+ * So a challenger wins when it is substantially longer: half as much again,
+ * and at least eighty words more. Both conditions matter — the ratio alone
+ * promotes a 40-word difference on a short post, and the absolute alone
+ * promotes a feed's boilerplate footer on a long one.
+ */
+export function pickBody(candidates: BodyCandidate[]): BodyCandidate | null {
+  const usable = candidates.filter((candidate) => candidate.words > 0);
+  if (usable.length === 0) return null;
+
+  const page = usable.find((candidate) => candidate.via === "page");
+  if (!page) {
+    return usable.reduce((best, candidate) =>
+      candidate.words > best.words ? candidate : best,
+    );
+  }
+
+  let winner = page;
+  for (const candidate of usable) {
+    if (candidate === page) continue;
+    const beats = candidate.words >= winner.words * 1.5 && candidate.words >= winner.words + 80;
+    if (beats) winner = candidate;
+  }
+  return winner;
+}
+
+export type ExtractOptions = {
+  /**
+   * The full text the publisher syndicated for this item, where the caller
+   * had a feed to look in. Offered as a candidate rather than kept for a
+   * failure: the interesting case is a page that extracts *successfully* and
+   * still holds a fraction of what the feed carries.
+   */
+  feedContent?: string | null;
+  /** Off for the AMP second try itself, so it cannot recurse. */
+  allowAlternate?: boolean;
+};
+
+export async function extractArticle(
+  url: string,
+  options: ExtractOptions = {},
+): Promise<ReadableArticle> {
   const { body, finalUrl } = await fetchText(url, 15000);
 
   // jsdom logs noisily about CSS it cannot parse; none of it matters here.
   const virtualConsole = new VirtualConsole();
   const dom = new JSDOM(body, { url: finalUrl, virtualConsole });
 
+  // What the page says about itself, before anything is removed from it.
+  const data = structuredArticle(body);
+
   const publishedAt =
     toIso(metaOf(dom, ["article:published_time", "datePublished", "date"])) ??
+    toIso(data?.publishedAt) ??
     toIso(
       dom.window.document
         .querySelector("time[datetime]")
         ?.getAttribute("datetime") ?? undefined,
     );
-  const siteName = metaOf(dom, ["og:site_name"]);
+  const siteName = metaOf(dom, ["og:site_name"]) ?? data?.siteName;
+  const amp = options.allowAlternate === false ? null : ampUrlFrom(dom, finalUrl);
 
   hoistLazyImages(dom.window.document);
   stripDiscussion(dom.window.document);
@@ -409,21 +568,61 @@ export async function extractArticle(url: string): Promise<ReadableArticle> {
   // short post and fall back to scraping the whole page. Short posts are
   // ordinary — a link-out note is often two sentences.
   const parsed = new Readability(dom.window.document, { charThreshold: 250 }).parse();
-  if (!parsed?.content) {
+
+  const candidates: BodyCandidate[] = [];
+  const add = (via: BodyCandidate["via"], html: string | null | undefined) => {
+    if (!html) return;
+    const cleaned = sanitize(
+      (via === "feed" ? stripChrome(html) : html).slice(0, MAX_CHARS),
+      finalUrl,
+    );
+    const words = proseWords(cleaned);
+    if (words > 0) candidates.push({ via, html: cleaned, words });
+  };
+
+  add("page", parsed?.content);
+  // The publisher's own copy of the prose, which survives a page whose body
+  // is assembled in the browser.
+  add("data", data?.body);
+  add("feed", options.feedContent);
+
+  let best = pickBody(candidates);
+
+  /**
+   * Still thin, and the publisher declares an AMP copy: it is server-rendered
+   * by definition, so it is the one remaining place the full text might be
+   * sitting in plain HTML. One extra request, only on the pages that need it.
+   */
+  if (amp && (!best || best.words < SHORT_ARTICLE_WORDS)) {
+    try {
+      const alternate = await extractArticle(amp, {
+        ...options,
+        allowAlternate: false,
+      });
+      const words = proseWords(alternate.html);
+      if (words > (best?.words ?? 0) * 1.5 && words >= (best?.words ?? 0) + 80) {
+        best = { via: "amp", html: alternate.html, words };
+      }
+    } catch {
+      /* the AMP copy is optional; the page's own text stands */
+    }
+  }
+
+  if (!best) {
     throw new Error("Could not extract readable text from that page.");
   }
 
-  const truncated = parsed.content.length > MAX_CHARS;
-  let html = sanitize(
-    truncated ? parsed.content.slice(0, MAX_CHARS) : parsed.content,
-    finalUrl,
-  );
+  const truncated =
+    (parsed?.content?.length ?? 0) > MAX_CHARS ||
+    (options.feedContent?.length ?? 0) > MAX_CHARS ||
+    (data?.body?.length ?? 0) > MAX_CHARS;
+  let html = best.html;
 
   // An article that came out with no picture at all gets the one the page
   // declares for itself, rather than opening as a wall of text.
   if (!/<img\b/i.test(html)) {
-    const lead = leadImageFrom(dom);
-    if (lead) {
+    const lead = leadImageFrom(dom) ?? (data?.image ? { src: data.image, alt: "" } : undefined);
+    if (lead && !isPlaceholder(lead.src)) {
       html =
         sanitize(
           `<figure><img src="${lead.src}" alt="${lead.alt.replace(/"/g, "&quot;")}" /></figure>`,
@@ -433,16 +632,48 @@ export async function extractArticle(url: string): Promise<ReadableArticle> {
   }
 
   const text = stripHtml(html, Number.MAX_SAFE_INTEGER);
+  const wordCount = text ? text.split(/\s+/).length : 0;
+
+  /**
+   * Is this all of it?
+   *
+   * Two ways to a yes. The publisher declared the article gated and what
+   * arrived is page text — in which case the length that looks complete is
+   * whatever the meter lets through, so the bar is generous. Or the text is
+   * short and the page shows a wall, or ends at one.
+   *
+   * A long body is never partial, whatever the page declares: when the
+   * publisher's own feed carried the whole article, the wall on the page it
+   * came from says nothing about what the reader is holding.
+   */
+  const wall = paywallVerdict(body, data?.free);
+  const partial =
+    (wall.declared && wall.marked && best.via === "page" && wordCount < 600) ||
+    (wordCount < SHORT_ARTICLE_WORDS && (wall.marked || endsAtWall(text)));
+
   return {
-    via: "page",
+    via: best.via,
     url: finalUrl,
-    title: parsed.title?.trim() || stripHtml(parsed.title ?? "", 200) || url,
-    byline: parsed.byline?.trim() || undefined,
-    siteName: siteName ?? parsed.siteName ?? undefined,
+    title:
+      parsed?.title?.trim() ||
+      data?.headline ||
+      metaOf(dom, ["og:title", "twitter:title"]) ||
+      dom.window.document.title?.trim() ||
+      url,
+    byline: parsed?.byline?.trim() || data?.byline || undefined,
+    siteName: siteName ?? parsed?.siteName ?? undefined,
     publishedAt,
-    excerpt: parsed.excerpt?.trim() || undefined,
+    excerpt: parsed?.excerpt?.trim() || data?.description || undefined,
     html,
-    wordCount: text ? text.split(/\s+/).length : 0,
+    wordCount,
     truncated,
+    topics: data?.keywords,
+    ...(partial
+      ? {
+          partial: true,
+          partialReason:
+            wall.reason ?? "The rest of this article is behind a subscription.",
+        }
+      : {}),
   };
 }

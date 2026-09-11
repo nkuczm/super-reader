@@ -515,3 +515,98 @@ export function startFakeX(port = 8785) {
     server.listen(port, () => resolve({ server, calls, close: () => server.close() }));
   });
 }
+
+
+/* ------------------------------------------------------------------ *
+ * Pages that answer, and still do not hand over the article.
+ *
+ * Three shapes, each one a real failure the reader used to show as a
+ * finished story: a metered page serving its opening paragraphs, a page
+ * whose body is assembled in the browser so the HTML holds only a shell,
+ * and a thin page that declares a full AMP copy of itself.
+ * ------------------------------------------------------------------ */
+
+const FULL_PROSE = Array.from(
+  { length: 14 },
+  (_, i) =>
+    `<p>Paragraph ${i + 1}: the committee's report set out in detail how the ` +
+    `programme had been funded, who had signed off on each stage, and what the ` +
+    `auditors found when they went back through the ledgers a second time.</p>`,
+).join("");
+
+const meteredPage = `<html><head><title>The ledger nobody checked</title>
+<meta property="og:site_name" content="The Daily Meter">
+<meta property="article:content_tier" content="metered">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"NewsArticle",
+ "headline":"The ledger nobody checked",
+ "author":[{"@type":"Person","name":"Ada Byron"},{"@type":"Person","name":"Sam Roe"}],
+ "datePublished":"2026-09-01T08:00:00Z",
+ "isAccessibleForFree":false,
+ "keywords":"audit, public spending",
+ "description":"A summary of the report."}
+</script></head><body>
+<article><h1>The ledger nobody checked</h1>
+<p>The committee published its report on Tuesday morning, and the first
+finding was blunt enough that two members asked for it to be read aloud.</p>
+<p>What followed was a list of payments that nobody present could account
+for, running to some fourteen pages of tables and a short annex.</p>
+<div class="paywall"><p>Subscribe to continue reading.</p></div>
+</article></body></html>`;
+
+const meteredFeed = `<?xml version="1.0"?><rss version="2.0"
+ xmlns:content="http://purl.org/rss/1.0/modules/content/">
+<channel><title>The Daily Meter</title><link>http://127.0.0.1:8793</link>
+<description>Syndicated in full</description>
+<item><title>The ledger nobody checked</title>
+<link>http://127.0.0.1:8793/metered</link><guid>m1</guid>
+<content:encoded><![CDATA[${FULL_PROSE}]]></content:encoded>
+</item></channel></rss>`;
+
+// The body is rendered client-side: the HTML carries a shell and the prose
+// only exists in the page's own structured data.
+const shellPage = `<html><head><title>Committee report published</title>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"NewsArticle",
+ "headline":"Committee report published",
+ "author":{"@type":"Organization","name":"Newsroom Staff"},
+ "datePublished":"2026-09-02T09:30:00Z",
+ "isAccessibleForFree":true,
+ "image":{"@type":"ImageObject","url":"http://cdn.example/lead.jpg"},
+ "articleBody":"The committee published its findings on Tuesday.\\n\\nThe report runs to two hundred pages and covers four financial years, each of them audited twice.\\n\\nMembers said the second audit was what changed their minds about publishing at all, and the annex explains why in some detail."}
+</script></head><body>
+<div id="root"><noscript>This site needs JavaScript.</noscript></div>
+</body></html>`;
+
+// A thin page that points at its own AMP copy, which is server-rendered.
+const ampStub = `<html><head><title>Harbour works approved</title>
+<link rel="amphtml" href="http://127.0.0.1:8793/amp/harbour">
+</head><body><article><h1>Harbour works approved</h1>
+<p>The council approved the harbour works on Thursday evening.</p>
+</article></body></html>`;
+
+const ampFull = `<html amp><head><title>Harbour works approved</title></head><body>
+<article><h1>Harbour works approved</h1>${FULL_PROSE}</article></body></html>`;
+
+// Invalid JSON-LD beside valid JSON-LD: one bad block must not cost the page
+// the good one.
+const brokenLdPage = `<html><head><title>Two blocks</title>
+<script type="application/ld+json">{"@type":"WebSite","name":"Site",}</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Two blocks",
+ "articleBody":"${"The annex is the interesting part. ".repeat(60)}"}
+</script></head><body><div id="app"></div></body></html>`;
+
+export function startThinPageSite(port = 8793) {
+  return serve(
+    {
+      "/metered": [200, "text/html", meteredPage],
+      "/feed.xml": [200, "application/rss+xml", meteredFeed],
+      "/shell": [200, "text/html", shellPage],
+      "/amp-stub": [200, "text/html", ampStub],
+      "/amp/harbour": [200, "text/html", ampFull],
+      "/broken-ld": [200, "text/html", brokenLdPage],
+    },
+    port,
+  );
+}
