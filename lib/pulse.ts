@@ -54,6 +54,12 @@ export type PulseCluster = {
   firstSeen: number;
   /** Canonical URLs of every copy, for exact matching. */
   urls: string[];
+  /**
+   * The headlines in the cluster. What the app shows as "also covered by",
+   * and the only way to check from outside whether a cluster really is one
+   * story — which is how the mixed clusters in it were found.
+   */
+  titles: string[];
   /** Distinctive words, for matching a headline we have no URL for. */
   tokens: string[];
 };
@@ -169,6 +175,7 @@ export function buildPulsePayload(
       breadth: importance.breadth,
       firstSeen: Math.min(...members.map((story) => story.seenAt)),
       urls: members.map((story) => story.url),
+      titles: members.slice(0, 12).map((story) => `${story.newsroom}: ${story.title}`),
       tokens: tokensOf(best.title),
     });
   }
