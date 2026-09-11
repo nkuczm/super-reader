@@ -73,7 +73,11 @@ export default function ScoreExplainer({
       weight: WEIGHTS.breadth,
       value: parts.breadth,
       headline: `${rank.newsrooms} newsroom${rank.newsrooms === 1 ? "" : "s"}`,
-      detail: `How many different newsrooms ran this story, weighted by reach — wires and agenda-setting papers count 1, major outlets 0.65, specialist and local 0.4. This story scores ${evidence.weighted} against a ceiling of ${evidence.ceiling}, the point where any more coverage stops telling you anything new. Counted per newsroom: a paper running it in two sections is one newsroom.`,
+      detail: `How many different newsrooms ran this story, weighted by reach — wires and agenda-setting papers count 1, major outlets 0.65, specialist and local 0.4. ${
+        evidence.weighted >= evidence.ceiling
+          ? `This story is at ${evidence.weighted}, past the ${evidence.ceiling} where this measure tops out: beyond that, more coverage stops telling you anything new.`
+          : `This story is at ${evidence.weighted} of the ${evidence.ceiling} where this measure tops out.`
+      } Counted per newsroom: a paper running it in two sections is one newsroom.`,
     },
     {
       id: "placement",
