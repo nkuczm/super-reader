@@ -129,6 +129,8 @@ export function buildPulsePayload(
     stories.map((story) => ({ id: story.url, title: story.title, outlet: story.newsroom })),
   );
   const byUrl = new Map(stories.map((story) => [story.url, story]));
+  const tokensByUrl = new Map(stories.map((story) => [story.url, tokensOf(story.title)]));
+  const idf = idfOver([...tokensByUrl.values()]);
 
   const ranked: PulseCluster[] = [];
   for (const cluster of clusters) {
@@ -160,9 +162,17 @@ export function buildPulsePayload(
     if (independent.length < 2 && !hasEngagement) continue;
 
     const importance = scoreCluster(evidence, now);
-    const best = [...members].sort(
-      (a, b) => Number(b.front) - Number(a.front) || a.slot - b.slot,
-    )[0];
+    // The headline that represents the cluster is its most central one, not
+    // its best-placed one.
+    //
+    // Trump's convention speech promised $5,000 cheques and addressed the
+    // Iran war, and newsrooms wrote it up as one or the other or both. The
+    // cluster is fair — eight newsrooms on one speech — but taking the
+    // best-placed copy titled the whole thing "$5,000 'Dividend' Offer"
+    // while it held Iran war coverage, which reads as a mistake even when
+    // the grouping is right. The most central headline is the one whose
+    // wording the rest of the cluster shares.
+    const best = mostCentral(members, tokensByUrl, idf);
 
     ranked.push({
       key: cluster.key,
@@ -189,6 +199,34 @@ export function buildPulsePayload(
   };
 }
 
+/**
+ * The member whose headline the others most agree with, with placement as
+ * the tie-break so a cluster of near-identical wordings still leads with the
+ * copy an editor put highest.
+ */
+function mostCentral(
+  members: CorpusStory[],
+  tokens: Map<string, string[]>,
+  idf: Map<string, number>,
+) {
+  if (members.length === 1) return members[0];
+  const scored = members.map((story) => {
+    let total = 0;
+    for (const other of members) {
+      if (other.url === story.url) continue;
+      total += similarity(tokens.get(story.url) ?? [], tokens.get(other.url) ?? [], idf);
+    }
+    return { story, centrality: total / (members.length - 1) };
+  });
+  scored.sort(
+    (a, b) =>
+      b.centrality - a.centrality ||
+      Number(b.story.front) - Number(a.story.front) ||
+      a.story.slot - b.story.slot,
+  );
+  return scored[0].story;
+}
+
 /** One subreddit counts once, at its best placement. */
 function dedupeReddit(hits: CorpusRedditHit[]): RedditEvidence[] {
   const best = new Map<string, RedditEvidence>();
@@ -211,6 +249,8 @@ export type RankedArticle = {
   band: ReturnType<typeof importanceBand>;
   reasons: string[];
   newsrooms: number;
+  /** Who they are, so "8 newsrooms" can be checked rather than taken. */
+  newsroomNames: string[];
   /** Which cluster it matched, so the app can group a story's copies. */
   key: string;
   /** How the match was made, which is worth being honest about in the UI. */
@@ -286,6 +326,7 @@ function asRanked(id: string, cluster: PulseCluster, via: "url" | "headline"): R
     band: cluster.band,
     reasons: cluster.reasons,
     newsrooms: cluster.newsrooms.length,
+    newsroomNames: cluster.newsrooms.slice(0, 12),
     key: cluster.key,
     via,
   };

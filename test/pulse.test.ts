@@ -52,8 +52,9 @@ test("builds a ranking from what the panel ran", () => {
   // story the whole panel is leading with.
   assert.equal(top.band, "big");
   assert.equal(top.urls.length, 4);
-  // The best-placed copy represents the cluster.
-  assert.equal(top.link, "https://apnews.com/a");
+  // The cluster is represented by its most central headline — the wording
+  // the other copies agree with — not by whichever copy sat highest.
+  assert.equal(top.title, "Iran producing ballistic missiles again");
 });
 
 test("a single outlet plus a community discussion still ranks", () => {

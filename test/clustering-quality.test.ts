@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { clusterStories } from "../lib/cluster";
+import { buildPulsePayload } from "../lib/pulse";
 import {
   SAME_STORY,
   DIFFERENT_STORIES,
@@ -143,4 +144,49 @@ test("records the stories headlines alone cannot join", () => {
       `${label} now clusters — move it into SAME_STORY and keep it there`,
     );
   }
+});
+
+test("names a mixed cluster by what its members share", () => {
+  // Real cluster from the live panel. Trump's convention speech promised
+  // $5,000 cheques and made the case for the Iran war, and newsrooms wrote
+  // it up as one, the other, or both — so the grouping is defensible while
+  // the label is not free: taking the best-placed copy titled the whole
+  // thing "$5,000 'Dividend' Offer" while it held Iran war coverage. The
+  // title has to describe what the cluster actually holds.
+  const members = [
+    ["The Atlantic", "Does Trump Want Republicans to Win the Midterms?"],
+    ["TIME", "Trump Promises End to Iran War After Midterms"],
+    ["TIME", "Trump Promises $5,000 Dividend if Republicans Win Both House and Senate"],
+    ["Financial Times", "Trump promises $5,000 ‘dividend’ for US voters if Republicans win midterms"],
+    ["CBS News", "Trump pitches $5,000 payments, but only if GOP wins House and Senate"],
+    ["The Wall Street Journal", "Trump’s Top Advisers Confront Possibility That Iran War Lasts Through End of Term"],
+    ["BBC News", "Iran war won't end until after crucial November elections, says Trump"],
+    ["The Washington Post", "Trump makes case for Iran war, promises $5,000 payouts if GOP wins midterms"],
+    ["The New York Times", "Some Republicans Balk at Trump’s $5,000 ‘Dividend’ Offer"],
+    ["The New York Times", "Trump’s Midterm Pitch Clouded by Iran War and Canada Tariffs"],
+    ["The New York Times", "Trump Floats $5,000 ‘Trump Dividend’ Checks if Republicans Win the Midterms"],
+  ];
+
+  const payload = buildPulsePayload(
+    members.map(([newsroom, title], index) => ({
+      url: `https://example.com/${index}`,
+      title,
+      newsroom,
+      outletId: newsroom.toLowerCase(),
+      tier: 1 as const,
+      // The Atlantic's commentary is the best-placed copy, which is exactly
+      // how a cluster ends up labelled by an outlier.
+      slot: newsroom === "The Atlantic" ? 0 : index + 3,
+      front: newsroom === "The Atlantic",
+      seenAt: Date.now() - 3_600_000,
+    })),
+    [],
+  );
+
+  const cluster = payload.clusters[0];
+  assert.ok(cluster, "the speech coverage clustered");
+  // Whatever the grouping, the title must be about the thing most of the
+  // cluster is about — the promise — and not the lone commentary headline.
+  assert.notEqual(cluster.title, "Does Trump Want Republicans to Win the Midterms?");
+  assert.match(cluster.title, /5,000|dividend|payments|payouts/i);
 });

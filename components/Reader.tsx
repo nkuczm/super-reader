@@ -1385,11 +1385,21 @@ export default function Reader() {
                         return (
                           <span
                             className={`rank-badge rank-${rank.band}`}
-                            title={`${rank.score}/100 — ${rank.reasons.join(" · ")}${
+                            // The whole claim, in the tooltip: the score, what
+                            // earned it, and which newsrooms — so "8
+                            // newsrooms" can be checked rather than believed.
+                            title={[
+                              `${rank.score}/100`,
+                              rank.reasons.join(" · "),
+                              rank.newsroomNames?.length
+                                ? `Covered by: ${rank.newsroomNames.join(", ")}`
+                                : "",
                               rank.via === "headline"
-                                ? " (matched by headline)"
-                                : ""
-                            }`}
+                                ? "Matched to this story by headline, not by link."
+                                : "",
+                            ]
+                              .filter(Boolean)
+                              .join("\n")}
                           >
                             {rank.band === "major"
                               ? "Major story"
