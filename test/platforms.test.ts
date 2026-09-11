@@ -9,6 +9,7 @@ import {
 } from "../lib/reddit";
 import { xSourceFrom, xSourceUrl } from "../lib/x";
 import { instagramHandleFrom, instagramProfileUrl } from "../lib/instagram";
+import { platformFeedFor, isMultiTenantHost } from "../lib/platforms";
 
 let fakeInstagram: { calls: string[]; close: () => void };
 
@@ -185,5 +186,69 @@ test("without credentials, Instagram explains itself instead of failing obscurel
     await assert.rejects(() => fetchInstagramFeed("nasa"), /INSTAGRAM_ACCESS_TOKEN/);
   } finally {
     if (token) process.env.INSTAGRAM_ACCESS_TOKEN = token;
+  }
+});
+
+/**
+ * The failure this last group covers is the quiet one again: pasting
+ * substack.com/@platformer found no feed under that path, widened to the
+ * domain, and subscribed the reader to Substack's own corporate blog — under
+ * the title they had pasted, so it looked like it had worked.
+ */
+
+test("a platform publication resolves to its own feed, not the platform's", () => {
+  assert.equal(
+    platformFeedFor("https://platformer.substack.com")?.feedUrl,
+    "https://platformer.substack.com/feed",
+  );
+  assert.equal(
+    platformFeedFor("https://open.substack.com/pub/platformer/p/some-post")?.feedUrl,
+    "https://platformer.substack.com/feed",
+    "an open.substack.com reader link names the publication it belongs to",
+  );
+  assert.equal(
+    platformFeedFor("https://medium.com/@someone")?.feedUrl,
+    "https://medium.com/feed/@someone",
+  );
+  assert.equal(
+    platformFeedFor("https://towardsdatascience.medium.com")?.feedUrl,
+    "https://towardsdatascience.medium.com/feed",
+  );
+  assert.equal(
+    platformFeedFor("https://www.youtube.com/channel/UC12345")?.feedUrl,
+    "https://www.youtube.com/feeds/videos.xml?channel_id=UC12345",
+  );
+  assert.equal(
+    platformFeedFor("https://www.youtube.com/playlist?list=PL999")?.feedUrl,
+    "https://www.youtube.com/feeds/videos.xml?playlist_id=PL999",
+  );
+  assert.equal(
+    platformFeedFor("https://github.com/vercel/next.js")?.feedUrl,
+    "https://github.com/vercel/next.js/releases.atom",
+  );
+});
+
+test("a guess is left out rather than shipped as a feed", () => {
+  // A writer's profile is not a publication and has no documented feed. Any
+  // answer here would be a guess, and a wrong feed that returns 200 is worse
+  // than none — it looks like it worked.
+  assert.equal(platformFeedFor("https://substack.com/@platformer"), null);
+  // A YouTube @handle needs the channel id looked up, which ordinary
+  // discovery does by reading the feed the page declares.
+  assert.equal(platformFeedFor("https://www.youtube.com/@veritasium"), null);
+  assert.equal(platformFeedFor("https://example.com/blog"), null);
+  assert.equal(platformFeedFor("semiconductors"), null);
+});
+
+test("multi-tenant hosts are known, and a publication's own subdomain is not one", () => {
+  for (const host of ["substack.com", "https://medium.com/x", "www.github.com"]) {
+    assert.equal(isMultiTenantHost(host), true, `${host} carries many publishers`);
+  }
+  for (const host of ["platformer.substack.com", "stratechery.com", "bbc.co.uk"]) {
+    assert.equal(
+      isMultiTenantHost(host),
+      false,
+      `${host} is one publisher, so widening to it is right`,
+    );
   }
 });

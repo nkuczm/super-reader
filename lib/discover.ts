@@ -12,6 +12,7 @@ import {
   fetchRedditFeed,
 } from "./reddit";
 import { knownFeedFor } from "./publishers";
+import { platformFeedFor, isMultiTenantHost } from "./platforms";
 import { sitemapSource, titleFromSlug } from "./sitemap";
 import { sortNewestFirst } from "./sort";
 import type { DiscoverResult } from "./types";
@@ -205,6 +206,29 @@ export async function discover(
     };
   }
 
+  /**
+   * A publication on a platform that hosts thousands of them. Resolved from
+   * the address rather than by crawling: these pages declare the *platform's*
+   * site-wide feed in their own <head>, so trusting discovery's ordinary
+   * order subscribed the reader to Substack's or Medium's own blog under the
+   * title they pasted.
+   */
+  const platform = platformFeedFor(raw);
+  if (platform) {
+    const { meta, total, articles } = await tryFeed(platform.feedUrl, limit);
+    return {
+      ...meta,
+      kind: "feed",
+      scope: "site",
+      total,
+      title: meta.title || platform.title,
+      siteUrl: platform.siteUrl,
+      description: meta.description ?? platform.note,
+      favicon: faviconFor(platform.faviconHost),
+      articles: await enrichArticles(articles, { siteDescription: meta.description }),
+    };
+  }
+
   // An X account is neither a feed nor a scrapable page: x.com serves
   // logged-out visitors a login wall, so it goes through the API instead.
   const xSource = xSourceFrom(raw);
@@ -335,12 +359,24 @@ export async function discover(
   // declaring it in <head>, which is how the .gov newsrooms were missed.
   const anchors = pageBody ? feedLinksInAnchors(pageBody, pageBase) : [];
 
-  const siteCandidates = [
-    ...declared,
-    ...anchors,
-    ...COMMON_PATHS.map((path) => `${origin}${path}`),
-    ...NEWSROOM_PATHS.map((path) => `${origin}${path}`),
-  ].filter((c) => !sectionCandidates.includes(c));
+  /**
+   * Widening to the whole site is wrong on a host that carries thousands of
+   * unrelated publications: medium.com/@someone has no feed of its own under
+   * that path, and medium.com's does not belong to them. On those hosts a
+   * pasted path stays a pasted path.
+   */
+  const multiTenant = hasSection && isMultiTenantHost(origin);
+
+  const siteCandidates = (
+    multiTenant
+      ? [...declared.filter(under), ...anchors.filter(under)]
+      : [
+          ...declared,
+          ...anchors,
+          ...COMMON_PATHS.map((path) => `${origin}${path}`),
+          ...NEWSROOM_PATHS.map((path) => `${origin}${path}`),
+        ]
+  ).filter((c) => !sectionCandidates.includes(c));
 
   const asResult = async (candidate: string, resultScope: "section" | "site") => {
     const { meta, total, articles } = await tryFeed(candidate, limit);
@@ -411,7 +447,9 @@ export async function discover(
   if (siteFeed) return siteFeed;
 
   // Some sites only list their feeds on a dedicated page, e.g. fbi.gov/feeds.
-  const indexPages = [
+  // Not on a multi-tenant host: its feed index lists the platform's feeds,
+  // not this publication's.
+  const indexPages = multiTenant ? [] : [
     ...(pageBody ? feedIndexPages(pageBody, pageBase) : []),
     ...INDEX_PATHS.map((path) => `${origin}${path}`),
   ];
