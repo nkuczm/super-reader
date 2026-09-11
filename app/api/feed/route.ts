@@ -21,6 +21,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const MAX_PER_SOURCE = 40;
+/** Sitemap sources cost one request per item to title; keep the list shorter. */
+const SITEMAP_ITEMS = 25;
 
 /** Refresh one known feed URL. Accepts ?url= repeated for a batch. */
 export async function GET(request: Request) {
@@ -61,7 +63,11 @@ export async function GET(request: Request) {
         if (looksLikeSitemap(body)) {
           const parsed = parseSitemap(body, finalUrl);
           const entries = parsed.kind === "urlset" ? parsed.entries : [];
-          const found = articlesFromSitemap(entries, { limit: MAX_PER_SOURCE }).map(
+          // Fewer than a feed gets. A sitemap entry has no headline of its
+          // own, so each one costs a request to read the page's title, and
+          // twenty-five properly titled stories beat forty where the last
+          // fifteen are URL slugs.
+          const found = articlesFromSitemap(entries, { limit: SITEMAP_ITEMS }).map(
             (article) => ({
               ...article,
               title: article.title || titleFromSlug(article.link),
@@ -74,7 +80,7 @@ export async function GET(request: Request) {
             siteUrl: new URL(finalUrl).origin,
             title: host,
             favicon: faviconFor(finalUrl),
-            articles: await enrichArticles(found, { max: 20 }),
+            articles: await enrichArticles(found, { max: SITEMAP_ITEMS }),
           };
         }
 

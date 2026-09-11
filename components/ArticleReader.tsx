@@ -217,6 +217,17 @@ export default function ArticleReader({
           </div>
         )}
 
+        {article?.topics && article.topics.length > 0 && (
+          // The subjects the publisher filed it under, in their own words.
+          // Worth showing: on a wire story or a government notice it is
+          // often the only statement of what the thing is actually about.
+          <p className="reader-topics">
+            {article.topics.slice(0, 6).map((topic) => (
+              <span key={topic}>{topic}</span>
+            ))}
+          </p>
+        )}
+
         {article?.attachments?.map((file) => (
           // The document itself, for a phone's own viewer — which handles a
           // court PDF better than any amount of reflowing here.

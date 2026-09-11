@@ -917,3 +917,21 @@
     background: #6b3c05;
   }
 }
+
+/* The publisher's own subject tags, under the byline. Quiet by design: they
+   are context for the article, not navigation. */
+.reader-topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 18px;
+}
+
+.reader-topics span {
+  font-size: 12px;
+  line-height: 1;
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: var(--text-dim);
+  background: var(--bg-hover);
+}

@@ -442,6 +442,10 @@ conditions matter, since the ratio alone promotes a forty-word difference on
 a short post and the absolute alone promotes a feed's boilerplate footer on a
 long one.
 
+Where a publisher files an article under subjects in that same structured
+data, those are shown under the byline. On a wire story or a government
+notice they are often the only plain statement of what the thing is about.
+
 The feed copy is a candidate rather than a catch. It used to be reached for
 only when the page refused outright; it is now fetched whenever the
 extraction comes back short or marked partial, which is the far more common
