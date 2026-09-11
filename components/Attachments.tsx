@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Attachment } from "@/lib/types";
 import { Icon } from "./icons";
+import { downloadUrlFor } from "@/lib/download";
 
 type Props = {
   attachments: Attachment[];
@@ -123,6 +124,17 @@ export default function Attachments({
                         {isSaved(file.url) ? Icon.bookmarkOn : Icon.bookmark}
                         {isSaved(file.url) ? "Saved" : "Save"}
                       </button>
+                      {/* Served from this origin with an attachment
+                          disposition, because `download` on a cross-origin
+                          link is ignored — the browser would just navigate to
+                          the publisher's PDF instead of saving it. */}
+                      <a
+                        className="read-btn"
+                        href={downloadUrlFor(file.url, nameOf(file))}
+                        download={nameOf(file)}
+                      >
+                        {Icon.download} Download
+                      </a>
                       <a
                         className="read-btn"
                         href={file.url}

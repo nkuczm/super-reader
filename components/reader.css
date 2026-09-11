@@ -262,6 +262,16 @@
   .select { margin-right: 0; width: 100%; }
   .dialog-foot .btn { flex: 1; }
 
+  /*
+   * Four controls do not fit across a phone once a file adds Download, and
+   * the bar was clipping "Open original" off the right edge. Save and
+   * Download keep their icons and drop their words — both are conventional,
+   * and the accessible names stay on the buttons.
+   */
+  .reader-bar { flex-wrap: wrap; }
+  .reader-bar .btn-label { display: none; }
+  .reader-bar .btn.ghost.small { padding: 8px 11px; }
+
   .reader { padding: 0 16px calc(72px + env(safe-area-inset-bottom, 0px)); }
   .reader-body h1 { font-size: 25px; }
   .prose { font-size: 17px; }
@@ -299,7 +309,9 @@
 }
 .reader-bar .btn { width: auto; text-decoration: none; }
 .reader-bar .btn.on { color: var(--accent); border-color: var(--accent); }
-.reader-bar a.btn { margin-left: auto; }
+/* The trailing links group at the right together: giving every anchor the
+   auto margin pushed the second one onto its own line. */
+.reader-bar a.btn:first-of-type { margin-left: auto; }
 
 .reader-body h1 {
   margin: 0 0 10px; font-size: 30px; line-height: 1.22;
@@ -677,12 +689,18 @@
 .reader-slow { margin-top: 6px; font-size: 13.5px; color: var(--text-dim); }
 .reader-slow a { color: var(--accent); }
 
+/* The file a story links, and the option to keep it. */
+.reader-file-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin-bottom: 18px;
+}
 .reader-file {
-  display: inline-flex; align-items: center; gap: 8px; margin-bottom: 18px;
+  display: inline-flex; align-items: center; gap: 8px; min-width: 0;
   padding: 8px 12px; border: 1px solid var(--border); border-radius: 9px;
   font-size: 13.5px; font-weight: 600; text-decoration: none; color: var(--text);
 }
 .reader-file:hover { background: var(--bg-hover); border-color: var(--accent); }
+.reader-file-save { width: auto; text-decoration: none; flex: none; }
 
 /* A long case number, citation or URL must not set the width of the page. */
 .prose { overflow-wrap: anywhere; }

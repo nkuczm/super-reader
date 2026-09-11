@@ -89,6 +89,13 @@ export const Icon = {
       <path d="M4 12.5l5.5 5.5L20 6.5" />
     </svg>
   ),
+  download: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3v12" />
+      <path d="m7 11 5 5 5-5" />
+      <path d="M5 20h14" />
+    </svg>
+  ),
   inbox: (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 12h5l2 3h4l2-3h5" /><path d="M4 5h16l1 7v7H3v-7z" />

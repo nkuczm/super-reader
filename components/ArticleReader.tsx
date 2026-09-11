@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { ReadableArticle } from "@/lib/article";
 import { Icon } from "./icons";
+import { downloadUrlFor } from "@/lib/download";
 import { readCached, writeCached } from "@/lib/offline";
 import { timeAgo, hostOf } from "./format";
 
@@ -135,16 +136,34 @@ export default function ArticleReader({
             onClick={onToggleSave}
           >
             {saved ? Icon.bookmarkOn : Icon.bookmark}
-            {saved ? "Saved" : "Save"}
+            <span className="btn-label">{saved ? "Saved" : "Save"}</span>
           </button>
+        )}
+        {/* What is open here is a file, not a page — so offer to keep it.
+            The bytes come back through this origin with an attachment
+            disposition; `download` on a cross-origin link is ignored, and the
+            browser would navigate to the publisher's PDF instead of saving
+            it. */}
+        {article?.via === "file" && (
+          <a
+            className="btn ghost small"
+            href={downloadUrlFor(article.url, article.title)}
+            download={article.title}
+            title="Download this file"
+            aria-label="Download this file"
+          >
+            {Icon.download}
+            <span className="btn-label">Download</span>
+          </a>
         )}
         <a
           className="btn ghost small"
           href={url}
           target="_blank"
           rel="noreferrer noopener"
+          title="Open the original"
         >
-          Open original
+          Open<span className="btn-label"> original</span>
         </a>
       </div>
 
@@ -216,18 +235,27 @@ export default function ArticleReader({
         )}
 
         {article?.attachments?.map((file) => (
-          // The document itself, for a phone's own viewer — which handles a
-          // court PDF better than any amount of reflowing here.
-          <a
-            key={file.url}
-            className="reader-file"
-            href={file.url}
-            target="_blank"
-            rel="noreferrer noopener"
-          >
-            <span className="file-kind">{file.kind.toUpperCase()}</span>
-            {file.title ?? "Open the file"}
-          </a>
+          <div key={file.url} className="reader-file-row">
+            {/* The document itself, for a phone's own viewer — which handles
+                a court PDF better than any amount of reflowing here. */}
+            <a
+              className="reader-file"
+              href={file.url}
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              <span className="file-kind">{file.kind.toUpperCase()}</span>
+              {file.title ?? "Open the file"}
+            </a>
+            <a
+              className="btn ghost small reader-file-save"
+              href={downloadUrlFor(file.url, file.title)}
+              download={file.title ?? undefined}
+              title="Save this file"
+            >
+              {Icon.download} Download
+            </a>
+          </div>
         ))}
 
         {article && (
