@@ -1,0 +1,6 @@
+{
+  "crons": [
+    { "path": "/api/pulse/sweep?slice=due&rounds=5", "schedule": "0 11 * * *" },
+    { "path": "/api/pulse/sweep?slice=due&rounds=5", "schedule": "0 23 * * *" }
+  ]
+}

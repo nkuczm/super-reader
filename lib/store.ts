@@ -100,8 +100,15 @@ export function moveSourceBetweenFeeds(
 
 export type ViewMode = "magazine" | "cards" | "list";
 
+/**
+ * How the list is ordered. "top" ranks by how big the story is rather than
+ * when it arrived — see lib/importance.ts for what that means.
+ */
+export type SortMode = "new" | "top";
+
 export type Settings = {
   view: ViewMode;
+  sort: SortMode;
   /** Hide articles already opened, rather than only dimming them. */
   hideRead: boolean;
   /**
@@ -114,6 +121,7 @@ export type Settings = {
 
 export const DEFAULT_SETTINGS: Settings = {
   view: "cards",
+  sort: "new",
   hideRead: false,
   openOnSite: [],
 };
@@ -134,6 +142,7 @@ export function loadSettings(): Settings {
       view: (["magazine", "cards", "list"] as const).includes(parsed.view as ViewMode)
         ? (parsed.view as ViewMode)
         : DEFAULT_SETTINGS.view,
+      sort: parsed.sort === "top" ? "top" : DEFAULT_SETTINGS.sort,
       hideRead: Boolean(parsed.hideRead),
       openOnSite: Array.isArray(parsed.openOnSite)
         ? parsed.openOnSite.filter((h): h is string => typeof h === "string")

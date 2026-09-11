@@ -375,6 +375,7 @@ function rssItem(item: any, site: string): Article {
     author:
       text(item["dc:creator"]) || stripHtml(text(item.author), 80) || undefined,
     publishedAt: toIso(text(item.pubDate) || text(item["dc:date"])),
+    commentCount: countFrom(item["slash:comments"] ?? item["thr:total"]),
     summary: summarize(content) || undefined,
     image: pickImage(
       enclosure?.["@_url"] ?? media?.["@_url"],
@@ -392,6 +393,12 @@ function rssItem(item: any, site: string): Article {
  * Enclosures that are files worth reading. A feed's declared type is the
  * better signal than the URL, and an image enclosure is left to pickImage.
  */
+/** A numeric count from a feed extension, ignoring anything unparseable. */
+function countFrom(value: unknown) {
+  const parsed = Number.parseInt(String(text(value as any) ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 function mergeAttachments(
   ...lists: (Attachment[] | undefined)[]
 ): Attachment[] | undefined {

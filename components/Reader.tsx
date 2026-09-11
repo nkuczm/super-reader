@@ -59,7 +59,9 @@ import ArticleReader from "./ArticleReader";
 import SourceIcon from "./SourceIcon";
 import { Icon } from "./icons";
 import { timeAgo, hostOf } from "./format";
-import { sortNewestFirst } from "@/lib/sort";
+import { sortNewestFirst, timeOf } from "@/lib/sort";
+import type { RankedArticle } from "@/lib/pulse";
+import type { PickedSource } from "./OutletCatalog";
 import "./reader.css";
 
 type Loaded = Article & { sourceId: string };
@@ -108,6 +110,9 @@ export default function Reader() {
   const [editing, setEditing] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  /** Importance by article id, from the shared story corpus. */
+  const [ranking, setRanking] = useState<Map<string, RankedArticle>>(new Map());
+  const [rankNote, setRankNote] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [saved, setSaved] = useState<SavedArticle[]>([]);
@@ -434,6 +439,42 @@ export default function Reader() {
             : { ...feed, sources: [...feed.sources, source] }
           : feed,
       );
+    });
+    setDialogOpen(false);
+  }
+
+  /**
+   * Add several directory sources at once. Nothing is previewed first: these
+   * are feeds the app ships the URLs for, and the refresh that follows is
+   * what fills them in — previewing twenty feeds one by one would take longer
+   * than just fetching them.
+   */
+  function addSources(picked: PickedSource[], target: string) {
+    if (picked.length === 0) return;
+    const made: Source[] = picked.map((source) => ({
+      id: newId(),
+      kind: "feed",
+      feedUrl: source.feedUrl,
+      siteUrl: source.siteUrl,
+      title: source.title,
+      favicon: source.favicon,
+    }));
+
+    setFeeds((current) => {
+      const exists = current.some((feed) => feed.id === target);
+      if (!exists) {
+        const feed: Feed = { id: newId(), name: "Outlets", sources: made };
+        setSelection({ type: "feed", id: feed.id });
+        return [...current, feed];
+      }
+      return current.map((feed) => {
+        if (feed.id !== target) return feed;
+        const have = new Set(feed.sources.map((source) => source.feedUrl));
+        return {
+          ...feed,
+          sources: [...feed.sources, ...made.filter((source) => !have.has(source.feedUrl))],
+        };
+      });
     });
     setDialogOpen(false);
   }
@@ -823,9 +864,71 @@ export default function Reader() {
     };
   }, [ready, articles.length, runDownload, offlineTargets]);
 
-  const shown = useMemo(
-    () => (settings.hideRead ? visible.filter((a) => !read.has(a.id)) : visible),
-    [visible, settings.hideRead, read],
+  /**
+   * Ask the server how big each story is.
+   *
+   * The articles have to be sent because the feeds live on this device, and
+   * only the link and the headline go — the ranking is a fact about the
+   * press, not about the reader. Runs whenever the list changes; the answer
+   * is cached server-side, so this is one small request per refresh.
+   */
+  useEffect(() => {
+    if (!ready || articles.length === 0) return;
+    const payload = articles.slice(0, 600).map((article) => ({
+      id: article.id,
+      link: article.link,
+      title: article.title,
+    }));
+    let live = true;
+    const timer = window.setTimeout(() => {
+      fetch("/api/rank", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ articles: payload }),
+      })
+        .then((res) => res.json())
+        .then((data: { available?: boolean; ranked?: RankedArticle[]; outletCount?: number; storyCount?: number }) => {
+          if (!live) return;
+          if (!data.available) {
+            // Ranking needs the shared corpus; without it the app still works
+            // and the sort switch says why it is empty rather than lying.
+            setRanking(new Map());
+            setRankNote(null);
+            return;
+          }
+          setRanking(new Map((data.ranked ?? []).map((entry) => [entry.id, entry])));
+          setRankNote(
+            data.storyCount
+              ? `${data.storyCount.toLocaleString()} stories from ${data.outletCount} feeds`
+              : null,
+          );
+        })
+        .catch(() => {
+          /* offline: the list is simply unranked */
+        });
+    }, 400);
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
+  }, [articles, ready]);
+
+  const shown = useMemo(() => {
+    const list = settings.hideRead ? visible.filter((a) => !read.has(a.id)) : visible;
+    if (settings.sort !== "top") return list;
+    // Ranked first, by score; everything else keeps its date order below,
+    // which is what an unranked story deserves — not a guess at a score.
+    return [...list].sort((a, b) => {
+      const scoreA = ranking.get(a.id)?.score ?? -1;
+      const scoreB = ranking.get(b.id)?.score ?? -1;
+      return scoreB - scoreA || timeOf(b) - timeOf(a);
+    });
+  }, [visible, settings.hideRead, settings.sort, read, ranking]);
+
+  /** How many of the shown articles the corpus had something to say about. */
+  const rankedCount = useMemo(
+    () => shown.filter((article) => ranking.has(article.id)).length,
+    [shown, ranking],
   );
 
   // On a phone the drawer covers the list, so any choice should close it.
@@ -1109,9 +1212,37 @@ export default function Reader() {
               {shown.length} article{shown.length === 1 ? "" : "s"}
               {selectedSourceCount > 0 &&
                 ` · ${selectedSourceCount} source${selectedSourceCount === 1 ? "" : "s"}`}
+              {settings.sort === "top" &&
+                (rankNote
+                  ? ` · ${rankedCount} ranked against ${rankNote}`
+                  : " · ranking unavailable on this deployment")}
             </p>
           </div>
           <div className="head-actions">
+            <div
+              className="scope-switch sort-switch"
+              role="group"
+              aria-label="Order articles by"
+            >
+              <button
+                className={settings.sort === "new" ? "on" : ""}
+                onClick={() => updateSettings({ ...settings, sort: "new" })}
+                title="Newest first"
+              >
+                Newest
+              </button>
+              <button
+                className={settings.sort === "top" ? "on" : ""}
+                onClick={() => updateSettings({ ...settings, sort: "top" })}
+                title={
+                  rankNote
+                    ? `Biggest stories first — measured against ${rankNote}`
+                    : "Biggest stories first"
+                }
+              >
+                Top stories
+              </button>
+            </div>
             <button
               className="btn ghost small"
               onClick={() => refresh(allSources)}
@@ -1228,6 +1359,31 @@ export default function Reader() {
                           {Icon.check}
                         </span>
                       )}
+                      {(() => {
+                        const rank = ranking.get(article.id);
+                        // Only bands that mean something get a badge: marking
+                        // most of a feed "notable" would say nothing at all.
+                        if (!rank || rank.band === "quiet") return null;
+                        return (
+                          <span
+                            className={`rank-badge rank-${rank.band}`}
+                            title={`${rank.score}/100 — ${rank.reasons.join(" · ")}${
+                              rank.via === "headline"
+                                ? " (matched by headline)"
+                                : ""
+                            }`}
+                          >
+                            {rank.band === "major"
+                              ? "Major story"
+                              : rank.band === "big"
+                                ? "Big story"
+                                : "Notable"}
+                            {rank.newsrooms > 1 && (
+                              <em> · {rank.newsrooms} newsrooms</em>
+                            )}
+                          </span>
+                        );
+                      })()}
                     </div>
                     <a
                       className="article-title"
@@ -1392,6 +1548,7 @@ export default function Reader() {
           }
           onCancel={() => setDialogOpen(false)}
           onAdd={addSource}
+          onAddMany={addSources}
         />
       )}
     </div>

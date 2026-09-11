@@ -732,3 +732,72 @@
   color: var(--text-dim);
   margin-right: 2px;
 }
+
+/* ---- Story ranking ------------------------------------------------------ */
+
+/* Newest / Top stories, beside Refresh. Shrinks first on a narrow header. */
+.sort-switch { flex: 0 1 auto; min-width: 0; }
+.sort-switch button { white-space: nowrap; }
+
+/*
+ * The badge says how big a story is and, in its tooltip, why. Bands are
+ * coloured by weight rather than by subject: one accent for the day's story,
+ * something quieter for the merely notable.
+ */
+.rank-badge {
+  display: inline-flex; align-items: baseline; gap: 4px;
+  padding: 1px 7px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.01em;
+  border: 1px solid transparent; cursor: help;
+}
+.rank-badge em { font-style: normal; font-weight: 600; opacity: 0.8; }
+.rank-major {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  color: var(--danger);
+}
+.rank-big {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  color: var(--accent);
+}
+.rank-notable {
+  background: var(--bg-sub); border-color: var(--border); color: var(--text-dim);
+}
+.article.read .rank-badge { opacity: 0.65; }
+
+/* ---- Outlet directory --------------------------------------------------- */
+
+.outlets { display: flex; flex-direction: column; gap: 10px; }
+.outlet-packs, .outlet-cats { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  border: 1px solid var(--border); background: var(--bg-sub); color: var(--text-dim);
+  border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 600;
+}
+.chip:hover { background: var(--bg-hover); color: var(--text); }
+.chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.outlet-list {
+  list-style: none; margin: 0; padding: 0;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  /* Its own scroller, so the dialog's footer stays reachable on a phone. */
+  max-height: min(46vh, 420px); overflow-y: auto;
+}
+.outlet-list li + li { border-top: 1px solid var(--border); }
+.outlet-list label {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center;
+  gap: 10px; padding: 9px 12px; cursor: pointer; font-size: 13.5px;
+}
+.outlet-list label:hover { background: var(--bg-sub); }
+.outlet-list input { accent-color: var(--accent); width: 16px; height: 16px; }
+.outlet-name { min-width: 0; }
+.outlet-name em { font-style: normal; color: var(--text-dim); }
+.outlet-tags { font-size: 11.5px; color: var(--text-dim); text-align: right; }
+.outlet-list li.api-note { padding: 12px; margin: 0; }
+.outlet-add { display: flex; gap: 8px; align-items: center; }
+
+@media (max-width: 620px) {
+  /* Region and panel tags are the first thing worth losing to the headline. */
+  .outlet-tags { display: none; }
+  .outlet-list label { grid-template-columns: auto 1fr; }
+}

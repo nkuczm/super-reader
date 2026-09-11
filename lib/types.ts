@@ -20,6 +20,12 @@ export type Article = {
   attachments?: Attachment[];
   /** Where the discussion of this item lives, when it is not the item itself. */
   comments?: string;
+  /**
+   * How many comments the source reports, where it reports any. A real RSS
+   * extension (slash:comments) that aggregators and blogs do publish, and a
+   * direct measure of interest wherever it is available.
+   */
+  commentCount?: number;
 };
 
 export type SourceMeta = {

@@ -5,6 +5,8 @@ import type { DiscoverResult } from "@/lib/types";
 import type { Feed } from "@/lib/store";
 import { Icon } from "./icons";
 import ApiCatalog from "./ApiCatalog";
+import OutletCatalog from "./OutletCatalog";
+import type { PickedSource } from "./OutletCatalog";
 import SourceIcon from "./SourceIcon";
 import { timeAgo, hostOf } from "./format";
 import { knownFeedFor, WSJ_CHOICES } from "@/lib/publishers";
@@ -16,6 +18,8 @@ type Props = {
   defaultFeedId?: string;
   onCancel: () => void;
   onAdd: (result: DiscoverResult, target: string) => void;
+  /** The outlet directory adds several at once, without previewing each. */
+  onAddMany: (sources: PickedSource[], target: string) => void;
 };
 
 const NEW_FEED = "__new__";
@@ -48,13 +52,14 @@ export default function AddSourceDialog({
   defaultFeedId,
   onCancel,
   onAdd,
+  onAddMany,
 }: Props) {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<DiscoverResult | null>(null);
   const [scope, setScope] = useState<"auto" | "site">("auto");
-  const [tab, setTab] = useState<"paste" | "apis">("paste");
+  const [tab, setTab] = useState<"paste" | "outlets" | "apis">("paste");
   const [target, setTarget] = useState(defaultFeedId ?? feeds[0]?.id ?? NEW_FEED);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -116,7 +121,9 @@ export default function AddSourceDialog({
           <p>
             {tab === "paste"
               ? "Paste a website, a Substack, an RSS URL, a subreddit like r/AskHistorians, an X account like @OpenAI — or just type a topic. Sites without a feed are read straight from the page."
-              : "Follow a data API — court opinions, federal rules, filings, papers. Fill in what you want and it becomes a source like any other."}
+              : tab === "outlets"
+                ? "Pick from the directory — newsrooms, wires, trade press, major subreddits. Tick as many as you like, or take a whole beat in one tap."
+                : "Follow a data API — court opinions, federal rules, filings, papers. Fill in what you want and it becomes a source like any other."}
           </p>
           <div className="scope-switch dialog-tabs">
             <button
@@ -124,6 +131,12 @@ export default function AddSourceDialog({
               onClick={() => setTab("paste")}
             >
               Paste a link
+            </button>
+            <button
+              className={tab === "outlets" ? "on" : ""}
+              onClick={() => setTab("outlets")}
+            >
+              Outlets
             </button>
             <button
               className={tab === "apis" ? "on" : ""}
@@ -135,6 +148,13 @@ export default function AddSourceDialog({
         </div>
 
         <div className="dialog-body">
+          {tab === "outlets" && (
+            <OutletCatalog
+              busy={loading}
+              onAddMany={(sources) => onAddMany(sources, target)}
+            />
+          )}
+
           {tab === "apis" && (
             <ApiCatalog
               busy={loading}
@@ -242,7 +262,7 @@ export default function AddSourceDialog({
         </div>
 
         <div className="dialog-foot">
-          {preview && (
+          {(preview || tab === "outlets") && (
             <select
               className="select"
               value={target}
@@ -259,14 +279,16 @@ export default function AddSourceDialog({
           <button className="btn ghost small" onClick={onCancel}>
             Cancel
           </button>
-          <button
-            className="btn small"
-            disabled={!preview}
-            onClick={() => preview && onAdd(preview, target)}
-          >
-            {Icon.plus}
-            Add source
-          </button>
+          {tab !== "outlets" && (
+            <button
+              className="btn small"
+              disabled={!preview}
+              onClick={() => preview && onAdd(preview, target)}
+            >
+              {Icon.plus}
+              Add source
+            </button>
+          )}
         </div>
       </div>
     </div>
