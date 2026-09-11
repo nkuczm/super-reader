@@ -57,6 +57,10 @@ export function ensureCorpusSchema() {
           PRIMARY KEY (url, subreddit)
         )
       `;
+      // Added after the table shipped, so it is a separate statement rather
+      // than a column in the CREATE above: an existing deployment's table is
+      // never recreated.
+      await sql`ALTER TABLE corpus_reddit ADD COLUMN IF NOT EXISTS title TEXT`;
       await sql`CREATE INDEX IF NOT EXISTS corpus_reddit_seen ON corpus_reddit (seen_at DESC)`;
       await sql`
         CREATE TABLE IF NOT EXISTS corpus_pulse (
@@ -131,10 +135,14 @@ export async function recordRedditHits(hits: CorpusRedditHit[]) {
     await Promise.all(
       hits.slice(i, i + 25).map(
         (hit) => sql`
-          INSERT INTO corpus_reddit (url, subreddit, weight, slot)
-          VALUES (${canonicalUrl(hit.url)}, ${hit.subreddit}, ${hit.weight}, ${hit.slot})
+          INSERT INTO corpus_reddit (url, subreddit, weight, slot, title)
+          VALUES (
+            ${canonicalUrl(hit.url)}, ${hit.subreddit}, ${hit.weight}, ${hit.slot},
+            ${hit.title ?? null}
+          )
           ON CONFLICT (url, subreddit) DO UPDATE SET
-            slot = LEAST(corpus_reddit.slot, EXCLUDED.slot)
+            slot  = LEAST(corpus_reddit.slot, EXCLUDED.slot),
+            title = COALESCE(NULLIF(corpus_reddit.title, ''), EXCLUDED.title)
         `,
       ),
     );
@@ -222,7 +230,7 @@ async function recentStories(hours: number): Promise<CorpusStory[]> {
 async function recentReddit(hours: number): Promise<CorpusRedditHit[]> {
   const sql = getSql();
   const rows = await sql`
-    SELECT url, subreddit, weight, slot
+    SELECT url, subreddit, weight, slot, title
     FROM corpus_reddit
     WHERE seen_at > now() - make_interval(hours => ${hours})
     LIMIT 20000
@@ -232,6 +240,7 @@ async function recentReddit(hours: number): Promise<CorpusRedditHit[]> {
     subreddit: String(row.subreddit),
     weight: Number(row.weight) as 1 | 2 | 3,
     slot: Number(row.slot),
+    title: row.title ? String(row.title) : undefined,
   }));
 }
 

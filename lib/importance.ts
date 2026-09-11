@@ -17,6 +17,11 @@
  *               where a feed reports them.
  *  velocity   — how fast breadth arrived. Ten outlets in two hours is
  *               breaking news; ten over three days is a slow-burning topic.
+ *  freshness  — whether it is still being covered. Measured from the most
+ *               recent copy, not the first: a story nobody has published on
+ *               for a day is finished, however many newsrooms ran it
+ *               yesterday, and the reader is being shown it as what is
+ *               happening now.
  *
  * Each is normalised to 0..1 against a "this is as big as it gets" ceiling,
  * then weighted. The result is 0..100 with the reasons kept alongside, so the
@@ -36,6 +41,13 @@ export type StoryEvidence = {
   front: boolean;
   /** When this copy was first seen, epoch ms. */
   seenAt: number;
+  /**
+   * An aggregator rather than a newsroom. Hacker News carrying a story is
+   * not a twelfth newsroom deciding to run it — it is readers voting, which
+   * is the engagement signal, counted once over there. Left in the evidence
+   * because its comment count is worth having.
+   */
+  aggregator?: boolean;
   /** Comments, where the feed reports them (Hacker News, slash:comments). */
   comments?: number;
 };
@@ -59,7 +71,13 @@ export type Importance = {
   /** Weighted count of distinct newsrooms — the headline number. */
   breadth: number;
   newsrooms: number;
-  parts: { breadth: number; placement: number; engagement: number; velocity: number };
+  parts: {
+    breadth: number;
+    placement: number;
+    engagement: number;
+    velocity: number;
+    freshness: number;
+  };
   /** The evidence behind the parts, for explaining the number. */
   evidence: {
     /** Weighted newsroom count, and the ceiling it is measured against. */
@@ -73,6 +91,8 @@ export type Importance = {
     comments: number;
     /** Hours between the first copy seen and now. */
     ageHours: number;
+    /** Hours since the most recent copy — how long since anyone added to it. */
+    quietHours?: number;
   };
   /** Short phrases, strongest first, for the badge and its tooltip. */
   reasons: string[];
@@ -89,6 +109,28 @@ export const WEIGHTS = {
   engagement: 0.25,
   velocity: 0.1,
 } as const;
+
+/**
+ * Freshness is a discount, not a fifth signal.
+ *
+ * It was a weighted part first, and that was wrong in a way worth recording:
+ * almost every story in a 48-hour window is inside a news cycle, so the part
+ * scored 1 for nearly all of them and amounted to a flat fifteen points added
+ * to everything. Every band moved up and the thresholds stopped meaning what
+ * they were tuned to mean.
+ *
+ * Being current is not evidence that a story is big. Having gone quiet *is*
+ * evidence that it has stopped happening — so it marks a story down rather
+ * than marking a live one up, and the four signals keep their calibration.
+ *
+ * Full marks for twelve hours after the most recent copy, then a fade to
+ * FRESH_FLOOR by the end of the window the corpus keeps. The floor matters:
+ * yesterday's big story should sit below today's, not vanish beneath a quiet
+ * one that happened an hour ago.
+ */
+const FRESH_HOURS = 12;
+const STALE_HOURS = 48;
+const FRESH_FLOOR = 0.6;
 
 /** Twelve tier-1 newsrooms on one story is the practical ceiling. */
 const BREADTH_CEILING = 9;
@@ -117,6 +159,10 @@ export function scoreCluster(
 ): Importance {
   const byNewsroom = new Map<string, StoryEvidence[]>();
   for (const story of cluster.stories) {
+    // An aggregator is not a newsroom that ran the story. Counting Hacker
+    // News towards breadth credited a link-voting site as an editorial
+    // decision, and inflated exactly the clusters that are only popular.
+    if (story.aggregator) continue;
     const bucket = byNewsroom.get(story.newsroom) ?? [];
     bucket.push(story);
     byNewsroom.set(story.newsroom, bucket);
@@ -133,6 +179,7 @@ export function scoreCluster(
   // Placement: the best few, so one outlet's odd ordering cannot carry a
   // story on its own, and one outlet burying it cannot sink it either.
   const placements = cluster.stories
+    .filter((story) => !story.aggregator)
     .map((story) => positionValue(story.position, story.front))
     .sort((a, b) => b - a)
     .slice(0, 3);
@@ -159,13 +206,23 @@ export function scoreCluster(
   );
 
   const firstSeen = Math.min(...cluster.stories.map((s) => s.seenAt));
+  const lastSeen = Math.max(...cluster.stories.map((s) => s.seenAt));
   const hours = Math.max((now - firstSeen) / 3_600_000, 0.5);
+  const quiet = Math.max((now - lastSeen) / 3_600_000, 0);
+  // Full marks inside a news cycle, then a straight fade to nothing by the
+  // end of the window the corpus keeps.
+  const fade =
+    quiet <= FRESH_HOURS
+      ? 0
+      : Math.min(1, (quiet - FRESH_HOURS) / (STALE_HOURS - FRESH_HOURS));
+  const freshness = 1 - fade * (1 - FRESH_FLOOR);
   // Breadth per hour over the first stretch, against "six newsrooms in the
   // first hour" as the ceiling — the shape of a genuine breaking story.
   const velocity = logScale(weighted / Math.min(hours, 24), 6);
 
   const score =
     100 *
+    freshness *
     (WEIGHTS.breadth * breadth +
       WEIGHTS.placement * placement +
       WEIGHTS.engagement * engagement +
@@ -176,7 +233,7 @@ export function scoreCluster(
     reasons.push(`${plural(byNewsroom.size, "newsroom")} covering it`);
   }
   const bestFront = cluster.stories
-    .filter((story) => story.front)
+    .filter((story) => story.front && !story.aggregator)
     .sort((a, b) => a.position - b.position)[0];
   if (bestFront) {
     reasons.push(
@@ -195,9 +252,12 @@ export function scoreCluster(
   }
   if (commentTotal >= 50) reasons.push(`${plural(commentTotal, "comment")}`);
   if (velocity > 0.55 && hours < 12) reasons.push("picked up fast");
+  // Worth saying out loud: a big story that has gone quiet still ranks, and
+  // the reader should know which of the two they are looking at.
+  if (freshness < 0.9) reasons.push(`nothing new for ${Math.round(quiet)}h`);
 
   const bestSection = [...cluster.stories]
-    .filter((story) => !story.front)
+    .filter((story) => !story.front && !story.aggregator)
     .sort((a, b) => a.position - b.position)[0];
 
   return {
@@ -217,6 +277,7 @@ export function scoreCluster(
         .map((hit) => ({ subreddit: hit.subreddit, position: hit.position })),
       comments: commentTotal,
       ageHours: Math.round(hours * 10) / 10,
+      quietHours: Math.round(quiet * 10) / 10,
     },
     newsrooms: byNewsroom.size,
     parts: {
@@ -224,6 +285,7 @@ export function scoreCluster(
       placement: Math.round(placement * 100) / 100,
       engagement: Math.round(engagement * 100) / 100,
       velocity: Math.round(velocity * 100) / 100,
+      freshness: Math.round(freshness * 100) / 100,
     },
     reasons,
   };

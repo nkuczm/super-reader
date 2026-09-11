@@ -186,6 +186,9 @@ async function readSubreddit(entry: SubredditEntry): Promise<CorpusRedditHit[]> 
       subreddit: entry.name,
       weight: entry.weight,
       slot: index,
+      // Kept so a community carrying a story under a different newsroom's
+      // link still counts towards that story's engagement.
+      title: article.title,
     });
   });
   return hits;

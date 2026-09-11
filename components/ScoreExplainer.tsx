@@ -62,7 +62,8 @@ export default function ScoreExplainer({
   // Defensive: the ranking is cached server-side and a payload from an older
   // build can reach a newer page. The shape check in lib/corpus.ts should
   // prevent it; this makes the failure a thinner page rather than a crash.
-  const parts = rank.parts ?? { breadth: 0, placement: 0, engagement: 0, velocity: 0 };
+  const parts =
+    rank.parts ?? { breadth: 0, placement: 0, engagement: 0, velocity: 0, freshness: 0 };
   const evidence =
     rank.evidence ?? { weighted: 0, ceiling: 9, subreddits: [], comments: 0, ageHours: 0 };
   const copies = rank.titles ?? [];
@@ -123,7 +124,22 @@ export default function ScoreExplainer({
       value: parts.velocity,
       headline: `First seen ${hours(evidence.ageHours)} ago`,
       detail:
-        "How fast that breadth arrived. Ten newsrooms inside two hours is breaking news; the same ten over three days is a topic. This is the smallest part of the score on purpose — it fades as a story ages, and a story should not stop being big just because it is a day old.",
+        "How fast that breadth arrived. Ten newsrooms inside two hours is breaking news; the same ten over three days is a topic. This is the smallest part of the score on purpose — a story should not stop being big just because it is a day old.",
+    },
+    {
+      id: "freshness",
+      name: "Freshness",
+      // Not a share of the score: it scales the four above it.
+      weight: 0,
+      value: parts.freshness ?? 1,
+      headline:
+        evidence.quietHours === undefined
+          ? "Still being covered"
+          : evidence.quietHours < 1
+            ? "A new copy in the last hour"
+            : `Nothing new for ${hours(evidence.quietHours)}`,
+      detail:
+        "Whether it is still going, measured from the most recent copy rather than the first. This one is not a share of the score — it scales the four above it. A story keeps its full score for twelve hours after the last newsroom added to it, and then fades to 60% of it over the next day and a half. Being current is not evidence that a story is big; having gone quiet is evidence that it has stopped happening, which is why it only ever marks a story down.",
     },
   ];
 
@@ -174,14 +190,22 @@ export default function ScoreExplainer({
             <section key={row.id} className="score-row">
               <header>
                 <strong>{row.name}</strong>
-                <span className="score-weight">{Math.round(row.weight * 100)}% of the score</span>
+                <span className="score-weight">
+                  {row.weight > 0
+                    ? `${Math.round(row.weight * 100)}% of the score`
+                    : "scales the total"}
+                </span>
               </header>
               <div className="score-meter" aria-hidden="true">
                 <span style={{ width: `${Math.round(row.value * 100)}%` }} />
               </div>
               <p className="score-reading">
                 {row.headline}
-                <em> · {Math.round(row.value * 100)} of 100 on this measure</em>
+                <em>
+                  {row.weight > 0
+                    ? ` · ${Math.round(row.value * 100)} of 100 on this measure`
+                    : ` · keeping ${Math.round(row.value * 100)}% of the score`}
+                </em>
               </p>
               <p className="score-detail">{row.detail}</p>
             </section>

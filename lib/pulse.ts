@@ -40,6 +40,13 @@ export type CorpusRedditHit = {
   subreddit: string;
   weight: 1 | 2 | 3;
   slot: number;
+  /**
+   * The post's own title. Kept because matching a community's interest to a
+   * story by URL alone misses most of it: a subreddit links whichever
+   * newsroom's copy someone happened to find, and the panel recorded a
+   * different one.
+   */
+  title?: string;
 };
 
 /** A ranked story, as cached and as served. */
@@ -77,7 +84,7 @@ export type PulseCluster = {
  * deploy, so without this a new build serves its own older cache and the
  * app reads fields that are not there. The score page did exactly that.
  */
-export const PULSE_SHAPE = 2;
+export const PULSE_SHAPE = 3;
 
 export type PulsePayload = {
   /** PULSE_SHAPE at the time it was built. */
@@ -118,6 +125,11 @@ export function buildPulsePayload(
     stories.map((story) => ({ id: story.url, title: story.title, outlet: story.newsroom })),
   );
   const byUrl = new Map(stories.map((story) => [story.url, story]));
+  // Every Reddit hit that no story's URL accounts for. These are the ones
+  // worth matching by headline, and doing it once here keeps the per-cluster
+  // work to a comparison rather than a scan of the whole corpus.
+  const storyUrls = new Set(stories.map((story) => canonicalUrl(story.url)));
+  const unmatchedReddit = reddit.filter((hit) => !storyUrls.has(canonicalUrl(hit.url)));
   const tokensByUrl = new Map(stories.map((story) => [story.url, tokensOf(story.title)]));
   const idf = idfOver([...tokensByUrl.values()]);
 
@@ -138,13 +150,21 @@ export function buildPulsePayload(
           front: story.front,
           seenAt: story.seenAt,
           comments: story.comments,
+          aggregator: AGGREGATORS.has(story.newsroom),
         }),
       ),
-      reddit: dedupeReddit(members.flatMap((story) => redditByUrl.get(story.url) ?? [])),
+      reddit: dedupeReddit([
+        ...members.flatMap((story) => redditByUrl.get(canonicalUrl(story.url)) ?? []),
+        // Communities that carried the same story under a different copy's
+        // URL, matched on the headline.
+        ...redditByHeadline(unmatchedReddit, members, tokensByUrl, idf),
+      ]),
     };
 
-    const newsrooms = [...new Set(members.map((story) => story.newsroom))];
-    const independent = newsrooms.filter((name) => !AGGREGATORS.has(name));
+    const newsrooms = [...new Set(members.map((story) => story.newsroom))].filter(
+      (name) => !AGGREGATORS.has(name),
+    );
+    const independent = newsrooms;
     const hasEngagement =
       (evidence.reddit?.length ?? 0) > 0 ||
       members.some((story) => (story.comments ?? 0) > 0);
@@ -217,6 +237,49 @@ function mostCentral(
       a.story.slot - b.story.slot,
   );
   return scored[0].story;
+}
+
+/**
+ * Reddit hits that belong to a cluster by subject rather than by link.
+ *
+ * A community links whichever copy of a story someone found first — often a
+ * different newsroom from the ones the panel carried, and sometimes a
+ * publication the panel does not watch at all. Matching only by URL therefore
+ * threw away most of the engagement signal, and threw it away unevenly:
+ * stories the panel happened to link identically scored, and the rest did
+ * not.
+ *
+ * The threshold is high on purpose. A false match credits one story with
+ * another's audience, which is worse than missing the signal — so this is
+ * deliberately stricter than the threshold used to match a reader's own
+ * articles, where a near miss only costs a badge.
+ */
+const REDDIT_MATCH = 0.62;
+
+function redditByHeadline(
+  hits: CorpusRedditHit[],
+  members: CorpusStory[],
+  tokensByUrl: Map<string, string[]>,
+  idf: Map<string, number>,
+): CorpusRedditHit[] {
+  if (hits.length === 0) return [];
+  const memberTokens = members
+    .map((story) => tokensByUrl.get(story.url))
+    .filter((tokens): tokens is string[] => Boolean(tokens));
+  if (memberTokens.length === 0) return [];
+
+  const matched: CorpusRedditHit[] = [];
+  for (const hit of hits) {
+    if (!hit.title) continue;
+    const tokens = tokensOf(hit.title);
+    if (tokens.length < 3) continue;
+    const best = memberTokens.reduce(
+      (top, member) => Math.max(top, similarity(tokens, member, idf)),
+      0,
+    );
+    if (best >= REDDIT_MATCH) matched.push(hit);
+  }
+  return matched;
 }
 
 /** One subreddit counts once, at its best placement. */
