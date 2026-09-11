@@ -177,6 +177,12 @@ class Union {
 export type Cluster<T> = { key: string; members: T[] };
 
 /**
+ * Above this the two headlines are effectively the same sentence, and the
+ * pair is joined whether or not either side had a better match elsewhere.
+ */
+const CERTAIN = 0.75;
+
+/**
  * Group stories that tell the same story. `threshold` is the similarity two
  * headlines must clear; 0.5 is loose enough to join a wire brief to a feature
  * and tight enough to keep two same-day Fed stories apart.
@@ -220,46 +226,17 @@ export function clusterStories<T extends Clusterable>(
   }
 
   const byId = new Map(stories.map((s) => [s.id, s]));
-  const union = new Union();
-  // Members per root, kept as the clusters grow, so a join can be checked
-  // against what is already in them.
-  const members = new Map<string, string[]>(stories.map((story) => [story.id, [story.id]]));
   const compared = new Set<string>();
 
   const score = (a: string, b: string) =>
     similarity(tokens.get(a)!, tokens.get(b)!, idf);
 
-  /**
-   * Would joining these two clusters hold up?
-   *
-   * Single-link clustering — join whenever any two members match — chains:
-   * a story about the convention matched both a story about a dividend
-   * promised at it and a story about oil prices intruding on it, and all
-   * three became one. So the mean similarity across the two clusters'
-   * members has to clear a bar too, not just the one pair that met.
-   */
-  const compatible = (rootA: string, rootB: string, pairScore: number) => {
-    const listA = members.get(rootA) ?? [rootA];
-    const listB = members.get(rootB) ?? [rootB];
-    if (listA.length === 1 && listB.length === 1) return true;
-    // A sample bounds the cost for a cluster that gets large; the members
-    // are near-duplicates of each other, so a few are representative.
-    const sampleA = listA.slice(0, 4);
-    const sampleB = listB.slice(0, 4);
-    let total = 0;
-    for (const a of sampleA) {
-      for (const b of sampleB) total += a === b ? 1 : score(a, b);
-    }
-    const mean = total / (sampleA.length * sampleB.length);
-    // The mean has to clear the same bar a single pair does. A looser bar
-    // still chained: one headline genuinely about two stories ("Red Sea
-    // shipping disrupted as Houthis take Mokha and oil prices climb") pulled
-    // the port story and the oil-price story into one. With this, the
-    // ambiguous headline lands in whichever cluster it fits best and the two
-    // stories stay apart.
-    return mean >= threshold && pairScore >= threshold;
-  };
-
+  // Collect the candidate pairs first, then decide which to believe. Doing
+  // it in one pass means the result depends on which pair happened to be
+  // visited first, and that is what put an oil-price story inside a Red Sea
+  // port story.
+  const edges: { a: string; b: string; score: number }[] = [];
+  const bestEdge = new Map<string, number>();
   for (const [, bucket] of blocks) {
     // A word used by hundreds of headlines says nothing on its own, and its
     // bucket would cost a full pairwise pass.
@@ -270,18 +247,34 @@ export function clusterStories<T extends Clusterable>(
         const pair = a < b ? `${a}|${b}` : `${b}|${a}`;
         if (compared.has(pair)) continue;
         compared.add(pair);
-        const [rootA, rootB] = [union.find(a), union.find(b)];
-        if (rootA === rootB) continue;
-        const pairScore = score(a, b);
-        if (pairScore < threshold) continue;
-        if (!compatible(rootA, rootB, pairScore)) continue;
-        union.join(a, b);
-        const merged = [...(members.get(rootA) ?? []), ...(members.get(rootB) ?? [])];
-        members.delete(rootA);
-        members.delete(rootB);
-        members.set(union.find(a), merged);
+        const value = score(a, b);
+        if (value < threshold) continue;
+        edges.push({ a, b, score: value });
+        bestEdge.set(a, Math.max(bestEdge.get(a) ?? 0, value));
+        bestEdge.set(b, Math.max(bestEdge.get(b) ?? 0, value));
       }
     }
+  }
+
+  /**
+   * Each headline gets to vote for the story it belongs to *once* — its best
+   * match — and near-identical pairs are always believed.
+   *
+   * This is the fix for chaining. "Red Sea shipping disrupted as Houthis
+   * take Mokha and oil prices climb" is genuinely about two stories and
+   * matches both; joining every pair it appears in welded the port story to
+   * the oil-price story. Letting it count only where it fits best puts it in
+   * one of them and leaves the other alone. Copies of one story still chain
+   * into a single cluster, because each of them independently votes for a
+   * sibling — which is how seven newsrooms on the same event stay together
+   * while two different events do not.
+   */
+  const union = new Union();
+  for (const edge of edges) {
+    const isBest =
+      edge.score >= (bestEdge.get(edge.a) ?? 0) ||
+      edge.score >= (bestEdge.get(edge.b) ?? 0);
+    if (isBest || edge.score >= CERTAIN) union.join(edge.a, edge.b);
   }
 
   const grouped = new Map<string, T[]>();

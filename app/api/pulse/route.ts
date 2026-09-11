@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import { after } from "next/server";
-import { corpusAvailable, readPulse, lastSweeps, PULSE_TTL_MS, WINDOW_HOURS } from "@/lib/corpus";
+import {
+  corpusAvailable,
+  readPulse,
+  lastSweeps,
+  sampleHeadlines,
+  PULSE_TTL_MS,
+  WINDOW_HOURS,
+} from "@/lib/corpus";
 import { catchUpSweeps, dueSlices, sliceCount } from "@/lib/sweep";
 
 export const runtime = "nodejs";
@@ -31,6 +38,12 @@ export async function GET(request: Request) {
 
   const params = new URL(request.url).searchParams;
   const limit = Math.min(Number(params.get("limit") ?? TOP) || TOP, 200);
+
+  // Just the headlines, for judging what clustering made of them.
+  const sample = Number(params.get("sample") ?? 0);
+  if (sample > 0) {
+    return NextResponse.json({ headlines: await sampleHeadlines(sample) });
+  }
 
   try {
     const payload = await readPulse();

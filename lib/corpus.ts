@@ -182,6 +182,21 @@ export async function pruneCorpus() {
   await sql`DELETE FROM corpus_reddit  WHERE seen_at < now() - make_interval(days => ${RETAIN_DAYS})`;
 }
 
+/**
+ * Recent headlines, newest first — for auditing what clustering did with
+ * them. Clustering quality is the whole feature, and it can only be judged
+ * against real headlines, so there has to be a way to look at them.
+ */
+export async function sampleHeadlines(limit = 200) {
+  await ensureCorpusSchema();
+  const sql = getSql();
+  const rows = await sql`
+    SELECT title, newsroom FROM corpus_stories
+    ORDER BY seen_at DESC, url LIMIT ${Math.min(limit, 500)}
+  `;
+  return rows.map((row) => ({ title: String(row.title), newsroom: String(row.newsroom) }));
+}
+
 async function recentStories(hours: number): Promise<CorpusStory[]> {
   const sql = getSql();
   const rows = await sql`
