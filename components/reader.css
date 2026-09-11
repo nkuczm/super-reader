@@ -239,6 +239,9 @@
   .head-actions .sort-switch button { flex: 1; min-height: 40px; }
   .head-actions .btn { min-height: 40px; justify-content: center; }
   .add-btn { flex: none; width: 44px; }
+  /* Pulling the list down is the refresh here, so the button would be a
+     second way to do the same thing, in a header with no room for it. */
+  .refresh-btn { display: none; }
 
   .articles { padding: 4px 16px 64px; }
   .score-body { padding: 0 0 80px; }
@@ -764,6 +767,14 @@
 
 /* The + is an icon button, so it must not stretch like a labelled one. */
 .add-btn { flex: none; width: 40px; padding: 0; justify-content: center; }
+
+/* Refreshing is a pull on a phone and a button on a desktop, never both:
+   there is no room for it in the phone header, and the gesture has nothing
+   on screen to suggest it on a desktop. */
+.refresh-btn { flex: none; gap: 7px; }
+.refresh-btn .spinner { width: 13px; height: 13px; border-width: 2px; }
+.refresh-btn[disabled] { opacity: 0.55; cursor: default; }
+.refresh-label { white-space: nowrap; }
 
 /*
  * The headline row. The circle is trailing rather than leading so that every

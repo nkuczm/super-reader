@@ -225,6 +225,21 @@ a menu button (it used to be hidden outright, which left no way to switch feeds
 or reach sync), touch targets grow, dialogs slide up from the bottom, and
 safe-area insets keep content clear of the notch and home indicator.
 
+### Refreshing
+
+Two ways, and only ever one of them at a time.
+
+Below 860px — the same width that turns the sidebar into a drawer — pull the
+list down past its top. It engages only when the list is already at the very
+top and the drag is downward, so it cannot fight an ordinary scroll, and it
+promises a refresh only once the pull is far enough to cause one.
+
+Above it, there is a **Refresh** button in the header. Scrolling up at the top
+of the list used to refresh on a desktop too, which is a hidden feature with
+nothing on screen to suggest it — and easy to trigger by accident on a
+trackpad. A touchscreen laptop counts as a desktop here and gets the button,
+because the button is the one you can see.
+
 ### Adding it to your Home Screen
 
 The app ships a web manifest, so it installs as a standalone app with no

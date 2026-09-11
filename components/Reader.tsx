@@ -98,6 +98,23 @@ type Selection =
   | { type: "saved" }
   | { type: "feed" | "source"; id: string };
 
+/** The breakpoint the layout calls a phone, kept in step with reader.css. */
+const PHONE_WIDTH = 860;
+
+function useIsPhone() {
+  const [isPhone, setIsPhone] = useState(false);
+
+  useEffect(() => {
+    const query = window.matchMedia(`(max-width: ${PHONE_WIDTH}px)`);
+    const apply = () => setIsPhone(query.matches);
+    apply();
+    query.addEventListener("change", apply);
+    return () => query.removeEventListener("change", apply);
+  }, []);
+
+  return isPhone;
+}
+
 export default function Reader() {
   const [feeds, setFeeds] = useState<Feed[]>([]);
   const [ready, setReady] = useState(false);
@@ -133,6 +150,17 @@ export default function Reader() {
   const [corpusStats, setCorpusStats] = useState<CorpusStats | null>(null);
   /** The article whose score is being explained, if any. */
   const [explaining, setExplaining] = useState<string | null>(null);
+  /**
+   * Is this the phone layout? The same 860px the stylesheet uses to swap the
+   * sidebar for a drawer, so the refresh affordance matches the rest of it.
+   *
+   * Starts false and is set on mount: the server has no viewport, and
+   * rendering "phone" first would mean a desktop briefly agreeing before
+   * changing its mind. Only the gesture depends on this — the button is shown
+   * and hidden in CSS, so it never flickers on a phone.
+   */
+  const isPhone = useIsPhone();
+
   /** The scrolling column: pull-to-refresh and jump-to-top both need it. */
   const listRef = useRef<HTMLElement | null>(null);
   /** How far the list has been dragged past its top, in pixels. */
@@ -1037,25 +1065,31 @@ export default function Reader() {
   );
 
   /**
-   * Pull the list past its top to refresh.
+   * Pull the list past its top to refresh — on a phone.
    *
-   * There is no Refresh button any more, so this is the gesture that replaces
-   * it. It only engages when the list is already scrolled to the very top and
-   * the drag is downward, so it can never fight an ordinary scroll; and the
+   * It only engages when the list is already scrolled to the very top and the
+   * drag is downward, so it can never fight an ordinary scroll; and the
    * indicator only promises a refresh once the pull is past the threshold,
    * rather than firing on any stray touch.
+   *
+   * Gated on the same 860px the layout uses to become a phone, rather than on
+   * "does this device have a touchscreen". A pull is the expected gesture on a
+   * phone and there is no room for a button in that header; on a desktop it is
+   * a hidden feature with nothing on screen to suggest it, which is what the
+   * Refresh button in the header replaces. A touchscreen laptop is a desktop
+   * by that measure and gets the button, which is the one that can be seen.
    */
   const PULL_TRIGGER = 72;
   const pullFrom = useRef<number | null>(null);
 
   const onListTouchStart = useCallback((event: React.TouchEvent<HTMLElement>) => {
     const list = listRef.current;
-    if (!list || list.scrollTop > 0 || refreshing) {
+    if (!isPhone || !list || list.scrollTop > 0 || refreshing) {
       pullFrom.current = null;
       return;
     }
     pullFrom.current = event.touches[0].clientY;
-  }, [refreshing]);
+  }, [isPhone, refreshing]);
 
   const onListTouchMove = useCallback(
     (event: React.TouchEvent<HTMLElement>) => {
@@ -1079,28 +1113,6 @@ export default function Reader() {
     setPullDistance(0);
     if (travelled >= PULL_TRIGGER && !refreshing) void refresh(allSources);
   }, [pullDistance, refreshing, refresh, allSources]);
-
-  // The same gesture with a trackpad or wheel: keep scrolling up once the
-  // list is already at the top and it refreshes, so this is not a
-  // touch-only feature.
-  const wheelPull = useRef(0);
-  useEffect(() => {
-    const list = listRef.current;
-    if (!list) return;
-    const onWheel = (event: WheelEvent) => {
-      if (list.scrollTop > 0 || event.deltaY >= 0 || refreshing) {
-        wheelPull.current = 0;
-        return;
-      }
-      wheelPull.current += -event.deltaY;
-      if (wheelPull.current > 240) {
-        wheelPull.current = 0;
-        void refresh(allSources);
-      }
-    };
-    list.addEventListener("wheel", onWheel, { passive: true });
-    return () => list.removeEventListener("wheel", onWheel);
-  }, [refresh, allSources, refreshing]);
 
   // Count the sources behind whatever is selected, not every source there is.
   const selectedSourceCount =
@@ -1375,7 +1387,9 @@ export default function Reader() {
         ) : (
           <>
         {/* The pull-to-refresh indicator. It says what will happen, and only
-            promises a refresh once the pull is far enough to cause one. */}
+            promises a refresh once the pull is far enough to cause one. It
+            also stands in for the button while a refresh started from there
+            is running, which is why it shows for `refreshing` alone. */}
         {(pullDistance > 0 || refreshing) && (
           <div
             className="pull-note"
@@ -1443,6 +1457,21 @@ export default function Reader() {
                 Top stories
               </button>
             </div>
+            {/* The desktop counterpart to pulling the list down on a phone.
+                Hidden below the phone breakpoint in CSS, where the gesture is
+                the one that belongs. */}
+            <button
+              className="btn small ghost refresh-btn"
+              onClick={() => void refresh(allSources)}
+              disabled={refreshing || allSources.length === 0}
+              aria-label="Refresh articles"
+              title="Refresh articles"
+            >
+              {refreshing ? <span className="spinner" /> : Icon.refresh}
+              <span className="refresh-label">
+                {refreshing ? "Refreshing…" : "Refresh"}
+              </span>
+            </button>
             <button
               className="btn small add-btn"
               onClick={() => openPanel(setDialogOpen)}
