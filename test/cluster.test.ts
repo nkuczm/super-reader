@@ -77,3 +77,42 @@ test("scales to a realistic corpus without going quadratic", () => {
   assert.ok(clusters.length > 100, "should not collapse everything into one");
   assert.ok(Date.now() - started < 5000, `took ${Date.now() - started}ms`);
 });
+
+test("a headline too thin to identify a story does not swallow one", () => {
+  // Found in production: CBC's "IN PHOTOS | TIFF movies and moments" reduces
+  // to the single word "photo", which matched the Washington Post's
+  // convention picture gallery — and through it the whole convention story.
+  // One shared word is never enough, however rare that word is.
+  const clusters = clusterStories([
+    { id: "tiff", title: "IN PHOTOS | TIFF movies and moments" },
+    { id: "gop", title: "The best pictures from the GOP midterm convention in Dallas" },
+    { id: "photos2", title: "In photos: the week in pictures" },
+  ]);
+  const tiff = clusters.find((c) => c.members.some((m) => m.id === "tiff"))!;
+  assert.deepEqual(tiff.members.map((m) => m.id), ["tiff"]);
+});
+
+test("does not chain two stories together through a third", () => {
+  // Found in production: a $5,000-dividend cluster absorbed the Iran war
+  // coverage, because a story about the convention matched both. Single-link
+  // clustering chains like that — join whenever any two members match — so a
+  // join has to hold against a cluster's existing members, not just against
+  // whichever one it met first.
+  const clusters = clusterStories([
+    { id: "x1", title: "Houthis seize strategic Red Sea port of Mokha" },
+    { id: "x2", title: "Houthi forces take the strategic Red Sea port of Mokha" },
+    // Genuinely about both stories, which is what did the chaining.
+    { id: "bridge", title: "Red Sea shipping disrupted as Houthis take Mokha and oil prices climb" },
+    { id: "y1", title: "Oil prices climb on Red Sea shipping disruption" },
+    { id: "y2", title: "Oil prices climb as Red Sea shipping is disrupted" },
+  ]);
+
+  const withX = clusters.find((c) => c.members.some((m) => m.id === "x1"))!;
+  const withY = clusters.find((c) => c.members.some((m) => m.id === "y1"))!;
+  assert.notEqual(withX.key, withY.key, "the port story and the oil story are two stories");
+  assert.equal(withX.members.some((m) => m.id.startsWith("y")), false);
+  assert.equal(withY.members.some((m) => m.id.startsWith("x")), false);
+  // The two copies of each story did still find each other.
+  assert.ok(withX.members.some((m) => m.id === "x2"));
+  assert.ok(withY.members.some((m) => m.id === "y2"));
+});

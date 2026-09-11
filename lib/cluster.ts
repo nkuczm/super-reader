@@ -134,14 +134,12 @@ export function similarity(
 
   let shared = 0;
   let sharedCount = 0;
-  let topShared = 0;
   let smallOnly = 0;
   for (const token of small) {
     const weight = weightOf(token);
     if (large.has(token)) {
       shared += weight;
       sharedCount += 1;
-      topShared = Math.max(topShared, weight);
     } else {
       smallOnly += weight;
     }
@@ -152,9 +150,11 @@ export function similarity(
   }
   if (shared === 0) return 0;
 
-  // One word in common is a coincidence unless that word is a name almost
-  // nothing else in the corpus uses.
-  if (sharedCount < 2 && topShared < 3.5) return 0;
+  // One word in common is never enough, however rare that word is. CBC's
+  // "IN PHOTOS | TIFF movies and moments" reduces to the single word
+  // "photo", and on that alone it matched the Washington Post's convention
+  // picture gallery — and through it, the whole convention story.
+  if (sharedCount < 2) return 0;
 
   return shared / (shared + 0.55 * smallOnly + 0.25 * largeOnly);
 }
@@ -188,6 +188,10 @@ export function clusterStories<T extends Clusterable>(
   const tokens = new Map<string, string[]>();
   for (const story of stories) tokens.set(story.id, tokensOf(story.title));
   const idf = idfOver([...tokens.values()]);
+  // A headline carrying one distinctive word or none cannot identify a
+  // story, so it stays on its own rather than attaching to whatever shares
+  // that word.
+  const clusterable = (id: string) => (tokens.get(id)?.length ?? 0) >= 2;
 
   // Index every headline under each of its words, then compare only inside a
   // word's bucket. Buckets for common words are skipped rather than sampled:
@@ -203,6 +207,7 @@ export function clusterStories<T extends Clusterable>(
   const blocks = new Map<string, string[]>();
   const keyTokens = new Map<string, string[]>();
   for (const story of stories) {
+    if (!clusterable(story.id)) continue;
     const ranked = [...(tokens.get(story.id) ?? [])].sort(
       (a, b) => (idf.get(b) ?? 0) - (idf.get(a) ?? 0),
     );
@@ -216,7 +221,44 @@ export function clusterStories<T extends Clusterable>(
 
   const byId = new Map(stories.map((s) => [s.id, s]));
   const union = new Union();
+  // Members per root, kept as the clusters grow, so a join can be checked
+  // against what is already in them.
+  const members = new Map<string, string[]>(stories.map((story) => [story.id, [story.id]]));
   const compared = new Set<string>();
+
+  const score = (a: string, b: string) =>
+    similarity(tokens.get(a)!, tokens.get(b)!, idf);
+
+  /**
+   * Would joining these two clusters hold up?
+   *
+   * Single-link clustering — join whenever any two members match — chains:
+   * a story about the convention matched both a story about a dividend
+   * promised at it and a story about oil prices intruding on it, and all
+   * three became one. So the mean similarity across the two clusters'
+   * members has to clear a bar too, not just the one pair that met.
+   */
+  const compatible = (rootA: string, rootB: string, pairScore: number) => {
+    const listA = members.get(rootA) ?? [rootA];
+    const listB = members.get(rootB) ?? [rootB];
+    if (listA.length === 1 && listB.length === 1) return true;
+    // A sample bounds the cost for a cluster that gets large; the members
+    // are near-duplicates of each other, so a few are representative.
+    const sampleA = listA.slice(0, 4);
+    const sampleB = listB.slice(0, 4);
+    let total = 0;
+    for (const a of sampleA) {
+      for (const b of sampleB) total += a === b ? 1 : score(a, b);
+    }
+    const mean = total / (sampleA.length * sampleB.length);
+    // The mean has to clear the same bar a single pair does. A looser bar
+    // still chained: one headline genuinely about two stories ("Red Sea
+    // shipping disrupted as Houthis take Mokha and oil prices climb") pulled
+    // the port story and the oil-price story into one. With this, the
+    // ambiguous headline lands in whichever cluster it fits best and the two
+    // stories stay apart.
+    return mean >= threshold && pairScore >= threshold;
+  };
 
   for (const [, bucket] of blocks) {
     // A word used by hundreds of headlines says nothing on its own, and its
@@ -228,9 +270,16 @@ export function clusterStories<T extends Clusterable>(
         const pair = a < b ? `${a}|${b}` : `${b}|${a}`;
         if (compared.has(pair)) continue;
         compared.add(pair);
-        if (union.find(a) === union.find(b)) continue;
-        const score = similarity(tokens.get(a)!, tokens.get(b)!, idf);
-        if (score >= threshold) union.join(a, b);
+        const [rootA, rootB] = [union.find(a), union.find(b)];
+        if (rootA === rootB) continue;
+        const pairScore = score(a, b);
+        if (pairScore < threshold) continue;
+        if (!compatible(rootA, rootB, pairScore)) continue;
+        union.join(a, b);
+        const merged = [...(members.get(rootA) ?? []), ...(members.get(rootB) ?? [])];
+        members.delete(rootA);
+        members.delete(rootB);
+        members.set(union.find(a), merged);
       }
     }
   }
