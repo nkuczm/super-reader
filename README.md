@@ -45,6 +45,12 @@ npm test                     # parser + discovery tests
 6. **A page with no feed at all** → the page's HTML is read directly and turned
    into a feed (`lib/scrape.ts`). This is how sites like `anthropic.com/news`,
    which never published RSS, become followable.
+7. **A page that builds its list in the browser** → the site's own sitemap
+   (`lib/sitemap.ts`). See "Sites that publish no feed at all" below.
+8. **A publication on a platform** — Substack, Medium, YouTube, GitHub,
+   Tumblr — resolves straight to that platform's published feed address, and
+   never widens to the platform itself. See "Platforms" below.
+9. **An Instagram account** → Meta's API, with your own credentials. See below.
 
 ### Sections vs whole sites
 
@@ -84,12 +90,61 @@ are more fragile than real RSS: a site redesign can change the markup.
 You always see a preview — the source's real recent articles — before deciding
 to keep it, and you pick which feed it joins.
 
+### Sites that publish no feed at all
+
+Reading the listing page covers a lot, but not the two cases that are getting
+more common rather than less: a page that assembles its list in the browser
+server-renders nothing to group, and a paginated section shows ten items and
+hides the eleventh behind a click. Government publishers are the worst case —
+a department that has never shipped RSS, whose newsroom is a React shell, was
+simply unfollowable.
+
+Those sites do publish a machine-readable index of what they post: a sitemap,
+advertised in `robots.txt` because search engines require it of them. A **news
+sitemap** is better still — capped by its own specification to the last two
+days, carrying each item's real headline and publication time, and holding
+exactly what the newsroom considers news.
+
+So a sitemap is tried after the page scrape rather than giving up: `robots.txt`
+first, then the conventional addresses, ranking a news sitemap above the
+site-wide one and anything matching a pasted section above both. One level of
+index is followed and at most four documents are opened.
+
+An entry with no date is dropped rather than sorted last — a sitemap has no
+order, so an undated entry cannot be placed, and a feed ordered by the CMS's
+internals is worse than a shorter honest one. Plain sitemaps carry no
+headlines, so the URL slug stands in until each page's own title is read.
+
+### Platforms
+
+`substack.com/@someone` used to find no feed under that path, widen to the
+domain, and subscribe you to **Substack's own corporate blog** — filed under
+the title you pasted, so it looked like it had worked. These pages make it
+worse by declaring the platform's site-wide feed in their own `<head>`, which
+is the first thing discovery trusts.
+
+Two rules fix it. A host known to carry thousands of unrelated publications
+never widens to its own domain feed: on those, a pasted path stays a pasted
+path. And where a platform's feed address is documented and stable it is used
+directly, before any crawling — `<pub>.substack.com/feed`,
+`medium.com/feed/@user`, YouTube's `feeds/videos.xml`, GitHub's
+`releases.atom`, Tumblr's `/rss`. A publication's own subdomain is not
+multi-tenant: `platformer.substack.com` is one publisher and widening to it is
+right.
+
+Anything that would be a guess is left out. `substack.com/@handle` is a
+writer's profile with no documented feed, and a YouTube `@handle` needs its
+channel id looked up — which ordinary discovery does perfectly well by reading
+the feed the page declares. A wrong feed that answers 200 is worse than no
+feed at all.
+
+
 **Reading** merges every source in the selected feed, always newest first
 (undated items sort last). Click a headline to read the whole article inside
-the app: the server fetches it, extracts the body with Mozilla's Readability,
-and **sanitizes the HTML** — scripts, styles, iframes, event handlers and
-non-http URLs are stripped before it reaches the page. Cmd/Ctrl-click still
-opens the original. Click a feed
+the app: the server fetches it, works out which copy of the article is the
+fullest one available (see below), and **sanitizes the HTML** — scripts,
+styles, iframes, event handlers and non-http URLs are stripped before it
+reaches the page. Cmd/Ctrl-click still opens the original. Click a feed
 in the sidebar to see everything in it, or a single source to narrow to it.
 Each source shows its favicon, with a letter avatar as fallback.
 
@@ -135,7 +190,12 @@ different densities, while the feeds themselves are what needs to match.
 | `lib/enrich.ts` | Fill in missing summaries/dates from article metadata |
 | `lib/article.ts` | Extract + sanitize an article for the in-app reader |
 | `lib/sort.ts` | Newest-first ordering shared by every path |
-| `lib/x.ts` | Following an X account through the official API |
+| `lib/x.ts` | Following an X account, list or search through the official API |
+| `lib/instagram.ts` | Following an Instagram account through Meta's API |
+| `lib/platforms.ts` | Platform feed addresses, and hosts that must not widen |
+| `lib/sitemap.ts` | Building a feed from a site's sitemap |
+| `lib/structured.ts` | Reading a page's schema.org JSON-LD |
+| `lib/paywall.ts` | Telling a free article from the free part of one |
 | `lib/offline.ts` | Offline store, download schedule, list snapshot |
 | `public/sw.js` | Service worker: opens the app with no connection |
 | `lib/sync-code.ts` | Sync code generation, normalising and hashing |
@@ -244,11 +304,28 @@ does, and is handled by the existing feed parser rather than a mapper.
 There is a test asserting every provider is well formed, and each mapper is
 tested against a recorded response shape rather than the live API.
 
-## Subreddits
+## Reddit
 
 Paste `r/AskHistorians`, or any reddit.com URL for a subreddit, and it becomes
 a source. A sort comes with it — `reddit.com/r/news/top/?t=week` follows the
 week's top posts.
+
+A subreddit is not the only thing people follow there, and the rest used to
+fall through to the topic branch — pasting `u/kn0thing` quietly subscribed you
+to a Bing News search for the letter u. These all work now, because Reddit
+publishes an RSS feed for each of them at the same `.rss` suffix:
+
+| Paste | What you get |
+| --- | --- |
+| `r/AskHistorians`, `reddit.com/r/news/top/?t=week` | a subreddit, with its sort |
+| `u/kn0thing`, `reddit.com/user/kn0thing` | that author's submissions |
+| `u/someone/m/newsmix` | a multireddit |
+| `reddit.com/domain/nature.com` | every post linking that publication |
+| `reddit.com/r/science/search?q=climate` | a standing search, newest first |
+
+Reddit answers a datacenter request with 429 or 403 often enough to matter, so
+every read retries against `old.reddit.com`, which serves the identical feed
+from a different tier.
 
 Reddit's entries need unpicking to read well. A **link post** is pointed at what
 it links to, so opening it gives the article rather than Reddit's comments page
@@ -271,9 +348,43 @@ your own credentials.
 2. Add `X_BEARER_TOKEN` to the project's environment variables in Vercel.
 3. Redeploy.
 
-Then paste `@handle` or an `x.com/handle` URL like any other source. Without
-the key, everything else keeps working and the dialog explains what is missing.
-Replies are excluded, and posts carry their images and full text.
+Then paste any of these like any other source:
+
+- `@handle` or an `x.com/handle` URL — that account's posts
+- `x.com/i/lists/<id>` — a list, which is how a beat is actually followed there
+- `x.com/search?q=…` or `x.com/hashtag/…` — a standing search over the last week
+
+Without the key, everything else keeps working and the dialog explains what is
+missing. Replies and retweets are excluded, posts carry their images, and a
+post over 280 characters arrives whole — the full text of a long one lives in
+`note_tweet` rather than `text`, so they used to be cut off at the limit with
+an ellipsis. Reply counts come back too, which the story ranking uses as a
+comment count.
+
+## Following Instagram accounts
+
+There is one way to do this and it is worth being blunt about why, because
+every other route is either broken or a bad idea. instagram.com serves a
+logged-out visitor a login wall — no public HTML, and no RSS anywhere on the
+service. The `?__a=1` endpoint that bridges relied on was closed years ago,
+and the bridges that scraped around it are blocked, rate-limited into
+uselessness, or ask for your password. Storing a session cookie on this server
+is out for the same reason a subscription cookie is: the deployment is public,
+so a credential the server can use is one anyone with the URL can use.
+
+What is left is the official API — the same bargain X asks for. Meta exposes
+other people's accounts only through Business Discovery, so it needs two
+values, both from the same place in Meta's developer console:
+
+1. `INSTAGRAM_ACCESS_TOKEN` — a token for an Instagram business or creator
+   account you control.
+2. `INSTAGRAM_USER_ID` — that account's id, since the request is made *as* it.
+
+Then paste `instagram.com/nasa` or `ig:nasa`. Not a bare `@nasa`: that already
+means X, and silently changing what it resolves to would be worse than asking
+for four more characters. The account you follow must itself be a business or
+creator account — Meta's API describes no others, and the reader says so
+rather than coming back empty.
 
 ### Court opinions
 
@@ -302,30 +413,140 @@ from oEmbed. Anything else with no extractable text falls back to what the page
 says about itself — title, picture, description — labelled as a preview rather
 than passed off as the article.
 
-## Paywalled and blocked articles
+## Getting the whole article
 
-Where a publisher syndicates full text in their feed, the reader uses it (see
-above). Where they do not — the New York Times, for instance, which blocks the
-page and syndicates only summaries — the reader says so and links to the
-original.
+Readability on the page it was handed was the whole of extraction, which is
+right when the page holds the article and quietly wrong three ways:
 
-This app deliberately does not route around paywalls: no archive mirrors, no
-crawler impersonation, no proxying, and no storing anyone's subscription
-credentials. Using text a publisher chose to syndicate is fair; defeating an
-access control they chose to apply is not, and it is also what gets a reader
-blocked harder.
+- A metered site serves its opening paragraphs to everyone. They extract
+  perfectly, so nothing errors and nothing says anything — the reader showed a
+  confident, complete-looking story that stopped mid-thought.
+- A page that assembles its body in the browser leaves a shell in the HTML.
+  Readability finds nothing and the reader fell back to a preview card, while
+  the prose sat in the page's own structured data the whole time.
+- A thin page that declares a full AMP copy of itself was never asked for it.
+
+So four candidate bodies are gathered and compared:
+
+| Where | What it is |
+| --- | --- |
+| the page | Readability's extraction, as before |
+| structured data | the publisher's own `articleBody` in schema.org JSON-LD |
+| the feed | `content:encoded` from the source's own feed |
+| AMP | the publisher's AMP copy, fetched only when the first pass is thin |
+
+The page wins at comparable length, because it carries the photographs, the
+pull quotes and the links where the others are prose alone. A challenger has
+to be half as much again **and** eighty words longer to displace it — both
+conditions matter, since the ratio alone promotes a forty-word difference on
+a short post and the absolute alone promotes a feed's boilerplate footer on a
+long one.
+
+The feed copy is a candidate rather than a catch. It used to be reached for
+only when the page refused outright; it is now fetched whenever the
+extraction comes back short or marked partial, which is the far more common
+case. On a metered article with a full-text feed that is the difference
+between 53 words and 518.
+
+### Paywalled and blocked articles
+
+Where a publisher marks an article as not free — `isAccessibleForFree` in
+their structured data, or the `article:content_tier` property — and nothing
+fuller is available, the reader says **Free excerpt** and offers the site,
+instead of passing a teaser off as the article. A page carrying a
+subscription wall, or text that ends at one, is read the same way. Long
+bodies are never marked partial: if the publisher's own feed carried the
+whole article, the wall on the page it came from says nothing about what you
+are holding.
+
+This detects walls; it does not go round them. No archive mirrors, no crawler
+impersonation, no proxying, and no storing anyone's subscription credentials.
+Using text a publisher chose to syndicate, or to publish in their own page
+metadata for every crawler that asks, is fair; defeating an access control
+they chose to apply is not, and it is also what gets a reader blocked harder.
 
 Note in particular that this deployment is **public** — Vercel Authentication
-is off so the app works from a phone. Any subscription cookie held server-side
-would therefore be usable by anyone who has the URL, which is reason enough on
-its own not to put one there.
+is off so the app works from a phone. Any subscription cookie held
+server-side would therefore be usable by anyone who has the URL, which is
+reason enough on its own not to put one there.
 
-**Open on their site.** For a subscription source, the headlines, summaries and
-images still arrive in the feed; only the body needs the publisher. When reader
-view fails, the error offers **"Always open <host> on the site"**. After that,
-articles from that host go straight to the browser — where a subscription
-applies — instead of failing in the reader first. Settings lists those hosts
-and can put any of them back.
+**Open on their site.** For a subscription source, the headlines, summaries
+and images still arrive in the feed; only the body needs the publisher. When
+reader view fails, the error offers **"Always open <host> on the site"**.
+After that, articles from that host go straight to the browser — where a
+subscription applies — instead of failing in the reader first. Settings lists
+those hosts and can put any of them back.
+
+## Top stories
+
+The list sorts newest-first by default. **Top stories** ranks it instead by
+how big each story is — from evidence, not opinion.
+
+A fixed panel of newsrooms (`lib/outlets.ts`, the entries marked `panel`) is
+swept on a schedule into a shared corpus: which article, from which newsroom,
+in which feed, at which position. Nothing is extracted or stored beyond the
+headline, the link and the placement. The panel is fixed on purpose — a story
+looks big because many newsrooms independently chose to run it, and that
+comparison means nothing if the set being watched changes with whoever is
+reading. Nothing per-person is recorded, on either side.
+
+Copies of one story are clustered, and each cluster scored on four signals:
+
+| Signal | Weight | What it answers |
+| --- | --- | --- |
+| Breadth | 45% | How many *different newsrooms* ran it, weighted by reach |
+| Engagement | 25% | Which communities carried it, how near their own top, comment counts |
+| Placement | 20% | Where it sat — a front page is an editor's ranking, a section feed is mostly recency |
+| Velocity | 10% | How fast that breadth arrived: ten outlets in two hours is breaking, ten over three days is a topic |
+
+Then the total is scaled by **freshness**, measured from the most recent copy
+rather than the first. A story nobody has added to in a day has stopped
+happening, whatever ran yesterday. It only ever marks down — being current is
+not evidence a story is big, while having gone quiet is evidence it has
+stopped — and it stops at 60%, because yesterday's big story should sit below
+today's rather than vanish beneath a quiet one from an hour ago. The reasons
+line says which of the two you are looking at.
+
+Two things are deliberately not counted:
+
+- **An aggregator is not a newsroom.** Hacker News carrying a story is readers
+  voting, which is the engagement signal and is counted there. Counting it
+  towards breadth credited a link-voting site with an editorial decision and
+  inflated exactly the stories that are popular rather than big.
+- **A newsroom counts once.** The same paper running it in World and in
+  Markets is one newsroom, not two.
+
+Engagement is matched to a story by URL *and* by headline. A community links
+whichever copy someone found first, usually a different newsroom from the ones
+the panel carried, so URL alone threw most of the signal away — and threw it
+away unevenly, crediting only the stories whose links happened to line up. The
+headline threshold is deliberately higher than the one used to match your own
+articles: a false match credits one story with another's audience, which is
+worse than missing the signal.
+
+Your own articles are then scored against that picture, by URL first and
+headline second, so a source nobody else follows still gets ranked as long as
+the press covered the same event. Tapping the score opens a page showing the
+whole calculation — every signal, what produced it, and the headline of each
+copy counted, so "8 newsrooms" can be checked rather than taken.
+
+### When a source stops answering
+
+Breadth is a count, so a panel feed that quietly stops answering produces no
+error anyone sees: it lowers every score a little and goes on doing it. Each
+sweep therefore records what every source did — consecutive failures, the last
+error, when it last succeeded — and `/api/outlets/health` reads it back, so
+one timeout reads differently from a feed that has been gone all week. An
+outlet also gets one quick retry, since a single timeout otherwise costs that
+newsroom's coverage for half an hour and makes a story look smaller than it is.
+
+That is a different question from `/api/outlets/audit`, which fetches the whole
+directory live to find rot in the menu people add sources from. A live check
+never catches a source that fails intermittently.
+
+On your side of the app, a source whose refresh failed used to keep its place
+in the sidebar, show no unread count, and read as a quiet week. It now carries
+a small mark with the reason.
 
 ## Files in the feed
 

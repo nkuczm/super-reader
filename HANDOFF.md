@@ -7,7 +7,7 @@ and it becomes a source in a named feed. Built from scratch in one session.
 - **Repo:** `nkuczm/super-reader`, branch `claude/feedly-clone-custom-feeds-laz6ll`
   (this branch is the repo's default; every push deploys to production)
 - **Vercel project:** `super-reader` — team `nathan-kuczmarskis-projects`
-- 36 commits, 47 tests, all passing.
+- 183 tests, all passing.
 
 ---
 
@@ -15,7 +15,7 @@ and it becomes a source in a named feed. Built from scratch in one session.
 
 ```bash
 npm install
-npm test          # 47 tests, ~30s
+npm test          # 183 tests, ~40s
 npm run dev       # but see "the sandbox can't do this" below
 ```
 
@@ -43,7 +43,7 @@ npx next build
 hosts in production so the deployed app cannot be used to probe its own
 network. Fixtures live on 127.0.0.1, hence the escape hatch.
 
-**Kill stale fixture servers before running tests.** Ports 8781/8783–8789 are
+**Kill stale fixture servers before running tests.** Ports 8781/8783–8795 are
 used by fixtures; a leftover process causes `EADDRINUSE` and every test hangs
 or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
 
@@ -59,8 +59,13 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
 | `lib/enrich.ts` | Fills missing summaries/images from each article's metadata |
 | `lib/article.ts` | Readability extraction + sanitising for the reader |
 | `lib/files.ts` | Reading linked files — PDF, text, Markdown, CSV, JSON |
-| `lib/x.ts` | Following an X account via the official API |
-| `lib/reddit.ts` | Subreddits: input parsing, and unpicking Reddit's entries |
+| `lib/x.ts` | Following an X account, list or search via the official API |
+| `lib/instagram.ts` | Following an Instagram account via Meta's Business Discovery |
+| `lib/platforms.ts` | Platform feed addresses; hosts that must never widen |
+| `lib/sitemap.ts` | Building a feed from a site's sitemap when it has no RSS |
+| `lib/structured.ts` | A page's schema.org JSON-LD — body, byline, date, tier |
+| `lib/paywall.ts` | Whether what arrived is the article or the free part of it |
+| `lib/reddit.ts` | Reddit sources — subreddits, users, multis, domains, searches |
 | `lib/apis.ts` | The API directory — CourtListener, Federal Register, arXiv… |
 | `lib/offline.ts` | IndexedDB store, download schedule, list snapshot |
 | `lib/sync.ts` `lib/sync-code.ts` `lib/db.ts` | Cross-device sync |
@@ -68,7 +73,8 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
 | `lib/store.ts` | Feeds, settings, read state and the Saved list (localStorage) |
 | `components/Reader.tsx` | The whole app shell: sidebar, list, state |
 | `components/DownloadBar.tsx` | Top-of-screen progress for the offline download |
-| `app/api/{discover,feed,article,sync,apis}` | The five endpoints |
+| `app/api/{discover,feed,article,sync,apis}` | The original five endpoints |
+| `app/api/{pulse,rank,outlets}` | The corpus sweep, ranking, and panel health |
 | `components/ApiCatalog.tsx` | The API directory tab in "Add a source" |
 | `public/sw.js` | Service worker so the app opens offline |
 | `scripts/gen-icons.mjs` | Regenerates PNG app icons from the mark |
@@ -88,6 +94,12 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
 6. Feed index pages (`/feeds`, `/rss`, …) probed **directly**, because a site
    can block its HTML homepage while serving both `/feeds` and the feeds.
 7. Scrape the page as a last resort.
+8. The site's sitemap, when the scrape found no list (`lib/sitemap.ts`).
+
+Two things sit *before* all of that and are easy to miss: `platformFeedFor`
+resolves a Substack/Medium/YouTube/GitHub/Tumblr URL straight to its published
+feed address, and `isMultiTenantHost` stops steps 5-7 widening a pasted path to
+the host's own feed on those domains.
 
 ---
 
@@ -307,6 +319,64 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   scripts, styles, iframes, event handlers and non-http(s) URLs are stripped.
   There is a test asserting nothing executable survives — keep it.
 
+- **Extraction picks between four candidate bodies, not one.** The page, the
+  publisher's schema.org `articleBody`, the feed's `content:encoded`, and an
+  AMP copy fetched only when the first pass came back thin. The page wins at
+  comparable length because it carries the pictures and links; a challenger
+  needs to be 1.5× **and** +80 words. Both conditions are load-bearing: the
+  ratio alone promotes a 40-word difference on a short post, the absolute
+  alone promotes a feed's boilerplate footer on a long one. Measured on the
+  metered fixture through the real route: 53 words → 518.
+- **The feed copy is now a candidate, not a catch.** It used to be reached for
+  only when the page *threw*. The commoner failure by far is a page that
+  answers, extracts perfectly, and holds three paragraphs of nine — which
+  errored nothing and said nothing. `/api/article` fetches the feed copy
+  whenever the extraction is short or marked partial.
+- **`partial` is the publisher's own statement, not a guess.**
+  `isAccessibleForFree: false` and `article:content_tier`. A long body is
+  never partial whatever the page says: if the feed carried the whole article,
+  the wall on the page it came from says nothing about what the reader holds.
+- **Freshness is a discount on the total, not a fifth weighted signal.** It
+  was written as a weighted part first and that was wrong in an instructive
+  way: inside a 48-hour window it scores 1 for nearly everything, so it
+  amounted to a flat +15 on the whole corpus and every band moved past the
+  thresholds it was tuned to. `test/pulse.test.ts` caught it. Being current is
+  not evidence a story is big; having gone quiet is evidence it stopped.
+- **Aggregators are excluded from breadth and placement, not from the corpus.**
+  Hacker News on the front page is readers voting, not a twelfth editor. Its
+  comment count still counts, in engagement, where it belongs.
+- **Reddit engagement is matched by headline as well as URL.** A community
+  links whichever copy someone found; the panel recorded a different one. The
+  threshold (0.62) is deliberately above the 0.55 used for a reader's own
+  articles — a false match credits one story with another's audience, which is
+  worse than missing the signal. Needed a `title` column on `corpus_reddit`,
+  added with `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` rather than in the
+  `CREATE`, since an existing deployment's table is never recreated.
+- **A sitemap entry with no date is dropped, not sorted last.** A sitemap has
+  no order, so an undated entry cannot be placed; a feed ordered by the CMS's
+  internals is worse than a shorter honest one.
+- **Sitemaps are parsed by regex, not by the XML parser.** They reach
+  megabytes and 50,000 entries; a full parse builds an object graph for every
+  one of them and nothing here needs more than four fields per block.
+- **`looksLikeSitemap` has to be tested before `looksLikeFeed` in
+  `/api/feed`.** The latter only asks whether the body opens with XML, and a
+  sitemap does.
+- **A bare `@handle` stays X.** Instagram takes `instagram.com/nasa` or
+  `ig:nasa`. Silently changing what `@nasa` resolves to would be worse than
+  asking for four more characters.
+- **Reddit reads retry against `old.reddit.com`.** www answers a datacenter
+  request with 403/429 often enough to matter; old serves the identical feed
+  from a different tier. The stored `feedUrl` stays the canonical www one —
+  it is the source's identity, and every fetch retries the same way.
+- **A sweep records per-source health.** Breadth is a count, so a dead panel
+  feed lowers every score silently and forever. `/api/outlets/health` is how
+  that is found; `/api/outlets/audit` cannot, because a single live check
+  never catches an intermittent failure.
+- **Ports 8793-8795 join the fixture list** (thin pages, sitemap site, fake
+  Instagram). Back-to-back `npm test` runs still collide on them — the
+  previous run's servers are still closing. `fuser -k <port>/tcp` first, as
+  before.
+
 ### Which feeds actually carry full text
 
 Measured against live feeds (median prose characters per item; the fallback
@@ -371,12 +441,26 @@ Don't re-litigate this without the user asking.
    stored per source, so anything added before the section-scope fix or the
    Bing switch needs deleting and re-adding.
 5. **OPML import/export** never built; the natural next feature for portability.
+   Worth more now than before: the app can follow considerably more kinds of
+   thing, so a feed list is worth more to move.
 6. **The API directory is verified only against recorded shapes.** Every
    provider builds the request it should and maps its fixture correctly, and
    the dialog was driven end to end in a browser — but no live API has been
    called, because the sandbox cannot reach them. Response shapes drift; check
    each one against the deployment before trusting it. Congress.gov and
    Regulations.gov need an `api.data.gov` key before they answer at all.
+
+7. **Everything in this round was verified against fixtures and the local
+   build, not the live web** — the sandbox cannot reach it. Specifically
+   unverified: that any given publisher's JSON-LD carries `articleBody` (the
+   shape is standard, the coverage is not), that Reddit's user/multi/domain/
+   search `.rss` endpoints answer from Vercel, that Meta's Business Discovery
+   response matches the fixture, and that X's list and recent-search endpoints
+   are included in whatever tier the token has. Check each against the
+   deployment before trusting it, the way the API directory was.
+8. **`INSTAGRAM_ACCESS_TOKEN` / `INSTAGRAM_USER_ID` are not set anywhere.**
+   Instagram sources return an actionable message until they are, and nothing
+   else is affected. Note Meta's long-lived tokens expire every 60 days.
 
 ## Ideas raised but not built
 
