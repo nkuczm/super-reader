@@ -112,7 +112,12 @@ export default function Reader() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   /** Importance by article id, from the shared story corpus. */
   const [ranking, setRanking] = useState<Map<string, RankedArticle>>(new Map());
-  const [rankNote, setRankNote] = useState<string | null>(null);
+  /**
+   * What the ranking is built on — or why there isn't one. Three states worth
+   * telling apart: no database on this deployment, a corpus still filling,
+   * and a corpus of N stories from M feeds.
+   */
+  const [rankState, setRankState] = useState<"unavailable" | "warming" | string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [saved, setSaved] = useState<SavedArticle[]>([]);
@@ -887,22 +892,31 @@ export default function Reader() {
         body: JSON.stringify({ articles: payload }),
       })
         .then((res) => res.json())
-        .then((data: { available?: boolean; ranked?: RankedArticle[]; outletCount?: number; storyCount?: number }) => {
-          if (!live) return;
-          if (!data.available) {
-            // Ranking needs the shared corpus; without it the app still works
-            // and the sort switch says why it is empty rather than lying.
-            setRanking(new Map());
-            setRankNote(null);
-            return;
-          }
-          setRanking(new Map((data.ranked ?? []).map((entry) => [entry.id, entry])));
-          setRankNote(
-            data.storyCount
-              ? `${data.storyCount.toLocaleString()} stories from ${data.outletCount} feeds`
-              : null,
-          );
-        })
+        .then(
+          (data: {
+            available?: boolean;
+            warming?: boolean;
+            ranked?: RankedArticle[];
+            outletCount?: number;
+            storyCount?: number;
+          }) => {
+            if (!live) return;
+            if (!data.available) {
+              // Ranking needs the shared corpus; without it the app works as
+              // before and the sub-line says so rather than implying the
+              // stories were weighed and found wanting.
+              setRanking(new Map());
+              setRankState("unavailable");
+              return;
+            }
+            setRanking(new Map((data.ranked ?? []).map((entry) => [entry.id, entry])));
+            setRankState(
+              data.warming
+                ? "warming"
+                : `${(data.storyCount ?? 0).toLocaleString()} stories from ${data.outletCount} feeds`,
+            );
+          },
+        )
         .catch(() => {
           /* offline: the list is simply unranked */
         });
@@ -1213,9 +1227,13 @@ export default function Reader() {
               {selectedSourceCount > 0 &&
                 ` · ${selectedSourceCount} source${selectedSourceCount === 1 ? "" : "s"}`}
               {settings.sort === "top" &&
-                (rankNote
-                  ? ` · ${rankedCount} ranked against ${rankNote}`
-                  : " · ranking unavailable on this deployment")}
+                (rankState === "unavailable"
+                  ? " · ranking needs a database on this deployment"
+                  : rankState === "warming"
+                    ? " · still reading the outlet panel — ranking fills in shortly"
+                    : rankState
+                      ? ` · ${rankedCount} ranked against ${rankState}`
+                      : "")}
             </p>
           </div>
           <div className="head-actions">
@@ -1235,8 +1253,8 @@ export default function Reader() {
                 className={settings.sort === "top" ? "on" : ""}
                 onClick={() => updateSettings({ ...settings, sort: "top" })}
                 title={
-                  rankNote
-                    ? `Biggest stories first — measured against ${rankNote}`
+                  rankState && rankState !== "unavailable" && rankState !== "warming"
+                    ? `Biggest stories first — measured against ${rankState}`
                     : "Biggest stories first"
                 }
               >

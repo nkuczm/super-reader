@@ -168,3 +168,21 @@ export async function dueSlices(now = Date.now()): Promise<number[]> {
   }
   return due.sort((a, b) => a.last - b.last).map((entry) => entry.slice);
 }
+
+/**
+ * Run the overdue slices, after the response, without making the caller
+ * wait. Called from the endpoints the app actually uses — ranking included,
+ * since that is the request a reader makes on every refresh and there may be
+ * no other traffic at all.
+ */
+export async function catchUpSweeps(limit = 2) {
+  const due = await dueSlices();
+  for (const slice of due.slice(0, limit)) {
+    try {
+      await sweepSlice(slice);
+    } catch {
+      /* the next sweep's report records what failed */
+    }
+  }
+  return due.length;
+}

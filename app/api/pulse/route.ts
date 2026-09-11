@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { after } from "next/server";
 import { corpusAvailable, readPulse, lastSweeps, PULSE_TTL_MS, WINDOW_HOURS } from "@/lib/corpus";
-import { dueSlices, sweepSlice, sliceCount } from "@/lib/sweep";
+import { catchUpSweeps, dueSlices, sliceCount } from "@/lib/sweep";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,19 +35,7 @@ export async function GET(request: Request) {
   try {
     const payload = await readPulse();
     const due = await dueSlices();
-    if (due.length > 0) {
-      after(async () => {
-        // Two slices per request: enough to catch up over a few visits,
-        // little enough that no single request spends a minute on it.
-        for (const slice of due.slice(0, 2)) {
-          try {
-            await sweepSlice(slice);
-          } catch {
-            /* a failing slice is recorded by the next sweep's report */
-          }
-        }
-      });
-    }
+    if (due.length > 0) after(() => catchUpSweeps(2));
 
     return NextResponse.json({
       available: true,
