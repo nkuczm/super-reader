@@ -190,8 +190,9 @@ export async function discover(
       title: wanted.title,
       siteUrl: wanted.siteUrl,
       favicon: faviconFor(wanted.faviconHost),
-      // No enrichment: these feeds already carry summaries, and the only
-      // place an image could come from is a site that answers 403.
+      // No enrichment: these feeds carry summaries and images already, and
+      // anything still missing one could only be filled from a host that
+      // answers 403.
       articles,
     };
   }
