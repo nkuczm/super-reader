@@ -5,6 +5,7 @@ import { xHandleFrom, fetchXFeed } from "./x";
 import { parseApiSourceUrl, fetchApiSource } from "./apis";
 import { subredditFrom, subredditFeedUrl, subredditPageUrl } from "./reddit";
 import { knownFeedFor } from "./publishers";
+import { sitemapSource, titleFromSlug } from "./sitemap";
 import { sortNewestFirst } from "./sort";
 import type { DiscoverResult } from "./types";
 
@@ -414,6 +415,8 @@ export async function discover(
 
   // 4. No feed anywhere. Read the page itself, the way Feedly does for sites
   //    that never published one.
+  let scraped: DiscoverResult | null = null;
+  let scrapeError: unknown = null;
   try {
     const { body, finalUrl } = await fetchText(pageBase);
     const { meta, articles } = scrapePage(body, finalUrl);
@@ -424,7 +427,7 @@ export async function discover(
         siteDescription: meta.description,
       }),
     );
-    return {
+    scraped = {
       ...meta,
       kind: "page",
       scope: hasSection ? "section" : "site",
@@ -433,10 +436,61 @@ export async function discover(
       articles: enriched,
     };
   } catch (error) {
-    throw new Error(
-      error instanceof Error && /article links|list of articles/.test(error.message)
-        ? error.message
-        : "No feed found for that site, and its articles could not be read.",
-    );
+    scrapeError = error;
   }
+
+  // A scrape that found a real list is the best of the remaining options: it
+  // carries headlines and pictures straight from the page.
+  if (scraped && scraped.articles.length >= 3) return scraped;
+
+  /**
+   * 5. The site's own sitemap.
+   *
+   * This is where a page that assembles its list in the browser ends up —
+   * there is nothing in the HTML to group, so the scrape above found two
+   * links or none. A sitemap is the same publisher's machine-readable index
+   * of what they have posted, advertised in their robots.txt for exactly this
+   * purpose, and for government publishers it is far more dependable than
+   * their RSS.
+   */
+  try {
+    const found = await sitemapSource(origin, {
+      sectionPath: wantsSection ? sectionPath : "",
+      limit,
+    });
+    if (found) {
+      const named = found.articles.map((article) => ({
+        ...article,
+        // A news sitemap carries headlines. An ordinary one does not, so the
+        // slug stands in until enrichment reads each page's own title.
+        title: article.title || titleFromSlug(article.link),
+      }));
+      const host = new URL(origin).hostname.replace(/^www\./, "");
+      return {
+        feedUrl: found.sitemapUrl,
+        siteUrl: wantsSection ? `${origin}${sectionPath}` : origin,
+        title: host,
+        description: found.headlines
+          ? "Built from the site's news sitemap"
+          : "Built from the site's sitemap",
+        kind: "sitemap",
+        scope: wantsSection ? "section" : "site",
+        total: named.length,
+        favicon: faviconFor(origin),
+        articles: await enrichArticles(named.slice(0, limit), { max: limit }),
+      };
+    }
+  } catch {
+    /* no sitemap either — fall through to whatever the scrape managed */
+  }
+
+  // A thin scrape beats nothing at all.
+  if (scraped && scraped.articles.length > 0) return scraped;
+
+  throw new Error(
+    scrapeError instanceof Error &&
+    /article links|list of articles/.test(scrapeError.message)
+      ? scrapeError.message
+      : "No feed found for that site, and its articles could not be read.",
+  );
 }

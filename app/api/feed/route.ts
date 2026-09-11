@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { fetchText, parseFeed, looksLikeFeed, faviconFor } from "@/lib/feed";
 import { scrapePage } from "@/lib/scrape";
+import {
+  looksLikeSitemap,
+  parseSitemap,
+  articlesFromSitemap,
+  titleFromSlug,
+} from "@/lib/sitemap";
 import { enrichArticles } from "@/lib/enrich";
 import { xHandleFrom, fetchXFeed } from "@/lib/x";
 import { sortNewestFirst } from "@/lib/sort";
@@ -38,6 +44,30 @@ export async function GET(request: Request) {
         }
 
         const { body, finalUrl } = await fetchText(url);
+
+        // A sitemap source refreshes by re-reading the sitemap. It has to be
+        // tested before looksLikeFeed, which only asks whether the body opens
+        // with XML — and a sitemap does.
+        if (looksLikeSitemap(body)) {
+          const parsed = parseSitemap(body, finalUrl);
+          const entries = parsed.kind === "urlset" ? parsed.entries : [];
+          const found = articlesFromSitemap(entries, { limit: MAX_PER_SOURCE }).map(
+            (article) => ({
+              ...article,
+              title: article.title || titleFromSlug(article.link),
+            }),
+          );
+          const host = new URL(finalUrl).hostname.replace(/^www\./, "");
+          return {
+            ok: true as const,
+            feedUrl: url,
+            siteUrl: new URL(finalUrl).origin,
+            title: host,
+            favicon: faviconFor(finalUrl),
+            articles: await enrichArticles(found, { max: 20 }),
+          };
+        }
+
         // A source may be a real feed or a scraped page; the body tells us.
         const { meta, articles } = looksLikeFeed(body)
           ? parseFeed(body, finalUrl)

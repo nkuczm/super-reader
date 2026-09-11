@@ -2,7 +2,7 @@
 
 import type { Article, SourceMeta } from "./types";
 
-export type Source = SourceMeta & { id: string; kind: "feed" | "topic" | "page" | "x" | "api" };
+export type Source = SourceMeta & { id: string; kind: "feed" | "topic" | "page" | "sitemap" | "x" | "api" };
 export type Feed = { id: string; name: string; sources: Source[] };
 
 const KEY = "super-reader:v1";

@@ -72,6 +72,14 @@ async function enrichOne(
         return firstImageIn(body, finalUrl);
       })();
 
+    // A sitemap gives a URL and a date but no headline. The page's own title
+    // is the headline, and this request is being made anyway.
+    const title =
+      article.title ||
+      stripHtml(metaTag(head, ["og:title", "twitter:title"]) ?? "") ||
+      body.match(/<title[^>]*>([\s\S]{0,300}?)<\/title>/i)?.[1]?.trim() ||
+      article.title;
+
     const publishedAt =
       article.publishedAt ??
       toIso(
@@ -82,7 +90,7 @@ async function enrichOne(
         ]),
       );
 
-    return { ...article, summary, image, publishedAt };
+    return { ...article, title, summary, image, publishedAt };
   } catch {
     // A source that blocks us, or a slow page, must not fail the whole feed.
     return article;
@@ -102,7 +110,7 @@ export async function enrichArticles(
     siteDescription,
   }: { max?: number; concurrency?: number; siteDescription?: string } = {},
 ): Promise<Article[]> {
-  const needs = (a: Article) => !a.image || !a.summary;
+  const needs = (a: Article) => !a.image || !a.summary || !a.title;
 
   const byIndex = new Map<number, Article>();
   const queue: { index: number; article: Article }[] = [];

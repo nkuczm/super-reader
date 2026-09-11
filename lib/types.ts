@@ -37,7 +37,7 @@ export type SourceMeta = {
 };
 
 export type DiscoverResult = SourceMeta & {
-  kind: "feed" | "topic" | "page" | "x" | "api";
+  kind: "feed" | "topic" | "page" | "sitemap" | "x" | "api";
   /** How many articles the source really has, before the preview cap. */
   total: number;
   /** Whether this covers just the pasted section or the whole site. */

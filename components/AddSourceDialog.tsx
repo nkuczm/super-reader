@@ -217,6 +217,9 @@ export default function AddSourceDialog({
                     {preview.kind === "page" && (
                       <em className="badge">built from the page — no RSS</em>
                     )}
+                    {preview.kind === "sitemap" && (
+                      <em className="badge">built from the site&rsquo;s sitemap — no RSS</em>
+                    )}
                   </span>
                 </div>
               </div>

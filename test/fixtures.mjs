@@ -610,3 +610,84 @@ export function startThinPageSite(port = 8793) {
     port,
   );
 }
+
+
+/* ------------------------------------------------------------------ *
+ * A department with no feed and no server-rendered list — the shape
+ * that defeats both feed discovery and the page scraper, and that a
+ * sitemap answers. Its robots.txt announces an index; the index points
+ * at a news sitemap and at a pile of sitemaps that are not articles.
+ * ------------------------------------------------------------------ */
+
+const SM = "http://127.0.0.1:8794";
+
+const govShell = `<html><head><title>Newsroom | Department of Works</title>
+<meta property="og:site_name" content="Department of Works"></head>
+<body><header><a href="/">Home</a><a href="/about">About</a></header>
+<div id="app">Loading the newsroom…</div>
+<footer><a href="/contact">Contact</a></footer></body></html>`;
+
+const govRobots = `User-agent: *
+Disallow: /internal/
+
+Sitemap: ${SM}/sitemap_index.xml
+`;
+
+const govIndex = `<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <sitemap><loc>${SM}/sitemap-images.xml</loc></sitemap>
+  <sitemap><loc>${SM}/sitemap-pages.xml</loc></sitemap>
+  <sitemap><loc>${SM}/news-sitemap.xml</loc></sitemap>
+</sitemapindex>`;
+
+const govNews = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">
+  <url><loc>${SM}/news/harbour-works-approved</loc>
+    <news:news><news:publication_date>2026-09-10T09:00:00Z</news:publication_date>
+      <news:title>Harbour works approved</news:title></news:news></url>
+  <url><loc>${SM}/news/bridge-inspection-report</loc>
+    <news:news><news:publication_date>2026-09-11T14:30:00Z</news:publication_date>
+      <news:title>Bridge inspection report published</news:title></news:news></url>
+  <url><loc>${SM}/news/grant-scheme-opens</loc>
+    <news:news><news:publication_date>2026-09-08T11:00:00Z</news:publication_date>
+      <news:title>Grant scheme opens for applications</news:title></news:news></url>
+  <url><loc>${SM}/</loc>
+    <news:news><news:publication_date>2026-09-11T00:00:00Z</news:publication_date>
+      <news:title>Home</news:title></news:news></url>
+</urlset>`;
+
+// The plain sitemap: URLs and lastmod, no headlines, plus section pages and
+// an undated entry that cannot be placed in a newest-first list.
+const govPages = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>${SM}/about</loc><lastmod>2026-01-02</lastmod></url>
+  <url><loc>${SM}/notices/dredging-consultation-2026</loc><lastmod>2026-09-09T08:00:00Z</lastmod></url>
+  <url><loc>${SM}/notices/quay-closure-notice</loc><lastmod>2026-09-07T08:00:00Z</lastmod></url>
+  <url><loc>${SM}/notices/undated-thing</loc></url>
+</urlset>`;
+
+const govStory = (title) => `<html><head>
+<meta property="og:title" content="${title}">
+<meta property="og:description" content="What the department decided and why.">
+</head><body><article><h1>${title}</h1><p>Body.</p></article></body></html>`;
+
+export function startSitemapSite(port = 8794) {
+  return serve(
+    {
+      "/": [200, "text/html", govShell],
+      "/newsroom": [200, "text/html", govShell],
+      "/robots.txt": [200, "text/plain", govRobots],
+      "/sitemap_index.xml": [200, "application/xml", govIndex],
+      "/news-sitemap.xml": [200, "application/xml", govNews],
+      "/sitemap-pages.xml": [200, "application/xml", govPages],
+      "/sitemap-images.xml": [200, "application/xml", `<?xml version="1.0"?><urlset></urlset>`],
+      "/news/harbour-works-approved": [200, "text/html", govStory("Harbour works approved")],
+      "/news/bridge-inspection-report": [200, "text/html", govStory("Bridge inspection report published")],
+      "/news/grant-scheme-opens": [200, "text/html", govStory("Grant scheme opens for applications")],
+      "/notices/dredging-consultation-2026": [200, "text/html", govStory("Dredging consultation")],
+      "/notices/quay-closure-notice": [200, "text/html", govStory("Quay closure notice")],
+    },
+    port,
+  );
+}
