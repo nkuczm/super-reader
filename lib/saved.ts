@@ -159,6 +159,9 @@ export function slimForSync(articles: SavedArticle[]): SavedArticle[] {
     link: article.link,
     savedAt: article.savedAt,
     ...(article.publishedAt ? { publishedAt: article.publishedAt } : {}),
+    // Carried so the other device shows the date rather than a time its
+    // source never gave — see lib/dates.ts.
+    ...(article.datePrecision ? { datePrecision: article.datePrecision } : {}),
     ...(article.author ? { author: article.author } : {}),
     ...(article.image ? { image: article.image } : {}),
     ...(article.sourceId ? { sourceId: article.sourceId } : {}),

@@ -8,7 +8,7 @@ import ApiCatalog from "./ApiCatalog";
 import OutletCatalog from "./OutletCatalog";
 import type { PickedSource } from "./OutletCatalog";
 import SourceIcon from "./SourceIcon";
-import { timeAgo, hostOf } from "./format";
+import { published, hostOf } from "./format";
 import { knownFeedFor, WSJ_CHOICES } from "@/lib/publishers";
 
 type Props = {
@@ -247,7 +247,7 @@ export default function AddSourceDialog({
                   <li key={article.id}>
                     <div>{article.title}</div>
                     <div className="when">
-                      {[article.author, timeAgo(article.publishedAt)]
+                      {[article.author, published(article)]
                         .filter(Boolean)
                         .join(" · ")}
                     </div>

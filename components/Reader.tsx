@@ -83,7 +83,7 @@ import {
 import ArticleReader from "./ArticleReader";
 import SourceIcon from "./SourceIcon";
 import { Icon } from "./icons";
-import { timeAgo, hostOf } from "./format";
+import { published, hostOf } from "./format";
 import { sortNewestFirst, timeOf } from "@/lib/sort";
 import type { RankedArticle } from "@/lib/pulse";
 import type { PickedSource } from "./OutletCatalog";
@@ -282,6 +282,21 @@ export default function Reader() {
     updatedAtRef.current = loadUpdatedAt();
     setUpdatedAt(updatedAtRef.current);
     setReady(true);
+
+    /**
+     * Paint the list we had last time, straight away.
+     *
+     * The refresh that `ready` sets off replaces this the moment it lands, so
+     * nothing here is shown for long — but a feed round trip is seconds, and
+     * opening to the articles you were just reading beats opening to a
+     * spinner. Only applied if the refresh has not already beaten us to it,
+     * which on a fast connection it sometimes does.
+     */
+    void (async () => {
+      const snapshot = await loadListSnapshot<Loaded>();
+      if (!snapshot || snapshot.length === 0) return;
+      setArticles((current) => (current.length > 0 ? current : snapshot));
+    })();
   }, []);
 
   // Lets the app open with no connection.
@@ -1167,6 +1182,7 @@ export default function Reader() {
             title,
             link,
             publishedAt: known?.publishedAt,
+            datePrecision: known?.datePrecision,
             summary: known?.summary ?? reading?.summary,
             image: known?.image,
             sourceId: known?.sourceId,
@@ -2218,7 +2234,7 @@ export default function Reader() {
                         <>
                           <span className="dot">·</span>
                           <span className="meta-when">
-                            {timeAgo(article.publishedAt)}
+                            {published(article)}
                           </span>
                         </>
                       )}

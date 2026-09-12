@@ -1,4 +1,5 @@
 import { stripHtml, toIso, faviconFor, fetchText, parseFeed, looksLikeFeed } from "./feed";
+import { datedFrom } from "./dates";
 import { sortNewestFirst } from "./sort";
 import type { Article, Attachment, SourceMeta } from "./types";
 
@@ -140,11 +141,11 @@ function clean(value: unknown, max = 400): string | undefined {
 }
 
 /** YYYYMMDD, as openFDA and a few others report dates. */
-function fromCompactDate(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const match = value.match(/^(\d{4})(\d{2})(\d{2})$/);
-  return match ? `${match[1]}-${match[2]}-${match[3]}T00:00:00Z` : toIso(value);
-}
+/**
+ * The Federal Register publishes one issue a day, live at 8:45am Eastern.
+ * Its API gives only the date, so this is the time those documents came out.
+ */
+const FEDERAL_REGISTER_RELEASE = "08:45";
 
 const query = (value: string) => encodeURIComponent(value.trim());
 
@@ -209,7 +210,7 @@ export const API_PROVIDERS: ApiProvider[] = [
         title,
         link,
         author: pick(item.court, item.court_id),
-        publishedAt: toIso(
+        ...datedFrom(
           pick(item.dateFiled, item.date_filed, item.dateArgued, item.dateCreated),
         ),
         summary: clean(snippet),
@@ -343,7 +344,7 @@ export const API_PROVIDERS: ApiProvider[] = [
         title: String(item.title),
         link: String(item.html_url),
         author: agencies.slice(0, 2).join(", ") || undefined,
-        publishedAt: toIso(item.publication_date),
+        ...datedFrom(item.publication_date, { at: FEDERAL_REGISTER_RELEASE }),
         summary: clean(item.abstract),
       };
     },
@@ -387,7 +388,7 @@ export const API_PROVIDERS: ApiProvider[] = [
         title: String(attributes.title),
         link: `https://www.regulations.gov/document/${item.id}`,
         author: pick(attributes.agencyId),
-        publishedAt: toIso(pick(attributes.postedDate, attributes.lastModifiedDate)),
+        ...datedFrom(pick(attributes.postedDate, attributes.lastModifiedDate)),
         summary: clean(pick(attributes.documentType, attributes.subtype)),
       };
     },
@@ -446,7 +447,7 @@ export const API_PROVIDERS: ApiProvider[] = [
         title: `${type.toUpperCase()} ${number} — ${title}`,
         link: `https://www.congress.gov/bill/${item.congress}th-congress/${slug}/${number}`,
         author: pick(item.originChamber),
-        publishedAt: toIso(pick(item.updateDate, item.introducedDate)),
+        ...datedFrom(pick(item.updateDate, item.introducedDate)),
         summary: clean(item.latestAction?.text),
       };
     },
@@ -496,7 +497,7 @@ export const API_PROVIDERS: ApiProvider[] = [
         title: `${form} — ${company}`,
         link,
         author: company,
-        publishedAt: toIso(pick(source.file_date)),
+        ...datedFrom(pick(source.file_date)),
         summary: clean(pick(source.file_description, source.display_names?.join(", "))),
       };
     },
@@ -551,7 +552,7 @@ export const API_PROVIDERS: ApiProvider[] = [
         title,
         link: `https://clinicaltrials.gov/study/${nctId}`,
         author: pick(section.sponsorCollaboratorsModule?.leadSponsor?.name),
-        publishedAt: toIso(
+        ...datedFrom(
           pick(
             section.statusModule?.lastUpdatePostDateStruct?.date,
             section.statusModule?.studyFirstPostDateStruct?.date,
@@ -609,7 +610,7 @@ export const API_PROVIDERS: ApiProvider[] = [
           endpoint.split("/")[0],
         )}#tabs-2`,
         author: pick(item.recalling_firm, item.state),
-        publishedAt: fromCompactDate(
+        ...datedFrom(
           pick(item.report_date, item.recall_initiation_date, item.center_classification_date),
         ),
         summary: clean(item.reason_for_recall),

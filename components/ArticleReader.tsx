@@ -5,7 +5,7 @@ import type { ReadableArticle } from "@/lib/article";
 import { Icon } from "./icons";
 import { downloadUrlFor } from "@/lib/download";
 import { readCached, writeCached } from "@/lib/offline";
-import { timeAgo, hostOf } from "./format";
+import { published, hostOf } from "./format";
 import QuoteToNote from "./QuoteToNote";
 import { findQuoteRange } from "@/lib/highlight";
 import type { Note } from "@/lib/notes";
@@ -255,7 +255,7 @@ export default function ArticleReader({
           {[
             article?.siteName ?? hostOf(url),
             article?.byline,
-            article?.publishedAt ? timeAgo(article.publishedAt) : null,
+            article?.publishedAt ? published(article) : null,
             article?.wordCount
               ? `${Math.max(1, Math.round(article.wordCount / 220))} min read`
               : null,

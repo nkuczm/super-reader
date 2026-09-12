@@ -15,6 +15,12 @@ export type Article = {
   link: string;
   author?: string;
   publishedAt?: string;
+  /**
+   * Set when the source gave a day and no time. The timestamp above is then
+   * the day's release time rather than something the source stated, so the
+   * list shows the date instead of quoting an hour — see lib/dates.ts.
+   */
+  datePrecision?: "day";
   summary?: string;
   image?: string;
   attachments?: Attachment[];

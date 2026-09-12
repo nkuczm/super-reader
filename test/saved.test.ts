@@ -156,6 +156,26 @@ test("a full payload still fits in what the sync route accepts", () => {
   );
 });
 
+test("a day-precision date survives the trip to another device", () => {
+  // Otherwise the other device shows "8:00 PM" under a Federal Register
+  // notice — a time its source never gave. See lib/dates.ts.
+  const notice: SavedArticle = {
+    id: "fr1",
+    title: "Rule on emissions",
+    link: "https://www.federalregister.gov/documents/2026/0001",
+    publishedAt: "2026-01-05T13:45:00.000Z",
+    datePrecision: "day",
+    savedAt: NOW,
+  };
+  const [wire] = slimForSync([notice]);
+  assert.equal(wire.publishedAt, "2026-01-05T13:45:00.000Z");
+  assert.equal(wire.datePrecision, "day");
+
+  // And an ordinary article is not given one it never had.
+  const ordinary: SavedArticle = { ...notice, datePrecision: undefined };
+  assert.equal("datePrecision" in slimForSync([ordinary])[0], false);
+});
+
 test("a trimmed copy cannot shorten the fuller local one", () => {
   const full = saved("https://a.example/1", ago(3), { summary: "F".repeat(600) });
   const [wire] = slimForSync([full]);

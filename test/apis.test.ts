@@ -124,7 +124,10 @@ test("CourtListener: builds the search and maps an opinion", async () => {
     "relative API paths become real links",
   );
   assert.equal(articles[0].summary, "Qualified immunity does not apply.", "markup is stripped");
-  assert.equal(articles[0].publishedAt, "2026-02-03T00:00:00.000Z");
+  // A filing date is a day, so it sits at midday Eastern rather than at
+  // midnight UTC — which is the evening before, and sorted as such.
+  assert.equal(articles[0].publishedAt, "2026-02-03T17:00:00.000Z");
+  assert.equal(articles[0].datePrecision, "day");
   delete process.env.COURTLISTENER_TOKEN;
 });
 
@@ -147,6 +150,37 @@ test("Federal Register: newest first, with the agency as the byline", async () =
   assert.match(calls[0].url, /conditions%5Btype%5D%5B%5D=RULE/);
   assert.equal(articles[0].author, "Environmental Protection Agency");
   assert.equal(articles[0].summary, "A short abstract.");
+  // The issue goes live at 8:45am Eastern, which in January is EST. Before
+  // this, every document in a day's issue shared one midnight-UTC timestamp
+  // and sorted below anything filed after 8pm the previous evening.
+  assert.equal(articles[0].publishedAt, "2026-01-05T13:45:00.000Z");
+  assert.equal(articles[0].datePrecision, "day");
+});
+
+test("Federal Register: a day's documents no longer share one timestamp", async () => {
+  stubFetch({
+    results: [
+      {
+        document_number: "2026-0001",
+        title: "First rule",
+        html_url: "https://www.federalregister.gov/documents/2026/0001",
+        publication_date: "2026-01-05",
+      },
+      {
+        document_number: "2026-0002",
+        title: "Second rule",
+        html_url: "https://www.federalregister.gov/documents/2026/0002",
+        publication_date: "2026-01-06",
+      },
+    ],
+  });
+
+  const { articles } = await fetchApiSource("api:federal-register");
+  assert.equal(articles[0].title, "Second rule", "the later day is first");
+  assert.ok(
+    Date.parse(articles[0].publishedAt!) > Date.parse(articles[1].publishedAt!),
+    "consecutive days are ordered, not tied",
+  );
 });
 
 test("Hacker News: prefers the story link and falls back to the discussion", async () => {
