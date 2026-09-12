@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReadableArticle } from "@/lib/article";
 import { Icon } from "./icons";
 import { downloadUrlFor } from "@/lib/download";
 import { readCached, writeCached } from "@/lib/offline";
 import { timeAgo, hostOf } from "./format";
+import QuoteToNote from "./QuoteToNote";
+import type { Note } from "@/lib/notes";
 
 type Props = {
   url: string;
@@ -26,6 +28,13 @@ type Props = {
   /** Whether this article is bookmarked, and how to change that. */
   saved?: boolean;
   onToggleSave?: () => void;
+  /**
+   * Highlighting to quote, when it is switched on. The notes are passed in
+   * rather than read here: they belong to the app, not to one article.
+   */
+  notes?: Note[];
+  onQuote?: (noteId: string, text: string) => void;
+  onCreateNote?: (name: string) => string;
   onClose: () => void;
 };
 
@@ -39,6 +48,9 @@ export default function ArticleReader({
   onOpenMenu,
   saved,
   onToggleSave,
+  notes,
+  onQuote,
+  onCreateNote,
   onClose,
 }: Props) {
   const [article, setArticle] = useState<ReadableArticle | null>(null);
@@ -46,6 +58,8 @@ export default function ArticleReader({
   const [fromCache, setFromCache] = useState(false);
   /** Set when a fetch is taking long enough that silence looks like a bug. */
   const [slow, setSlow] = useState(false);
+  /** The article's own text — the only place a highlight becomes a quote. */
+  const prose = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -264,8 +278,17 @@ export default function ArticleReader({
                 handlers are stripped before this ever reaches the DOM. */}
             <div
               className="prose"
+              ref={prose}
               dangerouslySetInnerHTML={{ __html: article.html }}
             />
+            {onQuote && onCreateNote && (
+              <QuoteToNote
+                container={prose}
+                notes={notes ?? []}
+                onQuote={onQuote}
+                onCreateNote={onCreateNote}
+              />
+            )}
             {article.via === "preview" && (
               <p className="reader-note">
                 This page has no article to extract — a video or a gallery,

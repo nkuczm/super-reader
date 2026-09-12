@@ -633,6 +633,77 @@
 .article-actions { display: flex; align-items: center; gap: 8px; }
 .save-btn.on { color: var(--accent); border-color: var(--accent); }
 
+/* ---------- notes ---------- */
+.notes-nav { margin: 2px 0 6px; }
+.note-row { display: flex; align-items: center; gap: 2px; }
+.note-row .nav-item { flex: 1; min-width: 0; }
+.note-row .icon-btn { opacity: 0; flex: none; }
+.note-row:hover .icon-btn, .note-row:focus-within .icon-btn { opacity: 1; }
+.foot-row { display: flex; gap: 7px; }
+.foot-row .btn { flex: 1; justify-content: center; }
+
+/* The floating "Add to note" button, and the note it goes into. */
+.quote-pop { position: fixed; z-index: 60; }
+.quote-add { box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22); }
+.quote-menu {
+  min-width: 210px; max-width: 260px; padding: 6px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 11px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
+}
+.quote-menu > button {
+  display: block; width: 100%; padding: 8px 9px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--text); font-size: 13.5px; text-align: left;
+}
+.quote-menu > button:hover { background: var(--bg-hover); }
+.quote-new { display: flex; gap: 6px; padding: 6px 4px 2px; }
+.quote-new .input { margin: 0; min-width: 0; flex: 1; font-size: 13.5px; }
+.quote-toast {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(22px + env(safe-area-inset-bottom, 0px)); z-index: 70;
+  padding: 9px 15px; border-radius: 999px; font-size: 13px; font-weight: 600;
+  background: var(--text); color: var(--bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.note-page { padding: 0 0 60px; }
+.note-entries { list-style: none; margin: 18px 0 0; padding: 0 24px; }
+.note-entry {
+  display: grid; grid-template-columns: 1fr auto; gap: 8px;
+  align-items: start; padding: 0 0 16px;
+}
+.note-entry .icon-btn { opacity: 0; }
+.note-entry:hover .icon-btn, .note-entry:focus-within .icon-btn { opacity: 1; }
+/* A bullet, because a note is a list of things picked up along the way. */
+.note-quote { position: relative; padding-left: 18px; }
+.note-quote::before {
+  content: ""; position: absolute; left: 2px; top: 9px;
+  width: 5px; height: 5px; border-radius: 50%; background: var(--text-dim);
+}
+.note-quote blockquote {
+  margin: 0; padding: 2px 0 2px 13px; border-left: 3px solid var(--accent);
+  font-size: 15.5px; line-height: 1.55;
+}
+.note-quote blockquote p { margin: 0 0 8px; }
+.note-quote blockquote p:last-child { margin-bottom: 0; }
+.note-source {
+  display: inline-flex; align-items: center; gap: 5px; margin: 7px 0 0 13px;
+  padding: 0; border: 0; background: transparent; color: var(--text-dim);
+  font-size: 12.5px; text-align: left;
+}
+.note-source:hover { color: var(--accent); text-decoration: underline; }
+.note-comment {
+  width: 100%; resize: none; overflow: hidden; padding: 3px 0 3px 18px;
+  border: 0; background: transparent; color: var(--text);
+  font: inherit; font-size: 15px; line-height: 1.55;
+}
+.note-comment:focus { outline: none; background: var(--bg-sub); border-radius: 7px; }
+.note-confirm { display: flex; gap: 10px; align-items: center; font-size: 12.5px; }
+.note-compose { display: flex; gap: 8px; align-items: flex-end; padding: 8px 24px 0; }
+.note-input { flex: 1; resize: vertical; font: inherit; font-size: 15px; }
+@media (max-width: 760px) {
+  .note-entries, .note-compose { padding-left: 16px; padding-right: 16px; }
+}
+
 /* ---------- team feeds ---------- */
 .article-actions { flex-wrap: wrap; }
 .team-share { position: relative; display: inline-flex; }

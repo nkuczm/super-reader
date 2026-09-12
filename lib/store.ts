@@ -141,6 +141,12 @@ export type Settings = {
    */
   showDownloadBar: boolean;
   /**
+   * Whether highlighting text in an article offers to quote it into a note.
+   * A switch because it changes what a selection does: with it off, selecting
+   * text is just selecting text.
+   */
+  quoteToNote: boolean;
+  /**
    * Hosts whose articles open on their own site instead of in the reader.
    * Subscription sites are the case: the text is only available in a browser
    * that is logged in, so attempting reader view just wastes a tap.
@@ -154,6 +160,7 @@ export const DEFAULT_SETTINGS: Settings = {
   bigStoryMetric: "score",
   hideRead: false,
   showDownloadBar: false,
+  quoteToNote: true,
   openOnSite: [],
 };
 
@@ -180,6 +187,7 @@ export function loadSettings(): Settings {
           : DEFAULT_SETTINGS.bigStoryMetric,
       hideRead: Boolean(parsed.hideRead),
       showDownloadBar: Boolean(parsed.showDownloadBar),
+      quoteToNote: parsed.quoteToNote !== false,
       openOnSite: Array.isArray(parsed.openOnSite)
         ? parsed.openOnSite.filter((h): h is string => typeof h === "string")
         : [],

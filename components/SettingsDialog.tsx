@@ -72,6 +72,7 @@ export default function SettingsDialog({
   apiKeys,
   onKeysChange,
   onDownload,
+  noteCount,
   teams,
   teamsBusy,
   onCreateTeam,
@@ -97,6 +98,8 @@ export default function SettingsDialog({
     result?: { saved: number; failed: number };
   };
   onDownload: () => void;
+  /** How many notes exist, so the switch can say what it is switching off. */
+  noteCount: number;
   /** The team feeds this device is connected to. */
   teams: TeamFeed[];
   teamsBusy: boolean;
@@ -222,6 +225,30 @@ export default function SettingsDialog({
               </ul>
             </>
           )}
+
+          <p className="field-label reading-label">Notes</p>
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={settings.quoteToNote}
+              onChange={(event) =>
+                onChange({ ...settings, quoteToNote: event.target.checked })
+              }
+            />
+            <span>
+              Highlight text to quote it into a note
+              <em>
+                Selecting text in an article offers <strong>Add to note</strong>.
+                The quote is kept word for word, and the article is saved with
+                it so it is still there later.
+              </em>
+            </span>
+          </label>
+          <p className="field-note">
+            {noteCount === 0
+              ? "Notes live in the sidebar, beside your feeds. Make one with New note, or straight from your first highlight."
+              : `${noteCount} note${noteCount === 1 ? "" : "s"} in the sidebar. Turning this off leaves them there; it only stops highlighting from offering to quote.`}
+          </p>
 
           <p className="field-label reading-label">Team feeds</p>
           <p className="hint" style={{ marginTop: 0, marginBottom: 12 }}>

@@ -36,6 +36,17 @@ import {
   type Source,
 } from "@/lib/store";
 import type { TeamArticle } from "@/lib/team";
+import {
+  loadNotes,
+  saveNotes,
+  addEntry,
+  removeEntry,
+  editComment,
+  renameNote,
+  releasableSaves,
+  type Note,
+} from "@/lib/notes";
+import NotePage from "./NotePage";
 import AddSourceDialog from "./AddSourceDialog";
 import SyncDialog from "./SyncDialog";
 import InlineName from "./InlineName";
@@ -107,6 +118,7 @@ type Selection =
   | { type: "saved" }
   /** A shared list: its id is the team's connect code. */
   | { type: "team"; id: string }
+  | { type: "note"; id: string }
   | { type: "feed" | "source"; id: string };
 
 export default function Reader() {
@@ -155,6 +167,11 @@ export default function Reader() {
   const [saved, setSaved] = useState<SavedArticle[]>([]);
   /** Un-saves, dated, so they survive syncing with a device that still has it. */
   const [savedRemovals, setSavedRemovals] = useState<SavedRemoval[]>([]);
+  /** Notes, and the quotes pulled into them. Per device, like Settings. */
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [addingNote, setAddingNote] = useState(false);
+  const [editingNote, setEditingNote] = useState<string | null>(null);
+  const [confirmingNote, setConfirmingNote] = useState<string | null>(null);
   /** The team feeds this device has joined. */
   const [teams, setTeams] = useState<TeamFeed[]>([]);
   /**
@@ -213,6 +230,8 @@ export default function Reader() {
   /** The bookmark list as it stands, for merging inside applyRemote. */
   const savedRef = useRef<SavedArticle[]>([]);
   const removalsRef = useRef<SavedRemoval[]>([]);
+  /** The notes as they stand, for writes that land in the same click. */
+  const notesRef = useRef<Note[]>([]);
 
   useEffect(() => {
     setFeeds(loadFeeds());
@@ -223,6 +242,9 @@ export default function Reader() {
     setSaved(loadSaved());
     setSavedRemovals(loadSavedRemovals());
     setTeams(loadTeams());
+    const storedNotes = loadNotes();
+    notesRef.current = storedNotes;
+    setNotes(storedNotes);
     setVault(loadVault());
     setApiKeys(loadUnlockedKeys());
     updatedAtRef.current = loadUpdatedAt();
@@ -946,6 +968,115 @@ export default function Reader() {
     [saved, noteRemoval],
   );
 
+  /**
+   * Write the notes through, and let go of any article that was only saved
+   * because a quote needed it. An article the reader saved themselves is
+   * never released — quoting something must not be able to lose a bookmark.
+   */
+  const commitNotes = useCallback(
+    (update: (current: Note[]) => Note[]) => {
+      // Functional, and through a ref, because two of these can land in one
+      // click: quoting into a note that the same click created. Reading the
+      // rendered `notes` for the second write would undo the first.
+      const next = update(notesRef.current);
+      notesRef.current = next;
+      setNotes(next);
+      saveNotes(next);
+
+      const releasable = releasableSaves(savedRef.current, next);
+      if (releasable.length === 0) return;
+      const drop = new Set(releasable);
+      for (const link of releasable) noteRemoval(link);
+      setSaved((current) => {
+        const kept = current.filter((article) => !drop.has(article.link));
+        saveSaved(kept);
+        return kept;
+      });
+    },
+    [noteRemoval],
+  );
+
+  const createNote = useCallback(
+    (name: string) => {
+      const note: Note = {
+        id: newId(),
+        name: name.trim().slice(0, 60) || "Note",
+        entries: [],
+        at: Date.now(),
+      };
+      commitNotes((current) => [...current, note]);
+      return note.id;
+    },
+    [commitNotes],
+  );
+
+  /**
+   * A highlighted passage becomes a quote, and the article behind it becomes
+   * a bookmark if it was not one already — a quote whose article has scrolled
+   * out of its feed and off the device is a quote with nothing behind it.
+   * That automatic save is marked, so it can be released when the quote goes.
+   */
+  const quoteIntoNote = useCallback(
+    (noteId: string, text: string) => {
+      const link = reading?.url;
+      if (!link || !text) return;
+
+      const known =
+        articles.find((a) => a.link === link) ??
+        savedRef.current.find((a) => a.link === link);
+      const source = known?.sourceId
+        ? allSources.find((entry) => entry.id === known.sourceId)
+        : undefined;
+      const title = known?.title ?? reading?.title ?? link;
+
+      commitNotes((current) =>
+        addEntry(current, noteId, {
+          id: newId(),
+          kind: "quote",
+          text,
+          link,
+          articleTitle: title,
+          sourceTitle: source?.title ?? (known as SavedArticle | undefined)?.sourceTitle,
+          at: Date.now(),
+        }),
+      );
+
+      if (savedRef.current.some((a) => a.link === link)) return;
+      setSaved((current) => {
+        const next: SavedArticle[] = [
+          {
+            id: known?.id ?? `note:${link}`,
+            title,
+            link,
+            publishedAt: known?.publishedAt,
+            summary: known?.summary ?? reading?.summary,
+            image: known?.image,
+            sourceId: known?.sourceId,
+            sourceTitle: source?.title ?? (known as SavedArticle | undefined)?.sourceTitle,
+            favicon: source?.favicon,
+            savedAt: Date.now(),
+            viaNote: true,
+          },
+          ...current,
+        ];
+        saveSaved(next);
+        return next;
+      });
+    },
+    [reading, articles, allSources, commitNotes],
+  );
+
+  const removeNote = useCallback(
+    (id: string) => {
+      commitNotes((current) => current.filter((note) => note.id !== id));
+      setConfirmingNote(null);
+      setSelection((current) =>
+        current.type === "note" && current.id === id ? { type: "all" } : current,
+      );
+    },
+    [commitNotes],
+  );
+
   const markSaved = useCallback((url: string) => {
     setSavedOffline((current) =>
       current.has(url) ? current : new Set(current).add(url),
@@ -1390,6 +1521,12 @@ export default function Reader() {
           ? (feeds.find((f) => f.id === selection.id)?.name ?? "Feed")
           : (sourceById.get(selection.id)?.title ?? "Source");
 
+  /** The note being read, if the sidebar is on one. */
+  const openNote =
+    selection.type === "note"
+      ? (notes.find((note) => note.id === selection.id) ?? null)
+      : null;
+
   const unread = (items: Loaded[]) =>
     items.filter((a) => !read.has(a.id)).length;
 
@@ -1436,6 +1573,85 @@ export default function Reader() {
               </span>
             </button>
           ))}
+
+          {/* Notes sit with Saved and the team feeds: places things are kept,
+              above the feeds things arrive in. */}
+          {(notes.length > 0 || addingNote) && (
+            <div className="notes-nav">
+              {notes.map((note) => (
+                <div className="note-row" key={note.id}>
+                  {editingNote === note.id ? (
+                    <InlineName
+                      initial={note.name}
+                      onSubmit={(value) => {
+                        commitNotes((current) => renameNote(current, note.id, value));
+                        setEditingNote(null);
+                      }}
+                      onCancel={() => setEditingNote(null)}
+                    />
+                  ) : confirmingNote === note.id ? (
+                    <div className="confirm-row">
+                      <span>Delete “{note.name}”?</span>
+                      <button
+                        className="link-btn danger"
+                        onClick={() => removeNote(note.id)}
+                      >
+                        Delete
+                      </button>
+                      <button
+                        className="link-btn"
+                        onClick={() => setConfirmingNote(null)}
+                      >
+                        Keep
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <button
+                        className={`nav-item ${
+                          selection.type === "note" && selection.id === note.id
+                            ? "active"
+                            : ""
+                        }`}
+                        onClick={() => choose({ type: "note", id: note.id })}
+                        onDoubleClick={() => setEditingNote(note.id)}
+                        title="Double-click to rename"
+                      >
+                        {Icon.note}
+                        <span className="feed-name">{note.name}</span>
+                        <span className="count">{note.entries.length || ""}</span>
+                      </button>
+                      <button
+                        className="icon-btn"
+                        onClick={() => setEditingNote(note.id)}
+                        aria-label={`Rename ${note.name}`}
+                      >
+                        {Icon.pencil}
+                      </button>
+                      <button
+                        className="icon-btn danger"
+                        onClick={() => setConfirmingNote(note.id)}
+                        aria-label={`Delete ${note.name}`}
+                      >
+                        {Icon.trash}
+                      </button>
+                    </>
+                  )}
+                </div>
+              ))}
+              {addingNote && (
+                <InlineName
+                  placeholder="Name this note"
+                  onSubmit={(value) => {
+                    const name = value.trim();
+                    setAddingNote(false);
+                    if (name) choose({ type: "note", id: createNote(name) });
+                  }}
+                  onCancel={() => setAddingNote(false)}
+                />
+              )}
+            </div>
+          )}
 
           {feeds.map((feed) => {
             const ids = new Set(feed.sources.map((s) => s.id));
@@ -1576,13 +1792,25 @@ export default function Reader() {
               onCancel={() => setAdding(false)}
             />
           ) : (
-            <button
-              className="btn ghost small"
-              onClick={() => setAdding(true)}
-              style={{ width: "100%" }}
-            >
-              {Icon.plus} New feed
-            </button>
+            <div className="foot-row">
+              <button
+                className="btn ghost small"
+                onClick={() => setAdding(true)}
+              >
+                {Icon.plus} New feed
+              </button>
+              {settings.quoteToNote && (
+                <button
+                  className="btn ghost small"
+                  onClick={() => {
+                    setAddingNote(true);
+                    setMenuOpen(true);
+                  }}
+                >
+                  {Icon.plus} New note
+                </button>
+              )}
+            </div>
           )}
           <button
             className="sync-btn"
@@ -1641,6 +1869,9 @@ export default function Reader() {
             keyHeaders={keyHeaders}
             onOpenMenu={() => setMenuOpen(true)}
             onAlwaysOpenOnSite={alwaysOpenOnSite}
+            notes={notes}
+            onQuote={settings.quoteToNote ? quoteIntoNote : undefined}
+            onCreateNote={settings.quoteToNote ? createNote : undefined}
             saved={isSaved(reading.url)}
             onToggleSave={() => {
               const article =
@@ -1649,6 +1880,28 @@ export default function Reader() {
               if (article) toggleSaved(article, sourceById.get(article.sourceId));
             }}
             onClose={() => setReading(null)}
+          />
+        ) : openNote ? (
+          <NotePage
+            note={openNote}
+            onOpenMenu={() => setMenuOpen(true)}
+            onOpenArticle={(link, title) => setReading({ url: link, title })}
+            onAddComment={(text) =>
+              commitNotes((current) =>
+                addEntry(current, openNote.id, {
+                  id: newId(),
+                  kind: "text",
+                  text,
+                  at: Date.now(),
+                }),
+              )
+            }
+            onEditComment={(entryId, text) =>
+              commitNotes((current) => editComment(current, openNote.id, entryId, text))
+            }
+            onRemoveEntry={(entryId) =>
+              commitNotes((current) => removeEntry(current, openNote.id, entryId))
+            }
           />
         ) : (
           <>
@@ -2074,6 +2327,7 @@ export default function Reader() {
           apiKeys={apiKeys}
           onKeysChange={updateKeys}
           onDownload={runDownload}
+          noteCount={notes.length}
           teams={teams}
           teamsBusy={teamsBusy}
           onCreateTeam={createTeam}

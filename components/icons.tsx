@@ -84,6 +84,14 @@ export const Icon = {
       <path d="M18.2 14.1a6.5 6.5 0 0 1 3.3 5.4" fill="none" />
     </svg>
   ),
+  /** A page with a line written on it: anything to do with notes. */
+  note: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 3.5h9L19 8v12.5H5z" />
+      <path d="M13.5 3.7V8.5H18.6" />
+      <path d="M8.5 13h7M8.5 16.5h4.5" />
+    </svg>
+  ),
   chat: (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-5.5A8 8 0 0 1 11 4h2a8 8 0 0 1 8 8z" />

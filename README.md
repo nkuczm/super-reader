@@ -358,6 +358,35 @@ and they are always included in the offline download — a bookmark is the
 article most worth having on the device. The list is per-device, like read
 state and view mode.
 
+## Notes
+
+Highlight anything in an article and **Add to note** appears beside the
+selection. The passage lands in the note you pick as a block quote, bulleted
+among the others, exactly as the article had it.
+
+Notes work like feeds: they are named, you make as many as you like with
+**New note** in the sidebar (or straight from a highlight, with "New note…"),
+and they can be renamed and deleted there. Each one is a page of its own:
+
+- **Quotes cannot be edited, only deleted.** A quote is the article's words,
+  not yours; the delete button is the only thing that touches it.
+- **Your own lines can be typed straight in**, under the quotes or between
+  them, and edited whenever. Plain text and nothing else — no toolbar, no
+  formatting, no styles to fight with.
+- **Every quote links back.** The line under it opens the article again, and
+  closing it returns you to the note.
+
+**The article behind a quote is bookmarked automatically**, so a quote does
+not end up pointing at a story that has scrolled out of its feed and off the
+device. That automatic bookmark is released when the last quote of it is
+deleted, or the note holding it is — but **an article you saved yourself with
+the Save button is never released**, whatever you do to the notes.
+
+Switch the whole thing off under **Settings → Notes** and selecting text goes
+back to being just selecting text; the notes you already have stay where they
+are. Notes live on the device they were made on, like view mode and collapsed
+feeds — they do not sync.
+
 ## Team feeds
 
 A team feed is a shared list that sits beside **Saved** in the sidebar. Set one

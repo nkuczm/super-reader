@@ -65,6 +65,7 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
 | `lib/offline.ts` | IndexedDB store, download schedule, list snapshot |
 | `lib/sync.ts` `lib/sync-code.ts` `lib/db.ts` | Cross-device sync |
 | `lib/team.ts` | Team feeds: the shared list, and the merge that makes it safe |
+| `lib/notes.ts` | Notes: quotes, your own lines, and which bookmarks they hold |
 | `lib/sort.ts` | Newest-first ordering, shared by every path |
 | `lib/store.ts` | Feeds, settings, read state and the Saved list (localStorage) |
 | `components/Reader.tsx` | The whole app shell: sidebar, list, state |
@@ -182,6 +183,33 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   value it sets re-stamps on every render, and the debounced push never
   survives long enough to fire — which looks exactly like sync being broken.
 - **Sync codes are stored as SHA-256 hashes**, never the code itself.
+- **A quote bookmarks its article, and that bookmark is marked `viaNote`.** A
+  quote pointing at a story that has aged out of its feed and off the device
+  is a quote with nothing behind it. The flag is what makes the bookmark
+  disposable: `releasableSaves` releases an article only when it is flagged
+  *and* no note quotes it any more. An article saved with the Save button
+  carries no flag and is never released — quoting something must not be able
+  to lose a bookmark. Releasing also writes the usual tombstone, or the other
+  device puts it straight back.
+- **`slimForSync` drops `viaNote` deliberately.** The flag is local
+  bookkeeping for local notes; a copy arriving from another device must not
+  turn that device's own bookmark into a disposable one.
+- **Note writes go through `notesRef`, not the rendered `notes`.** Quoting
+  into a note that the same click created is two writes in one render: the
+  second read the pre-creation array and undid the first, so the new note
+  vanished the moment its first quote landed. `commitNotes` takes an updater
+  and reads the ref. Caught in the browser, not by a test — the pure functions
+  were right all along.
+- **The reader renders *over* an open note, rather than instead of it.** A
+  quote's "back to the article" would otherwise do nothing visible, because
+  the note branch came first in the render chain. Now Back returns to the note
+  the reader was opened from.
+- **The quote button watches `pointerup`, not `selectionchange`.** The latter
+  fires on every character of a drag and the button chases the cursor. It also
+  checks that *both* ends of the selection are inside the article body, so
+  dragging out of the text quotes nothing, and it sits below the selection
+  where there is room — on a phone the browser's own copy bar takes the strip
+  above it.
 - **A team feed is not a second sync.** Sync writes a whole device document and
   resolves by most recent change: one copy wins and the other is dropped. That
   is right for one person's devices and wrong for several people — two
