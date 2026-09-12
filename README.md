@@ -364,12 +364,17 @@ Highlight anything in an article and **Add to note** appears beside the
 selection. The passage lands in the note you pick as a block quote, bulleted
 among the others, exactly as the article had it.
 
+When a quote lands, a bubble says which note it went to. **Tap it to open that
+note**, or tap **Change** to send the quote somewhere else — another note, or
+a new one named on the spot. It waits long enough to be answered and then goes.
+
 Notes work like feeds: they are named, you make as many as you like with
 **New note** in the sidebar (or straight from a highlight, with "New note…"),
 and they can be renamed and deleted there. Each one is a page of its own:
 
-- **The page is one document you write on.** Tap anywhere and type; there is
-  no compose box and no Add button. Lines save as you write them, can be
+- **The page is one document you write on.** Tap anywhere on it — including
+  the empty space below the writing — and the cursor lands at the end. There
+  is no compose box and no Add button. Lines save as you write them, can be
   edited in place afterwards, and disappear from the note if you empty them.
 - **Quotes cannot be edited, only deleted.** A quote is the article's words,
   not yours — it goes in or out whole, with the bin beside it.

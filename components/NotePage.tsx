@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "./icons";
 import type { Note, NoteEntry } from "@/lib/notes";
 
@@ -32,6 +32,21 @@ export default function NotePage({
   onOpenMenu?: () => void;
 }) {
   const quotes = note.entries.filter((entry) => entry.kind === "quote").length;
+  const end = useRef<HTMLTextAreaElement | null>(null);
+
+  /**
+   * Tapping the page puts the cursor at the end of it, the way tapping below
+   * the text in any document does. Without this the only way in was a 34px
+   * strip of empty line under the last quote, with nothing to show it was
+   * there — which on a phone reads as a page you simply cannot type on.
+   */
+  const focusEnd = useCallback((event: React.MouseEvent) => {
+    if (event.target !== event.currentTarget) return;
+    const el = end.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, []);
 
   return (
     <div className="note-page">
@@ -49,7 +64,9 @@ export default function NotePage({
         </div>
       </div>
 
-      <div className="note-doc">
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions,
+          jsx-a11y/click-events-have-key-events */}
+      <div className="note-doc" onClick={focusEnd}>
         {note.entries.length === 0 && (
           <p className="note-hint">
             Highlight anything while reading and choose <strong>Add to note</strong>.
@@ -76,16 +93,21 @@ export default function NotePage({
           ),
         )}
 
-        {/* Always a line waiting at the end, so the page can just be typed on. */}
+        {/* Always a line waiting at the end, so the page can just be typed
+            on — and always labelled, because an empty line with no placeholder
+            is invisible, and an invisible text box is not one. */}
         <Line
           key={`draft-${note.entries.length}`}
+          ref={end}
           text=""
-          placeholder={note.entries.length === 0 ? "Write a note…" : undefined}
+          placeholder="Write a note…"
           onChange={(text) => {
             if (text.trim()) onAddComment(text);
           }}
           once
         />
+        {/* The rest of the page: still the document, still tappable. */}
+        <div className="note-rest" onClick={focusEnd} />
       </div>
     </div>
   );
@@ -152,20 +174,14 @@ function Quote({
  * One of your own lines: ordinary text to look at, a textarea to type in.
  * It grows with what it holds, and empties itself out of the note.
  */
-function Line({
-  text,
-  placeholder,
-  onChange,
-  onEmpty,
-  once,
-}: {
+const Line = forwardRef<HTMLTextAreaElement, {
   text: string;
   placeholder?: string;
   onChange: (text: string) => void;
   onEmpty?: () => void;
   /** The waiting line at the end: it hands its text over and starts again. */
   once?: boolean;
-}) {
+}>(function Line({ text, placeholder, onChange, onEmpty, once }, forwarded) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const [value, setValue] = useState(text);
   /** The latest text and handler, for the commit on the way out. */
@@ -202,7 +218,11 @@ function Line({
 
   return (
     <textarea
-      ref={ref}
+      ref={(el) => {
+        ref.current = el;
+        if (typeof forwarded === "function") forwarded(el);
+        else if (forwarded) forwarded.current = el;
+      }}
       className="note-line"
       value={value}
       rows={1}
@@ -226,4 +246,4 @@ function Line({
       }}
     />
   );
-}
+});

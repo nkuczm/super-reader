@@ -4,6 +4,7 @@ import {
   addEntry,
   cleanQuoteText,
   editComment,
+  moveEntry,
   quotedLinks,
   releasableSaves,
   removeEntry,
@@ -358,4 +359,28 @@ test("a device does owe when it holds a quote the server has not seen", () => {
     ),
     true,
   );
+});
+
+test("a quote sent to another note keeps its id, so nothing counts as deleted", () => {
+  let notes = [note("n1", "Quotes"), note("n2", "Second")];
+  notes = addEntry(notes, "n1", quote("q1", "https://e.com/a"));
+  const before = notes.flatMap(idsOf);
+
+  notes = moveEntry(notes, "q1", "n2");
+  assert.deepEqual(notes[0].entries, []);
+  assert.deepEqual(notes[1].entries.map((e) => e.id), ["q1"]);
+  // Same ids on both sides of the move: a move writes no tombstone...
+  assert.deepEqual([...notes.flatMap(idsOf)].sort(), [...before].sort());
+  // ...and the article the quote holds is still quoted, so it stays saved.
+  assert.deepEqual(
+    releasableSaves([{ id: "a", title: "A", link: "https://e.com/a", savedAt: 1, viaNote: true }], notes),
+    [],
+  );
+});
+
+test("moving to a note that is not there, or an entry that is not, changes nothing", () => {
+  const notes = [note("n1"), note("n2")];
+  const withQuote = addEntry(notes, "n1", quote("q1", "https://e.com/a"));
+  assert.equal(moveEntry(withQuote, "q1", "nowhere"), withQuote);
+  assert.equal(moveEntry(withQuote, "missing", "n2"), withQuote);
 });

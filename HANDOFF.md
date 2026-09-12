@@ -257,6 +257,20 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   phone. Reported from real use, with a screenshot. Docked at the bottom it is
   always there, and it is where a thumb already is. `(pointer: coarse)` picks
   the mode.
+- **"I can't type in the notes page" was an affordance bug, not an input one.**
+  Reported twice. The waiting line at the end works when you hit it — but it
+  had no placeholder unless the note was empty, so on a phone it was an
+  invisible 34px strip under the last quote, and tapping the page below it did
+  nothing at all. It is now always labelled, and the document fills the screen
+  and focuses its end wherever it is tapped. Measured on a simulated iPhone:
+  before, a tap at (200, 600) focused BODY; after, it focuses the line. When
+  something is reported as "cannot type", check what there is to tap before
+  checking the input.
+- **The "Added to…" bubble is something to answer, not just to read.** It opens
+  the note the quote went to, and offers to move that quote to another note or
+  one named on the spot — `moveEntry` keeps the entry's id, so a move writes no
+  tombstone and the article the quote holds stays saved. It lingers six
+  seconds, or twenty while the picker is open.
 - **The note page is a document, not a form.** It was a list of entries with a
   bordered compose box and an Add button underneath; it is now text you type
   straight onto, with the quotes sitting in it as blocks. The waiting line at

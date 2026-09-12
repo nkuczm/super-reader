@@ -49,6 +49,7 @@ import {
   removeEntry,
   editComment,
   renameNote,
+  moveEntry,
   releasableSaves,
   type Note,
   type NoteRemoval,
@@ -1138,6 +1139,7 @@ export default function Reader() {
     (noteId: string, text: string) => {
       const link = reading?.url;
       if (!link || !text) return;
+      const entryId = newId();
 
       const known =
         articles.find((a) => a.link === link) ??
@@ -1149,7 +1151,7 @@ export default function Reader() {
 
       commitNotes((current) =>
         addEntry(current, noteId, {
-          id: newId(),
+          id: entryId,
           kind: "quote",
           text,
           link,
@@ -1159,7 +1161,7 @@ export default function Reader() {
         }),
       );
 
-      if (savedRef.current.some((a) => a.link === link)) return;
+      if (savedRef.current.some((a) => a.link === link)) return entryId;
       setSaved((current) => {
         const next: SavedArticle[] = [
           {
@@ -1180,8 +1182,22 @@ export default function Reader() {
         saveSaved(next);
         return next;
       });
+      return entryId;
     },
     [reading, articles, allSources, commitNotes],
+  );
+
+  /**
+   * Send a quote to a different note — what the "Added to…" bubble offers
+   * straight after filing one, when it went to the wrong place. A move, not a
+   * copy: the entry keeps its id, so nothing counts it as deleted and the
+   * article it holds stays saved.
+   */
+  const moveQuote = useCallback(
+    (entryId: string, toNoteId: string) => {
+      commitNotes((current) => moveEntry(current, entryId, toNoteId));
+    },
+    [commitNotes],
   );
 
   const removeNote = useCallback(
@@ -1991,6 +2007,8 @@ export default function Reader() {
             highlight={reading.quote}
             onQuote={settings.quoteToNote ? quoteIntoNote : undefined}
             onCreateNote={settings.quoteToNote ? createNote : undefined}
+            onOpenNote={(id) => choose({ type: "note", id })}
+            onMoveQuote={moveQuote}
             saved={isSaved(reading.url)}
             onToggleSave={() => {
               const article =

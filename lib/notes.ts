@@ -290,6 +290,29 @@ export function addEntry(notes: Note[], id: string, entry: NoteEntry): Note[] {
   );
 }
 
+/**
+ * Send an entry to another note.
+ *
+ * A move, not a copy-and-delete: the entry keeps its id, so nothing counts it
+ * as deleted — no tombstone is written, and the article a quote is holding
+ * stays saved. This is what the "Added to…" bubble offers when a quote has
+ * just gone to the wrong place.
+ */
+export function moveEntry(notes: Note[], entryId: string, toNoteId: string): Note[] {
+  let moving: NoteEntry | undefined;
+  const without = notes.map((note) => {
+    const found = note.entries.find((entry) => entry.id === entryId);
+    if (!found) return note;
+    moving = found;
+    return { ...note, entries: note.entries.filter((entry) => entry.id !== entryId) };
+  });
+  if (!moving || !notes.some((note) => note.id === toNoteId)) return notes;
+  const entry = moving;
+  return without.map((note) =>
+    note.id === toNoteId ? { ...note, entries: [...note.entries, entry] } : note,
+  );
+}
+
 export function removeEntry(notes: Note[], noteId: string, entryId: string): Note[] {
   return notes.map((note) =>
     note.id === noteId

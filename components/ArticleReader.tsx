@@ -34,8 +34,11 @@ type Props = {
    * rather than read here: they belong to the app, not to one article.
    */
   notes?: Note[];
-  onQuote?: (noteId: string, text: string) => void;
+  onQuote?: (noteId: string, text: string) => string | void;
   onCreateNote?: (name: string) => string;
+  /** Where the "Added to…" bubble leads, and how it re-files a quote. */
+  onOpenNote?: (noteId: string) => void;
+  onMoveQuote?: (entryId: string, toNoteId: string) => void;
   /**
    * A passage to go to on arrival — how a note's quote returns to where it
    * came from. It is found in the text, scrolled to and flashed.
@@ -57,6 +60,8 @@ export default function ArticleReader({
   notes,
   onQuote,
   onCreateNote,
+  onOpenNote,
+  onMoveQuote,
   highlight,
   onClose,
 }: Props) {
@@ -368,6 +373,8 @@ export default function ArticleReader({
                 notes={notes ?? []}
                 onQuote={onQuote}
                 onCreateNote={onCreateNote}
+                onOpenNote={onOpenNote}
+                onMoveQuote={onMoveQuote}
               />
             )}
             {article.via === "preview" && (

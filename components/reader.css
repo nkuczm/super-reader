@@ -670,16 +670,46 @@
 .quote-menu > button:hover { background: var(--bg-hover); }
 .quote-new { display: flex; gap: 6px; padding: 6px 4px 2px; }
 .quote-new .input { margin: 0; min-width: 0; flex: 1; font-size: 13.5px; }
+/* The bubble is something to answer, not just something to read: it opens the
+   note the quote went to, and offers to send it somewhere else instead. */
 .quote-toast {
   position: fixed; left: 50%; transform: translateX(-50%);
   bottom: calc(22px + env(safe-area-inset-bottom, 0px)); z-index: 70;
-  padding: 9px 15px; border-radius: 999px; font-size: 13px; font-weight: 600;
-  background: var(--text); color: var(--bg);
+  display: flex; flex-direction: column; align-items: stretch; gap: 8px;
+  max-width: calc(100vw - 24px);
+}
+.quote-toast-row {
+  display: flex; align-items: stretch; gap: 1px; overflow: hidden;
+  border-radius: 999px; background: var(--text);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
 }
+.quote-toast-open, .quote-toast-change {
+  border: 0; background: var(--text); color: var(--bg);
+  font-size: 13.5px; font-weight: 600; white-space: nowrap;
+}
+.quote-toast-open {
+  display: inline-flex; align-items: center; gap: 4px; padding: 11px 8px 11px 16px;
+  min-width: 0;
+}
+.quote-toast-open strong { font-weight: 800; }
+.quote-toast-open svg { opacity: 0.75; }
+.quote-toast-change {
+  padding: 11px 16px; opacity: 0.75;
+  border-left: 1px solid color-mix(in srgb, var(--bg) 25%, transparent);
+}
+.quote-toast-open:active, .quote-toast-change:active { opacity: 0.6; }
+.toast-menu { max-height: 50vh; overflow-y: auto; }
 
-.note-page { padding: 0 0 80px; }
-.note-doc { padding: 18px 28px 40px; max-width: 760px; }
+/* The page fills the screen, so tapping anywhere below the writing is still
+   tapping the document. */
+.note-page { display: flex; flex-direction: column; min-height: 100%; }
+.note-doc {
+  flex: 1; display: flex; flex-direction: column;
+  padding: 18px 28px 40px; max-width: 760px; width: 100%; cursor: text;
+}
+/* The page below the writing: tapping it lands the cursor at the end, the way
+   tapping under the text of any document does. */
+.note-rest { flex: 1; min-height: 120px; }
 .note-hint {
   margin: 0 0 14px; color: var(--text-dim); font-size: 14px; line-height: 1.6;
 }

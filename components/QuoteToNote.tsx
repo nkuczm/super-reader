@@ -20,18 +20,33 @@ export default function QuoteToNote({
   notes,
   onQuote,
   onCreateNote,
+  onOpenNote,
+  onMoveQuote,
 }: {
   container: React.RefObject<HTMLElement | null>;
   notes: Note[];
-  /** Add the highlighted text to this note. */
-  onQuote: (noteId: string, text: string) => void;
+  /** Add the highlighted text to this note; hands back the quote's own id. */
+  onQuote: (noteId: string, text: string) => string | void;
   /** Start a note and return its id, so a quote can go straight into it. */
   onCreateNote: (name: string) => string;
+  /** Open a note — where the "Added to…" bubble goes when it is tapped. */
+  onOpenNote?: (noteId: string) => void;
+  /** Send a quote that has just been filed to a different note instead. */
+  onMoveQuote?: (entryId: string, toNoteId: string) => void;
 }) {
   const [placed, setPlaced] = useState<Placed | null>(null);
   const [picking, setPicking] = useState(false);
   const [newName, setNewName] = useState("");
-  const [added, setAdded] = useState<string | null>(null);
+  /**
+   * The quote just filed: what it says, where it went, and which entry it is —
+   * enough for the bubble to open that note, or move the quote to another.
+   */
+  const [added, setAdded] = useState<
+    { noteId: string; noteName: string; entryId?: string } | null
+  >(null);
+  const [changing, setChanging] = useState(false);
+  const [renaming, setRenaming] = useState("");
+  const hide = useRef<ReturnType<typeof setTimeout> | null>(null);
   const root = useRef<HTMLDivElement | null>(null);
   /**
    * On a touch screen the button is docked to the bottom of the screen rather
@@ -137,15 +152,36 @@ export default function QuoteToNote({
     return () => document.removeEventListener("mousedown", close);
   }, [picking]);
 
+  /** Keep the bubble up while it is being used, and take it away after. */
+  const linger = useCallback((ms: number) => {
+    if (hide.current) clearTimeout(hide.current);
+    hide.current = setTimeout(() => {
+      setAdded(null);
+      setChanging(false);
+    }, ms);
+  }, []);
+
   function finish(noteId: string, name: string, text: string) {
-    onQuote(noteId, text);
+    const entryId = onQuote(noteId, text) || undefined;
     setPicking(false);
     setPlaced(null);
     setNewName("");
     window.getSelection()?.removeAllRanges();
-    // Said out loud, because the quote lands on a page you are not looking at.
-    setAdded(`Added to ${name}`);
-    setTimeout(() => setAdded(null), 2200);
+    // Said out loud, because the quote lands on a page you are not looking at
+    // — and worth saying for long enough to be answered: the bubble opens that
+    // note, or sends the quote to a different one.
+    setAdded({ noteId, noteName: name, entryId });
+    setChanging(false);
+    linger(6000);
+  }
+
+  /** Send the quote that was just filed somewhere else instead. */
+  function moveTo(noteId: string, name: string) {
+    if (added?.entryId && onMoveQuote) onMoveQuote(added.entryId, noteId);
+    setAdded((current) => (current ? { ...current, noteId, noteName: name } : current));
+    setChanging(false);
+    setRenaming("");
+    linger(4000);
   }
 
   return (
@@ -218,7 +254,66 @@ export default function QuoteToNote({
       )}
       {added && (
         <div className="quote-toast" role="status">
-          {added}
+          {changing && (
+            <div className="quote-menu toast-menu" role="menu">
+              {notes
+                .filter((note) => note.id !== added.noteId)
+                .map((note) => (
+                  <button
+                    key={note.id}
+                    role="menuitem"
+                    onClick={() => moveTo(note.id, note.name)}
+                  >
+                    {note.name}
+                  </button>
+                ))}
+              <div className="quote-new">
+                <input
+                  className="input"
+                  placeholder="New note…"
+                  value={renaming}
+                  autoFocus
+                  onChange={(event) => setRenaming(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && renaming.trim()) {
+                      moveTo(onCreateNote(renaming.trim()), renaming.trim());
+                    }
+                  }}
+                />
+                <button
+                  className="btn small"
+                  disabled={!renaming.trim()}
+                  onClick={() => moveTo(onCreateNote(renaming.trim()), renaming.trim())}
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="quote-toast-row">
+            <button
+              className="quote-toast-open"
+              onClick={() => {
+                setAdded(null);
+                onOpenNote?.(added.noteId);
+              }}
+            >
+              Added to <strong>{added.noteName}</strong>
+              {Icon.chevron}
+            </button>
+            <button
+              className="quote-toast-change"
+              aria-expanded={changing}
+              onClick={() => {
+                setChanging((open) => !open);
+                // Given a choice to make, the bubble waits rather than leaving
+                // mid-decision.
+                linger(20000);
+              }}
+            >
+              Change
+            </button>
+          </div>
         </div>
       )}
     </>
