@@ -646,6 +646,17 @@
 
 /* The floating "Add to note" button, and the note it goes into. */
 .quote-pop { position: fixed; z-index: 60; }
+/* Docked on touch screens: iOS's own copy/paste bar takes the space beside a
+   selection, above it or below it as it pleases, so there is nowhere next to
+   the words that is reliably free. */
+.quote-pop.docked {
+  left: 50%; transform: translateX(-50%); top: auto;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  width: max-content; max-width: calc(100vw - 32px);
+}
+.quote-pop.docked .quote-add { padding: 11px 18px; font-size: 14.5px; }
+.quote-pop.docked .quote-menu { order: -1; }
 .quote-add { box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22); }
 .quote-menu {
   min-width: 210px; max-width: 260px; padding: 6px;
@@ -667,7 +678,20 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
 }
 
-.note-page { padding: 0 0 60px; }
+.note-page { padding: 0 0 80px; }
+.note-doc { padding: 18px 28px 40px; max-width: 760px; }
+.note-hint {
+  margin: 0 0 14px; color: var(--text-dim); font-size: 14px; line-height: 1.6;
+}
+/* Your own writing: ordinary text to read, a place to type when touched. */
+.note-line {
+  display: block; width: 100%; resize: none; overflow: hidden;
+  margin: 0 0 2px; padding: 4px 0;
+  border: 0; background: transparent; color: var(--text);
+  font: inherit; font-size: 16px; line-height: 1.6;
+}
+.note-line:focus { outline: none; }
+.note-line::placeholder { color: var(--text-dim); }
 
 /* The passage a quote came from, lit up on arrival. Boxes painted over the
    words rather than wrapped around them: a quote can start mid-sentence and
@@ -687,17 +711,10 @@
 @media (prefers-reduced-motion: reduce) {
   .quote-flash span { animation-duration: 2.6s; animation-timing-function: step-end; }
 }
-.note-entries { list-style: none; margin: 18px 0 0; padding: 0 24px; }
-.note-entry {
-  display: grid; grid-template-columns: 1fr auto; gap: 8px;
-  align-items: start; padding: 0 0 16px;
-}
-.note-entry .icon-btn { opacity: 0; }
-.note-entry:hover .icon-btn, .note-entry:focus-within .icon-btn { opacity: 1; }
 /* A bullet, because a note is a list of things picked up along the way. */
-.note-quote { position: relative; padding-left: 18px; }
+.note-quote { position: relative; padding-left: 18px; margin: 14px 0 16px; }
 .note-quote::before {
-  content: ""; position: absolute; left: 2px; top: 9px;
+  content: ""; position: absolute; left: 2px; top: 13px;
   width: 5px; height: 5px; border-radius: 50%; background: var(--text-dim);
 }
 .note-quote blockquote { cursor: pointer; }
@@ -708,23 +725,29 @@
 }
 .note-quote blockquote p { margin: 0 0 8px; }
 .note-quote blockquote p:last-child { margin-bottom: 0; }
+/* The line under a quote: where it came from, and the way to remove it. The
+   delete button stays visible rather than appearing on hover — a phone has no
+   hover, and a quote that cannot be deleted on the device it was taken on is
+   not much of a quote. */
+.note-quote-foot {
+  display: flex; align-items: center; gap: 10px; margin: 7px 0 0 13px;
+  min-height: 22px;
+}
 .note-source {
-  display: inline-flex; align-items: center; gap: 5px; margin: 7px 0 0 13px;
+  display: inline-flex; align-items: center; gap: 5px; min-width: 0;
   padding: 0; border: 0; background: transparent; color: var(--text-dim);
   font-size: 12.5px; text-align: left;
 }
 .note-source:hover { color: var(--accent); text-decoration: underline; }
-.note-comment {
-  width: 100%; resize: none; overflow: hidden; padding: 3px 0 3px 18px;
-  border: 0; background: transparent; color: var(--text);
-  font: inherit; font-size: 15px; line-height: 1.55;
+.note-quote-foot .note-remove { margin-left: auto; flex: none; opacity: 0.55; }
+.note-quote-foot .note-remove:hover { opacity: 1; }
+.note-confirm {
+  display: flex; gap: 10px; align-items: center; margin-left: auto;
+  font-size: 12.5px; white-space: nowrap;
 }
-.note-comment:focus { outline: none; background: var(--bg-sub); border-radius: 7px; }
-.note-confirm { display: flex; gap: 10px; align-items: center; font-size: 12.5px; }
-.note-compose { display: flex; gap: 8px; align-items: flex-end; padding: 8px 24px 0; }
-.note-input { flex: 1; resize: vertical; font: inherit; font-size: 15px; }
 @media (max-width: 760px) {
-  .note-entries, .note-compose { padding-left: 16px; padding-right: 16px; }
+  .note-doc { padding: 14px 16px 40px; }
+  .note-quote blockquote { font-size: 16px; }
 }
 
 /* ---------- team feeds ---------- */

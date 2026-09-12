@@ -33,6 +33,19 @@ export default function QuoteToNote({
   const [newName, setNewName] = useState("");
   const [added, setAdded] = useState<string | null>(null);
   const root = useRef<HTMLDivElement | null>(null);
+  /**
+   * On a touch screen the button is docked to the bottom of the screen rather
+   * than put beside the selection.
+   *
+   * iOS draws its own copy/paste callout over the selection — above it, or
+   * below it when there is no room above — so *neither* side of a selection is
+   * safe to put anything on. Out of the way at the bottom is the only place
+   * that is always reachable, and it is where a thumb already is.
+   */
+  const [docked, setDocked] = useState(false);
+  useEffect(() => {
+    setDocked(window.matchMedia?.("(pointer: coarse)").matches ?? false);
+  }, []);
 
   const read = useCallback(() => {
     const selection = window.getSelection();
@@ -58,6 +71,12 @@ export default function QuoteToNote({
         setPlaced(null);
         return;
       }
+      if (docked) {
+        // Position comes from the stylesheet; only the text matters here.
+        setPlaced({ text: hit.text, top: 0, left: 0 });
+        return;
+      }
+
       const { rect } = hit;
       const below = rect.bottom + 8;
       const fitsBelow = below + 44 < window.innerHeight;
@@ -77,7 +96,7 @@ export default function QuoteToNote({
           window.innerWidth - 152,
         ),
       });
-  }, [read]);
+  }, [read, docked]);
 
   useEffect(() => {
     // The menu is open over a selection the browser may have just cleared;
@@ -134,8 +153,8 @@ export default function QuoteToNote({
       {placed && (
         <div
           ref={root}
-          className="quote-pop"
-          style={{ top: placed.top, left: placed.left }}
+          className={`quote-pop${docked ? " docked" : ""}`}
+          style={docked ? undefined : { top: placed.top, left: placed.left }}
         >
           {!picking ? (
             <button

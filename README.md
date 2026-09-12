@@ -368,11 +368,11 @@ Notes work like feeds: they are named, you make as many as you like with
 **New note** in the sidebar (or straight from a highlight, with "New note…"),
 and they can be renamed and deleted there. Each one is a page of its own:
 
+- **The page is one document you write on.** Tap anywhere and type; there is
+  no compose box and no Add button. Lines save as you write them, can be
+  edited in place afterwards, and disappear from the note if you empty them.
 - **Quotes cannot be edited, only deleted.** A quote is the article's words,
-  not yours; the delete button is the only thing that touches it.
-- **Your own lines can be typed straight in**, under the quotes or between
-  them, and edited whenever. Plain text and nothing else — no toolbar, no
-  formatting, no styles to fight with.
+  not yours — it goes in or out whole, with the bin beside it.
 - **Every quote links back to the passage itself.** Click the quote (or the
   line under it) and the article opens *at* those words, scrolled to them and
   highlighted for a couple of seconds so you can see where you are. Closing

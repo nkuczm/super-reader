@@ -250,6 +250,25 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   (which is `position: relative` for exactly this). Wrapping in a `<mark>`
   would mean restructuring sanitised third-party HTML across element
   boundaries, which `surroundContents` refuses on any interesting quote.
+- **On a touch screen the quote button is docked to the bottom, not placed
+  beside the selection.** iOS draws its own copy/paste callout over the
+  selection — above it, or below it when there is no room above — so *neither*
+  side of a selection is reliably free, and the button was unreachable on a
+  phone. Reported from real use, with a screenshot. Docked at the bottom it is
+  always there, and it is where a thumb already is. `(pointer: coarse)` picks
+  the mode.
+- **The note page is a document, not a form.** It was a list of entries with a
+  bordered compose box and an Add button underneath; it is now text you type
+  straight onto, with the quotes sitting in it as blocks. The waiting line at
+  the end hands its text over on blur *and* on unmount — leaving the page
+  should not lose what was being typed — with a `handedOver` flag between them,
+  or the blur commit and the unmount that follows it file the same line twice.
+- **`.list-head` never existed.** The note page used it for its title, so the
+  heading had no padding at all and sat flat against the left edge of the
+  phone. It is `.main-head`, like every other page.
+- **The quote's delete button no longer hides until hover.** A phone has no
+  hover, so on the device most of these notes are written on, a quote could
+  not be deleted at all.
 - **The quote button follows the selection on scroll rather than dropping.**
   Dropping on any scroll looked fine on a desktop and broke on a phone: the
   momentum scroll that follows a selection took the button away before it
