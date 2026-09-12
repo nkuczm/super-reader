@@ -8,6 +8,7 @@ import {
   MAX_PAYLOAD_BYTES,
 } from "@/lib/sync";
 import { isValidCode } from "@/lib/sync-code";
+import type { Note, NoteRemoval } from "@/lib/notes";
 import type { SavedArticle, SavedRemoval } from "@/lib/saved";
 
 export const runtime = "nodejs";
@@ -60,6 +61,8 @@ export async function PUT(request: Request) {
     read?: unknown;
     saved?: unknown;
     savedRemovals?: unknown;
+    notes?: unknown;
+    noteRemovals?: unknown;
     teams?: unknown;
     vault?: unknown;
     updatedAt?: unknown;
@@ -86,6 +89,12 @@ export async function PUT(request: Request) {
     saved: Array.isArray(body.saved) ? (body.saved as SavedArticle[]) : [],
     savedRemovals: Array.isArray(body.savedRemovals)
       ? (body.savedRemovals as SavedRemoval[])
+      : [],
+    // Merged by writeSync, like bookmarks: a device that has been away must
+    // not delete the notes written while it was.
+    notes: Array.isArray(body.notes) ? (body.notes as Note[]) : [],
+    noteRemovals: Array.isArray(body.noteRemovals)
+      ? (body.noteRemovals as NoteRemoval[])
       : [],
     ...(Array.isArray(body.teams) ? { teams: body.teams.slice(0, 50) } : {}),
     // Opaque to this server by design; stored and handed back untouched.

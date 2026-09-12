@@ -39,12 +39,19 @@ import type { TeamArticle } from "@/lib/team";
 import {
   loadNotes,
   saveNotes,
+  loadNoteRemovals,
+  saveNoteRemovals,
+  mergeNotes,
+  notesDifferFrom,
+  slimNotesForSync,
+  idsOf,
   addEntry,
   removeEntry,
   editComment,
   renameNote,
   releasableSaves,
   type Note,
+  type NoteRemoval,
 } from "@/lib/notes";
 import NotePage from "./NotePage";
 import AddSourceDialog from "./AddSourceDialog";
@@ -106,6 +113,19 @@ const BAND_LABELS: Record<"major" | "big" | "notable" | "quiet", string> = {
 function fileTitleFor(file: Attachment, parentTitle: string) {
   const kind = file.kind === "pdf" ? "PDF" : file.kind.toUpperCase();
   return `${parentTitle} (${kind})`;
+}
+
+/**
+ * Whether applying this would actually change anything.
+ *
+ * A merge hands back fresh arrays whether or not it found anything new, and
+ * a fresh array is a new identity — which the change-stamping effect reads as
+ * a local edit, stamps, and pushes. Two devices left open then pushed to each
+ * other on every focus, forever, with nothing to say. Cheap to compare: these
+ * are the same documents that are about to be JSON-encoded onto the wire.
+ */
+function unchanged(a: unknown, b: unknown) {
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 function keyHeadersFrom(keys: Record<string, string>): HeadersInit | undefined {
@@ -172,6 +192,7 @@ export default function Reader() {
   /** Notes, and the quotes pulled into them. Per device, like Settings. */
   const [notes, setNotes] = useState<Note[]>([]);
   const [addingNote, setAddingNote] = useState(false);
+  const [noteRemovals, setNoteRemovals] = useState<NoteRemoval[]>([]);
   const [editingNote, setEditingNote] = useState<string | null>(null);
   const [confirmingNote, setConfirmingNote] = useState<string | null>(null);
   /** The team feeds this device has joined. */
@@ -234,6 +255,12 @@ export default function Reader() {
   const removalsRef = useRef<SavedRemoval[]>([]);
   /** The notes as they stand, for writes that land in the same click. */
   const notesRef = useRef<Note[]>([]);
+  /** Feeds and teams as they stand, so an identical pull can be recognised. */
+  const feedsRef = useRef<Feed[]>([]);
+  const teamsRef = useRef<TeamFeed[]>([]);
+  const readRef = useRef<Set<string>>(new Set());
+  /** Deletions, dated, so syncing does not put them back. */
+  const noteRemovalsRef = useRef<NoteRemoval[]>([]);
 
   useEffect(() => {
     setFeeds(loadFeeds());
@@ -247,6 +274,9 @@ export default function Reader() {
     const storedNotes = loadNotes();
     notesRef.current = storedNotes;
     setNotes(storedNotes);
+    const storedNoteRemovals = loadNoteRemovals();
+    noteRemovalsRef.current = storedNoteRemovals;
+    setNoteRemovals(storedNoteRemovals);
     setVault(loadVault());
     setApiKeys(loadUnlockedKeys());
     updatedAtRef.current = loadUpdatedAt();
@@ -267,18 +297,24 @@ export default function Reader() {
     read?: string[];
     saved?: SavedArticle[];
     savedRemovals?: SavedRemoval[];
+    notes?: Note[];
+    noteRemovals?: NoteRemoval[];
     teams?: unknown;
     vault?: unknown;
     updatedAt?: number;
   }) => {
     applying.current = true;
-    if (Array.isArray(payload.feeds)) setFeeds(payload.feeds);
+    if (Array.isArray(payload.feeds) && !unchanged(payload.feeds, feedsRef.current)) {
+      setFeeds(payload.feeds);
+    }
     // Which team feeds this person is on travels between their own devices;
     // what is *in* those feeds does not, and never touches local storage.
     if (Array.isArray(payload.teams)) {
       const next = sanitizeTeams(payload.teams);
-      setTeams(next);
-      saveTeams(next);
+      if (!unchanged(next, teamsRef.current)) {
+        setTeams(next);
+        saveTeams(next);
+      }
     }
     // The vault arrives encrypted; it stays locked until a passphrase is
     // entered on this device, which is the whole point of it.
@@ -286,7 +322,10 @@ export default function Reader() {
       setVault(payload.vault);
       saveVault(payload.vault);
     }
-    if (Array.isArray(payload.read)) {
+    // Compared before applying: a fresh Set of the same ids is still a new
+    // identity, and the stamping effect reads that as a local change — which
+    // is how two idle devices came to push to each other on every focus.
+    if (Array.isArray(payload.read) && !unchanged(payload.read, [...readRef.current])) {
       const next = new Set(payload.read);
       setRead(next);
       saveRead(next);
@@ -302,16 +341,66 @@ export default function Reader() {
       { saved: savedRef.current, removals: removalsRef.current },
       { saved: payload.saved ?? [], removals: payload.savedRemovals ?? [] },
     );
-    setSaved(bookmarks.saved);
-    saveSaved(bookmarks.saved);
-    setSavedRemovals(bookmarks.removals);
-    saveSavedRemovals(bookmarks.removals);
+    if (!unchanged(bookmarks.saved, savedRef.current)) {
+      setSaved(bookmarks.saved);
+      saveSaved(bookmarks.saved);
+    }
+    if (!unchanged(bookmarks.removals, removalsRef.current)) {
+      setSavedRemovals(bookmarks.removals);
+      saveSavedRemovals(bookmarks.removals);
+    }
+    // Notes merge for the same reason, and with the same shape of tombstone:
+    // a quote taken on the phone must survive the desktop pushing over it.
+    const merged = mergeNotes(
+      { notes: notesRef.current, removals: noteRemovalsRef.current },
+      { notes: payload.notes ?? [], removals: payload.noteRemovals ?? [] },
+    );
+    if (!unchanged(merged.notes, notesRef.current)) {
+      notesRef.current = merged.notes;
+      setNotes(merged.notes);
+      saveNotes(merged.notes);
+    }
+    if (!unchanged(merged.removals, noteRemovalsRef.current)) {
+      noteRemovalsRef.current = merged.removals;
+      setNoteRemovals(merged.removals);
+      saveNoteRemovals(merged.removals);
+    }
+
+    // A note deleted on the other device releases the bookmark its quote was
+    // holding here — that device may never have known the bookmark was one a
+    // quote made, since the flag is local. Without this the article would sit
+    // in Saved forever, quoted by nothing.
+    const releasable = releasableSaves(bookmarks.saved, merged.notes);
+    if (releasable.length > 0) {
+      const drop = new Set(releasable);
+      bookmarks.saved = bookmarks.saved.filter((article) => !drop.has(article.link));
+      const at = Date.now();
+      bookmarks.removals = [
+        ...releasable.map((link) => ({ link, at })),
+        ...bookmarks.removals.filter((removal) => !drop.has(removal.link)),
+      ];
+      setSaved(bookmarks.saved);
+      saveSaved(bookmarks.saved);
+      setSavedRemovals(bookmarks.removals);
+      saveSavedRemovals(bookmarks.removals);
+    }
+
     // If the merge kept something the other side had not seen, this device
     // still has news — so it must not mark itself up to date.
-    const owes = differsFrom(bookmarks, {
-      saved: payload.saved ?? [],
-      removals: payload.savedRemovals ?? [],
-    });
+    const owes =
+      differsFrom(bookmarks, {
+        saved: payload.saved ?? [],
+        removals: payload.savedRemovals ?? [],
+      }) ||
+      releasable.length > 0 ||
+      // Compared as it would be *sent*, not as it is held: the wire copy is
+      // cut to a budget, and comparing the full set against the server's copy
+      // would report news this device can never deliver — and push forever
+      // trying.
+      notesDifferFrom(
+        { notes: slimNotesForSync(merged.notes), removals: merged.removals },
+        { notes: payload.notes ?? [], removals: payload.noteRemovals ?? [] },
+      );
 
     if (typeof payload.updatedAt === "number" && payload.updatedAt > 0) {
       updatedAtRef.current = payload.updatedAt;
@@ -358,7 +447,10 @@ export default function Reader() {
   useEffect(() => {
     savedRef.current = saved;
     removalsRef.current = savedRemovals;
-  }, [saved, savedRemovals]);
+    feedsRef.current = feeds;
+    teamsRef.current = teams;
+    readRef.current = read;
+  }, [saved, savedRemovals, feeds, teams, read]);
 
   /**
    * Stamp a real local change. The first run is the load from storage, which
@@ -379,7 +471,7 @@ export default function Reader() {
     updatedAtRef.current = now;
     setUpdatedAt(now);
     saveUpdatedAt(now);
-  }, [feeds, read, saved, savedRemovals, vault, teams, ready]);
+  }, [feeds, read, saved, savedRemovals, notes, noteRemovals, vault, teams, ready]);
 
   // Pull once the code is known, and again whenever the window regains focus,
   // so a device left open picks up changes made elsewhere.
@@ -425,6 +517,8 @@ export default function Reader() {
             // past the size the route accepts, and then nothing syncs.
             saved: slimForSync(saved),
             savedRemovals,
+            notes: slimNotesForSync(notes),
+            noteRemovals,
             teams,
             vault,
             updatedAt,
@@ -445,7 +539,10 @@ export default function Reader() {
       }
     }, 900);
     return () => clearTimeout(timer);
-  }, [feeds, read, saved, savedRemovals, teams, ready, syncCode, vault, updatedAt, applyRemote]);
+  }, [
+    feeds, read, saved, savedRemovals, notes, noteRemovals, teams, ready,
+    syncCode, vault, updatedAt, applyRemote,
+  ]);
 
   const startSync = useCallback(async () => {
     setSyncState("working");
@@ -470,6 +567,8 @@ export default function Reader() {
         read: [...read],
         saved: slimForSync(saved),
         savedRemovals,
+        notes: slimNotesForSync(notes),
+        noteRemovals,
         teams,
         vault,
         updatedAt: Math.max(Date.now(), updatedAtRef.current + 1),
@@ -483,7 +582,7 @@ export default function Reader() {
     saveSyncCode(data.code);
     setSyncCode(data.code);
     setSyncState("saved");
-  }, [feeds, read, saved, savedRemovals, teams, vault]);
+  }, [feeds, read, saved, savedRemovals, notes, noteRemovals, teams, vault]);
 
   const connectSync = useCallback(
     async (entered: string) => {
@@ -980,10 +1079,27 @@ export default function Reader() {
       // Functional, and through a ref, because two of these can land in one
       // click: quoting into a note that the same click created. Reading the
       // rendered `notes` for the second write would undo the first.
-      const next = update(notesRef.current);
+      const before = notesRef.current;
+      const next = update(before);
       notesRef.current = next;
       setNotes(next);
       saveNotes(next);
+
+      // Whatever is no longer there was deleted, whichever way it went — an
+      // entry, or the note around it. Dated here in one place, because the
+      // other device still holds it and would otherwise put it back.
+      const surviving = new Set(next.flatMap(idsOf));
+      const gone = before.flatMap(idsOf).filter((id) => !surviving.has(id));
+      if (gone.length > 0) {
+        const at = Date.now();
+        const tombstones = [
+          ...gone.map((id) => ({ id, at })),
+          ...noteRemovalsRef.current.filter((removal) => !gone.includes(removal.id)),
+        ];
+        noteRemovalsRef.current = tombstones;
+        setNoteRemovals(tombstones);
+        saveNoteRemovals(tombstones);
+      }
 
       const releasable = releasableSaves(savedRef.current, next);
       if (releasable.length === 0) return;

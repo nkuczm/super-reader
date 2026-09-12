@@ -184,6 +184,30 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   value it sets re-stamps on every render, and the debounced push never
   survives long enough to fire — which looks exactly like sync being broken.
 - **Sync codes are stored as SHA-256 hashes**, never the code itself.
+- **Notes merge on sync, exactly as bookmarks do** (`mergeNotes`). Both
+  devices write to them constantly, so whole-document replacement would delete
+  a quote taken on the phone the moment the desktop pushed. Notes merge by id,
+  their entries merge by id, each kept in whichever copy is newer, and every
+  deletion — a quote, a typed line, a whole note — leaves a dated tombstone,
+  because the other device still holds the thing and would otherwise put it
+  back. `commitNotes` writes those tombstones in one place by diffing the ids
+  before and after, so no deletion path can forget to.
+- **A note's name resolves on `updatedAt`, falling back to `at`** — not the
+  later of the two. Using `max()` let a note made months ago outrank a rename
+  made today, and the new name never travelled.
+- **`slimNotesForSync` drops whole entries, never parts of one.** Half a quote
+  would read as what the article said. The newest fit the budget; the rest
+  stay on the device that took them, which is safe because a device that never
+  receives an entry cannot delete it either. The push-loop trap: `owes` must
+  be computed against the **slimmed** copy, or a device holding more than the
+  budget reports news it can never deliver and pushes on every single sync.
+- **An idle device used to push on every focus, and this predates notes.**
+  `applyRemote` rebuilt `read` as a fresh Set (and the merges hand back fresh
+  arrays) whether or not anything had changed; a new identity is a change to
+  the stamping effect, which stamped, which pushed. Two idle devices therefore
+  wrote to the database every time either was focused. Everything applied from
+  a pull is now compared first (`unchanged`), and two settled devices make
+  zero requests beyond the pull itself — measured, in two real browsers.
 - **A quote bookmarks its article, and that bookmark is marked `viaNote`.** A
   quote pointing at a story that has aged out of its feed and off the device
   is a quote with nothing behind it. The flag is what makes the bookmark
@@ -194,7 +218,12 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   device puts it straight back.
 - **`slimForSync` drops `viaNote` deliberately.** The flag is local
   bookkeeping for local notes; a copy arriving from another device must not
-  turn that device's own bookmark into a disposable one.
+  turn that device's own bookmark into a disposable one. The consequence is
+  that only the device that made the quote can release the bookmark; when the
+  *other* device deletes the note, `applyRemote` on the first one notices the
+  quote is gone, releases the bookmark and writes the un-save that carries the
+  removal back. That is why the release check runs on pull and not only on a
+  local edit.
 - **Note writes go through `notesRef`, not the rendered `notes`.** Quoting
   into a note that the same click created is two writes in one render: the
   second read the pre-creation array and undid the first, so the new note

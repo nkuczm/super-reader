@@ -386,10 +386,20 @@ device. That automatic bookmark is released when the last quote of it is
 deleted, or the note holding it is — but **an article you saved yourself with
 the Save button is never released**, whatever you do to the notes.
 
+Notes travel with your sync code, so a quote taken on the phone is on the
+desktop and the other way round. They **merge** rather than replace, like
+bookmarks: a quote taken on one device while the other was closed is not lost
+when the other syncs, and a quote or note you delete stays deleted instead of
+being put back by the device that still had it. What each note is called
+follows whichever device renamed it last, and its contents are kept either way.
+
+Syncing carries roughly 140KB of notes — plenty for hundreds of quotes. Past
+that the newest are the ones that travel and the rest stay on the device that
+took them, because half a quote would be worse than none.
+
 Switch the whole thing off under **Settings → Notes** and selecting text goes
 back to being just selecting text; the notes you already have stay where they
-are. Notes live on the device they were made on, like view mode and collapsed
-feeds — they do not sync.
+are.
 
 ## Team feeds
 

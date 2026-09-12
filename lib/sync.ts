@@ -2,6 +2,8 @@ import { getSql, ensureSchema } from "./db";
 import { hashCode, newSyncCode } from "./sync-code";
 import { mergeSaved } from "./saved";
 import type { SavedArticle, SavedRemoval } from "./saved";
+import { mergeNotes } from "./notes";
+import type { Note, NoteRemoval } from "./notes";
 
 export type SyncPayload = {
   feeds: unknown[];
@@ -13,6 +15,13 @@ export type SyncPayload = {
    */
   saved?: SavedArticle[];
   savedRemovals?: SavedRemoval[];
+  /**
+   * Notes and their quotes, merged rather than replaced for the same reason
+   * bookmarks are: both devices write to them between syncs, and one of them
+   * pushing must not delete what the other wrote. Deletions carry tombstones.
+   */
+  notes?: Note[];
+  noteRemovals?: NoteRemoval[];
   /**
    * Which team feeds this person has joined — the name and connect code, not
    * the shared articles. Those live on the server because several people write
@@ -106,10 +115,16 @@ export async function writeSync(
     { saved: payload.saved ?? [], removals: payload.savedRemovals ?? [] },
     { saved: stored.saved ?? [], removals: stored.savedRemovals ?? [] },
   );
+  const notes = mergeNotes(
+    { notes: payload.notes ?? [], removals: payload.noteRemovals ?? [] },
+    { notes: stored.notes ?? [], removals: stored.noteRemovals ?? [] },
+  );
   const merged: SyncPayload = {
     ...payload,
     saved: bookmarks.saved,
     savedRemovals: bookmarks.removals,
+    notes: notes.notes,
+    noteRemovals: notes.removals,
   };
 
   await ensureSchema();
