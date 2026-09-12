@@ -19,6 +19,8 @@ import {
   moveSourceBetweenFeeds,
   loadSaved,
   saveSaved,
+  loadSavedRemovals,
+  saveSavedRemovals,
   loadTeams,
   saveTeams,
   sanitizeTeams,
@@ -70,6 +72,8 @@ import type { PickedSource } from "./OutletCatalog";
 import ScoreExplainer from "./ScoreExplainer";
 import type { CorpusStats } from "./ScoreExplainer";
 import { canonicalUrl } from "@/lib/url";
+import { mergeSaved, differsFrom, slimForSync } from "@/lib/saved";
+import type { SavedRemoval } from "@/lib/saved";
 import "./reader.css";
 
 type Loaded = Article & { sourceId: string };
@@ -149,6 +153,8 @@ export default function Reader() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [saved, setSaved] = useState<SavedArticle[]>([]);
+  /** Un-saves, dated, so they survive syncing with a device that still has it. */
+  const [savedRemovals, setSavedRemovals] = useState<SavedRemoval[]>([]);
   /** The team feeds this device has joined. */
   const [teams, setTeams] = useState<TeamFeed[]>([]);
   /**
@@ -204,6 +210,9 @@ export default function Reader() {
   const pulled = useRef(false);
   const hydrated = useRef(false);
   const pushedAt = useRef(0);
+  /** The bookmark list as it stands, for merging inside applyRemote. */
+  const savedRef = useRef<SavedArticle[]>([]);
+  const removalsRef = useRef<SavedRemoval[]>([]);
 
   useEffect(() => {
     setFeeds(loadFeeds());
@@ -212,6 +221,7 @@ export default function Reader() {
     setSettings(loadSettings());
     setCollapsed(loadCollapsed());
     setSaved(loadSaved());
+    setSavedRemovals(loadSavedRemovals());
     setTeams(loadTeams());
     setVault(loadVault());
     setApiKeys(loadUnlockedKeys());
@@ -228,7 +238,15 @@ export default function Reader() {
     });
   }, []);
 
-  const applyRemote = useCallback((payload: { feeds?: Feed[]; read?: string[]; teams?: unknown; vault?: unknown; updatedAt?: number }) => {
+  const applyRemote = useCallback((payload: {
+    feeds?: Feed[];
+    read?: string[];
+    saved?: SavedArticle[];
+    savedRemovals?: SavedRemoval[];
+    teams?: unknown;
+    vault?: unknown;
+    updatedAt?: number;
+  }) => {
     applying.current = true;
     if (Array.isArray(payload.feeds)) setFeeds(payload.feeds);
     // Which team feeds this person is on travels between their own devices;
@@ -249,11 +267,42 @@ export default function Reader() {
       setRead(next);
       saveRead(next);
     }
+    /*
+     * Bookmarks are merged, not taken. Everything else in this document
+     * resolves by "most recent change wins", which for a bookmark list would
+     * mean the phone saving something on the train deleting what the desktop
+     * saved that morning. The merge keeps both sides, and a dated un-save
+     * still removes an article the other device is holding.
+     */
+    const bookmarks = mergeSaved(
+      { saved: savedRef.current, removals: removalsRef.current },
+      { saved: payload.saved ?? [], removals: payload.savedRemovals ?? [] },
+    );
+    setSaved(bookmarks.saved);
+    saveSaved(bookmarks.saved);
+    setSavedRemovals(bookmarks.removals);
+    saveSavedRemovals(bookmarks.removals);
+    // If the merge kept something the other side had not seen, this device
+    // still has news — so it must not mark itself up to date.
+    const owes = differsFrom(bookmarks, {
+      saved: payload.saved ?? [],
+      removals: payload.savedRemovals ?? [],
+    });
+
     if (typeof payload.updatedAt === "number" && payload.updatedAt > 0) {
       updatedAtRef.current = payload.updatedAt;
       setUpdatedAt(payload.updatedAt);
       saveUpdatedAt(payload.updatedAt);
-      pushedAt.current = payload.updatedAt;
+      // Only call this device up to date when it has nothing left to send.
+      pushedAt.current = owes ? 0 : payload.updatedAt;
+    }
+    if (owes) {
+      // Stamp the union as a change of this device's own, so the push effect
+      // sends it rather than sitting on bookmarks the other device lacks.
+      const now = Math.max(Date.now(), updatedAtRef.current + 1);
+      updatedAtRef.current = now;
+      setUpdatedAt(now);
+      saveUpdatedAt(now);
     }
     // Release on the next tick, after the state updates have flushed.
     setTimeout(() => {
@@ -282,6 +331,11 @@ export default function Reader() {
     if (ready) saveFeeds(feeds);
   }, [feeds, ready]);
 
+  useEffect(() => {
+    savedRef.current = saved;
+    removalsRef.current = savedRemovals;
+  }, [saved, savedRemovals]);
+
   /**
    * Stamp a real local change. The first run is the load from storage, which
    * is not a change — stamping it would make a stale device look like the
@@ -301,7 +355,7 @@ export default function Reader() {
     updatedAtRef.current = now;
     setUpdatedAt(now);
     saveUpdatedAt(now);
-  }, [feeds, read, vault, teams, ready]);
+  }, [feeds, read, saved, savedRemovals, vault, teams, ready]);
 
   // Pull once the code is known, and again whenever the window regains focus,
   // so a device left open picks up changes made elsewhere.
@@ -343,6 +397,10 @@ export default function Reader() {
             code: syncCode,
             feeds,
             read: [...read],
+            // Trimmed: a few hundred full records would push the document
+            // past the size the route accepts, and then nothing syncs.
+            saved: slimForSync(saved),
+            savedRemovals,
             teams,
             vault,
             updatedAt,
@@ -363,7 +421,7 @@ export default function Reader() {
       }
     }, 900);
     return () => clearTimeout(timer);
-  }, [feeds, read, teams, ready, syncCode, vault, updatedAt, applyRemote]);
+  }, [feeds, read, saved, savedRemovals, teams, ready, syncCode, vault, updatedAt, applyRemote]);
 
   const startSync = useCallback(async () => {
     setSyncState("working");
@@ -376,13 +434,24 @@ export default function Reader() {
 
     // Upload what this device already has *before* the code goes live,
     // otherwise the first pull would overwrite these feeds with the empty
-    // record we just created.
-    const saved = await fetch("/api/sync", {
+    // record we just created. Bookmarks go with it: turning sync on should
+    // carry the list that is already here, not wait for the next change to
+    // it. (Named `upload`, not `saved` — that name is the bookmark list.)
+    const upload = await fetch("/api/sync", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code: data.code, feeds, read: [...read], teams }),
+      body: JSON.stringify({
+        code: data.code,
+        feeds,
+        read: [...read],
+        saved: slimForSync(saved),
+        savedRemovals,
+        teams,
+        vault,
+        updatedAt: Math.max(Date.now(), updatedAtRef.current + 1),
+      }),
     });
-    if (!saved.ok) {
+    if (!upload.ok) {
       setSyncState("error");
       throw new Error("Could not upload this device's feeds");
     }
@@ -390,7 +459,7 @@ export default function Reader() {
     saveSyncCode(data.code);
     setSyncCode(data.code);
     setSyncState("saved");
-  }, [feeds, read, teams]);
+  }, [feeds, read, saved, savedRemovals, teams, vault]);
 
   const connectSync = useCallback(
     async (entered: string) => {
@@ -804,12 +873,28 @@ export default function Reader() {
   );
 
   /**
+   * Note an un-save, dated. Without this the other device — which still has
+   * the article — simply puts it back at the next sync.
+   */
+  const noteRemoval = useCallback((link: string) => {
+    setSavedRemovals((current) => {
+      const next = [
+        { link, at: Date.now() },
+        ...current.filter((removal) => removal.link !== link),
+      ];
+      saveSavedRemovals(next);
+      return next;
+    });
+  }, []);
+
+  /**
    * Bookmark an article, or take it off the list. The whole record is kept:
    * an article falls out of its feed after a few weeks, and a saved one has
    * to still be there afterwards.
    */
   const toggleSaved = useCallback(
     (article: Loaded, source?: Source) => {
+      if (saved.some((a) => a.link === article.link)) noteRemoval(article.link);
       setSaved((current) => {
         const next = current.some((a) => a.link === article.link)
           ? current.filter((a) => a.link !== article.link)
@@ -826,7 +911,7 @@ export default function Reader() {
         return next;
       });
     },
-    [],
+    [saved, noteRemoval],
   );
 
   /**
@@ -836,6 +921,7 @@ export default function Reader() {
    */
   const toggleSavedFile = useCallback(
     (file: Attachment, parent: Loaded, source?: Source) => {
+      if (saved.some((a) => a.link === file.url)) noteRemoval(file.url);
       setSaved((current) => {
         const next = current.some((a) => a.link === file.url)
           ? current.filter((a) => a.link !== file.url)
@@ -857,7 +943,7 @@ export default function Reader() {
         return next;
       });
     },
-    [],
+    [saved, noteRemoval],
   );
 
   const markSaved = useCallback((url: string) => {
