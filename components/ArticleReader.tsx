@@ -7,6 +7,7 @@ import { downloadUrlFor } from "@/lib/download";
 import { readCached, writeCached } from "@/lib/offline";
 import { timeAgo, hostOf } from "./format";
 import QuoteToNote from "./QuoteToNote";
+import { findQuoteRange } from "@/lib/highlight";
 import type { Note } from "@/lib/notes";
 
 type Props = {
@@ -35,6 +36,11 @@ type Props = {
   notes?: Note[];
   onQuote?: (noteId: string, text: string) => void;
   onCreateNote?: (name: string) => string;
+  /**
+   * A passage to go to on arrival — how a note's quote returns to where it
+   * came from. It is found in the text, scrolled to and flashed.
+   */
+  highlight?: string;
   onClose: () => void;
 };
 
@@ -51,6 +57,7 @@ export default function ArticleReader({
   notes,
   onQuote,
   onCreateNote,
+  highlight,
   onClose,
 }: Props) {
   const [article, setArticle] = useState<ReadableArticle | null>(null);
@@ -60,6 +67,67 @@ export default function ArticleReader({
   const [slow, setSlow] = useState(false);
   /** The article's own text — the only place a highlight becomes a quote. */
   const prose = useRef<HTMLDivElement | null>(null);
+  /** Where the quote being returned to sits, in boxes to paint over it. */
+  const [flash, setFlash] = useState<
+    { top: number; left: number; width: number; height: number }[]
+  >([]);
+  /** Set when the quote is not in this copy of the article, and said so. */
+  const [lost, setLost] = useState(false);
+
+  /**
+   * Go to the quoted passage and light it up for a moment.
+   *
+   * Waits a frame: the text has only just been written into the page, and a
+   * measurement taken before layout has settled scrolls to the wrong place.
+   * The boxes are drawn over the words rather than wrapped around them,
+   * because a quote can start mid-sentence and end inside a link, and the
+   * article's HTML is not ours to restructure.
+   */
+  useEffect(() => {
+    setFlash([]);
+    setLost(false);
+    if (!highlight || !article) return;
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      const host = prose.current;
+      const range = findQuoteRange(host, highlight);
+      if (!host || !range) {
+        setLost(true);
+        return;
+      }
+
+      const body = host.closest(".reader-body") as HTMLElement | null;
+      const scroller = host.closest(".main") as HTMLElement | null;
+      const base = body?.getBoundingClientRect();
+      if (base) {
+        setFlash(
+          [...range.getClientRects()].map((rect) => ({
+            top: rect.top - base.top,
+            left: rect.left - base.left,
+            width: rect.width,
+            height: rect.height,
+          })),
+        );
+      }
+
+      if (scroller) {
+        const rect = range.getBoundingClientRect();
+        const top =
+          scroller.scrollTop + rect.top - scroller.getBoundingClientRect().top - 90;
+        scroller.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+      }
+      // Long enough to catch the eye after the scroll, short enough that it
+      // does not sit there colouring the article while it is being read.
+      setTimeout(() => !cancelled && setFlash([]), 2600);
+    }, 120);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [highlight, article]);
 
   useEffect(() => {
     let cancelled = false;
@@ -276,6 +344,19 @@ export default function ArticleReader({
           <>
             {/* Sanitized server-side: scripts, styles, iframes and event
                 handlers are stripped before this ever reaches the DOM. */}
+            {flash.length > 0 && (
+              <div className="quote-flash" aria-hidden="true">
+                {flash.map((box, i) => (
+                  <span key={i} style={box} />
+                ))}
+              </div>
+            )}
+            {lost && (
+              <p className="reader-note">
+                The quoted passage is not in this copy of the article — it may
+                have been edited since.
+              </p>
+            )}
             <div
               className="prose"
               ref={prose}

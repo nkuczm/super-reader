@@ -316,6 +316,8 @@
    auto margin pushed the second one onto its own line. */
 .reader-bar a.btn:first-of-type { margin-left: auto; }
 
+/* The frame the quote-flash boxes are measured and drawn against. */
+.reader-body { position: relative; }
 .reader-body h1 {
   margin: 0 0 10px; font-size: 30px; line-height: 1.22;
   letter-spacing: -0.025em; font-weight: 680;
@@ -666,6 +668,25 @@
 }
 
 .note-page { padding: 0 0 60px; }
+
+/* The passage a quote came from, lit up on arrival. Boxes painted over the
+   words rather than wrapped around them: a quote can start mid-sentence and
+   end inside a link, and the article's own markup is not ours to restructure. */
+.quote-flash { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.quote-flash span {
+  position: absolute; border-radius: 3px;
+  background: var(--quote-flash);
+  animation: quote-flash 2.6s ease-out forwards;
+}
+@keyframes quote-flash {
+  0% { opacity: 0; }
+  8% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .quote-flash span { animation-duration: 2.6s; animation-timing-function: step-end; }
+}
 .note-entries { list-style: none; margin: 18px 0 0; padding: 0 24px; }
 .note-entry {
   display: grid; grid-template-columns: 1fr auto; gap: 8px;
@@ -679,6 +700,8 @@
   content: ""; position: absolute; left: 2px; top: 9px;
   width: 5px; height: 5px; border-radius: 50%; background: var(--text-dim);
 }
+.note-quote blockquote { cursor: pointer; }
+.note-quote blockquote:hover { border-left-color: var(--text); }
 .note-quote blockquote {
   margin: 0; padding: 2px 0 2px 13px; border-left: 3px solid var(--accent);
   font-size: 15.5px; line-height: 1.55;

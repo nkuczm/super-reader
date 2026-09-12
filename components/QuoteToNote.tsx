@@ -52,11 +52,7 @@ export default function QuoteToNote({
     return { text, rect };
   }, [container]);
 
-  useEffect(() => {
-    const show = () => {
-      // The menu is open over a selection the browser may have just cleared;
-      // leave it where it is until the reader chooses or dismisses it.
-      if (picking) return;
+  const place = useCallback(() => {
       const hit = read();
       if (!hit) {
         setPlaced(null);
@@ -65,16 +61,30 @@ export default function QuoteToNote({
       const { rect } = hit;
       const below = rect.bottom + 8;
       const fitsBelow = below + 44 < window.innerHeight;
+      // Clamped to the screen: a selection can run off the bottom of the
+      // viewport — a long passage, or one the page scrolled after selecting —
+      // and a button placed faithfully beside it would be somewhere nobody
+      // can reach.
+      const top = Math.min(
+        Math.max(8, fitsBelow ? below : rect.top - 44),
+        window.innerHeight - 52,
+      );
       setPlaced({
         text: hit.text,
-        top: fitsBelow ? below : Math.max(8, rect.top - 44),
+        top,
         left: Math.min(
           Math.max(12, rect.left + rect.width / 2 - 70),
           window.innerWidth - 152,
         ),
       });
-    };
+  }, [read]);
 
+  useEffect(() => {
+    // The menu is open over a selection the browser may have just cleared;
+    // leave it where it is until the reader chooses or dismisses it.
+    const show = () => {
+      if (!picking) place();
+    };
     // pointerup/keyup rather than selectionchange: the latter fires on every
     // character of a drag, and the button would jitter along with it.
     document.addEventListener("pointerup", show);
@@ -83,17 +93,18 @@ export default function QuoteToNote({
       document.removeEventListener("pointerup", show);
       document.removeEventListener("keyup", show);
     };
-  }, [read, picking]);
+  }, [place, picking]);
 
-  // Scrolling away from the selection should take the button with it.
+  // Scrolling moves the words, so it moves the button with them — and drops
+  // it once the selection itself is gone. Dropping it on any scroll at all
+  // was wrong: a phone's momentum scroll after a selection took it away
+  // before it could be used.
   useEffect(() => {
-    if (!placed) return;
-    const drop = () => {
-      if (!picking) setPlaced(null);
-    };
-    window.addEventListener("scroll", drop, true);
-    return () => window.removeEventListener("scroll", drop, true);
-  }, [placed, picking]);
+    if (!placed || picking) return;
+    const follow = () => place();
+    window.addEventListener("scroll", follow, true);
+    return () => window.removeEventListener("scroll", follow, true);
+  }, [placed, picking, place]);
 
   useEffect(() => {
     if (!picking) return;

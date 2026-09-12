@@ -22,8 +22,8 @@ export default function NotePage({
   onOpenMenu,
 }: {
   note: Note;
-  /** Back to the article a quote came from. */
-  onOpenArticle: (link: string, title: string) => void;
+  /** Back to the article a quote came from, at the passage itself. */
+  onOpenArticle: (link: string, title: string, quote: string) => void;
   onAddComment: (text: string) => void;
   onEditComment: (entryId: string, text: string) => void;
   onRemoveEntry: (entryId: string) => void;
@@ -75,7 +75,9 @@ export default function NotePage({
               {entry.kind === "quote" ? (
                 <Quote
                   entry={entry}
-                  onOpen={() => onOpenArticle(entry.link, entry.articleTitle)}
+                  onOpen={() =>
+                    onOpenArticle(entry.link, entry.articleTitle, entry.text)
+                  }
                 />
               ) : (
                 <Comment
@@ -147,7 +149,16 @@ function Quote({
 }) {
   return (
     <div className="note-quote">
-      <blockquote>
+      {/* The quote itself goes back to where it came from — but not when
+          something in it is selected, which means the reader is copying it,
+          not asking to leave. */}
+      <blockquote
+        title="Open this passage in the article"
+        onClick={() => {
+          if ((window.getSelection()?.toString() ?? "").trim()) return;
+          onOpen();
+        }}
+      >
         {entry.text.split(/\n\n+/).map((para, i) => (
           <p key={i}>{para}</p>
         ))}

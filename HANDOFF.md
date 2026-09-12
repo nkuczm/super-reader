@@ -66,6 +66,7 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
 | `lib/sync.ts` `lib/sync-code.ts` `lib/db.ts` | Cross-device sync |
 | `lib/team.ts` | Team feeds: the shared list, and the merge that makes it safe |
 | `lib/notes.ts` | Notes: quotes, your own lines, and which bookmarks they hold |
+| `lib/highlight.ts` | Finding a stored quote again in the article it came from |
 | `lib/sort.ts` | Newest-first ordering, shared by every path |
 | `lib/store.ts` | Feeds, settings, read state and the Saved list (localStorage) |
 | `components/Reader.tsx` | The whole app shell: sidebar, list, state |
@@ -204,6 +205,28 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   quote's "back to the article" would otherwise do nothing visible, because
   the note branch came first in the render chain. Now Back returns to the note
   the reader was opened from.
+- **A quote finds its way back by text, not by an anchor.** There is no id to
+  jump to: the article is re-extracted each time and its markup is the
+  publisher's. `findQuoteRange` indexes the rendered text into a whitespace-
+  normalised string with a map back to the text nodes, so a quote that runs
+  through a link, an italic or two paragraphs is still one match. Paragraph
+  boundaries count as a space whether or not the HTML has one — minified
+  pages have none, and `<p>One.</p><p>Two.</p>` would otherwise index as
+  "One.Two." and never match. When the full quote has gone, a binary search
+  finds the longest opening that still matches (floor 25 chars), so an
+  article that gained a correction still lands in the right place; below that
+  the reader says the passage is not in this copy rather than sitting silent.
+- **The flash is painted over the words, not wrapped around them.** Absolutely
+  positioned boxes from `range.getClientRects()`, inside `.reader-body`
+  (which is `position: relative` for exactly this). Wrapping in a `<mark>`
+  would mean restructuring sanitised third-party HTML across element
+  boundaries, which `surroundContents` refuses on any interesting quote.
+- **The quote button follows the selection on scroll rather than dropping.**
+  Dropping on any scroll looked fine on a desktop and broke on a phone: the
+  momentum scroll that follows a selection took the button away before it
+  could be tapped. It is also clamped to the viewport, because a selection
+  can run off the bottom of the screen and a button placed faithfully beside
+  it would be somewhere nobody can reach.
 - **The quote button watches `pointerup`, not `selectionchange`.** The latter
   fires on every character of a drag and the button chases the cursor. It also
   checks that *both* ends of the selection are inside the article body, so

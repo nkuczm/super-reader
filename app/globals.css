@@ -11,6 +11,8 @@
   /* Sky, for the "already downloaded" mark: distinct from the blue accent,
      which everywhere else means something you can act on. */
   --saved: #0ea5e9;
+  /* A highlighter over the words, not a block of colour under them. */
+  --quote-flash: rgba(250, 204, 21, 0.45);
   --radius: 10px;
   color-scheme: light;
 }
@@ -27,6 +29,7 @@
     --accent-soft: #172030;
     --danger: #f87171;
     --saved: #38bdf8;
+    --quote-flash: rgba(250, 204, 21, 0.3);
     color-scheme: dark;
   }
 }

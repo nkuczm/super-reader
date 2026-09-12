@@ -373,8 +373,12 @@ and they can be renamed and deleted there. Each one is a page of its own:
 - **Your own lines can be typed straight in**, under the quotes or between
   them, and edited whenever. Plain text and nothing else — no toolbar, no
   formatting, no styles to fight with.
-- **Every quote links back.** The line under it opens the article again, and
-  closing it returns you to the note.
+- **Every quote links back to the passage itself.** Click the quote (or the
+  line under it) and the article opens *at* those words, scrolled to them and
+  highlighted for a couple of seconds so you can see where you are. Closing
+  the article returns you to the note. If the page has been edited since and
+  the passage is no longer in it, the reader says so rather than leaving you
+  at the top wondering.
 
 **The article behind a quote is bookmarked automatically**, so a quote does
 not end up pointing at a story that has scrolled out of its feed and off the

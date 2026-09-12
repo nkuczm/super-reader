@@ -134,6 +134,8 @@ export default function Reader() {
     title: string;
     feedUrl?: string;
     summary?: string;
+    /** A passage to go to on arrival, when a note's quote sent us here. */
+    quote?: string;
   } | null>(null);
   const [syncCode, setSyncCode] = useState<string | null>(null);
   const [syncOpen, setSyncOpen] = useState(false);
@@ -1870,6 +1872,7 @@ export default function Reader() {
             onOpenMenu={() => setMenuOpen(true)}
             onAlwaysOpenOnSite={alwaysOpenOnSite}
             notes={notes}
+            highlight={reading.quote}
             onQuote={settings.quoteToNote ? quoteIntoNote : undefined}
             onCreateNote={settings.quoteToNote ? createNote : undefined}
             saved={isSaved(reading.url)}
@@ -1885,7 +1888,9 @@ export default function Reader() {
           <NotePage
             note={openNote}
             onOpenMenu={() => setMenuOpen(true)}
-            onOpenArticle={(link, title) => setReading({ url: link, title })}
+            onOpenArticle={(link, title, quote) =>
+              setReading({ url: link, title, quote })
+            }
             onAddComment={(text) =>
               commitNotes((current) =>
                 addEntry(current, openNote.id, {
