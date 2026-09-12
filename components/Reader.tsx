@@ -19,6 +19,9 @@ import {
   moveSourceBetweenFeeds,
   loadSaved,
   saveSaved,
+  loadTeams,
+  saveTeams,
+  sanitizeTeams,
   loadVault,
   saveVault,
   loadUpdatedAt,
@@ -26,9 +29,11 @@ import {
   loadUnlockedKeys,
   saveUnlockedKeys,
   type SavedArticle,
+  type TeamFeed,
   type Feed,
   type Source,
 } from "@/lib/store";
+import type { TeamArticle } from "@/lib/team";
 import AddSourceDialog from "./AddSourceDialog";
 import SyncDialog from "./SyncDialog";
 import InlineName from "./InlineName";
@@ -96,6 +101,8 @@ function keyHeadersFrom(keys: Record<string, string>): HeadersInit | undefined {
 type Selection =
   | { type: "all" }
   | { type: "saved" }
+  /** A shared list: its id is the team's connect code. */
+  | { type: "team"; id: string }
   | { type: "feed" | "source"; id: string };
 
 export default function Reader() {
@@ -142,6 +149,17 @@ export default function Reader() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [saved, setSaved] = useState<SavedArticle[]>([]);
+  /** The team feeds this device has joined. */
+  const [teams, setTeams] = useState<TeamFeed[]>([]);
+  /**
+   * What is on each team feed, by connect code. Not kept in local storage:
+   * several people write to a team feed, so the server's copy is the only one
+   * that can be trusted to be current.
+   */
+  const [teamArticles, setTeamArticles] = useState<Record<string, TeamArticle[]>>({});
+  const [teamsBusy, setTeamsBusy] = useState(false);
+  /** The article whose "Save to Team" menu is open, when there are several. */
+  const [teamMenu, setTeamMenu] = useState<string | null>(null);
   /** Whether the browser promised to keep this cache rather than evict it. */
   const [persisted, setPersisted] = useState(false);
   const [vault, setVault] = useState<unknown | null>(null);
@@ -194,6 +212,7 @@ export default function Reader() {
     setSettings(loadSettings());
     setCollapsed(loadCollapsed());
     setSaved(loadSaved());
+    setTeams(loadTeams());
     setVault(loadVault());
     setApiKeys(loadUnlockedKeys());
     updatedAtRef.current = loadUpdatedAt();
@@ -209,9 +228,16 @@ export default function Reader() {
     });
   }, []);
 
-  const applyRemote = useCallback((payload: { feeds?: Feed[]; read?: string[]; vault?: unknown; updatedAt?: number }) => {
+  const applyRemote = useCallback((payload: { feeds?: Feed[]; read?: string[]; teams?: unknown; vault?: unknown; updatedAt?: number }) => {
     applying.current = true;
     if (Array.isArray(payload.feeds)) setFeeds(payload.feeds);
+    // Which team feeds this person is on travels between their own devices;
+    // what is *in* those feeds does not, and never touches local storage.
+    if (Array.isArray(payload.teams)) {
+      const next = sanitizeTeams(payload.teams);
+      setTeams(next);
+      saveTeams(next);
+    }
     // The vault arrives encrypted; it stays locked until a passphrase is
     // entered on this device, which is the whole point of it.
     if (payload.vault) {
@@ -275,7 +301,7 @@ export default function Reader() {
     updatedAtRef.current = now;
     setUpdatedAt(now);
     saveUpdatedAt(now);
-  }, [feeds, read, vault, ready]);
+  }, [feeds, read, vault, teams, ready]);
 
   // Pull once the code is known, and again whenever the window regains focus,
   // so a device left open picks up changes made elsewhere.
@@ -317,6 +343,7 @@ export default function Reader() {
             code: syncCode,
             feeds,
             read: [...read],
+            teams,
             vault,
             updatedAt,
           }),
@@ -336,7 +363,7 @@ export default function Reader() {
       }
     }, 900);
     return () => clearTimeout(timer);
-  }, [feeds, read, ready, syncCode, vault, updatedAt, applyRemote]);
+  }, [feeds, read, teams, ready, syncCode, vault, updatedAt, applyRemote]);
 
   const startSync = useCallback(async () => {
     setSyncState("working");
@@ -353,7 +380,7 @@ export default function Reader() {
     const saved = await fetch("/api/sync", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code: data.code, feeds, read: [...read] }),
+      body: JSON.stringify({ code: data.code, feeds, read: [...read], teams }),
     });
     if (!saved.ok) {
       setSyncState("error");
@@ -363,7 +390,7 @@ export default function Reader() {
     saveSyncCode(data.code);
     setSyncCode(data.code);
     setSyncState("saved");
-  }, [feeds, read]);
+  }, [feeds, read, teams]);
 
   const connectSync = useCallback(
     async (entered: string) => {
@@ -387,6 +414,178 @@ export default function Reader() {
     setSyncState("idle");
     setSyncOpen(false);
   }, []);
+
+  /* ---------- team feeds ---------- */
+
+  /**
+   * Pull one team feed. Whoever else is on it may have added something since,
+   * so the server's copy always wins here — there is no local copy to merge.
+   */
+  const refreshTeam = useCallback(async (code: string) => {
+    const res = await fetch(`/api/team?code=${encodeURIComponent(code)}`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error ?? "Could not reach that team feed");
+    }
+    const data = (await res.json()) as { name: string; articles: TeamArticle[] };
+    setTeamArticles((current) => ({ ...current, [code]: data.articles ?? [] }));
+    // The name is the team's, not this device's: a rename elsewhere lands here.
+    setTeams((current) => {
+      if (!current.some((team) => team.code === code && team.name !== data.name)) {
+        return current;
+      }
+      const next = current.map((team) =>
+        team.code === code ? { ...team, name: data.name } : team,
+      );
+      saveTeams(next);
+      return next;
+    });
+    return data;
+  }, []);
+
+  // Load every joined feed on open, and again on focus — the same moment sync
+  // pulls, and the moment someone comes back to see what the team shared.
+  useEffect(() => {
+    if (!ready || teams.length === 0) return;
+    const load = () => {
+      for (const team of teams) {
+        refreshTeam(team.code).catch(() => {
+          /* offline or unreachable: keep showing what was last loaded */
+        });
+      }
+    };
+    load();
+    window.addEventListener("focus", load);
+    return () => window.removeEventListener("focus", load);
+  }, [ready, teams, refreshTeam]);
+
+  const createTeam = useCallback(async (name: string) => {
+    setTeamsBusy(true);
+    try {
+      const res = await fetch("/api/team", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not create a team feed");
+      setTeams((current) => {
+        const next = [...current, { code: data.code as string, name: data.name as string }];
+        saveTeams(next);
+        return next;
+      });
+      setTeamArticles((current) => ({ ...current, [data.code]: [] }));
+    } finally {
+      setTeamsBusy(false);
+    }
+  }, []);
+
+  const joinTeam = useCallback(
+    async (entered: string) => {
+      const code = entered.trim();
+      setTeamsBusy(true);
+      try {
+        // Fetch first: joining a code that does not resolve should say so
+        // rather than adding an entry that never loads.
+        const data = await refreshTeam(code);
+        setTeams((current) => {
+          if (current.some((team) => team.code === code)) return current;
+          const next = [...current, { code, name: data.name }];
+          saveTeams(next);
+          return next;
+        });
+      } finally {
+        setTeamsBusy(false);
+      }
+    },
+    [refreshTeam],
+  );
+
+  /**
+   * Leave on this device only. The shared list itself stays where it is —
+   * other people are still on it, and the code still works.
+   */
+  const leaveTeam = useCallback((code: string) => {
+    setTeams((current) => {
+      const next = current.filter((team) => team.code !== code);
+      saveTeams(next);
+      return next;
+    });
+    setTeamArticles((current) => {
+      const next = { ...current };
+      delete next[code];
+      return next;
+    });
+    setSelection((current) =>
+      current.type === "team" && current.id === code ? { type: "all" } : current,
+    );
+  }, []);
+
+  // A picker left open over a list that has moved on is just in the way.
+  useEffect(() => {
+    if (!teamMenu) return;
+    const close = (event: MouseEvent) => {
+      if (!(event.target as HTMLElement | null)?.closest(".team-share")) {
+        setTeamMenu(null);
+      }
+    };
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [teamMenu]);
+
+  /** Which of the joined feeds already carry this article. */
+  const teamsWith = useCallback(
+    (link: string) =>
+      teams.filter((team) =>
+        (teamArticles[team.code] ?? []).some((a) => a.link === link),
+      ),
+    [teams, teamArticles],
+  );
+
+  /**
+   * Share one article, or take it back off. Only the article is sent: the
+   * request carries no feeds, no read state and nothing saying who sent it.
+   */
+  const toggleTeam = useCallback(
+    async (code: string, article: Loaded, source?: Source) => {
+      const shared = (teamArticles[code] ?? []).some((a) => a.link === article.link);
+      setTeamsBusy(true);
+      try {
+        const res = shared
+          ? await fetch(
+              `/api/team?code=${encodeURIComponent(code)}&link=${encodeURIComponent(article.link)}`,
+              { method: "DELETE" },
+            )
+          : await fetch("/api/team", {
+              method: "PUT",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                code,
+                article: {
+                  id: article.id,
+                  title: article.title,
+                  link: article.link,
+                  author: article.author,
+                  publishedAt: article.publishedAt,
+                  summary: article.summary,
+                  image: article.image,
+                  sourceTitle: source?.title,
+                  favicon: source?.favicon,
+                },
+              }),
+            });
+        if (!res.ok) return;
+        const data = (await res.json()) as { articles: TeamArticle[] };
+        setTeamArticles((current) => ({ ...current, [code]: data.articles ?? [] }));
+      } catch {
+        /* offline: the list stays as it was, and a later save can retry */
+      } finally {
+        setTeamsBusy(false);
+        setTeamMenu(null);
+      }
+    },
+    [teamArticles],
+  );
 
   const allSources = useMemo(
     () => feeds.flatMap((feed) => feed.sources),
@@ -777,16 +976,24 @@ export default function Reader() {
     [saved],
   );
 
+  /** A team feed's articles, in the same shape the list renders. */
+  const teamAsArticles = useCallback(
+    (code: string): Loaded[] =>
+      (teamArticles[code] ?? []).map((article) => ({ ...article, sourceId: "" })),
+    [teamArticles],
+  );
+
   const visible = useMemo(() => {
     if (selection.type === "all") return articles;
     if (selection.type === "saved") return savedAsArticles;
+    if (selection.type === "team") return teamAsArticles(selection.id);
     if (selection.type === "source") {
       return articles.filter((a) => a.sourceId === selection.id);
     }
     const feed = feeds.find((f) => f.id === selection.id);
     const ids = new Set(feed?.sources.map((s) => s.id));
     return articles.filter((a) => ids.has(a.sourceId));
-  }, [articles, feeds, selection, savedAsArticles]);
+  }, [articles, feeds, selection, savedAsArticles, teamAsArticles]);
 
   const sourceById = useMemo(
     () => new Map(allSources.map((s) => [s.id, s])),
@@ -1010,6 +1217,7 @@ export default function Reader() {
     (next: Selection) => {
       setSelection(next);
       setMenuOpen(false);
+      setTeamMenu(null);
       // Picking a feed means going back to the list; staying in the article you
       // were reading made the sidebar look unresponsive.
       setReading(null);
@@ -1079,7 +1287,7 @@ export default function Reader() {
   const selectedSourceCount =
     selection.type === "all"
       ? allSources.length
-      : selection.type === "saved"
+      : selection.type === "saved" || selection.type === "team"
         ? 0
         : selection.type === "source"
           ? 1
@@ -1090,7 +1298,9 @@ export default function Reader() {
       ? "All articles"
       : selection.type === "saved"
         ? "Saved"
-        : selection.type === "feed"
+        : selection.type === "team"
+          ? (teams.find((team) => team.code === selection.id)?.name ?? "Team")
+          : selection.type === "feed"
           ? (feeds.find((f) => f.id === selection.id)?.name ?? "Feed")
           : (sourceById.get(selection.id)?.title ?? "Source");
 
@@ -1122,6 +1332,24 @@ export default function Reader() {
             <span className="feed-name">Saved</span>
             <span className="count">{saved.length || ""}</span>
           </button>
+
+          {/* Team feeds sit right beside Saved: the same kind of list, shared
+              with other people rather than kept on this device. */}
+          {teams.map((team) => (
+            <button
+              key={team.code}
+              className={`nav-item ${
+                selection.type === "team" && selection.id === team.code ? "active" : ""
+              }`}
+              onClick={() => choose({ type: "team", id: team.code })}
+            >
+              {Icon.people}
+              <span className="feed-name">{team.name}</span>
+              <span className="count">
+                {(teamArticles[team.code] ?? []).length || ""}
+              </span>
+            </button>
+          ))}
 
           {feeds.map((feed) => {
             const ids = new Set(feed.sources.map((s) => s.id));
@@ -1429,7 +1657,12 @@ export default function Reader() {
           </div>
         </div>
 
-        {!ready ? null : allSources.length === 0 ? (
+        {/* A team feed is readable on its own: someone can join one with a
+            connect code before they follow a single source of their own, and
+            "start with one link" over a list of shared stories is wrong. */}
+        {!ready ? null : allSources.length === 0 &&
+          shown.length === 0 &&
+          selection.type !== "team" ? (
           <div className="state">
             <h2>Start with one link.</h2>
             <p>
@@ -1444,7 +1677,13 @@ export default function Reader() {
           <div className="state">
             <h2>{refreshing ? "Loading articles…" : "Nothing here yet."}</h2>
             {!refreshing &&
-              (selection.type === "saved" ? (
+              (selection.type === "team" ? (
+                <p>
+                  Nothing shared yet. Use <strong>Save to Team</strong> on any
+                  article and everyone with this feed&rsquo;s connect code will
+                  see it here.
+                </p>
+              ) : selection.type === "saved" ? (
                 <p>
                   Nothing saved yet. Use <strong>Save</strong> on any article
                   and it will wait here — kept on this device, and downloaded
@@ -1639,6 +1878,63 @@ export default function Reader() {
                         {isSaved(article.link) ? Icon.bookmarkOn : Icon.bookmark}
                         {isSaved(article.link) ? "Saved" : "Save"}
                       </button>
+                      {/* Sharing is its own button, never a side effect of
+                          saving: what goes to the team is a deliberate act. */}
+                      {teams.length > 0 &&
+                        (() => {
+                          const on = teamsWith(article.link);
+                          const menuOpenHere = teamMenu === article.link;
+                          return (
+                            <div className="team-share">
+                              <button
+                                className={`read-btn team-btn${on.length > 0 ? " on" : ""}`}
+                                aria-pressed={on.length > 0}
+                                aria-expanded={teams.length > 1 ? menuOpenHere : undefined}
+                                disabled={teamsBusy}
+                                title={
+                                  on.length > 0
+                                    ? `Shared with ${on.map((t) => t.name).join(", ")}`
+                                    : "Save to a team feed"
+                                }
+                                onClick={() => {
+                                  // One team is a straight toggle; several
+                                  // need to know which one.
+                                  if (teams.length === 1) {
+                                    void toggleTeam(teams[0].code, article, source);
+                                  } else {
+                                    setTeamMenu(menuOpenHere ? null : article.link);
+                                  }
+                                }}
+                              >
+                                {on.length > 0 ? Icon.peopleOn : Icon.people}
+                                {on.length > 0 ? "Shared" : "Save to Team"}
+                              </button>
+                              {menuOpenHere && teams.length > 1 && (
+                                <div className="team-menu" role="menu">
+                                  {teams.map((team) => {
+                                    const shared = on.some((t) => t.code === team.code);
+                                    return (
+                                      <button
+                                        key={team.code}
+                                        role="menuitemcheckbox"
+                                        aria-checked={shared}
+                                        disabled={teamsBusy}
+                                        onClick={() =>
+                                          void toggleTeam(team.code, article, source)
+                                        }
+                                      >
+                                        <span className="team-check">
+                                          {shared ? Icon.check : null}
+                                        </span>
+                                        {team.name}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                     </div>
                   </div>
                   {article.image && settings.view === "cards" && (
@@ -1675,7 +1971,9 @@ export default function Reader() {
         </div>
       )}
 
-      <DownloadBar state={offline.state} done={offline.done} total={offline.total} />
+      {settings.showDownloadBar && (
+        <DownloadBar state={offline.state} done={offline.done} total={offline.total} />
+      )}
 
       {settingsOpen && (
         <SettingsDialog
@@ -1690,6 +1988,11 @@ export default function Reader() {
           apiKeys={apiKeys}
           onKeysChange={updateKeys}
           onDownload={runDownload}
+          teams={teams}
+          teamsBusy={teamsBusy}
+          onCreateTeam={createTeam}
+          onJoinTeam={joinTeam}
+          onLeaveTeam={leaveTeam}
         />
       )}
 

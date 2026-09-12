@@ -67,6 +67,23 @@ export const Icon = {
       <path d="M6 4h12v16l-6-4.5L6 20z" />
     </svg>
   ),
+  /** A small crowd: the mark for anything shared with the team. */
+  people: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="9" cy="8" r="3.2" />
+      <path d="M2.5 19.5a6.5 6.5 0 0 1 13 0" />
+      <path d="M16.5 5.6a3.2 3.2 0 0 1 0 6.1" />
+      <path d="M18.2 14.1a6.5 6.5 0 0 1 3.3 5.4" />
+    </svg>
+  ),
+  peopleOn: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="9" cy="8" r="3.2" />
+      <path d="M2.5 19.5a6.5 6.5 0 0 1 13 0z" />
+      <path d="M16.5 5.6a3.2 3.2 0 0 1 0 6.1" fill="none" />
+      <path d="M18.2 14.1a6.5 6.5 0 0 1 3.3 5.4" fill="none" />
+    </svg>
+  ),
   chat: (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-5.5A8 8 0 0 1 11 4h2a8 8 0 0 1 8 8z" />

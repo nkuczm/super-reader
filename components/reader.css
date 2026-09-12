@@ -632,6 +632,45 @@
 
 .article-actions { display: flex; align-items: center; gap: 8px; }
 .save-btn.on { color: var(--accent); border-color: var(--accent); }
+
+/* ---------- team feeds ---------- */
+.article-actions { flex-wrap: wrap; }
+.team-share { position: relative; display: inline-flex; }
+.team-btn.on { color: var(--accent); border-color: var(--accent); }
+.team-btn:disabled { opacity: 0.6; }
+/* The picker only appears when there is more than one team to choose. */
+.team-menu {
+  position: absolute; top: calc(100% + 5px); left: 0; z-index: 30;
+  min-width: 190px; max-width: 260px; padding: 5px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+}
+.team-menu button {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 8px;
+  border: 0; border-radius: 7px; background: transparent; color: var(--text);
+  font-size: 13px; text-align: left;
+}
+.team-menu button:hover:not(:disabled) { background: var(--bg-hover); }
+.team-check {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; flex: none; color: var(--accent);
+}
+
+.team-list { list-style: none; margin: 0 0 14px; padding: 0; }
+.team-list li {
+  padding: 11px; border: 1px solid var(--border); border-radius: 10px;
+  margin-bottom: 9px;
+}
+.team-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 9px;
+}
+.team-name {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 14px; font-weight: 600;
+}
+.team-list .hint { margin-top: 8px; }
+.team-add, .team-cancel { width: auto !important; margin-top: 4px; }
 .view-list .article-actions { display: none; }
 
 .offline-count { color: var(--text); }

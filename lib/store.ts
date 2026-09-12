@@ -119,6 +119,13 @@ export type Settings = {
   /** Hide articles already opened, rather than only dimming them. */
   hideRead: boolean;
   /**
+   * Whether the offline download shows a progress bar across the top of the
+   * screen. Off by default: the download runs on every visit, and a bar that
+   * appears unbidden reads as the app loading something you asked for. Settings
+   * still reports what is on the device, which is the question that matters.
+   */
+  showDownloadBar: boolean;
+  /**
    * Hosts whose articles open on their own site instead of in the reader.
    * Subscription sites are the case: the text is only available in a browser
    * that is logged in, so attempting reader view just wastes a tap.
@@ -131,6 +138,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sort: "new",
   bigStoryMetric: "score",
   hideRead: false,
+  showDownloadBar: false,
   openOnSite: [],
 };
 
@@ -156,6 +164,7 @@ export function loadSettings(): Settings {
           ? "newsrooms"
           : DEFAULT_SETTINGS.bigStoryMetric,
       hideRead: Boolean(parsed.hideRead),
+      showDownloadBar: Boolean(parsed.showDownloadBar),
       openOnSite: Array.isArray(parsed.openOnSite)
         ? parsed.openOnSite.filter((h): h is string => typeof h === "string")
         : [],
@@ -212,6 +221,49 @@ export function saveSyncCode(code: string | null) {
   } catch {
     /* storage unavailable; sync just won't persist across reloads */
   }
+}
+
+/**
+ * The team feeds this device is connected to: a name and the connect code
+ * that reaches the shared list. The articles themselves are not kept here —
+ * they live on the server, because several people write to them.
+ */
+export type TeamFeed = { code: string; name: string };
+
+const TEAMS_KEY = "super-reader:teams:v1";
+
+export function loadTeams(): TeamFeed[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(TEAMS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? sanitizeTeams(parsed) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveTeams(teams: TeamFeed[]) {
+  try {
+    window.localStorage.setItem(TEAMS_KEY, JSON.stringify(teams));
+  } catch {
+    /* storage unavailable; the connection just won't persist */
+  }
+}
+
+/** A list arriving from sync is another device's data, so check its shape. */
+export function sanitizeTeams(value: unknown): TeamFeed[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const teams: TeamFeed[] = [];
+  for (const entry of value) {
+    const team = entry as TeamFeed | null;
+    if (!team || typeof team.code !== "string" || typeof team.name !== "string") continue;
+    if (seen.has(team.code)) continue;
+    seen.add(team.code);
+    teams.push({ code: team.code, name: team.name });
+  }
+  return teams;
 }
 
 const VAULT_KEY = "super-reader:vault:v1";

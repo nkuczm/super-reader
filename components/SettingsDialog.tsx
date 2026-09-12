@@ -1,9 +1,10 @@
 "use client";
 
 import ApiKeys from "./ApiKeys";
+import TeamFeeds from "./TeamFeeds";
 import { Icon } from "./icons";
 import { useEffect } from "react";
-import type { Settings, ViewMode } from "@/lib/store";
+import type { Settings, TeamFeed, ViewMode } from "@/lib/store";
 
 const VIEWS: { id: ViewMode; name: string; blurb: string }[] = [
   {
@@ -71,6 +72,11 @@ export default function SettingsDialog({
   apiKeys,
   onKeysChange,
   onDownload,
+  teams,
+  teamsBusy,
+  onCreateTeam,
+  onJoinTeam,
+  onLeaveTeam,
 }: {
   settings: Settings;
   onChange: (next: Settings) => void;
@@ -91,6 +97,12 @@ export default function SettingsDialog({
     result?: { saved: number; failed: number };
   };
   onDownload: () => void;
+  /** The team feeds this device is connected to. */
+  teams: TeamFeed[];
+  teamsBusy: boolean;
+  onCreateTeam: (name: string) => Promise<void>;
+  onJoinTeam: (code: string) => Promise<void>;
+  onLeaveTeam: (code: string) => void;
 }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -211,10 +223,40 @@ export default function SettingsDialog({
             </>
           )}
 
+          <p className="field-label reading-label">Team feeds</p>
+          <p className="hint" style={{ marginTop: 0, marginBottom: 12 }}>
+            A shared list that sits beside your saved articles. Save a story to
+            it with the <strong>Team</strong> button and everyone on the feed
+            sees it.
+          </p>
+          <TeamFeeds
+            teams={teams}
+            busy={teamsBusy}
+            onCreate={onCreateTeam}
+            onConnect={onJoinTeam}
+            onLeave={onLeaveTeam}
+          />
+
           <p className="field-label reading-label">API keys</p>
           <ApiKeys vault={vault} keys={apiKeys} onChange={onKeysChange} />
 
           <p className="field-label reading-label">Offline</p>
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={settings.showDownloadBar}
+              onChange={(event) =>
+                onChange({ ...settings, showDownloadBar: event.target.checked })
+              }
+            />
+            <span>
+              Show a progress bar while downloading
+              <em>
+                Off by default. The download runs quietly on every visit; the
+                count below says what is on this device.
+              </em>
+            </span>
+          </label>
           <div className="offline-box">
             <div className="offline-status">
               <strong>

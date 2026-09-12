@@ -5,6 +5,13 @@ export type SyncPayload = {
   feeds: unknown[];
   read?: string[];
   /**
+   * Which team feeds this person has joined — the name and connect code, not
+   * the shared articles. Those live on the server because several people write
+   * to them; what syncs is only "this person is on that feed", so joining one
+   * on a laptop reaches their phone.
+   */
+  teams?: unknown[];
+  /**
    * The API-key vault, encrypted in the browser before it ever reaches here.
    * The server stores these bytes and cannot read them: it has no passphrase,
    * and this deployment is public, so anything it could read would be readable

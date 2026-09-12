@@ -57,6 +57,7 @@ export async function PUT(request: Request) {
     code?: string;
     feeds?: unknown;
     read?: unknown;
+    teams?: unknown;
     vault?: unknown;
     updatedAt?: unknown;
   };
@@ -77,6 +78,7 @@ export async function PUT(request: Request) {
   const payload = {
     feeds: body.feeds,
     read: Array.isArray(body.read) ? (body.read as string[]).slice(-3000) : [],
+    ...(Array.isArray(body.teams) ? { teams: body.teams.slice(0, 50) } : {}),
     // Opaque to this server by design; stored and handed back untouched.
     ...(body.vault ? { vault: body.vault } : {}),
     updatedAt: Number.isFinite(Number(body.updatedAt)) ? Number(body.updatedAt) : 0,

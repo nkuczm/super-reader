@@ -358,6 +358,33 @@ and they are always included in the offline download — a bookmark is the
 article most worth having on the device. The list is per-device, like read
 state and view mode.
 
+## Team feeds
+
+A team feed is a shared list that sits beside **Saved** in the sidebar. Set one
+up in **Settings → Team feeds**: create one with a name, or join an existing one
+with its connect code. **Save to Team** on any article — a separate button with
+a small crowd as its mark — puts it on that list, and everyone holding the code
+sees it. With more than one team feed the button opens a short picker.
+
+Only the article travels: its title, link, summary, image and publication. Your
+own feeds, your saved articles, what you have read and your API keys are not
+shared, and nothing records who added what. Anyone on the feed can take an
+article back off it.
+
+The connect code has the same shape and the same rules as a sync code: 100 bits
+of randomness, stored as a SHA-256 hash rather than the code itself, and a
+bearer secret — whoever holds it can read the list and add to it.
+
+It is deliberately **not** a second sync. Sync moves one device's whole document
+and resolves by most recent change, so one copy wins; a team feed is written to
+by several people, so each save merges a single article into the list in one SQL
+statement. Two people saving in the same moment both land on the list. Which
+team feeds you have joined does sync between your own devices — the name and the
+code, never the shared articles, which are read from the server each time.
+
+Team feeds need the same Postgres database as sync. Without one, Settings says
+they are unavailable and everything else works as before.
+
 ## Reading offline
 
 Articles already on the device carry a small sky-blue check in their byline
@@ -375,10 +402,12 @@ The app also asks the browser to keep this cache rather than evict it. Safari
 clears site storage after about a week of not visiting unless the app is on
 your Home Screen; Settings shows which state you are in.
 
-While that download is running, a thin progress bar sits across the top of the
-screen and fills as each article lands — it holds at full for a moment when it
-finishes, so completing looks different from stopping. Settings still carries
-the exact count and the last download time.
+A thin progress bar can sit across the top of the screen while that download
+runs, filling as each article lands and holding at full for a moment when it
+finishes, so completing looks different from stopping. It is **off by default**
+— the download runs on every visit, and a bar appearing unbidden reads as the
+app loading something you asked for. Turn it on under **Settings → Offline**.
+Settings carries the exact count and the last download time either way.
 
 The newest 15 stories from each source are downloaded to the device — the full
 extracted text, not just headlines — so they can be read with no connection.

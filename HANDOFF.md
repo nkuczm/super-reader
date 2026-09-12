@@ -64,11 +64,12 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
 | `lib/apis.ts` | The API directory — CourtListener, Federal Register, arXiv… |
 | `lib/offline.ts` | IndexedDB store, download schedule, list snapshot |
 | `lib/sync.ts` `lib/sync-code.ts` `lib/db.ts` | Cross-device sync |
+| `lib/team.ts` | Team feeds: the shared list, and the merge that makes it safe |
 | `lib/sort.ts` | Newest-first ordering, shared by every path |
 | `lib/store.ts` | Feeds, settings, read state and the Saved list (localStorage) |
 | `components/Reader.tsx` | The whole app shell: sidebar, list, state |
 | `components/DownloadBar.tsx` | Top-of-screen progress for the offline download |
-| `app/api/{discover,feed,article,sync,apis}` | The five endpoints |
+| `app/api/{discover,feed,article,sync,team,apis}` | The endpoints |
 | `components/ApiCatalog.tsx` | The API directory tab in "Add a source" |
 | `public/sw.js` | Service worker so the app opens offline |
 | `scripts/gen-icons.mjs` | Regenerates PNG app icons from the mark |
@@ -181,6 +182,34 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   value it sets re-stamps on every render, and the debounced push never
   survives long enough to fire — which looks exactly like sync being broken.
 - **Sync codes are stored as SHA-256 hashes**, never the code itself.
+- **A team feed is not a second sync.** Sync writes a whole device document and
+  resolves by most recent change: one copy wins and the other is dropped. That
+  is right for one person's devices and wrong for several people — two
+  colleagues saving a story in the same minute must both end up on the list. So
+  `addToTeam` merges *one article* into the array **in a single SQL statement**
+  (`jsonb_array_elements … WITH ORDINALITY`, the new item at ordinal 0, the
+  existing ones filtered on link, capped with `LIMIT`). A read-modify-write
+  would lose whichever save landed second; the test that fires three saves
+  concurrently is there to hold that.
+- **Only the article crosses to a team feed.** `cleanArticle` rebuilds the
+  record field by field rather than passing through what the client sent, so a
+  sourceId, a vault, a feed list or anything else in the sender's copy cannot
+  ride along. There is a test asserting exactly which keys survive — keep it.
+  Nothing records who saved what, by design: the user asked for the feed and
+  nothing else to be shared.
+- **A team feed is readable on a device with no sources of its own.** Someone
+  can join with a connect code before following anything, and the list used to
+  render "Start with one link." over their shared stories. The empty state is
+  now skipped for a team selection.
+- **Team articles are never written to local storage.** Several people write to
+  the list, so only the server's copy can be current; it is fetched on open and
+  on focus, the same moments sync pulls. What *does* sync between a person's own
+  devices is which feeds they have joined — name and code, in the sync payload
+  under `teams`.
+- **The offline progress bar is off by default** (`settings.showDownloadBar`).
+  The download runs on every visit, and a bar appearing unbidden reads as the
+  app loading something the user asked for. Settings' count is the honest
+  answer to "is this working?" and stays visible either way.
 - **API keys are encrypted in the browser (`lib/vault.ts`) before they sync.**
   AES-GCM under a PBKDF2 key from the passphrase; the server stores the blob
   and cannot read it. Keys reach the server only in the `x-sr-api-keys` header,
@@ -353,11 +382,11 @@ Don't re-litigate this without the user asking.
 
 ## Outstanding
 
-1. **Sync is built but off** — needs a database. Vercel dashboard → Storage →
+1. **Sync and team feeds are built but off** — both need a database. Vercel dashboard → Storage →
    Create Database → **Neon Postgres** (free), connect to this project, which
-   adds `POSTGRES_URL`, then redeploy. The table creates itself. Until then
-   `/api/sync` returns a clean 503 and everything else works. *This is the one
-   thing waiting on the user.*
+   adds `POSTGRES_URL`, then redeploy. Both tables create themselves. Until
+   then `/api/sync` and `/api/team` return a clean 503 and everything else
+   works. *This is the one thing waiting on the user.*
 2. **X accounts need `X_BEARER_TOKEN`** (paid X API tier). Without it, pasting
    `@handle` returns an actionable message and nothing else is affected.
    The user was advised this is probably not worth $100/mo for personal use.
