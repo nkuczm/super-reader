@@ -375,14 +375,14 @@ and they can be renamed and deleted there. Each one is a page of its own:
 - **The page is one text box you write on.** Tap anywhere on it — including
   the empty space below the writing — and the cursor lands there. No compose
   box, no Add button, no fields; what you write saves as you write it.
-- **A quote is highlighted where it sits**, in the flow of what you have
-  written, so the cursor goes either side of one and you write around it like
-  any other words.
+- **A quote is a block quote** with a grey rule down its side, sitting in what
+  you have written — the cursor goes above it, below it and between quotes, so
+  you write around them.
 - **Quotes cannot be edited, only deleted.** A quote is the article's words,
-  not yours: it cannot be typed into, and it comes out whole — a backspace
-  from the character after it takes the entire quote, the way deleting
-  anything else in a line of text does.
-- **Every quote links back to the passage itself.** Click the highlight and
+  not yours: it cannot be typed into, and there is no button beside it. It
+  comes out whole — a backspace from the character after it takes the entire
+  quote, the way deleting anything else in a line of text does.
+- **Every quote links back to the passage itself.** Click the quote and
   the article opens *at* those words, scrolled to them and
   highlighted for a couple of seconds so you can see where you are. Closing
   the article returns you to the note. If the page has been edited since and

@@ -272,10 +272,19 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   one named on the spot — `moveEntry` keeps the entry's id, so a move writes no
   tombstone and the article the quote holds stays saved. It lingers six
   seconds, or twenty while the picker is open.
+- **A listing page needs three article links to be believed — unless they sit
+  directly under it, where two is enough.** `abliteration.ai/blog` is the case:
+  no feed anywhere on the site, and exactly two posts, which the scraper
+  refused outright. A group of links in the pasted page's own directory
+  (/blog listing /blog/…) is a stronger signal than the count; a group
+  elsewhere still needs three, or any page with a couple of stray links to one
+  place would read as a blog. Diagnosed with a temporary `/api/debug-fetch`
+  route deployed to Vercel — the sandbox cannot reach the site, and neither
+  can WebFetch, but the deployment can. Removed again in the same session, as
+  ever.
 - **The note page is one contentEditable surface, and React must never render
-  into it twice.** Quotes are highlighted inline so the cursor can go either
-  side of them, which means the whole note is a single editable region rather
-  than a field per entry. Every edit hands a new entries array upwards, which
+  into it twice.** Quotes are block quotes set apart in the writing, and the
+  whole note is a single editable region rather than a field per entry. Every edit hands a new entries array upwards, which
   comes straight back down as a prop — so anything derived from that prop is
   derived again on every keystroke, and React writing it back into the
   contentEditable resets the cursor. Typing "He " gave " eH". The page is
