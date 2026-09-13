@@ -2,12 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   addEntry,
+  appendQuote,
   cleanQuoteText,
-  editComment,
   moveEntry,
   quotedLinks,
   releasableSaves,
-  removeEntry,
   renameNote,
   type Note,
 } from "../lib/notes";
@@ -26,6 +25,14 @@ function quote(id: string, link: string) {
     articleTitle: "A story",
     at: 1,
   };
+}
+
+/** What the note page leaves behind when a quote is deleted out of it. */
+function withoutEntry(notes: Note[], entryId: string): Note[] {
+  return notes.map((n) => ({
+    ...n,
+    entries: n.entries.filter((entry) => entry.id !== entryId),
+  }));
 }
 
 function saved(link: string, viaNote?: boolean): SavedArticle {
@@ -55,19 +62,6 @@ test("quotes are added to the named note, in the order they arrive", () => {
   );
 });
 
-test("your own lines can be rewritten; a quote cannot", () => {
-  let notes = [note("n1")];
-  notes = addEntry(notes, "n1", quote("q1", "https://example.com/a"));
-  notes = addEntry(notes, "n1", { id: "t1", kind: "text", text: "Ask about this", at: 2 });
-
-  notes = editComment(notes, "n1", "t1", "Asked; answered");
-  assert.equal((notes[0].entries[1] as { text: string }).text, "Asked; answered");
-
-  // Aimed at a quote, the same edit changes nothing.
-  notes = editComment(notes, "n1", "q1", "Something the article never said");
-  assert.equal((notes[0].entries[0] as { text: string }).text, "What it said");
-});
-
 test("a note is renamed, and an empty name is refused", () => {
   const notes = [note("n1")];
   assert.equal(renameNote(notes, "n1", "  Court watch ")[0].name, "Court watch");
@@ -91,7 +85,7 @@ test("deleting the last quote of an article releases the save it caused", () => 
 
   assert.deepEqual(releasableSaves(library, notes), []);
 
-  notes = removeEntry(notes, "n1", "q1");
+  notes = withoutEntry(notes, "q1");
   assert.deepEqual(releasableSaves(library, notes), ["https://example.com/a"]);
 });
 
@@ -108,10 +102,10 @@ test("an article another note still quotes is kept", () => {
   notes = addEntry(notes, "n2", quote("q2", "https://example.com/a"));
   const library = [saved("https://example.com/a", true)];
 
-  notes = removeEntry(notes, "n1", "q1");
+  notes = withoutEntry(notes, "q1");
   assert.deepEqual(releasableSaves(library, notes), []);
 
-  notes = removeEntry(notes, "n2", "q2");
+  notes = withoutEntry(notes, "q2");
   assert.deepEqual(releasableSaves(library, notes), ["https://example.com/a"]);
 });
 
@@ -383,4 +377,24 @@ test("moving to a note that is not there, or an entry that is not, changes nothi
   const withQuote = addEntry(notes, "n1", quote("q1", "https://e.com/a"));
   assert.equal(moveEntry(withQuote, "q1", "nowhere"), withQuote);
   assert.equal(moveEntry(withQuote, "missing", "n2"), withQuote);
+});
+
+test("a quote added to writing that needs one gets a space in front of it", () => {
+  const q = { ...quote("q1", "https://example.com/a"), kind: "quote" as const };
+  const withWriting = [
+    { ...note("n1"), entries: [{ id: "t1", kind: "text" as const, text: "Just a thought.", at: 1 }] },
+  ];
+  const after = appendQuote(withWriting, "n1", q);
+  assert.equal((after[0].entries[0] as { text: string }).text, "Just a thought. ");
+  assert.equal(after[0].entries[1].id, "q1");
+
+  // Already spaced, or nothing there at all: left alone.
+  const spaced = [
+    { ...note("n1"), entries: [{ id: "t1", kind: "text" as const, text: "A thought ", at: 1 }] },
+  ];
+  assert.equal(
+    (appendQuote(spaced, "n1", q)[0].entries[0] as { text: string }).text,
+    "A thought ",
+  );
+  assert.deepEqual(appendQuote([note("n1")], "n1", q)[0].entries.map((e) => e.id), ["q1"]);
 });

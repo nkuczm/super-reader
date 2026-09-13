@@ -67,6 +67,7 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
 | `lib/team.ts` | Team feeds: the shared list, and the merge that makes it safe |
 | `lib/notes.ts` | Notes: quotes, your own lines, and which bookmarks they hold |
 | `lib/highlight.ts` | Finding a stored quote again in the article it came from |
+| `lib/note-flow.ts` | A note as one page of writing: laying it out, reading it back |
 | `lib/sort.ts` | Newest-first ordering, shared by every path |
 | `lib/store.ts` | Feeds, settings, read state and the Saved list (localStorage) |
 | `components/Reader.tsx` | The whole app shell: sidebar, list, state |
@@ -271,6 +272,52 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   one named on the spot — `moveEntry` keeps the entry's id, so a move writes no
   tombstone and the article the quote holds stays saved. It lingers six
   seconds, or twenty while the picker is open.
+- **The note page is one contentEditable surface, and React must never render
+  into it twice.** Quotes are highlighted inline so the cursor can go either
+  side of them, which means the whole note is a single editable region rather
+  than a field per entry. Every edit hands a new entries array upwards, which
+  comes straight back down as a prop — so anything derived from that prop is
+  derived again on every keystroke, and React writing it back into the
+  contentEditable resets the cursor. Typing "He " gave " eH". The page is
+  captured once in a `useState` initialiser, its JSX memoised on that, and the
+  callbacks reached through a ref so nothing can bust the memo. The component
+  holds no state and never re-renders: the placeholder is shown and hidden
+  through a ref.
+- **Enter is handled by hand.** Left to itself the browser answers Enter by
+  cutting the surface into nested blocks of its own invention, with the quotes
+  somewhere inside them, and `readFlow` would have to reason about arbitrary
+  trees. A plain newline plus `white-space: pre-wrap` keeps the DOM a flat run
+  of text nodes and marks. Paste is intercepted for the same reason, and takes
+  plain text only. `readFlow` still walks anything nested, because a gesture
+  nobody anticipated must not turn a quote into undeletable plain text.
+- **A newline at the end of the surface needs something after it.** Otherwise
+  there is no cursor position past it, the browser leaves the cursor in front
+  of the break, and the next thing typed lands on the line above — measured. A
+  zero-width space is appended in that one case, and stripped on the way back
+  out like the others.
+- **An empty run between two quotes is a real space, not nothing.** Two quotes
+  with nothing between them leave the cursor nowhere to go — and the tap aimed
+  at the gap lands on a highlight, which opens the article instead of letting
+  you write. A real space plus the marks' margins makes that 9px of target,
+  measured; elsewhere a zero-width space does, since the start of the line and
+  the rest of the page are targets already.
+- **There is no delete button on a quote, deliberately.** One was tried, sat
+  immediately after the highlight, and was hit twice in testing by a click
+  aimed at "just after the quote" — which is exactly where a reader clicks to
+  write there. The browser already deletes a `contenteditable=false` span
+  whole on a backspace from the character after it: both what was asked for
+  from the start ("deleting it using the text tools") and the only thing that
+  leaves that spot free.
+- **A run of writing is identified by the quote it sits in front of.** Not by
+  index, and not by a fresh id per keystroke: syncing matches entries by id,
+  so churning them would make every keystroke a delete and an add on the other
+  device. Adding or removing a quote does shift a run's identity, which is a
+  deliberate act and settles at once.
+- **What arrives while the page is open is not the page's to delete.** The
+  surface is built once, so it never learns of a quote that syncs in behind
+  it; folding the page as it stands would find that quote missing and bury it.
+  `foldIntoNote` keeps anything the page never knew about, so only what it was
+  holding and has let go of counts as deleted.
 - **The note page is a document, not a form.** It was a list of entries with a
   bordered compose box and an Add button underneath; it is now text you type
   straight onto, with the quotes sitting in it as blocks. The waiting line at

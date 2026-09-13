@@ -1,52 +1,39 @@
 "use client";
 
-import { forwardRef, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons";
-import type { Note, NoteEntry } from "@/lib/notes";
+import { isQuote, type Note, type NoteEntry } from "@/lib/notes";
+import { CARET_SPACE, flowOf, foldFlow, readFlow } from "@/lib/note-flow";
 
 /**
- * One note: a page you write on, with the quotes sitting in it.
+ * One note: a page of writing with the quotes highlighted in it.
  *
- * It reads as a single document rather than a form — your own lines are plain
- * text you type straight into, wherever they are, and they save as you go.
- * The quotes are the exception: a quote is what the article said, so it is not
- * editable at all. It goes in or out whole.
+ * It is a single text box, not a stack of fields. The quoted passages sit in
+ * the writing as highlighted words, so the cursor goes either side of one and
+ * carries on. A quote cannot be rewritten — it says what the article said —
+ * but it comes out whole, either with the cross beside it or with a backspace
+ * from the character after it, the way any other thing in a line of text does.
  *
- * Deliberately plain: no formatting, no toolbar. A note here is for holding
- * what a story actually said.
+ * Deliberately plain: no formatting, no toolbar.
  */
 export default function NotePage({
   note,
   onOpenArticle,
-  onAddComment,
-  onEditComment,
-  onRemoveEntry,
+  onCommitEntries,
   onOpenMenu,
 }: {
   note: Note;
   /** Back to the article a quote came from, at the passage itself. */
   onOpenArticle: (link: string, title: string, quote: string) => void;
-  onAddComment: (text: string) => void;
-  onEditComment: (entryId: string, text: string) => void;
-  onRemoveEntry: (entryId: string) => void;
+  /**
+   * The note's contents after an edit, and every entry the page knew of when
+   * it made them — so that anything which arrived meanwhile is not mistaken
+   * for something the reader deleted.
+   */
+  onCommitEntries: (entries: NoteEntry[], known: ReadonlySet<string>) => void;
   onOpenMenu?: () => void;
 }) {
-  const quotes = note.entries.filter((entry) => entry.kind === "quote").length;
-  const end = useRef<HTMLTextAreaElement | null>(null);
-
-  /**
-   * Tapping the page puts the cursor at the end of it, the way tapping below
-   * the text in any document does. Without this the only way in was a 34px
-   * strip of empty line under the last quote, with nothing to show it was
-   * there — which on a phone reads as a page you simply cannot type on.
-   */
-  const focusEnd = useCallback((event: React.MouseEvent) => {
-    if (event.target !== event.currentTarget) return;
-    const el = end.current;
-    if (!el) return;
-    el.focus();
-    el.setSelectionRange(el.value.length, el.value.length);
-  }, []);
+  const quotes = note.entries.filter(isQuote).length;
 
   return (
     <div className="note-page">
@@ -64,186 +51,191 @@ export default function NotePage({
         </div>
       </div>
 
-      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions,
-          jsx-a11y/click-events-have-key-events */}
-      <div className="note-doc" onClick={focusEnd}>
-        {note.entries.length === 0 && (
-          <p className="note-hint">
-            Highlight anything while reading and choose <strong>Add to note</strong>.
-            The quote lands here as written, and the article is kept with it. Type
-            anywhere on this page to write your own.
-          </p>
-        )}
-
-        {note.entries.map((entry) =>
-          entry.kind === "quote" ? (
-            <Quote
-              key={entry.id}
-              entry={entry}
-              onOpen={() => onOpenArticle(entry.link, entry.articleTitle, entry.text)}
-              onRemove={() => onRemoveEntry(entry.id)}
-            />
-          ) : (
-            <Line
-              key={entry.id}
-              text={entry.text}
-              onChange={(text) => onEditComment(entry.id, text)}
-              onEmpty={() => onRemoveEntry(entry.id)}
-            />
-          ),
-        )}
-
-        {/* Always a line waiting at the end, so the page can just be typed
-            on — and always labelled, because an empty line with no placeholder
-            is invisible, and an invisible text box is not one. */}
-        <Line
-          key={`draft-${note.entries.length}`}
-          ref={end}
-          text=""
-          placeholder="Write a note…"
-          onChange={(text) => {
-            if (text.trim()) onAddComment(text);
-          }}
-          once
-        />
-        {/* The rest of the page: still the document, still tappable. */}
-        <div className="note-rest" onClick={focusEnd} />
-      </div>
-    </div>
-  );
-}
-
-/** A quote, as the article had it: read-only, and removed whole or not at all. */
-function Quote({
-  entry,
-  onOpen,
-  onRemove,
-}: {
-  entry: Extract<NoteEntry, { kind: "quote" }>;
-  onOpen: () => void;
-  onRemove: () => void;
-}) {
-  const [confirming, setConfirming] = useState(false);
-
-  return (
-    <div className="note-quote">
-      {/* The quote itself goes back to where it came from — but not when
-          something in it is selected, which means it is being copied, not
-          left behind. */}
-      <blockquote
-        title="Open this passage in the article"
-        onClick={() => {
-          if ((window.getSelection()?.toString() ?? "").trim()) return;
-          onOpen();
-        }}
-      >
-        {entry.text.split(/\n\n+/).map((para, i) => (
-          <p key={i}>{para}</p>
-        ))}
-      </blockquote>
-      <div className="note-quote-foot">
-        <button className="note-source" onClick={onOpen}>
-          {Icon.back} {entry.articleTitle}
-          {entry.sourceTitle ? ` · ${entry.sourceTitle}` : ""}
-        </button>
-        {confirming ? (
-          <span className="note-confirm">
-            <button className="link-btn danger" onClick={onRemove}>
-              Delete quote
-            </button>
-            <button className="link-btn" onClick={() => setConfirming(false)}>
-              Keep
-            </button>
-          </span>
-        ) : (
-          <button
-            className="icon-btn danger note-remove"
-            aria-label="Delete this quote"
-            title="Delete this quote"
-            onClick={() => setConfirming(true)}
-          >
-            {Icon.trash}
-          </button>
-        )}
-      </div>
+      {/* Keyed by the note, so opening another one builds a fresh page rather
+          than editing this one's DOM into that one's. */}
+      <NoteFlow
+        key={note.id}
+        initialEntries={note.entries}
+        onOpenArticle={onOpenArticle}
+        onCommit={onCommitEntries}
+      />
     </div>
   );
 }
 
 /**
- * One of your own lines: ordinary text to look at, a textarea to type in.
- * It grows with what it holds, and empties itself out of the note.
+ * The writing surface.
+ *
+ * Rendered once, from the entries the note had when the page opened, and then
+ * left alone: after that the browser owns this DOM. React re-rendering into a
+ * contentEditable is what throws the cursor back to the start of the line
+ * mid-sentence, so this component holds no state at all — every edit is read
+ * back out of the DOM and handed upwards, and the placeholder is shown and
+ * hidden through a ref rather than by rendering again.
  */
-const Line = forwardRef<HTMLTextAreaElement, {
-  text: string;
-  placeholder?: string;
-  onChange: (text: string) => void;
-  onEmpty?: () => void;
-  /** The waiting line at the end: it hands its text over and starts again. */
-  once?: boolean;
-}>(function Line({ text, placeholder, onChange, onEmpty, once }, forwarded) {
-  const ref = useRef<HTMLTextAreaElement | null>(null);
-  const [value, setValue] = useState(text);
-  /** The latest text and handler, for the commit on the way out. */
-  const latest = useRef({ value, onChange });
-  latest.current = { value, onChange };
+function NoteFlow({
+  initialEntries,
+  onOpenArticle,
+  onCommit,
+}: {
+  initialEntries: NoteEntry[];
+  onOpenArticle: (link: string, title: string, quote: string) => void;
+  onCommit: (entries: NoteEntry[], known: ReadonlySet<string>) => void;
+}) {
+  const surface = useRef<HTMLDivElement | null>(null);
+  const hint = useRef<HTMLParagraphElement | null>(null);
+  /** What the note held at the last read, for the next fold to build on. */
+  const entries = useRef<NoteEntry[]>(initialEntries);
   /**
-   * Whether this line has already been handed over. Committing on blur
-   * unmounts this one (the list it joined is longer, so the waiting line is a
-   * new one), and the unmount would otherwise hand the same text over a
-   * second time — the state that cleared it never got to render.
+   * The page as it stood when it opened, and never again.
+   *
+   * Every commit hands a new entries array upwards and it comes straight back
+   * down as a prop, so anything derived from the prop is derived afresh on
+   * every keystroke — and React writing that back into a contentEditable puts
+   * the cursor at the start of the line each time. Typed "He " and the page
+   * held " eH". Captured at mount instead, through the one hook that promises
+   * to run its initialiser once.
    */
-  const handedOver = useRef(false);
+  const [pieces] = useState(() => flowOf(initialEntries));
+  /**
+   * The callbacks, reachable from JSX that must not be rebuilt to see them.
+   */
+  const handlers = useRef({ onOpenArticle, onCommit });
+  handlers.current = { onOpenArticle, onCommit };
 
-  useEffect(() => setValue(text), [text]);
-
-  // Leaving the page — for another note, or the article a quote came from —
-  // keeps what was being typed. Blur alone would miss it: the page can go
-  // while the line still has focus.
-  useEffect(() => {
-    if (!once) return;
-    return () => {
-      if (handedOver.current) return;
-      const { value: last, onChange: commit } = latest.current;
-      if (last.trim()) commit(last);
-    };
-  }, [once]);
-
-  useEffect(() => {
-    const el = ref.current;
+  const commit = useCallback(() => {
+    const el = surface.current;
     if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-  }, [value]);
+    const { quoteIds, runs } = readFlow(el);
+    const known = new Set(entries.current.map((entry) => entry.id));
+    const next = foldFlow(entries.current, quoteIds, runs);
+    entries.current = next;
+    if (hint.current) hint.current.hidden = next.length > 0;
+    handlers.current.onCommit(next, known);
+  }, []);
+
+  /**
+   * Enter puts in a line break and nothing else.
+   *
+   * Left to itself the browser answers Enter by cutting the page into nested
+   * blocks of its own invention, which the quotes then live somewhere inside.
+   * A plain newline in the text keeps this a flat run of words and highlights,
+   * which is the only reason reading it back is simple.
+   */
+  const insertText = useCallback((text: string) => {
+    const el = surface.current;
+    const selection = window.getSelection();
+    if (!el || !selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    const node = document.createTextNode(text);
+    range.insertNode(node);
+
+    let caretNode: Text = node;
+    let caretOffset = node.length;
+
+    // A line break with nothing after it has nowhere to put the cursor, so
+    // the browser leaves it in front of the break and the next thing typed
+    // lands back on the line above. A standing space gives it somewhere to
+    // be; it is stripped on the way back out, like the others.
+    const after = document.createRange();
+    after.setStartAfter(node);
+    after.setEnd(el, el.childNodes.length);
+    if (text.includes("\n") && after.toString().length === 0) {
+      const standing = document.createTextNode(CARET_SPACE);
+      node.parentNode?.insertBefore(standing, node.nextSibling);
+      caretNode = standing;
+      caretOffset = 0;
+    }
+
+    const caret = document.createRange();
+    caret.setStart(caretNode, caretOffset);
+    caret.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(caret);
+  }, []);
+
+  const written = useMemo(
+    () =>
+      pieces.map((piece, index) =>
+        piece.kind === "text" ? (
+          // Never nothing: an empty run still needs somewhere for the cursor
+          // to go. Between two quotes that has to be a real space you can aim
+          // at — a hair's width of nothing there means the tap lands on a
+          // highlight instead, and opens the article rather than letting you
+          // write. Elsewhere a zero-width space does, since the start of the
+          // line and the rest of the page are targets of their own.
+          <Fragment key={`text-${index}`}>
+            {piece.text ||
+              (index > 0 && index < pieces.length - 1 ? " " : CARET_SPACE)}
+          </Fragment>
+        ) : (
+          /* The quoted words themselves, highlighted where they sit. One
+             thing to the cursor: it cannot be typed into, and a backspace
+             from the character after it takes the whole quote out — which is
+             the only way it goes, and how deleting a quote was always meant
+             to work. Nothing else sits beside it in the line, because a
+             button there would be exactly where a reader clicks to write
+             after the quote. */
+          <mark
+            key={piece.quote.id}
+            className="note-quote-mark"
+            data-quote-id={piece.quote.id}
+            contentEditable={false}
+            title={`From “${piece.quote.articleTitle}”${
+              piece.quote.sourceTitle ? ` · ${piece.quote.sourceTitle}` : ""
+            } — open it there`}
+            onClick={() => {
+              // Selecting inside a quote means copying it, not leaving.
+              if ((window.getSelection()?.toString() ?? "").trim()) return;
+              handlers.current.onOpenArticle(
+                piece.quote.link,
+                piece.quote.articleTitle,
+                piece.quote.text,
+              );
+            }}
+          >
+            {piece.quote.text}
+          </mark>
+        ),
+      ),
+    [pieces],
+  );
 
   return (
-    <textarea
-      ref={(el) => {
-        ref.current = el;
-        if (typeof forwarded === "function") forwarded(el);
-        else if (forwarded) forwarded.current = el;
-      }}
-      className="note-line"
-      value={value}
-      rows={1}
-      placeholder={placeholder}
-      onChange={(event) => {
-        const next = event.target.value;
-        setValue(next);
-        if (once) return; // committed on blur, so it becomes a line of its own
-        onChange(next);
-      }}
-      onBlur={() => {
-        if (once) {
-          if (value.trim()) {
-            handedOver.current = true;
-            onChange(value);
-            setValue("");
-          }
-          return;
-        }
-        if (!value.trim()) onEmpty?.();
-      }}
-    />
+    <div className="note-doc">
+      <p className="note-hint" ref={hint} hidden={initialEntries.length > 0}>
+        Highlight anything while reading and choose <strong>Add to note</strong>.
+        The quote lands here as written, and the article is kept with it. Type
+        anywhere on this page to write around it.
+      </p>
+
+      <div
+        ref={surface}
+        className="note-flow"
+        contentEditable
+        suppressContentEditableWarning
+        role="textbox"
+        aria-multiline="true"
+        aria-label="Note"
+        onInput={commit}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          insertText("\n");
+          commit();
+        }}
+        onPaste={(event) => {
+          // Plain text only: this page holds words and quotes, and nothing
+          // pasted in should be able to bring styling — or a stray element a
+          // quote could end up hiding inside — with it.
+          event.preventDefault();
+          insertText(event.clipboardData.getData("text/plain"));
+          commit();
+        }}
+      >
+        {written}
+      </div>
+    </div>
   );
-});
+}

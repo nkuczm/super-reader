@@ -46,8 +46,7 @@ import {
   slimNotesForSync,
   idsOf,
   addEntry,
-  removeEntry,
-  editComment,
+  appendQuote,
   renameNote,
   moveEntry,
   releasableSaves,
@@ -55,6 +54,7 @@ import {
   type NoteRemoval,
 } from "@/lib/notes";
 import NotePage from "./NotePage";
+import { foldIntoNote } from "@/lib/note-flow";
 import AddSourceDialog from "./AddSourceDialog";
 import SyncDialog from "./SyncDialog";
 import InlineName from "./InlineName";
@@ -1150,7 +1150,7 @@ export default function Reader() {
       const title = known?.title ?? reading?.title ?? link;
 
       commitNotes((current) =>
-        addEntry(current, noteId, {
+        appendQuote(current, noteId, {
           id: entryId,
           kind: "quote",
           text,
@@ -1753,7 +1753,10 @@ export default function Reader() {
                       >
                         {Icon.note}
                         <span className="feed-name">{note.name}</span>
-                        <span className="count">{note.entries.length || ""}</span>
+                        <span className="count">
+                          {note.entries.filter((entry) => entry.kind === "quote")
+                            .length || ""}
+                        </span>
                       </button>
                       <button
                         className="icon-btn"
@@ -2025,21 +2028,18 @@ export default function Reader() {
             onOpenArticle={(link, title, quote) =>
               setReading({ url: link, title, quote })
             }
-            onAddComment={(text) =>
+            // The page hands back the whole note each time it changes: it is
+            // one text box, and what came out of it is what the note now
+            // says — bar anything that arrived while it was open, which is
+            // not the page's to have an opinion about.
+            onCommitEntries={(entries, known) =>
               commitNotes((current) =>
-                addEntry(current, openNote.id, {
-                  id: newId(),
-                  kind: "text",
-                  text,
-                  at: Date.now(),
-                }),
+                current.map((note) =>
+                  note.id === openNote.id
+                    ? { ...note, entries: foldIntoNote(note.entries, entries, known) }
+                    : note,
+                ),
               )
-            }
-            onEditComment={(entryId, text) =>
-              commitNotes((current) => editComment(current, openNote.id, entryId, text))
-            }
-            onRemoveEntry={(entryId) =>
-              commitNotes((current) => removeEntry(current, openNote.id, entryId))
             }
           />
         ) : (

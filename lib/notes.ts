@@ -284,6 +284,31 @@ export function renameNote(notes: Note[], id: string, name: string): Note[] {
   );
 }
 
+/**
+ * Put a quote at the end of a note, with a space in front of it if the
+ * writing there needs one.
+ *
+ * The page is one flowing line of words now, so a quote landing straight
+ * after "Just a thought." would read as "Just a thought.My father died…".
+ * A person adding one by hand would type the space; so does this.
+ */
+export function appendQuote(notes: Note[], id: string, quote: NoteQuote): Note[] {
+  return notes.map((note) => {
+    if (note.id !== id) return note;
+    const last = note.entries[note.entries.length - 1];
+    const needsSpace =
+      last && last.kind === "text" && last.text.length > 0 && !/\s$/.test(last.text);
+    const entries = needsSpace
+      ? [
+          ...note.entries.slice(0, -1),
+          { ...(last as NoteComment), text: `${last.text} `, editedAt: Date.now() },
+          quote,
+        ]
+      : [...note.entries, quote];
+    return { ...note, entries };
+  });
+}
+
 export function addEntry(notes: Note[], id: string, entry: NoteEntry): Note[] {
   return notes.map((note) =>
     note.id === id ? { ...note, entries: [...note.entries, entry] } : note,
@@ -313,34 +338,7 @@ export function moveEntry(notes: Note[], entryId: string, toNoteId: string): Not
   );
 }
 
-export function removeEntry(notes: Note[], noteId: string, entryId: string): Note[] {
-  return notes.map((note) =>
-    note.id === noteId
-      ? { ...note, entries: note.entries.filter((entry) => entry.id !== entryId) }
-      : note,
-  );
-}
 
-/** Rewrite one of your own lines. A quote is never rewritten, only removed. */
-export function editComment(
-  notes: Note[],
-  noteId: string,
-  entryId: string,
-  text: string,
-): Note[] {
-  return notes.map((note) =>
-    note.id === noteId
-      ? {
-          ...note,
-          entries: note.entries.map((entry) =>
-            entry.id === entryId && entry.kind === "text"
-              ? { ...entry, text, editedAt: Date.now() }
-              : entry,
-          ),
-        }
-      : note,
-  );
-}
 
 const KEY = "super-reader:notes:v1";
 const REMOVED_KEY = "super-reader:notes-removed:v1";
