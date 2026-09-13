@@ -132,6 +132,22 @@ test("dedupes repeated links to the same article", async () => {
   assert.equal(new Set(links).size, links.length);
 });
 
+test("a blog with only two posts is still a blog", async () => {
+  // Three links is the usual bar, but a listing page whose own directory
+  // holds the posts is signal enough — abliteration.ai/blog had exactly two.
+  const r = await discover(`${N}/blog`);
+  assert.equal(r.articles.length, 2);
+  assert.deepEqual(
+    r.articles.map((a) => a.title),
+    ["Introducing the second model", "Introducing the first model"],
+  );
+  assert.ok(r.articles[0].publishedAt?.startsWith("2026-07-24"));
+  const links = r.articles.map((a) => a.link).join(" ");
+  for (const junk of ["/pricing", "/terms"]) {
+    assert.ok(!links.includes(junk), `${junk} leaked into the feed`);
+  }
+});
+
 test("refuses a page that is not a list of articles", async () => {
   await assert.rejects(
     () => discover(`${N}/about`),

@@ -160,26 +160,19 @@ function NoteFlow({
       pieces.map((piece, index) =>
         piece.kind === "text" ? (
           // Never nothing: an empty run still needs somewhere for the cursor
-          // to go. Between two quotes that has to be a real space you can aim
-          // at — a hair's width of nothing there means the tap lands on a
-          // highlight instead, and opens the article rather than letting you
-          // write. Elsewhere a zero-width space does, since the start of the
-          // line and the rest of the page are targets of their own.
-          <Fragment key={`text-${index}`}>
-            {piece.text ||
-              (index > 0 && index < pieces.length - 1 ? " " : CARET_SPACE)}
-          </Fragment>
+          // to go, or there would be no way to write above the first quote or
+          // between two of them. A quote is a block of its own, so each run
+          // is its own line and a zero-width space holds one open.
+          <Fragment key={`text-${index}`}>{piece.text || CARET_SPACE}</Fragment>
         ) : (
-          /* The quoted words themselves, highlighted where they sit. One
-             thing to the cursor: it cannot be typed into, and a backspace
-             from the character after it takes the whole quote out — which is
-             the only way it goes, and how deleting a quote was always meant
-             to work. Nothing else sits beside it in the line, because a
-             button there would be exactly where a reader clicks to write
-             after the quote. */
-          <mark
+          /* The quoted passage, set apart as a block quote with a rule down
+             its side. One thing to the cursor: it cannot be typed into, and a
+             backspace from the character after it takes the whole quote out —
+             the only way it goes. Nothing sits beside it to press, because
+             anything there would be where a reader clicks to write. */
+          <blockquote
             key={piece.quote.id}
-            className="note-quote-mark"
+            className="note-quote-block"
             data-quote-id={piece.quote.id}
             contentEditable={false}
             title={`From “${piece.quote.articleTitle}”${
@@ -196,7 +189,7 @@ function NoteFlow({
             }}
           >
             {piece.quote.text}
-          </mark>
+          </blockquote>
         ),
       ),
     [pieces],

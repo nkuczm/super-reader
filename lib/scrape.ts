@@ -203,7 +203,16 @@ export function scrapePage(
     }))
     .sort((a, b) => b.score - a.score)[0];
 
-  if (!best || best.items.length < 3) {
+  /**
+   * Three links is the usual bar for "this is a list of articles" — a couple
+   * of stray links to the same directory is not a blog. But a blog that has
+   * published twice is still a blog, and where the links sit directly under
+   * the page that was pasted (/blog listing them at /blog/…) that placement
+   * is the stronger signal, so two is enough there. abliteration.ai/blog is
+   * the case that found it: two posts, no feed, and nothing else wrong.
+   */
+  const minimum = best?.group === pagePath ? 2 : 3;
+  if (!best || best.items.length < minimum) {
     throw new Error(
       "No feed found, and that page doesn't look like a list of articles.",
     );

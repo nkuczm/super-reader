@@ -738,19 +738,16 @@
 @media (prefers-reduced-motion: reduce) {
   .quote-flash span { animation-duration: 2.6s; animation-timing-function: step-end; }
 }
-/* A quote in a note: the words highlighted where they sit, not a block held
-   off to one side. It is one thing to the cursor — you write either side of
-   it, it cannot be typed into, and a backspace from the character after it
-   takes it out whole. Nothing is placed beside it in the line: a button there
-   would sit exactly where a reader clicks to write after the quote. */
-.note-quote-mark {
-  background: var(--note-mark); color: inherit;
-  /* The margin is a target as much as a gap: a click in it belongs to the
-     writing either side, not to the quote. */
-  padding: 2px 1px; margin: 0 2px; border-radius: 3px; cursor: pointer;
-  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+/* A quote in a note: set apart as a block quote, with a plain grey rule down
+   its side. One thing to the cursor — it cannot be typed into, and a
+   backspace from the character after it takes it out whole — so nothing is
+   placed beside it to press. */
+.note-quote-block {
+  display: block; margin: 10px 0; padding: 2px 0 2px 14px;
+  border-left: 3px solid var(--note-rule); cursor: pointer;
+  color: var(--text);
 }
-.note-quote-mark:hover { background: var(--note-mark-strong); }
+.note-quote-block:hover { border-left-color: var(--text-dim); }
 
 @media (max-width: 760px) {
   .note-doc { padding: 14px 16px 40px; }
