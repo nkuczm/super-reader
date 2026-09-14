@@ -424,7 +424,10 @@ test("ClinicalTrials dates a study when it was first posted", () => {
 test("ClinicalTrials asks for the newest registrations, not the newest edits", () => {
   // Otherwise the page it fetches is full of old studies touched today, and
   // dating them honestly just buries them.
-  const { url } = provider("clinicaltrials").request({ q: "cancer" }, { limit: 20 });
+  const { url } = provider("clinicaltrials").request(
+    { q: "cancer" },
+    { limit: 20, key: null },
+  );
   assert.match(url, /sort=StudyFirstPostDate/);
 });
 
