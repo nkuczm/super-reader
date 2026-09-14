@@ -162,6 +162,14 @@ export default function Reader() {
   const [selection, setSelection] = useState<Selection>({ type: "all" });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  /** Whether the refresh has gone on long enough to be worth mentioning. */
+  const [slowRefresh, setSlowRefresh] = useState(false);
+  /**
+   * Whether a refresh has replaced the list with live results yet. The stored
+   * copy is only allowed to fill an empty screen; once the feeds have answered,
+   * their answer stands even if it is shorter than what was saved.
+   */
+  const refreshed = useRef(false);
   const [reading, setReading] = useState<{
     url: string;
     title: string;
@@ -869,6 +877,7 @@ export default function Reader() {
   /** Fetch every known feed and merge the results newest-first. */
   const refresh = useCallback(async (sources: Source[]) => {
     if (sources.length === 0) {
+      refreshed.current = true;
       setArticles([]);
       return;
     }
@@ -912,6 +921,7 @@ export default function Reader() {
           canonical: canonicalUrl,
         }),
       );
+      refreshed.current = true;
       setArticles(ordered);
       // Also what the list falls back to with no connection.
       void saveListSnapshot(ordered);
@@ -923,6 +933,40 @@ export default function Reader() {
       setRefreshing(false);
     }
   }, []);
+
+  /**
+   * Show the last list this device held while the feeds are still being
+   * fetched. Every visit used to open on a blank screen for as long as the
+   * slowest source took to answer — the articles were already on the device,
+   * just not on screen. The stored copy is a placeholder only: it fills an
+   * empty list and is then replaced by whatever comes back, so it can never
+   * hide a fresher result or resurrect something a refresh has dropped.
+   */
+  useEffect(() => {
+    if (!ready) return;
+    let cancelled = false;
+    void (async () => {
+      const snapshot = await loadListSnapshot<Loaded>();
+      if (cancelled || refreshed.current || !snapshot?.length) return;
+      setArticles((current) => (current.length > 0 ? current : snapshot));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ready]);
+
+  /**
+   * A refresh that answers straight away needs no announcement — the list
+   * simply updates. Only one that takes a moment gets a line saying so.
+   */
+  useEffect(() => {
+    if (!refreshing) {
+      setSlowRefresh(false);
+      return;
+    }
+    const timer = setTimeout(() => setSlowRefresh(true), 600);
+    return () => clearTimeout(timer);
+  }, [refreshing]);
 
   // Reload whenever the set of sources changes.
   const sourceKey = allSources.map((s) => s.feedUrl).join("|");
@@ -1645,6 +1689,16 @@ export default function Reader() {
     return rank && article ? { rank, title: article.title } : null;
   }, [explaining, ranking, articles]);
 
+  /**
+   * Whether this list is still being fetched, as opposed to genuinely empty.
+   * A shared feed has not been asked for until its code appears in the map,
+   * so an unfetched one used to read as "nothing shared yet".
+   */
+  const pending =
+    selection.type === "team"
+      ? teamArticles[selection.id] === undefined
+      : refreshing;
+
   /** How many of the shown articles the corpus had something to say about. */
   const rankedCount = useMemo(
     () => shown.filter((article) => ranking.has(article.id)).length,
@@ -2325,6 +2379,15 @@ export default function Reader() {
           </div>
         )}
 
+        {/* Checking for new articles over a list that is already readable.
+            Said out loud so a list from the last visit is not mistaken for
+            everything there is. */}
+        {slowRefresh && !pullRefresh && shown.length > 0 && (
+          <div className="list-updating" aria-live="polite">
+            <span className="spinner" /> Checking for new articles…
+          </div>
+        )}
+
         <div className="main-head">
           <button
             className="menu-btn"
@@ -2499,8 +2562,8 @@ export default function Reader() {
           </div>
         ) : shown.length === 0 ? (
           <div className="state">
-            <h2>{refreshing ? "Loading articles…" : "Nothing here yet."}</h2>
-            {!refreshing &&
+            <h2>{pending ? "Loading articles…" : "Nothing here yet."}</h2>
+            {!pending &&
               (selection.type === "team" ? (
                 <p>
                   Nothing shared yet. Use <strong>Save to Team</strong> on any

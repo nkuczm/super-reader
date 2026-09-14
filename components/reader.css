@@ -996,6 +996,13 @@
   transition: height 0.14s ease-out;
 }
 
+.list-updating {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 7px 10px;
+  font-size: 12.5px; font-weight: 600; color: var(--text-dim);
+  background: var(--bg-sub); border-bottom: 1px solid var(--line);
+}
+
 /* ---- The score page ----------------------------------------------------- */
 
 .score-body { max-width: 680px; margin: 0 auto; padding: 0 0 90px; }
