@@ -8,6 +8,7 @@ import {
   MAX_SAVED,
 } from "../lib/saved";
 import { MAX_PAYLOAD_BYTES } from "../lib/sync";
+import { pullable } from "../lib/store";
 import type { SavedArticle, SavedState } from "../lib/saved";
 
 const NOW = Date.UTC(2026, 8, 11, 12, 0, 0);
@@ -161,4 +162,38 @@ test("a trimmed copy cannot shorten the fuller local one", () => {
   const [wire] = slimForSync([full]);
   const merged = mergeSaved(state([full]), state([wire]), NOW);
   assert.equal(merged.saved[0].summary?.length, 600);
+});
+
+test("an older synced document still hands over its bookmarks", () => {
+  /*
+   * The computer that showed one saved article while the phone held five.
+   * Its own stamp was ahead — wall clocks disagree, and any local change
+   * moves it — so the pull threw the whole document away, bookmarks and all.
+   * The stamp decides the feed list, never the keep-list.
+   */
+  const theirs = { updatedAt: ago(6) };
+  const ourStamp = ago(1);
+
+  const plan = pullable(theirs.updatedAt, ourStamp);
+  assert.equal(plan.replace, false, "the feed list stays this device's");
+  assert.equal(plan.merge, true, "the bookmarks still merge");
+
+  const merged = mergeSaved(
+    state([saved("https://a.example/mine", ago(2))]),
+    state([
+      saved("https://b.example/1", ago(30)),
+      saved("https://b.example/2", ago(26)),
+      saved("https://b.example/3", ago(20)),
+      saved("https://b.example/4", ago(14)),
+    ]),
+    NOW,
+  );
+  assert.equal(merged.saved.length, 5, "all five, not the one this device had");
+});
+
+test("a document at least as new decides the replaced parts too", () => {
+  assert.equal(pullable(ago(1), ago(6)).replace, true);
+  assert.equal(pullable(ago(3), ago(3)).replace, true, "a tie is not stale");
+  // A document with no stamp at all cannot outrank a device that has one.
+  assert.equal(pullable(0, ago(9)).replace, false);
 });

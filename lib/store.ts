@@ -434,3 +434,27 @@ export function saveRead(read: Set<string>) {
     /* ignore */
   }
 }
+
+/**
+ * What a device may take from a document it has just pulled.
+ *
+ * The stamp orders only the parts that are replaced wholesale — the feed
+ * list, the read marks, the team list, the vault — because for those the
+ * newest arrangement is the one wanted. It says nothing about bookmarks,
+ * notes and watch marks: both devices write to those between syncs, so they
+ * merge whichever way round the stamps are, and a merge cannot lose anything
+ * by running when it did not need to.
+ *
+ * Dropping the whole document when its stamp was older was how a computer
+ * came to show one saved article while another device held five: the
+ * bookmarks were in the document it refused to read.
+ */
+export function pullable(
+  remoteUpdatedAt: number,
+  localUpdatedAt: number,
+): { merge: true; replace: boolean } {
+  return {
+    merge: true,
+    replace: (Number(remoteUpdatedAt) || 0) >= (Number(localUpdatedAt) || 0),
+  };
+}

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { parseBundle } from "../lib/bundle";
 import { knownFeedFor, WSJ_CHOICES, repairSources } from "../lib/publishers";
-import { OUTLETS, SUBREDDITS, PACKS } from "../lib/outlets";
+import { frontOutletForHost, OUTLETS, SUBREDDITS, PACKS } from "../lib/outlets";
 
 test("recognises the WSJ however it is asked for", () => {
   for (const input of [
@@ -228,4 +228,30 @@ test("AP says what it is rather than naming the aggregator", () => {
   assert.match(ap.note, /apnews\.com/);
   // Only the sources that need it carry one.
   assert.equal(knownFeedFor("WSJ")?.note, undefined);
+});
+
+test("a bare domain finds the directory's feed for that newsroom", () => {
+  // cnbc.com: the feed is served from a search endpoint that is neither
+  // declared in the page nor guessable, so discovery found nothing and the
+  // reader got a scrape of the homepage. The directory had it all along.
+  const cnbc = frontOutletForHost("cnbc.com");
+  assert.equal(cnbc?.name, "CNBC");
+  assert.ok(cnbc?.feedUrl.includes("search.cnbc.com"), "the feed that answers");
+  assert.equal(frontOutletForHost("www.cnbc.com")?.id, cnbc?.id, "www is the same site");
+
+  // Where a newsroom has several desks in the directory, the bare domain
+  // means the front page, not whichever desk happens to sort first.
+  assert.equal(frontOutletForHost("nytimes.com")?.section, "Front page");
+  assert.equal(frontOutletForHost("theguardian.com")?.section, "Front page");
+
+  assert.equal(frontOutletForHost("example.com"), null, "not in the directory");
+});
+
+test("every directory domain resolves to an entry with a feed", () => {
+  for (const outlet of OUTLETS) {
+    const host = new URL(outlet.siteUrl).hostname;
+    const found = frontOutletForHost(host);
+    assert.ok(found, `${host} resolves`);
+    assert.ok(/^https?:\/\//.test(found.feedUrl), `${host} has a fetchable feed`);
+  }
 });

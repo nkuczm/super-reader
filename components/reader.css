@@ -76,7 +76,14 @@
 .btn.small { width: auto; padding: 7px 12px; font-size: 13px; }
 
 /* ---------- main ---------- */
-.main { overflow-y: auto; }
+/*
+ * `overscroll-behavior-y: contain` is what makes the pull gesture belong to
+ * this list. Without it a drag at the top of the list is taken by the browser
+ * first — Chrome on Android runs its own pull-to-refresh and reloads the
+ * page, and iOS rubber-bands the whole document — so the app's gesture was
+ * being fought for and usually lost.
+ */
+.main { overflow-y: auto; overscroll-behavior-y: contain; }
 .main-head {
   position: sticky; top: 0; z-index: 5; background: var(--bg);
   border-bottom: 1px solid var(--border);
@@ -984,23 +991,70 @@
 /* ---- Pull to refresh ---------------------------------------------------- */
 
 /*
- * Sits above the sticky header and grows with the drag, so the list itself
- * does not have to move — transforming the whole column fights the sticky
- * header on iOS.
+ * Both refresh indicators hang off the bottom edge of the sticky header,
+ * floating over the list.
+ *
+ * They used to be rows in the flow above the header, which had two costs. On
+ * a phone the header is what carries the safe-area inset, so anything above
+ * it went under the status bar — the clock and the signal bars sitting on top
+ * of the words. And being in the flow, each one appearing pushed the header
+ * and the whole list down by its own height and yanked them back when it
+ * went, under a thumb that was mid-scroll. Out of flow, nothing moves but the
+ * indicator.
  */
-.pull-note {
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  overflow: hidden;
-  font-size: 12.5px; font-weight: 600; color: var(--text-dim);
-  background: var(--bg-sub);
-  transition: height 0.14s ease-out;
+.pull-ring,
+.list-updating {
+  position: absolute; left: 50%; z-index: 6;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-dim);
+  pointer-events: none;
 }
 
+/* The ring the drag pulls down. It starts hidden behind the header's edge. */
+.pull-ring {
+  top: 100%; margin-top: -19px;
+  width: 34px; height: 34px; border-radius: 50%;
+  /* Opaque, and lifted off the page: it passes over headlines on its way
+     down, and a disc you can read through reads as a rendering fault. */
+  background: var(--bg); border: 1px solid var(--border);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  /* No transition while the finger is down — it must not lag behind it. */
+  will-change: transform;
+}
+/* Letting go hands the ring back to CSS, which settles it into place. */
+.pull-ring.spinning { transition: transform 0.2s ease-out, opacity 0.2s ease-out; }
+.pull-ring.ready { color: var(--accent); border-color: var(--accent); }
+
+.pull-arrow {
+  display: flex; transition: transform 0.18s ease-out;
+}
+
+/* The pill that says a refresh is running on a list already worth reading. */
 .list-updating {
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  padding: 7px 10px;
-  font-size: 12.5px; font-weight: 600; color: var(--text-dim);
-  background: var(--bg-sub); border-bottom: 1px solid var(--line);
+  /* Just below the header rather than straddling it: the sort switch sits
+     on that edge, and a pill over a control looks like a mistake even when
+     taps pass straight through it. */
+  top: 100%; transform: translate(-50%, 9px);
+  gap: 8px; padding: 6px 13px;
+  font-size: 12.5px; font-weight: 600;
+  white-space: nowrap;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 999px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  animation: pill-in 0.22s ease-out;
+}
+@keyframes pill-in {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pull-ring, .pull-arrow { transition: none; }
+  .list-updating { animation: none; }
+}
+
+/* Screen-reader-only: the indicators are pictures, the words go here. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
 }
 
 .list-tail {

@@ -29,6 +29,7 @@ import {
   loadVault,
   saveVault,
   loadUpdatedAt,
+  pullable,
   saveUpdatedAt,
   loadUnlockedKeys,
   saveUnlockedKeys,
@@ -346,14 +347,29 @@ export default function Reader() {
     teams?: unknown;
     vault?: unknown;
     updatedAt?: number;
-  }) => {
+  },
+  /**
+   * The synced document is older than what this device holds. Only the parts
+   * that resolve by "most recent change wins" are then this device's to keep:
+   * bookmarks, notes and watch marks merge whoever is newer, because a stamp
+   * can say which arrangement of the feed list is newer but cannot say that
+   * the other device's bookmarks matter less. Skipping the whole document was
+   * how a computer came to show one saved article while another device held
+   * five.
+   */
+  stale = false,
+  ) => {
     applying.current = true;
-    if (Array.isArray(payload.feeds) && !unchanged(payload.feeds, feedsRef.current)) {
+    if (
+      !stale &&
+      Array.isArray(payload.feeds) &&
+      !unchanged(payload.feeds, feedsRef.current)
+    ) {
       setFeeds(payload.feeds);
     }
     // Which team feeds this person is on travels between their own devices;
     // what is *in* those feeds does not, and never touches local storage.
-    if (Array.isArray(payload.teams)) {
+    if (!stale && Array.isArray(payload.teams)) {
       const next = sanitizeTeams(payload.teams);
       if (!unchanged(next, teamsRef.current)) {
         setTeams(next);
@@ -362,14 +378,18 @@ export default function Reader() {
     }
     // The vault arrives encrypted; it stays locked until a passphrase is
     // entered on this device, which is the whole point of it.
-    if (payload.vault) {
+    if (!stale && payload.vault) {
       setVault(payload.vault);
       saveVault(payload.vault);
     }
     // Compared before applying: a fresh Set of the same ids is still a new
     // identity, and the stamping effect reads that as a local change — which
     // is how two idle devices came to push to each other on every focus.
-    if (Array.isArray(payload.read) && !unchanged(payload.read, [...readRef.current])) {
+    if (
+      !stale &&
+      Array.isArray(payload.read) &&
+      !unchanged(payload.read, [...readRef.current])
+    ) {
       const next = new Set(payload.read);
       setRead(next);
       saveRead(next);
@@ -457,7 +477,9 @@ export default function Reader() {
         { notes: payload.notes ?? [], removals: payload.noteRemovals ?? [] },
       );
 
-    if (typeof payload.updatedAt === "number" && payload.updatedAt > 0) {
+    // Never taken from a document this device has already moved past: the
+    // stamp only ever goes forward, or the next push looks like the stale one.
+    if (!stale && typeof payload.updatedAt === "number" && payload.updatedAt > 0) {
       updatedAtRef.current = payload.updatedAt;
       setUpdatedAt(payload.updatedAt);
       saveUpdatedAt(payload.updatedAt);
@@ -489,8 +511,13 @@ export default function Reader() {
 
       const remote = data.payload ?? {};
       const theirs = Number(remote.updatedAt ?? 0);
-      // Older than what this device has? Keep ours; the push below sends it.
-      if (theirs >= loadUpdatedAt()) applyRemote(remote);
+      /*
+       * An older document still has bookmarks and notes in it. Those merge
+       * whichever way round the two devices are — only the feed list, the
+       * read marks, the team list and the vault are decided by the stamp —
+       * so a stale pull is applied too, with the replaced parts held back.
+       */
+      applyRemote(remote, !pullable(theirs, loadUpdatedAt()).replace);
     },
     [applyRemote],
   );
@@ -1714,7 +1741,16 @@ export default function Reader() {
   }, [articles, ready]);
 
   const shown = useMemo(() => {
-    const list = settings.hideRead ? visible.filter((a) => !read.has(a.id)) : visible;
+    /*
+     * Hide-read triages a feed; it has no business emptying the keep-list.
+     * Saved is where an article was deliberately put so it would still be
+     * there later, and the read mark that would hide it often arrives from
+     * another device — so the computer that synced showed one of five
+     * bookmarks, while the badge beside it, counting the list itself, said
+     * five.
+     */
+    const hideRead = settings.hideRead && selection.type !== "saved";
+    const list = hideRead ? visible.filter((a) => !read.has(a.id)) : visible;
     if (settings.sort !== "top") return list;
     // Ranked first, by score; everything else keeps its date order below,
     // which is what an unranked story deserves — not a guess at a score.
@@ -1723,7 +1759,7 @@ export default function Reader() {
       const scoreB = ranking.get(b.id)?.score ?? -1;
       return scoreB - scoreA || timeOf(b) - timeOf(a);
     });
-  }, [visible, settings.hideRead, settings.sort, read, ranking]);
+  }, [visible, settings.hideRead, settings.sort, selection.type, read, ranking]);
 
   /**
    * How much of the list is actually rendered.
@@ -2455,36 +2491,78 @@ export default function Reader() {
           />
         ) : (
           <>
-        {/* The pull-to-refresh indicator. It says what will happen, and only
-            promises a refresh once the pull is far enough to cause one. */}
-        {(pullDistance > 0 || (refreshing && pullRefresh)) && (
-          <div
-            className="pull-note"
-            style={{ height: refreshing ? 34 : Math.round(pullDistance) }}
-            aria-live="polite"
-          >
-            {refreshing ? (
-              <>
-                <span className="spinner" /> Refreshing…
-              </>
-            ) : pullDistance >= 72 ? (
-              "Release to refresh"
-            ) : (
-              "Pull to refresh"
-            )}
-          </div>
-        )}
-
-        {/* Checking for new articles over a list that is already readable.
-            Said out loud so a list from the last visit is not mistaken for
-            everything there is. */}
-        {slowRefresh && !pullRefresh && shown.length > 0 && (
-          <div className="list-updating" aria-live="polite">
-            <span className="spinner" /> Checking for new articles…
-          </div>
-        )}
+        {/*
+          * What a refresh looks like, said out loud for a screen reader.
+          *
+          * The indicators themselves sit inside the header below, where they
+          * float over the list rather than pushing it: both used to be rows
+          * above the header, which put them under a phone's status bar — the
+          * clock sitting on top of the words — and moved the whole page down
+          * and back up again every time one appeared.
+          */}
+        <p className="sr-only" aria-live="polite">
+          {refreshing
+            ? "Checking for new articles"
+            : pullDistance >= PULL_TRIGGER
+              ? "Release to refresh"
+              : pullDistance > 0
+                ? "Pull to refresh"
+                : ""}
+        </p>
 
         <div className="main-head">
+          {/*
+            * The pull indicator follows the finger down from under the
+            * header, turning over as it passes the point where letting go
+            * refreshes — the gesture's own progress, rather than a caption
+            * describing it. Anchored to the header, so it clears the status
+            * bar on a phone and costs the list no layout.
+            */}
+          {(pullDistance > 0 || (refreshing && pullRefresh)) && (
+            <div
+              className={`pull-ring${refreshing ? " spinning" : ""}${
+                pullDistance >= PULL_TRIGGER ? " ready" : ""
+              }`}
+              style={{
+                // Parked at a fixed spot once the refresh is under way; before
+                // that it is wherever the finger has dragged it to.
+                transform: `translate(-50%, ${
+                  refreshing ? PULL_TRIGGER * 0.5 : Math.round(pullDistance)
+                }px)`,
+                // Fully there well before the trigger, so what the reader
+                // is deciding about is a solid thing, not a hint of one.
+                opacity: refreshing
+                  ? 1
+                  : Math.min(1, pullDistance / (PULL_TRIGGER * 0.35)),
+              }}
+              aria-hidden
+            >
+              {refreshing ? (
+                <span className="spinner" />
+              ) : (
+                <span
+                  className="pull-arrow"
+                  style={{
+                    transform: `rotate(${
+                      pullDistance >= PULL_TRIGGER ? 180 : 0
+                    }deg)`,
+                  }}
+                >
+                  {Icon.arrowDown}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Checking for new articles over a list that is already readable,
+              so a list from the last visit is not mistaken for everything
+              there is. A pill on the header's edge: it says the same thing
+              without the page moving under the reader's thumb. */}
+          {slowRefresh && !pullRefresh && shown.length > 0 && (
+            <div className="list-updating" aria-hidden>
+              <span className="spinner" /> Checking for new articles…
+            </div>
+          )}
           <button
             className="menu-btn"
             onClick={() => setMenuOpen(true)}
