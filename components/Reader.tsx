@@ -23,6 +23,9 @@ import {
   saveSavedRemovals,
   loadWatchMarks,
   saveWatchMarks,
+  loadTeams,
+  saveTeams,
+  sanitizeTeams,
   loadVault,
   saveVault,
   loadUpdatedAt,
@@ -30,9 +33,30 @@ import {
   loadUnlockedKeys,
   saveUnlockedKeys,
   type SavedArticle,
+  type TeamFeed,
   type Feed,
   type Source,
 } from "@/lib/store";
+import type { TeamArticle } from "@/lib/team";
+import {
+  loadNotes,
+  saveNotes,
+  loadNoteRemovals,
+  saveNoteRemovals,
+  mergeNotes,
+  notesDifferFrom,
+  slimNotesForSync,
+  idsOf,
+  addEntry,
+  appendQuote,
+  renameNote,
+  moveEntry,
+  releasableSaves,
+  type Note,
+  type NoteRemoval,
+} from "@/lib/notes";
+import NotePage from "./NotePage";
+import { foldIntoNote } from "@/lib/note-flow";
 import AddSourceDialog from "./AddSourceDialog";
 import SyncDialog from "./SyncDialog";
 import InlineName from "./InlineName";
@@ -69,6 +93,7 @@ import type { PickedSource } from "./OutletCatalog";
 import ScoreExplainer from "./ScoreExplainer";
 import type { CorpusStats } from "./ScoreExplainer";
 import { canonicalUrl } from "@/lib/url";
+import { mergeWindow, stamp } from "@/lib/window";
 import { mergeSaved, differsFrom, slimForSync } from "@/lib/saved";
 import {
   alertsFor,
@@ -102,6 +127,19 @@ function fileTitleFor(file: Attachment, parentTitle: string) {
   return `${parentTitle} (${kind})`;
 }
 
+/**
+ * Whether applying this would actually change anything.
+ *
+ * A merge hands back fresh arrays whether or not it found anything new, and
+ * a fresh array is a new identity — which the change-stamping effect reads as
+ * a local edit, stamps, and pushes. Two devices left open then pushed to each
+ * other on every focus, forever, with nothing to say. Cheap to compare: these
+ * are the same documents that are about to be JSON-encoded onto the wire.
+ */
+function unchanged(a: unknown, b: unknown) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 function keyHeadersFrom(keys: Record<string, string>): HeadersInit | undefined {
   return Object.keys(keys).length === 0
     ? undefined
@@ -111,6 +149,9 @@ type Selection =
   | { type: "all" }
   | { type: "saved" }
   | { type: "alerts" }
+  /** A shared list: its id is the team's connect code. */
+  | { type: "team"; id: string }
+  | { type: "note"; id: string }
   | { type: "feed" | "source"; id: string };
 
 export default function Reader() {
@@ -126,6 +167,8 @@ export default function Reader() {
     title: string;
     feedUrl?: string;
     summary?: string;
+    /** A passage to go to on arrival, when a note's quote sent us here. */
+    quote?: string;
   } | null>(null);
   const [syncCode, setSyncCode] = useState<string | null>(null);
   const [syncOpen, setSyncOpen] = useState(false);
@@ -161,6 +204,23 @@ export default function Reader() {
   const [savedRemovals, setSavedRemovals] = useState<SavedRemoval[]>([]);
   /** How far each watched source has been read up to. */
   const [watchMarks, setWatchMarks] = useState<WatchMarks>({});
+  /** Notes, and the quotes pulled into them. Per device, like Settings. */
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [addingNote, setAddingNote] = useState(false);
+  const [noteRemovals, setNoteRemovals] = useState<NoteRemoval[]>([]);
+  const [editingNote, setEditingNote] = useState<string | null>(null);
+  const [confirmingNote, setConfirmingNote] = useState<string | null>(null);
+  /** The team feeds this device has joined. */
+  const [teams, setTeams] = useState<TeamFeed[]>([]);
+  /**
+   * What is on each team feed, by connect code. Not kept in local storage:
+   * several people write to a team feed, so the server's copy is the only one
+   * that can be trusted to be current.
+   */
+  const [teamArticles, setTeamArticles] = useState<Record<string, TeamArticle[]>>({});
+  const [teamsBusy, setTeamsBusy] = useState(false);
+  /** The article whose "Save to Team" menu is open, when there are several. */
+  const [teamMenu, setTeamMenu] = useState<string | null>(null);
   /** Whether the browser promised to keep this cache rather than evict it. */
   const [persisted, setPersisted] = useState(false);
   const [vault, setVault] = useState<unknown | null>(null);
@@ -207,10 +267,16 @@ export default function Reader() {
   const pushedAt = useRef(0);
   /** The bookmark list as it stands, for merging inside applyRemote. */
   const savedRef = useRef<SavedArticle[]>([]);
-  /** The feed list as it stands, for handlers that must not re-bind on it. */
-  const feedsRef = useRef<Feed[]>([]);
   const removalsRef = useRef<SavedRemoval[]>([]);
   const marksRef = useRef<WatchMarks>({});
+  /** The notes as they stand, for writes that land in the same click. */
+  const notesRef = useRef<Note[]>([]);
+  /** Feeds and teams as they stand, so an identical pull can be recognised. */
+  const feedsRef = useRef<Feed[]>([]);
+  const teamsRef = useRef<TeamFeed[]>([]);
+  const readRef = useRef<Set<string>>(new Set());
+  /** Deletions, dated, so syncing does not put them back. */
+  const noteRemovalsRef = useRef<NoteRemoval[]>([]);
 
   useEffect(() => {
     setFeeds(loadFeeds());
@@ -221,6 +287,13 @@ export default function Reader() {
     setSaved(loadSaved());
     setSavedRemovals(loadSavedRemovals());
     setWatchMarks(loadWatchMarks());
+    setTeams(loadTeams());
+    const storedNotes = loadNotes();
+    notesRef.current = storedNotes;
+    setNotes(storedNotes);
+    const storedNoteRemovals = loadNoteRemovals();
+    noteRemovalsRef.current = storedNoteRemovals;
+    setNoteRemovals(storedNoteRemovals);
     setVault(loadVault());
     setApiKeys(loadUnlockedKeys());
     updatedAtRef.current = loadUpdatedAt();
@@ -242,18 +315,35 @@ export default function Reader() {
     saved?: SavedArticle[];
     savedRemovals?: SavedRemoval[];
     watchMarks?: WatchMarks;
+    notes?: Note[];
+    noteRemovals?: NoteRemoval[];
+    teams?: unknown;
     vault?: unknown;
     updatedAt?: number;
   }) => {
     applying.current = true;
-    if (Array.isArray(payload.feeds)) setFeeds(payload.feeds);
+    if (Array.isArray(payload.feeds) && !unchanged(payload.feeds, feedsRef.current)) {
+      setFeeds(payload.feeds);
+    }
+    // Which team feeds this person is on travels between their own devices;
+    // what is *in* those feeds does not, and never touches local storage.
+    if (Array.isArray(payload.teams)) {
+      const next = sanitizeTeams(payload.teams);
+      if (!unchanged(next, teamsRef.current)) {
+        setTeams(next);
+        saveTeams(next);
+      }
+    }
     // The vault arrives encrypted; it stays locked until a passphrase is
     // entered on this device, which is the whole point of it.
     if (payload.vault) {
       setVault(payload.vault);
       saveVault(payload.vault);
     }
-    if (Array.isArray(payload.read)) {
+    // Compared before applying: a fresh Set of the same ids is still a new
+    // identity, and the stamping effect reads that as a local change — which
+    // is how two idle devices came to push to each other on every focus.
+    if (Array.isArray(payload.read) && !unchanged(payload.read, [...readRef.current])) {
       const next = new Set(payload.read);
       setRead(next);
       saveRead(next);
@@ -269,23 +359,77 @@ export default function Reader() {
       { saved: savedRef.current, removals: removalsRef.current },
       { saved: payload.saved ?? [], removals: payload.savedRemovals ?? [] },
     );
-    setSaved(bookmarks.saved);
-    saveSaved(bookmarks.saved);
-    setSavedRemovals(bookmarks.removals);
-    saveSavedRemovals(bookmarks.removals);
     // Watch marks merge by taking the later of each: looking at a source on
     // one device should clear its badge on the other, and a mark only ever
-    // moves forward, so there is nothing to resolve.
+    // moves forward, so there is nothing to resolve. Guarded like the rest,
+    // so an identical pull does not set state and start the two devices
+    // talking past each other.
     const marks = mergeMarks(marksRef.current, payload.watchMarks ?? {});
-    setWatchMarks(marks);
-    saveWatchMarks(marks);
+    if (!unchanged(marks, marksRef.current)) {
+      marksRef.current = marks;
+      setWatchMarks(marks);
+      saveWatchMarks(marks);
+    }
+    if (!unchanged(bookmarks.saved, savedRef.current)) {
+      setSaved(bookmarks.saved);
+      saveSaved(bookmarks.saved);
+    }
+    if (!unchanged(bookmarks.removals, removalsRef.current)) {
+      setSavedRemovals(bookmarks.removals);
+      saveSavedRemovals(bookmarks.removals);
+    }
+    // Notes merge for the same reason, and with the same shape of tombstone:
+    // a quote taken on the phone must survive the desktop pushing over it.
+    const merged = mergeNotes(
+      { notes: notesRef.current, removals: noteRemovalsRef.current },
+      { notes: payload.notes ?? [], removals: payload.noteRemovals ?? [] },
+    );
+    if (!unchanged(merged.notes, notesRef.current)) {
+      notesRef.current = merged.notes;
+      setNotes(merged.notes);
+      saveNotes(merged.notes);
+    }
+    if (!unchanged(merged.removals, noteRemovalsRef.current)) {
+      noteRemovalsRef.current = merged.removals;
+      setNoteRemovals(merged.removals);
+      saveNoteRemovals(merged.removals);
+    }
+
+    // A note deleted on the other device releases the bookmark its quote was
+    // holding here — that device may never have known the bookmark was one a
+    // quote made, since the flag is local. Without this the article would sit
+    // in Saved forever, quoted by nothing.
+    const releasable = releasableSaves(bookmarks.saved, merged.notes);
+    if (releasable.length > 0) {
+      const drop = new Set(releasable);
+      bookmarks.saved = bookmarks.saved.filter((article) => !drop.has(article.link));
+      const at = Date.now();
+      bookmarks.removals = [
+        ...releasable.map((link) => ({ link, at })),
+        ...bookmarks.removals.filter((removal) => !drop.has(removal.link)),
+      ];
+      setSaved(bookmarks.saved);
+      saveSaved(bookmarks.saved);
+      setSavedRemovals(bookmarks.removals);
+      saveSavedRemovals(bookmarks.removals);
+    }
 
     // If the merge kept something the other side had not seen, this device
     // still has news — so it must not mark itself up to date.
-    const owes = differsFrom(bookmarks, {
-      saved: payload.saved ?? [],
-      removals: payload.savedRemovals ?? [],
-    });
+    const owes =
+      differsFrom(bookmarks, {
+        saved: payload.saved ?? [],
+        removals: payload.savedRemovals ?? [],
+      }) ||
+      releasable.length > 0 ||
+      // Compared as it would be *sent*, not as it is held: the wire copy is
+      // cut to a budget, and comparing the full set against the server's copy
+      // would report news this device can never deliver — and push forever
+      // trying.
+      notesDifferFrom(
+        { notes: slimNotesForSync(merged.notes), removals: merged.removals },
+        { notes: payload.notes ?? [], removals: payload.noteRemovals ?? [] },
+      );
 
     if (typeof payload.updatedAt === "number" && payload.updatedAt > 0) {
       updatedAtRef.current = payload.updatedAt;
@@ -351,7 +495,10 @@ export default function Reader() {
     savedRef.current = saved;
     removalsRef.current = savedRemovals;
     marksRef.current = watchMarks;
-  }, [saved, savedRemovals, watchMarks]);
+    feedsRef.current = feeds;
+    teamsRef.current = teams;
+    readRef.current = read;
+  }, [saved, savedRemovals, watchMarks, feeds, teams, read]);
 
   /**
    * Stamp a real local change. The first run is the load from storage, which
@@ -372,7 +519,18 @@ export default function Reader() {
     updatedAtRef.current = now;
     setUpdatedAt(now);
     saveUpdatedAt(now);
-  }, [feeds, read, saved, savedRemovals, watchMarks, vault, ready]);
+  }, [
+    feeds,
+    read,
+    saved,
+    savedRemovals,
+    watchMarks,
+    notes,
+    noteRemovals,
+    vault,
+    teams,
+    ready,
+  ]);
 
   // Pull once the code is known, and again whenever the window regains focus,
   // so a device left open picks up changes made elsewhere.
@@ -419,6 +577,9 @@ export default function Reader() {
             saved: slimForSync(saved),
             savedRemovals,
             watchMarks,
+            notes: slimNotesForSync(notes),
+            noteRemovals,
+            teams,
             vault,
             updatedAt,
           }),
@@ -444,6 +605,9 @@ export default function Reader() {
     saved,
     savedRemovals,
     watchMarks,
+    notes,
+    noteRemovals,
+    teams,
     ready,
     syncCode,
     vault,
@@ -475,6 +639,9 @@ export default function Reader() {
         saved: slimForSync(saved),
         savedRemovals,
         watchMarks,
+        notes: slimNotesForSync(notes),
+        noteRemovals,
+        teams,
         vault,
         updatedAt: Math.max(Date.now(), updatedAtRef.current + 1),
       }),
@@ -487,7 +654,17 @@ export default function Reader() {
     saveSyncCode(data.code);
     setSyncCode(data.code);
     setSyncState("saved");
-  }, [feeds, read, saved, savedRemovals, watchMarks, vault]);
+  }, [
+    feeds,
+    read,
+    saved,
+    savedRemovals,
+    watchMarks,
+    notes,
+    noteRemovals,
+    teams,
+    vault,
+  ]);
 
   const connectSync = useCallback(
     async (entered: string) => {
@@ -511,6 +688,178 @@ export default function Reader() {
     setSyncState("idle");
     setSyncOpen(false);
   }, []);
+
+  /* ---------- team feeds ---------- */
+
+  /**
+   * Pull one team feed. Whoever else is on it may have added something since,
+   * so the server's copy always wins here — there is no local copy to merge.
+   */
+  const refreshTeam = useCallback(async (code: string) => {
+    const res = await fetch(`/api/team?code=${encodeURIComponent(code)}`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error ?? "Could not reach that team feed");
+    }
+    const data = (await res.json()) as { name: string; articles: TeamArticle[] };
+    setTeamArticles((current) => ({ ...current, [code]: data.articles ?? [] }));
+    // The name is the team's, not this device's: a rename elsewhere lands here.
+    setTeams((current) => {
+      if (!current.some((team) => team.code === code && team.name !== data.name)) {
+        return current;
+      }
+      const next = current.map((team) =>
+        team.code === code ? { ...team, name: data.name } : team,
+      );
+      saveTeams(next);
+      return next;
+    });
+    return data;
+  }, []);
+
+  // Load every joined feed on open, and again on focus — the same moment sync
+  // pulls, and the moment someone comes back to see what the team shared.
+  useEffect(() => {
+    if (!ready || teams.length === 0) return;
+    const load = () => {
+      for (const team of teams) {
+        refreshTeam(team.code).catch(() => {
+          /* offline or unreachable: keep showing what was last loaded */
+        });
+      }
+    };
+    load();
+    window.addEventListener("focus", load);
+    return () => window.removeEventListener("focus", load);
+  }, [ready, teams, refreshTeam]);
+
+  const createTeam = useCallback(async (name: string) => {
+    setTeamsBusy(true);
+    try {
+      const res = await fetch("/api/team", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not create a team feed");
+      setTeams((current) => {
+        const next = [...current, { code: data.code as string, name: data.name as string }];
+        saveTeams(next);
+        return next;
+      });
+      setTeamArticles((current) => ({ ...current, [data.code]: [] }));
+    } finally {
+      setTeamsBusy(false);
+    }
+  }, []);
+
+  const joinTeam = useCallback(
+    async (entered: string) => {
+      const code = entered.trim();
+      setTeamsBusy(true);
+      try {
+        // Fetch first: joining a code that does not resolve should say so
+        // rather than adding an entry that never loads.
+        const data = await refreshTeam(code);
+        setTeams((current) => {
+          if (current.some((team) => team.code === code)) return current;
+          const next = [...current, { code, name: data.name }];
+          saveTeams(next);
+          return next;
+        });
+      } finally {
+        setTeamsBusy(false);
+      }
+    },
+    [refreshTeam],
+  );
+
+  /**
+   * Leave on this device only. The shared list itself stays where it is —
+   * other people are still on it, and the code still works.
+   */
+  const leaveTeam = useCallback((code: string) => {
+    setTeams((current) => {
+      const next = current.filter((team) => team.code !== code);
+      saveTeams(next);
+      return next;
+    });
+    setTeamArticles((current) => {
+      const next = { ...current };
+      delete next[code];
+      return next;
+    });
+    setSelection((current) =>
+      current.type === "team" && current.id === code ? { type: "all" } : current,
+    );
+  }, []);
+
+  // A picker left open over a list that has moved on is just in the way.
+  useEffect(() => {
+    if (!teamMenu) return;
+    const close = (event: MouseEvent) => {
+      if (!(event.target as HTMLElement | null)?.closest(".team-share")) {
+        setTeamMenu(null);
+      }
+    };
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [teamMenu]);
+
+  /** Which of the joined feeds already carry this article. */
+  const teamsWith = useCallback(
+    (link: string) =>
+      teams.filter((team) =>
+        (teamArticles[team.code] ?? []).some((a) => a.link === link),
+      ),
+    [teams, teamArticles],
+  );
+
+  /**
+   * Share one article, or take it back off. Only the article is sent: the
+   * request carries no feeds, no read state and nothing saying who sent it.
+   */
+  const toggleTeam = useCallback(
+    async (code: string, article: Loaded, source?: Source) => {
+      const shared = (teamArticles[code] ?? []).some((a) => a.link === article.link);
+      setTeamsBusy(true);
+      try {
+        const res = shared
+          ? await fetch(
+              `/api/team?code=${encodeURIComponent(code)}&link=${encodeURIComponent(article.link)}`,
+              { method: "DELETE" },
+            )
+          : await fetch("/api/team", {
+              method: "PUT",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                code,
+                article: {
+                  id: article.id,
+                  title: article.title,
+                  link: article.link,
+                  author: article.author,
+                  publishedAt: article.publishedAt,
+                  summary: article.summary,
+                  image: article.image,
+                  sourceTitle: source?.title,
+                  favicon: source?.favicon,
+                },
+              }),
+            });
+        if (!res.ok) return;
+        const data = (await res.json()) as { articles: TeamArticle[] };
+        setTeamArticles((current) => ({ ...current, [code]: data.articles ?? [] }));
+      } catch {
+        /* offline: the list stays as it was, and a later save can retry */
+      } finally {
+        setTeamsBusy(false);
+        setTeamMenu(null);
+      }
+    },
+    [teamArticles],
+  );
 
   const allSources = useMemo(
     () => feeds.flatMap((feed) => feed.sources),
@@ -549,9 +898,22 @@ export default function Reader() {
         seen.add(key);
         return true;
       });
-      const ordered = sortNewestFirst(unique);
+
+      /**
+       * Merged into what was already held, not swapped for it. A feed is a
+       * window of the last few dozen things a desk filed; showing only that
+       * window meant everything published between two visits was missed, with
+       * nothing to show it had happened — see lib/window.ts.
+       */
+      const held = (await loadListSnapshot<Loaded>()) ?? [];
+      const ordered = sortNewestFirst(
+        mergeWindow(stamp(unique), held, {
+          sources: new Set(sources.map((source) => source.id)),
+          canonical: canonicalUrl,
+        }),
+      );
       setArticles(ordered);
-      // Keep a copy so the list is still there with no connection.
+      // Also what the list falls back to with no connection.
       void saveListSnapshot(ordered);
     } catch {
       // Offline or the feeds are unreachable: show what was last saved.
@@ -802,6 +1164,147 @@ export default function Reader() {
     [saved, noteRemoval],
   );
 
+  /**
+   * Write the notes through, and let go of any article that was only saved
+   * because a quote needed it. An article the reader saved themselves is
+   * never released — quoting something must not be able to lose a bookmark.
+   */
+  const commitNotes = useCallback(
+    (update: (current: Note[]) => Note[]) => {
+      // Functional, and through a ref, because two of these can land in one
+      // click: quoting into a note that the same click created. Reading the
+      // rendered `notes` for the second write would undo the first.
+      const before = notesRef.current;
+      const next = update(before);
+      notesRef.current = next;
+      setNotes(next);
+      saveNotes(next);
+
+      // Whatever is no longer there was deleted, whichever way it went — an
+      // entry, or the note around it. Dated here in one place, because the
+      // other device still holds it and would otherwise put it back.
+      const surviving = new Set(next.flatMap(idsOf));
+      const gone = before.flatMap(idsOf).filter((id) => !surviving.has(id));
+      if (gone.length > 0) {
+        const at = Date.now();
+        const tombstones = [
+          ...gone.map((id) => ({ id, at })),
+          ...noteRemovalsRef.current.filter((removal) => !gone.includes(removal.id)),
+        ];
+        noteRemovalsRef.current = tombstones;
+        setNoteRemovals(tombstones);
+        saveNoteRemovals(tombstones);
+      }
+
+      const releasable = releasableSaves(savedRef.current, next);
+      if (releasable.length === 0) return;
+      const drop = new Set(releasable);
+      for (const link of releasable) noteRemoval(link);
+      setSaved((current) => {
+        const kept = current.filter((article) => !drop.has(article.link));
+        saveSaved(kept);
+        return kept;
+      });
+    },
+    [noteRemoval],
+  );
+
+  const createNote = useCallback(
+    (name: string) => {
+      const note: Note = {
+        id: newId(),
+        name: name.trim().slice(0, 60) || "Note",
+        entries: [],
+        at: Date.now(),
+      };
+      commitNotes((current) => [...current, note]);
+      return note.id;
+    },
+    [commitNotes],
+  );
+
+  /**
+   * A highlighted passage becomes a quote, and the article behind it becomes
+   * a bookmark if it was not one already — a quote whose article has scrolled
+   * out of its feed and off the device is a quote with nothing behind it.
+   * That automatic save is marked, so it can be released when the quote goes.
+   */
+  const quoteIntoNote = useCallback(
+    (noteId: string, text: string) => {
+      const link = reading?.url;
+      if (!link || !text) return;
+      const entryId = newId();
+
+      const known =
+        articles.find((a) => a.link === link) ??
+        savedRef.current.find((a) => a.link === link);
+      const source = known?.sourceId
+        ? allSources.find((entry) => entry.id === known.sourceId)
+        : undefined;
+      const title = known?.title ?? reading?.title ?? link;
+
+      commitNotes((current) =>
+        appendQuote(current, noteId, {
+          id: entryId,
+          kind: "quote",
+          text,
+          link,
+          articleTitle: title,
+          sourceTitle: source?.title ?? (known as SavedArticle | undefined)?.sourceTitle,
+          at: Date.now(),
+        }),
+      );
+
+      if (savedRef.current.some((a) => a.link === link)) return entryId;
+      setSaved((current) => {
+        const next: SavedArticle[] = [
+          {
+            id: known?.id ?? `note:${link}`,
+            title,
+            link,
+            publishedAt: known?.publishedAt,
+            summary: known?.summary ?? reading?.summary,
+            image: known?.image,
+            sourceId: known?.sourceId,
+            sourceTitle: source?.title ?? (known as SavedArticle | undefined)?.sourceTitle,
+            favicon: source?.favicon,
+            savedAt: Date.now(),
+            viaNote: true,
+          },
+          ...current,
+        ];
+        saveSaved(next);
+        return next;
+      });
+      return entryId;
+    },
+    [reading, articles, allSources, commitNotes],
+  );
+
+  /**
+   * Send a quote to a different note — what the "Added to…" bubble offers
+   * straight after filing one, when it went to the wrong place. A move, not a
+   * copy: the entry keeps its id, so nothing counts it as deleted and the
+   * article it holds stays saved.
+   */
+  const moveQuote = useCallback(
+    (entryId: string, toNoteId: string) => {
+      commitNotes((current) => moveEntry(current, entryId, toNoteId));
+    },
+    [commitNotes],
+  );
+
+  const removeNote = useCallback(
+    (id: string) => {
+      commitNotes((current) => current.filter((note) => note.id !== id));
+      setConfirmingNote(null);
+      setSelection((current) =>
+        current.type === "note" && current.id === id ? { type: "all" } : current,
+      );
+    },
+    [commitNotes],
+  );
+
   const markSaved = useCallback((url: string) => {
     setSavedOffline((current) =>
       current.has(url) ? current : new Set(current).add(url),
@@ -925,18 +1428,26 @@ export default function Reader() {
     [saved],
   );
 
+  /** A team feed's articles, in the same shape the list renders. */
+  const teamAsArticles = useCallback(
+    (code: string): Loaded[] =>
+      (teamArticles[code] ?? []).map((article) => ({ ...article, sourceId: "" })),
+    [teamArticles],
+  );
+
   const visible = useMemo(() => {
     if (selection.type === "all") return articles;
     if (selection.type === "saved") return savedAsArticles;
     // Notifications is its own view, not a list of articles.
     if (selection.type === "alerts") return [];
+    if (selection.type === "team") return teamAsArticles(selection.id);
     if (selection.type === "source") {
       return articles.filter((a) => a.sourceId === selection.id);
     }
     const feed = feeds.find((f) => f.id === selection.id);
     const ids = new Set(feed?.sources.map((s) => s.id));
     return articles.filter((a) => ids.has(a.sourceId));
-  }, [articles, feeds, selection, savedAsArticles]);
+  }, [articles, feeds, selection, savedAsArticles, teamAsArticles]);
 
   const sourceById = useMemo(
     () => new Map(allSources.map((s) => [s.id, s])),
@@ -1212,24 +1723,36 @@ export default function Reader() {
     [allSources, bySource],
   );
 
-  /** Turn watching on or off for one source. */
+  /**
+   * Turn watching on or off for one source.
+   *
+   * Whether this is switching on is decided from the state as it stands, not
+   * from a flag set inside the setFeeds updater: React runs that updater
+   * during the render that follows, so the flag was still false by the time
+   * it was read, and the starting mark was never written. The badge then lit
+   * up for every post already in the feed.
+   */
   const toggleNotify = useCallback(
     (feedId: string, sourceId: string) => {
-      let turningOn = false;
+      const source = feedsRef.current
+        .find((feed) => feed.id === feedId)
+        ?.sources.find((entry) => entry.id === sourceId);
+      if (!source) return;
+      const turningOn = !source.notify;
+
       setFeeds((current) =>
         current.map((feed) =>
           feed.id !== feedId
             ? feed
             : {
                 ...feed,
-                sources: feed.sources.map((source) => {
-                  if (source.id !== sourceId) return source;
-                  turningOn = !source.notify;
-                  return { ...source, notify: !source.notify };
-                }),
+                sources: feed.sources.map((entry) =>
+                  entry.id === sourceId ? { ...entry, notify: turningOn } : entry,
+                ),
               },
         ),
       );
+
       // Start the mark at what is already there, so turning notifications on
       // announces the next post rather than the last forty.
       if (turningOn) {
@@ -1259,6 +1782,7 @@ export default function Reader() {
     (next: Selection) => {
       setSelection(next);
       setMenuOpen(false);
+      setTeamMenu(null);
       // Navigating to a source — or to the feed holding it — counts as having
       // seen it. "All articles" deliberately does not: it is the default
       // view, and clearing there would mean never seeing a badge at all.
@@ -1336,7 +1860,9 @@ export default function Reader() {
   const selectedSourceCount =
     selection.type === "all"
       ? allSources.length
-      : selection.type === "saved" || selection.type === "alerts"
+      : selection.type === "saved" ||
+          selection.type === "alerts" ||
+          selection.type === "team"
         ? 0
         : selection.type === "source"
           ? 1
@@ -1349,9 +1875,17 @@ export default function Reader() {
         ? "Saved"
         : selection.type === "alerts"
           ? "Notifications"
-          : selection.type === "feed"
+          : selection.type === "team"
+            ? (teams.find((team) => team.code === selection.id)?.name ?? "Team")
+            : selection.type === "feed"
           ? (feeds.find((f) => f.id === selection.id)?.name ?? "Feed")
           : (sourceById.get(selection.id)?.title ?? "Source");
+
+  /** The note being read, if the sidebar is on one. */
+  const openNote =
+    selection.type === "note"
+      ? (notes.find((note) => note.id === selection.id) ?? null)
+      : null;
 
   const unread = (items: Loaded[]) =>
     items.filter((a) => !read.has(a.id)).length;
@@ -1394,6 +1928,106 @@ export default function Reader() {
               <span className="feed-name">Notifications</span>
               <span className="count alert-count">{alertTotal || ""}</span>
             </button>
+          )}
+
+          {/* Team feeds sit right beside Saved: the same kind of list, shared
+              with other people rather than kept on this device. */}
+          {teams.map((team) => (
+            <button
+              key={team.code}
+              className={`nav-item ${
+                selection.type === "team" && selection.id === team.code ? "active" : ""
+              }`}
+              onClick={() => choose({ type: "team", id: team.code })}
+            >
+              {Icon.people}
+              <span className="feed-name">{team.name}</span>
+              <span className="count">
+                {(teamArticles[team.code] ?? []).length || ""}
+              </span>
+            </button>
+          ))}
+
+          {/* Notes sit with Saved and the team feeds: places things are kept,
+              above the feeds things arrive in. */}
+          {(notes.length > 0 || addingNote) && (
+            <div className="notes-nav">
+              {notes.map((note) => (
+                <div className="note-row" key={note.id}>
+                  {editingNote === note.id ? (
+                    <InlineName
+                      initial={note.name}
+                      onSubmit={(value) => {
+                        commitNotes((current) => renameNote(current, note.id, value));
+                        setEditingNote(null);
+                      }}
+                      onCancel={() => setEditingNote(null)}
+                    />
+                  ) : confirmingNote === note.id ? (
+                    <div className="confirm-row">
+                      <span>Delete “{note.name}”?</span>
+                      <button
+                        className="link-btn danger"
+                        onClick={() => removeNote(note.id)}
+                      >
+                        Delete
+                      </button>
+                      <button
+                        className="link-btn"
+                        onClick={() => setConfirmingNote(null)}
+                      >
+                        Keep
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <button
+                        className={`nav-item ${
+                          selection.type === "note" && selection.id === note.id
+                            ? "active"
+                            : ""
+                        }`}
+                        onClick={() => choose({ type: "note", id: note.id })}
+                        onDoubleClick={() => setEditingNote(note.id)}
+                        title="Double-click to rename"
+                      >
+                        {Icon.note}
+                        <span className="feed-name">{note.name}</span>
+                        <span className="count">
+                          {note.entries.filter((entry) => entry.kind === "quote")
+                            .length || ""}
+                        </span>
+                      </button>
+                      <button
+                        className="icon-btn"
+                        onClick={() => setEditingNote(note.id)}
+                        aria-label={`Rename ${note.name}`}
+                      >
+                        {Icon.pencil}
+                      </button>
+                      <button
+                        className="icon-btn danger"
+                        onClick={() => setConfirmingNote(note.id)}
+                        aria-label={`Delete ${note.name}`}
+                      >
+                        {Icon.trash}
+                      </button>
+                    </>
+                  )}
+                </div>
+              ))}
+              {addingNote && (
+                <InlineName
+                  placeholder="Name this note"
+                  onSubmit={(value) => {
+                    const name = value.trim();
+                    setAddingNote(false);
+                    if (name) choose({ type: "note", id: createNote(name) });
+                  }}
+                  onCancel={() => setAddingNote(false)}
+                />
+              )}
+            </div>
           )}
 
           {feeds.map((feed) => {
@@ -1556,13 +2190,25 @@ export default function Reader() {
               onCancel={() => setAdding(false)}
             />
           ) : (
-            <button
-              className="btn ghost small"
-              onClick={() => setAdding(true)}
-              style={{ width: "100%" }}
-            >
-              {Icon.plus} New feed
-            </button>
+            <div className="foot-row">
+              <button
+                className="btn ghost small"
+                onClick={() => setAdding(true)}
+              >
+                {Icon.plus} New feed
+              </button>
+              {settings.quoteToNote && (
+                <button
+                  className="btn ghost small"
+                  onClick={() => {
+                    setAddingNote(true);
+                    setMenuOpen(true);
+                  }}
+                >
+                  {Icon.plus} New note
+                </button>
+              )}
+            </div>
           )}
           <button
             className="sync-btn"
@@ -1621,6 +2267,12 @@ export default function Reader() {
             keyHeaders={keyHeaders}
             onOpenMenu={() => setMenuOpen(true)}
             onAlwaysOpenOnSite={alwaysOpenOnSite}
+            notes={notes}
+            highlight={reading.quote}
+            onQuote={settings.quoteToNote ? quoteIntoNote : undefined}
+            onCreateNote={settings.quoteToNote ? createNote : undefined}
+            onOpenNote={(id) => choose({ type: "note", id })}
+            onMoveQuote={moveQuote}
             saved={isSaved(reading.url)}
             onToggleSave={() => {
               const article =
@@ -1629,6 +2281,27 @@ export default function Reader() {
               if (article) toggleSaved(article, sourceById.get(article.sourceId));
             }}
             onClose={() => setReading(null)}
+          />
+        ) : openNote ? (
+          <NotePage
+            note={openNote}
+            onOpenMenu={() => setMenuOpen(true)}
+            onOpenArticle={(link, title, quote) =>
+              setReading({ url: link, title, quote })
+            }
+            // The page hands back the whole note each time it changes: it is
+            // one text box, and what came out of it is what the note now
+            // says — bar anything that arrived while it was open, which is
+            // not the page's to have an opinion about.
+            onCommitEntries={(entries, known) =>
+              commitNotes((current) =>
+                current.map((note) =>
+                  note.id === openNote.id
+                    ? { ...note, entries: foldIntoNote(note.entries, entries, known) }
+                    : note,
+                ),
+              )
+            }
           />
         ) : (
           <>
@@ -1807,7 +2480,13 @@ export default function Reader() {
               </>
             )}
           </div>
-        ) : allSources.length === 0 ? (
+        ) : /* A team feed is readable on its own: someone can join one with
+               a connect code before they follow a single source of their own,
+               and "start with one link" over a list of shared stories is
+               wrong. */
+          allSources.length === 0 &&
+          shown.length === 0 &&
+          selection.type !== "team" ? (
           <div className="state">
             <h2>Start with one link.</h2>
             <p>
@@ -1822,7 +2501,13 @@ export default function Reader() {
           <div className="state">
             <h2>{refreshing ? "Loading articles…" : "Nothing here yet."}</h2>
             {!refreshing &&
-              (selection.type === "saved" ? (
+              (selection.type === "team" ? (
+                <p>
+                  Nothing shared yet. Use <strong>Save to Team</strong> on any
+                  article and everyone with this feed&rsquo;s connect code will
+                  see it here.
+                </p>
+              ) : selection.type === "saved" ? (
                 <p>
                   Nothing saved yet. Use <strong>Save</strong> on any article
                   and it will wait here — kept on this device, and downloaded
@@ -2017,6 +2702,63 @@ export default function Reader() {
                         {isSaved(article.link) ? Icon.bookmarkOn : Icon.bookmark}
                         {isSaved(article.link) ? "Saved" : "Save"}
                       </button>
+                      {/* Sharing is its own button, never a side effect of
+                          saving: what goes to the team is a deliberate act. */}
+                      {teams.length > 0 &&
+                        (() => {
+                          const on = teamsWith(article.link);
+                          const menuOpenHere = teamMenu === article.link;
+                          return (
+                            <div className="team-share">
+                              <button
+                                className={`read-btn team-btn${on.length > 0 ? " on" : ""}`}
+                                aria-pressed={on.length > 0}
+                                aria-expanded={teams.length > 1 ? menuOpenHere : undefined}
+                                disabled={teamsBusy}
+                                title={
+                                  on.length > 0
+                                    ? `Shared with ${on.map((t) => t.name).join(", ")}`
+                                    : "Save to a team feed"
+                                }
+                                onClick={() => {
+                                  // One team is a straight toggle; several
+                                  // need to know which one.
+                                  if (teams.length === 1) {
+                                    void toggleTeam(teams[0].code, article, source);
+                                  } else {
+                                    setTeamMenu(menuOpenHere ? null : article.link);
+                                  }
+                                }}
+                              >
+                                {on.length > 0 ? Icon.peopleOn : Icon.people}
+                                {on.length > 0 ? "Shared" : "Save to Team"}
+                              </button>
+                              {menuOpenHere && teams.length > 1 && (
+                                <div className="team-menu" role="menu">
+                                  {teams.map((team) => {
+                                    const shared = on.some((t) => t.code === team.code);
+                                    return (
+                                      <button
+                                        key={team.code}
+                                        role="menuitemcheckbox"
+                                        aria-checked={shared}
+                                        disabled={teamsBusy}
+                                        onClick={() =>
+                                          void toggleTeam(team.code, article, source)
+                                        }
+                                      >
+                                        <span className="team-check">
+                                          {shared ? Icon.check : null}
+                                        </span>
+                                        {team.name}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                     </div>
                   </div>
                   {article.image && settings.view === "cards" && (
@@ -2053,7 +2795,9 @@ export default function Reader() {
         </div>
       )}
 
-      <DownloadBar state={offline.state} done={offline.done} total={offline.total} />
+      {settings.showDownloadBar && (
+        <DownloadBar state={offline.state} done={offline.done} total={offline.total} />
+      )}
 
       {settingsOpen && (
         <SettingsDialog
@@ -2068,6 +2812,12 @@ export default function Reader() {
           apiKeys={apiKeys}
           onKeysChange={updateKeys}
           onDownload={runDownload}
+          noteCount={notes.length}
+          teams={teams}
+          teamsBusy={teamsBusy}
+          onCreateTeam={createTeam}
+          onJoinTeam={joinTeam}
+          onLeaveTeam={leaveTeam}
         />
       )}
 

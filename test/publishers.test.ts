@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { parseBundle } from "../lib/bundle";
 import { knownFeedFor, WSJ_CHOICES } from "../lib/publishers";
 import { OUTLETS, SUBREDDITS, PACKS } from "../lib/outlets";
 
@@ -19,6 +20,7 @@ test("recognises the WSJ however it is asked for", () => {
     assert.equal(known.title, "The Wall Street Journal");
     assert.equal(known.scope, "site");
     assert.equal(known.siteUrl, "https://www.wsj.com");
+    assert.ok(parseBundle(known.feedUrl), `${input} should carry every section`);
   }
 });
 
@@ -48,7 +50,10 @@ test("a single WSJ story falls back to the whole paper", () => {
     "https://www.wsj.com/articles/some-headline-a4f0f219?mod=rss_worldnews",
   );
   assert.equal(known?.scope, "site");
-  assert.equal(known?.feedUrl, "https://feeds.content.dowjones.io/public/rss/RSSWorldNews");
+  // The whole paper is every section — it used to be the world desk under the
+  // paper's name, which is how markets, business and tech went missing.
+  const feeds = parseBundle(known!.feedUrl);
+  assert.ok(feeds && feeds.length >= 8, "the paper is a bundle of its sections");
 });
 
 test("rewrites the abandoned RSS host onto the live one", () => {
@@ -114,5 +119,34 @@ test("no two directory entries claim the same id or feed", () => {
     const key = entry.name.toLowerCase();
     assert.ok(!names.has(key), `duplicate subreddit: ${entry.name}`);
     names.add(key);
+  }
+});
+
+test("the paper is saved as the paper, not as the first feed read", async () => {
+  // The preview builds its metadata from whichever section answered first.
+  // Saving that would quietly follow that one section for ever — which is the
+  // bug this whole bundle exists to fix, reintroduced one layer down.
+  const { discover } = await import("../lib/discover");
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const slug = url.split("/").pop();
+    return new Response(
+      `<?xml version="1.0"?><rss version="2.0"><channel><title>WSJ.com: ${slug}</title>
+       <link>https://www.wsj.com</link><description>${slug}</description>
+       <item><title>A ${slug} story</title><link>https://www.wsj.com/${slug}/story-1234</link>
+       <pubDate>Sun, 13 Sep 2026 10:00:00 GMT</pubDate></item></channel></rss>`,
+      { status: 200, headers: { "content-type": "application/rss+xml" } },
+    );
+  }) as typeof fetch;
+
+  try {
+    const result = await discover("wsj");
+    assert.ok(parseBundle(result.feedUrl), `saved ${result.feedUrl}, expected the bundle`);
+    assert.equal(result.title, "The Wall Street Journal");
+    // Every section contributed, and each story arrived once.
+    assert.ok(result.articles.length >= 8, `expected a story per section, got ${result.articles.length}`);
+  } finally {
+    globalThis.fetch = original;
   }
 });

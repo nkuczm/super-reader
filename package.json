@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "tsx --test test/*.test.ts"
+    "test": "tsx --test test/*.test.ts",
+    "coverage": "node scripts/coverage.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",

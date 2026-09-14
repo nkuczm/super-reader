@@ -13,6 +13,8 @@
  * and summaries in the app, with the story one tap away on wsj.com.
  */
 
+import { bundleOf } from "./bundle";
+
 export type KnownFeed = {
   feedUrl: string;
   /** What to call the source in the sidebar. */
@@ -52,13 +54,32 @@ export const WSJ_CHOICES = WSJ_SECTIONS.map(({ slug, title, path }) => ({
   url: `https://www.wsj.com${path}`,
 }));
 
-function wsjFeed(section: (typeof WSJ_SECTIONS)[number], scope: "site" | "section"): KnownFeed {
+function wsjSection(section: (typeof WSJ_SECTIONS)[number]): KnownFeed {
   return {
     feedUrl: `${DJ}${section.slug}`,
-    title: scope === "site" ? "The Wall Street Journal" : section.title,
-    siteUrl: `https://www.wsj.com${scope === "site" ? "" : section.path}`,
+    title: section.title,
+    siteUrl: `https://www.wsj.com${section.path}`,
     faviconHost: "wsj.com",
-    scope,
+    scope: "section",
+  };
+}
+
+/**
+ * The whole paper: every section at once.
+ *
+ * There is no WSJ feed of everything it publishes, so asking for the paper
+ * used to hand back World News under the paper's name — markets, business,
+ * tech, opinion and the rest missing, with nothing to say they were. A
+ * bundle reads all eight (lib/bundle.ts), which is what "latest headlines"
+ * on wsj.com actually is.
+ */
+function wsjWhole(): KnownFeed {
+  return {
+    feedUrl: bundleOf(WSJ_SECTIONS.map((section) => `${DJ}${section.slug}`)),
+    title: "The Wall Street Journal",
+    siteUrl: "https://www.wsj.com",
+    faviconHost: "wsj.com",
+    scope: "site",
   };
 }
 
@@ -72,7 +93,7 @@ export function knownFeedFor(input: string): KnownFeed | null {
   const raw = input.trim();
   if (!raw) return null;
 
-  if (WSJ_NAMES.test(raw)) return wsjFeed(WSJ_SECTIONS[0], "site");
+  if (WSJ_NAMES.test(raw)) return wsjWhole();
 
   let url: URL;
   try {
@@ -87,7 +108,7 @@ export function knownFeedFor(input: string): KnownFeed | null {
   if (host === "feeds.a.dj.com" || host === "feeds.content.dowjones.io") {
     const slug = url.pathname.split("/").pop()?.replace(/\.xml$/i, "") ?? "";
     const known = WSJ_SECTIONS.find((s) => s.slug.toLowerCase() === slug.toLowerCase());
-    if (known) return wsjFeed(known, "section");
+    if (known) return wsjSection(known);
     return null;
   }
 
@@ -96,10 +117,11 @@ export function knownFeedFor(input: string): KnownFeed | null {
   const segments = url.pathname.split("/").filter(Boolean);
   // wsj.com/news/markets and wsj.com/markets both name the same section.
   const word = (segments[0] === "news" ? segments[1] : segments[0])?.toLowerCase();
-  if (!word) return wsjFeed(WSJ_SECTIONS[0], "site");
+  if (!word) return wsjWhole();
 
   const section = WSJ_SECTIONS.find((s) => s.match.test(word));
-  // A single WSJ story, or a section we have no feed for: the whole paper is
-  // closer to useful than an error.
-  return wsjFeed(section ?? WSJ_SECTIONS[0], section ? "section" : "site");
+  // A single WSJ story, or a page that means the paper rather than a section
+  // of it — /news/latest-headlines above all, which is where the newsroom
+  // puts everything it files. Anything but a section is the whole paper.
+  return section ? wsjSection(section) : wsjWhole();
 }

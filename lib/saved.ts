@@ -29,6 +29,13 @@ export type SavedArticle = Article & {
   sourceTitle?: string;
   favicon?: string;
   savedAt: number;
+  /**
+   * Saved because it was quoted in a note, rather than by the reader pressing
+   * Save. Only these are cleaned up when the quote goes — see lib/notes.ts.
+   * Device-local bookkeeping: `slimForSync` drops it, so a copy arriving from
+   * another device never turns someone's own bookmark into a disposable one.
+   */
+  viaNote?: boolean;
 };
 
 /** An un-save, dated, so it survives a sync with a device that still has it. */

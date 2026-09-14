@@ -229,8 +229,30 @@ export function startAnchorFeedSite(port = 8788) {
   );
 }
 
+/**
+ * A young blog: no feed, and two posts. Shaped like abliteration.ai/blog,
+ * which is where the case came from — a real blog our scraper refused
+ * because it wanted three links before it would believe a listing page.
+ */
+const twoPostBlog = `<html><head><title>Blog \u2014 Example</title>
+<meta property="og:site_name" content="Example">
+<meta property="og:description" content="Notes from Example">
+<link rel="alternate" hrefLang="en" href="/blog">
+</head><body>
+<header><a href="/">Home</a><a href="/pricing">Pricing</a></header>
+<main><section>
+<a href="/blog/introducing-the-second-model"><div><span>July 24, 2026</span><span>Announcement</span></div>
+<h3>Introducing the second model</h3><p>What it does and why we built it, at some length.</p></a>
+<a href="/blog/introducing-the-first-model"><div><span>June 2, 2026</span><span>Announcement</span></div>
+<h3>Introducing the first model</h3><p>The one that came before, also described.</p></a>
+</section></main>
+<footer><a href="/terms">Terms</a></footer></body></html>`;
+
 const noFeedRoutes = {
   "/news": [200, "text/html", newsIndex],
+  "/blog": [200, "text/html", twoPostBlog],
+  "/blog/introducing-the-second-model": [200, "text/html", article],
+  "/blog/introducing-the-first-model": [200, "text/html", article],
   "/about": [200, "text/html", aboutPage],
   "/news/claude-opus-5": [200, "text/html", article],
   "/news/interpretability-progress": [200, "text/html", boilerplatePage],

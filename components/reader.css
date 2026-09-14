@@ -316,6 +316,8 @@
    auto margin pushed the second one onto its own line. */
 .reader-bar a.btn:first-of-type { margin-left: auto; }
 
+/* The frame the quote-flash boxes are measured and drawn against. */
+.reader-body { position: relative; }
 .reader-body h1 {
   margin: 0 0 10px; font-size: 30px; line-height: 1.22;
   letter-spacing: -0.025em; font-weight: 680;
@@ -632,6 +634,163 @@
 
 .article-actions { display: flex; align-items: center; gap: 8px; }
 .save-btn.on { color: var(--accent); border-color: var(--accent); }
+
+/* ---------- notes ---------- */
+.notes-nav { margin: 2px 0 6px; }
+.note-row { display: flex; align-items: center; gap: 2px; }
+.note-row .nav-item { flex: 1; min-width: 0; }
+.note-row .icon-btn { opacity: 0; flex: none; }
+.note-row:hover .icon-btn, .note-row:focus-within .icon-btn { opacity: 1; }
+.foot-row { display: flex; gap: 7px; }
+.foot-row .btn { flex: 1; justify-content: center; }
+
+/* The floating "Add to note" button, and the note it goes into. */
+.quote-pop { position: fixed; z-index: 60; }
+/* Docked on touch screens: iOS's own copy/paste bar takes the space beside a
+   selection, above it or below it as it pleases, so there is nowhere next to
+   the words that is reliably free. */
+.quote-pop.docked {
+  left: 50%; transform: translateX(-50%); top: auto;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  width: max-content; max-width: calc(100vw - 32px);
+}
+.quote-pop.docked .quote-add { padding: 11px 18px; font-size: 14.5px; }
+.quote-pop.docked .quote-menu { order: -1; }
+.quote-add { box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22); }
+.quote-menu {
+  min-width: 210px; max-width: 260px; padding: 6px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 11px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
+}
+.quote-menu > button {
+  display: block; width: 100%; padding: 8px 9px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--text); font-size: 13.5px; text-align: left;
+}
+.quote-menu > button:hover { background: var(--bg-hover); }
+.quote-new { display: flex; gap: 6px; padding: 6px 4px 2px; }
+.quote-new .input { margin: 0; min-width: 0; flex: 1; font-size: 13.5px; }
+/* The bubble is something to answer, not just something to read: it opens the
+   note the quote went to, and offers to send it somewhere else instead. */
+.quote-toast {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(22px + env(safe-area-inset-bottom, 0px)); z-index: 70;
+  display: flex; flex-direction: column; align-items: stretch; gap: 8px;
+  max-width: calc(100vw - 24px);
+}
+.quote-toast-row {
+  display: flex; align-items: stretch; gap: 1px; overflow: hidden;
+  border-radius: 999px; background: var(--text);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+.quote-toast-open, .quote-toast-change {
+  border: 0; background: var(--text); color: var(--bg);
+  font-size: 13.5px; font-weight: 600; white-space: nowrap;
+}
+.quote-toast-open {
+  display: inline-flex; align-items: center; gap: 4px; padding: 11px 8px 11px 16px;
+  min-width: 0;
+}
+.quote-toast-open strong { font-weight: 800; }
+.quote-toast-open svg { opacity: 0.75; }
+.quote-toast-change {
+  padding: 11px 16px; opacity: 0.75;
+  border-left: 1px solid color-mix(in srgb, var(--bg) 25%, transparent);
+}
+.quote-toast-open:active, .quote-toast-change:active { opacity: 0.6; }
+.toast-menu { max-height: 50vh; overflow-y: auto; }
+
+/* The page fills the screen, so tapping anywhere below the writing is still
+   tapping the document — the writing surface itself is what runs to the
+   bottom, so the cursor lands in it wherever the tap was. */
+.note-page { display: flex; flex-direction: column; min-height: 100%; }
+.note-doc {
+  flex: 1; display: flex; flex-direction: column;
+  padding: 18px 28px 40px; max-width: 760px; width: 100%;
+}
+.note-hint {
+  margin: 0 0 14px; color: var(--text-dim); font-size: 14px; line-height: 1.6;
+}
+/* One text box for the whole note. Newlines are written into the text itself
+   rather than left to the browser to invent blocks for, so it needs to honour
+   them. */
+.note-flow {
+  flex: 1; min-height: 55vh; white-space: pre-wrap; overflow-wrap: break-word;
+  font-size: 16px; line-height: 1.75; cursor: text;
+}
+.note-flow:focus, .note-flow:focus-visible { outline: none; }
+
+/* The passage a quote came from, lit up on arrival. Boxes painted over the
+   words rather than wrapped around them: a quote can start mid-sentence and
+   end inside a link, and the article's own markup is not ours to restructure. */
+.quote-flash { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.quote-flash span {
+  position: absolute; border-radius: 3px;
+  background: var(--quote-flash);
+  animation: quote-flash 2.6s ease-out forwards;
+}
+@keyframes quote-flash {
+  0% { opacity: 0; }
+  8% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .quote-flash span { animation-duration: 2.6s; animation-timing-function: step-end; }
+}
+/* A quote in a note: set apart as a block quote, with a plain grey rule down
+   its side. One thing to the cursor — it cannot be typed into, and a
+   backspace from the character after it takes it out whole — so nothing is
+   placed beside it to press. */
+.note-quote-block {
+  display: block; margin: 10px 0; padding: 2px 0 2px 14px;
+  border-left: 3px solid var(--note-rule); cursor: pointer;
+  color: var(--text);
+}
+.note-quote-block:hover { border-left-color: var(--text-dim); }
+
+@media (max-width: 760px) {
+  .note-doc { padding: 14px 16px 40px; }
+}
+
+/* ---------- team feeds ---------- */
+.article-actions { flex-wrap: wrap; }
+.team-share { position: relative; display: inline-flex; }
+.team-btn.on { color: var(--accent); border-color: var(--accent); }
+.team-btn:disabled { opacity: 0.6; }
+/* The picker only appears when there is more than one team to choose. */
+.team-menu {
+  position: absolute; top: calc(100% + 5px); left: 0; z-index: 30;
+  min-width: 190px; max-width: 260px; padding: 5px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+}
+.team-menu button {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 8px;
+  border: 0; border-radius: 7px; background: transparent; color: var(--text);
+  font-size: 13px; text-align: left;
+}
+.team-menu button:hover:not(:disabled) { background: var(--bg-hover); }
+.team-check {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; flex: none; color: var(--accent);
+}
+
+.team-list { list-style: none; margin: 0 0 14px; padding: 0; }
+.team-list li {
+  padding: 11px; border: 1px solid var(--border); border-radius: 10px;
+  margin-bottom: 9px;
+}
+.team-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 9px;
+}
+.team-name {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 14px; font-weight: 600;
+}
+.team-list .hint { margin-top: 8px; }
+.team-add, .team-cancel { width: auto !important; margin-top: 4px; }
 .view-list .article-actions { display: none; }
 
 .offline-count { color: var(--text); }

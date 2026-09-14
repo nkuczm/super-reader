@@ -8,6 +8,7 @@ import {
   MAX_PAYLOAD_BYTES,
 } from "@/lib/sync";
 import { isValidCode } from "@/lib/sync-code";
+import type { Note, NoteRemoval } from "@/lib/notes";
 import type { SavedArticle, SavedRemoval } from "@/lib/saved";
 import type { WatchMarks } from "@/lib/alerts";
 
@@ -62,6 +63,9 @@ export async function PUT(request: Request) {
     saved?: unknown;
     savedRemovals?: unknown;
     watchMarks?: unknown;
+    notes?: unknown;
+    noteRemovals?: unknown;
+    teams?: unknown;
     vault?: unknown;
     updatedAt?: unknown;
   };
@@ -93,6 +97,13 @@ export async function PUT(request: Request) {
       body.watchMarks && typeof body.watchMarks === "object"
         ? (body.watchMarks as WatchMarks)
         : {},
+    // Merged by writeSync, like bookmarks: a device that has been away must
+    // not delete the notes written while it was.
+    notes: Array.isArray(body.notes) ? (body.notes as Note[]) : [],
+    noteRemovals: Array.isArray(body.noteRemovals)
+      ? (body.noteRemovals as NoteRemoval[])
+      : [],
+    ...(Array.isArray(body.teams) ? { teams: body.teams.slice(0, 50) } : {}),
     // Opaque to this server by design; stored and handed back untouched.
     ...(body.vault ? { vault: body.vault } : {}),
     updatedAt: Number.isFinite(Number(body.updatedAt)) ? Number(body.updatedAt) : 0,

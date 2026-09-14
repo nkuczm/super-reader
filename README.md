@@ -358,6 +358,85 @@ and they are always included in the offline download — a bookmark is the
 article most worth having on the device. The list is per-device, like read
 state and view mode.
 
+## Notes
+
+Highlight anything in an article and **Add to note** appears beside the
+selection. The passage lands in the note you pick as a block quote, bulleted
+among the others, exactly as the article had it.
+
+When a quote lands, a bubble says which note it went to. **Tap it to open that
+note**, or tap **Change** to send the quote somewhere else — another note, or
+a new one named on the spot. It waits long enough to be answered and then goes.
+
+Notes work like feeds: they are named, you make as many as you like with
+**New note** in the sidebar (or straight from a highlight, with "New note…"),
+and they can be renamed and deleted there. Each one is a page of its own:
+
+- **The page is one text box you write on.** Tap anywhere on it — including
+  the empty space below the writing — and the cursor lands there. No compose
+  box, no Add button, no fields; what you write saves as you write it.
+- **A quote is a block quote** with a grey rule down its side, sitting in what
+  you have written — the cursor goes above it, below it and between quotes, so
+  you write around them.
+- **Quotes cannot be edited, only deleted.** A quote is the article's words,
+  not yours: it cannot be typed into, and there is no button beside it. It
+  comes out whole — a backspace from the character after it takes the entire
+  quote, the way deleting anything else in a line of text does.
+- **Every quote links back to the passage itself.** Click the quote and
+  the article opens *at* those words, scrolled to them and
+  highlighted for a couple of seconds so you can see where you are. Closing
+  the article returns you to the note. If the page has been edited since and
+  the passage is no longer in it, the reader says so rather than leaving you
+  at the top wondering.
+
+**The article behind a quote is bookmarked automatically**, so a quote does
+not end up pointing at a story that has scrolled out of its feed and off the
+device. That automatic bookmark is released when the last quote of it is
+deleted, or the note holding it is — but **an article you saved yourself with
+the Save button is never released**, whatever you do to the notes.
+
+Notes travel with your sync code, so a quote taken on the phone is on the
+desktop and the other way round. They **merge** rather than replace, like
+bookmarks: a quote taken on one device while the other was closed is not lost
+when the other syncs, and a quote or note you delete stays deleted instead of
+being put back by the device that still had it. What each note is called
+follows whichever device renamed it last, and its contents are kept either way.
+
+Syncing carries roughly 140KB of notes — plenty for hundreds of quotes. Past
+that the newest are the ones that travel and the rest stay on the device that
+took them, because half a quote would be worse than none.
+
+Switch the whole thing off under **Settings → Notes** and selecting text goes
+back to being just selecting text; the notes you already have stay where they
+are.
+
+## Team feeds
+
+A team feed is a shared list that sits beside **Saved** in the sidebar. Set one
+up in **Settings → Team feeds**: create one with a name, or join an existing one
+with its connect code. **Save to Team** on any article — a separate button with
+a small crowd as its mark — puts it on that list, and everyone holding the code
+sees it. With more than one team feed the button opens a short picker.
+
+Only the article travels: its title, link, summary, image and publication. Your
+own feeds, your saved articles, what you have read and your API keys are not
+shared, and nothing records who added what. Anyone on the feed can take an
+article back off it.
+
+The connect code has the same shape and the same rules as a sync code: 100 bits
+of randomness, stored as a SHA-256 hash rather than the code itself, and a
+bearer secret — whoever holds it can read the list and add to it.
+
+It is deliberately **not** a second sync. Sync moves one device's whole document
+and resolves by most recent change, so one copy wins; a team feed is written to
+by several people, so each save merges a single article into the list in one SQL
+statement. Two people saving in the same moment both land on the list. Which
+team feeds you have joined does sync between your own devices — the name and the
+code, never the shared articles, which are read from the server each time.
+
+Team feeds need the same Postgres database as sync. Without one, Settings says
+they are unavailable and everything else works as before.
+
 ## Reading offline
 
 Articles already on the device carry a small sky-blue check in their byline
@@ -375,10 +454,12 @@ The app also asks the browser to keep this cache rather than evict it. Safari
 clears site storage after about a week of not visiting unless the app is on
 your Home Screen; Settings shows which state you are in.
 
-While that download is running, a thin progress bar sits across the top of the
-screen and fills as each article lands — it holds at full for a moment when it
-finishes, so completing looks different from stopping. Settings still carries
-the exact count and the last download time.
+A thin progress bar can sit across the top of the screen while that download
+runs, filling as each article lands and holding at full for a moment when it
+finishes, so completing looks different from stopping. It is **off by default**
+— the download runs on every visit, and a bar appearing unbidden reads as the
+app loading something you asked for. Turn it on under **Settings → Offline**.
+Settings carries the exact count and the last download time either way.
 
 The newest 15 stories from each source are downloaded to the device — the full
 extracted text, not just headlines — so they can be read with no connection.

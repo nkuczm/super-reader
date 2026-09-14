@@ -6,13 +6,20 @@ import { xHandleFrom, fetchXFeed } from "@/lib/x";
 import { sortNewestFirst } from "@/lib/sort";
 import { parseApiSourceUrl, fetchApiSource } from "@/lib/apis";
 import { decodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
+import { parseBundle, mergeBundled, PER_MEMBER } from "@/lib/bundle";
+import { canonicalUrl } from "@/lib/url";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 // Feed fetches plus gap-filling for several sources take a moment.
 export const maxDuration = 60;
 
-const MAX_PER_SOURCE = 40;
+/**
+ * How many items to take from one feed. Raised from 40 once sources could
+ * carry several feeds: the WSJ's world feed alone offers 72, and taking 40
+ * threw away a day and a half of it on every refresh.
+ */
+const MAX_PER_SOURCE = 100;
 
 /** Refresh one known feed URL. Accepts ?url= repeated for a batch. */
 export async function GET(request: Request) {
@@ -23,9 +30,58 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Missing ?url" }, { status: 400 });
   }
 
+  /** One feed, read and parsed. The unit a source is built out of. */
+  async function readFeed(url: string, cap: number) {
+    const { body, finalUrl } = await fetchText(url);
+    // A source may be a real feed or a scraped page; the body tells us.
+    const { meta, articles } = looksLikeFeed(body)
+      ? parseFeed(body, finalUrl)
+      : scrapePage(body, finalUrl);
+    // A big archive feed can carry hundreds of entries; only the recent ones
+    // are ever read, and the cap bounds both payload and enrichment.
+    return { meta, articles: sortNewestFirst(articles).slice(0, cap) };
+  }
+
   const results = await Promise.all(
     urls.map(async (url) => {
       try {
+        const members = parseBundle(url);
+        if (members) {
+          /**
+           * A publisher with no feed of its own whole output — see
+           * lib/bundle.ts. Every section is read, and a section that fails
+           * costs its own stories and no others: half a paper beats an error
+           * where the rest of it would have been.
+           */
+          const parts = await Promise.all(
+            members.map(async (member) => {
+              try {
+                return await readFeed(member, PER_MEMBER);
+              } catch {
+                return null;
+              }
+            }),
+          );
+          const alive = parts.filter((part) => part !== null);
+          if (alive.length === 0) throw new Error("No feed in this source could be read");
+
+          const merged = mergeBundled(
+            [sortNewestFirst(alive.flatMap((part) => part.articles))],
+            canonicalUrl,
+          );
+          const meta = alive[0].meta;
+          const ready = await enrichArticles(merged, {
+            siteDescription: meta.description,
+          });
+          return {
+            ok: true as const,
+            ...meta,
+            feedUrl: url,
+            favicon: faviconFor(meta.siteUrl),
+            articles: ready,
+          };
+        }
+
         if (parseApiSourceUrl(url)) {
           const { meta, articles } = await fetchApiSource(url, MAX_PER_SOURCE, keys);
           return { ok: true as const, ...meta, feedUrl: url, articles };
@@ -37,15 +93,7 @@ export async function GET(request: Request) {
           return { ok: true as const, ...meta, feedUrl: url, articles };
         }
 
-        const { body, finalUrl } = await fetchText(url);
-        // A source may be a real feed or a scraped page; the body tells us.
-        const { meta, articles } = looksLikeFeed(body)
-          ? parseFeed(body, finalUrl)
-          : scrapePage(body, finalUrl);
-
-        // A big archive feed can carry hundreds of entries; only the recent
-        // ones are ever read, and the cap bounds both payload and enrichment.
-        const recent = sortNewestFirst(articles).slice(0, MAX_PER_SOURCE);
+        const { meta, articles: recent } = await readFeed(url, MAX_PER_SOURCE);
         const ready = await enrichArticles(recent, {
           siteDescription: meta.description,
         });

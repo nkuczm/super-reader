@@ -64,11 +64,15 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
 | `lib/apis.ts` | The API directory — CourtListener, Federal Register, arXiv… |
 | `lib/offline.ts` | IndexedDB store, download schedule, list snapshot |
 | `lib/sync.ts` `lib/sync-code.ts` `lib/db.ts` | Cross-device sync |
+| `lib/team.ts` | Team feeds: the shared list, and the merge that makes it safe |
+| `lib/notes.ts` | Notes: quotes, your own lines, and which bookmarks they hold |
+| `lib/highlight.ts` | Finding a stored quote again in the article it came from |
+| `lib/note-flow.ts` | A note as one page of writing: laying it out, reading it back |
 | `lib/sort.ts` | Newest-first ordering, shared by every path |
 | `lib/store.ts` | Feeds, settings, read state and the Saved list (localStorage) |
 | `components/Reader.tsx` | The whole app shell: sidebar, list, state |
 | `components/DownloadBar.tsx` | Top-of-screen progress for the offline download |
-| `app/api/{discover,feed,article,sync,apis}` | The five endpoints |
+| `app/api/{discover,feed,article,sync,team,apis}` | The endpoints |
 | `components/ApiCatalog.tsx` | The API directory tab in "Add a source" |
 | `public/sw.js` | Service worker so the app opens offline |
 | `scripts/gen-icons.mjs` | Regenerates PNG app icons from the mark |
@@ -181,6 +185,200 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   value it sets re-stamps on every render, and the debounced push never
   survives long enough to fire — which looks exactly like sync being broken.
 - **Sync codes are stored as SHA-256 hashes**, never the code itself.
+- **Notes merge on sync, exactly as bookmarks do** (`mergeNotes`). Both
+  devices write to them constantly, so whole-document replacement would delete
+  a quote taken on the phone the moment the desktop pushed. Notes merge by id,
+  their entries merge by id, each kept in whichever copy is newer, and every
+  deletion — a quote, a typed line, a whole note — leaves a dated tombstone,
+  because the other device still holds the thing and would otherwise put it
+  back. `commitNotes` writes those tombstones in one place by diffing the ids
+  before and after, so no deletion path can forget to.
+- **A note's name resolves on `updatedAt`, falling back to `at`** — not the
+  later of the two. Using `max()` let a note made months ago outrank a rename
+  made today, and the new name never travelled.
+- **`slimNotesForSync` drops whole entries, never parts of one.** Half a quote
+  would read as what the article said. The newest fit the budget; the rest
+  stay on the device that took them, which is safe because a device that never
+  receives an entry cannot delete it either. The push-loop trap: `owes` must
+  be computed against the **slimmed** copy, or a device holding more than the
+  budget reports news it can never deliver and pushes on every single sync.
+- **An idle device used to push on every focus, and this predates notes.**
+  `applyRemote` rebuilt `read` as a fresh Set (and the merges hand back fresh
+  arrays) whether or not anything had changed; a new identity is a change to
+  the stamping effect, which stamped, which pushed. Two idle devices therefore
+  wrote to the database every time either was focused. Everything applied from
+  a pull is now compared first (`unchanged`), and two settled devices make
+  zero requests beyond the pull itself — measured, in two real browsers.
+- **A quote bookmarks its article, and that bookmark is marked `viaNote`.** A
+  quote pointing at a story that has aged out of its feed and off the device
+  is a quote with nothing behind it. The flag is what makes the bookmark
+  disposable: `releasableSaves` releases an article only when it is flagged
+  *and* no note quotes it any more. An article saved with the Save button
+  carries no flag and is never released — quoting something must not be able
+  to lose a bookmark. Releasing also writes the usual tombstone, or the other
+  device puts it straight back.
+- **`slimForSync` drops `viaNote` deliberately.** The flag is local
+  bookkeeping for local notes; a copy arriving from another device must not
+  turn that device's own bookmark into a disposable one. The consequence is
+  that only the device that made the quote can release the bookmark; when the
+  *other* device deletes the note, `applyRemote` on the first one notices the
+  quote is gone, releases the bookmark and writes the un-save that carries the
+  removal back. That is why the release check runs on pull and not only on a
+  local edit.
+- **Note writes go through `notesRef`, not the rendered `notes`.** Quoting
+  into a note that the same click created is two writes in one render: the
+  second read the pre-creation array and undid the first, so the new note
+  vanished the moment its first quote landed. `commitNotes` takes an updater
+  and reads the ref. Caught in the browser, not by a test — the pure functions
+  were right all along.
+- **The reader renders *over* an open note, rather than instead of it.** A
+  quote's "back to the article" would otherwise do nothing visible, because
+  the note branch came first in the render chain. Now Back returns to the note
+  the reader was opened from.
+- **A quote finds its way back by text, not by an anchor.** There is no id to
+  jump to: the article is re-extracted each time and its markup is the
+  publisher's. `findQuoteRange` indexes the rendered text into a whitespace-
+  normalised string with a map back to the text nodes, so a quote that runs
+  through a link, an italic or two paragraphs is still one match. Paragraph
+  boundaries count as a space whether or not the HTML has one — minified
+  pages have none, and `<p>One.</p><p>Two.</p>` would otherwise index as
+  "One.Two." and never match. When the full quote has gone, a binary search
+  finds the longest opening that still matches (floor 25 chars), so an
+  article that gained a correction still lands in the right place; below that
+  the reader says the passage is not in this copy rather than sitting silent.
+- **The flash is painted over the words, not wrapped around them.** Absolutely
+  positioned boxes from `range.getClientRects()`, inside `.reader-body`
+  (which is `position: relative` for exactly this). Wrapping in a `<mark>`
+  would mean restructuring sanitised third-party HTML across element
+  boundaries, which `surroundContents` refuses on any interesting quote.
+- **On a touch screen the quote button is docked to the bottom, not placed
+  beside the selection.** iOS draws its own copy/paste callout over the
+  selection — above it, or below it when there is no room above — so *neither*
+  side of a selection is reliably free, and the button was unreachable on a
+  phone. Reported from real use, with a screenshot. Docked at the bottom it is
+  always there, and it is where a thumb already is. `(pointer: coarse)` picks
+  the mode.
+- **"I can't type in the notes page" was an affordance bug, not an input one.**
+  Reported twice. The waiting line at the end works when you hit it — but it
+  had no placeholder unless the note was empty, so on a phone it was an
+  invisible 34px strip under the last quote, and tapping the page below it did
+  nothing at all. It is now always labelled, and the document fills the screen
+  and focuses its end wherever it is tapped. Measured on a simulated iPhone:
+  before, a tap at (200, 600) focused BODY; after, it focuses the line. When
+  something is reported as "cannot type", check what there is to tap before
+  checking the input.
+- **The "Added to…" bubble is something to answer, not just to read.** It opens
+  the note the quote went to, and offers to move that quote to another note or
+  one named on the spot — `moveEntry` keeps the entry's id, so a move writes no
+  tombstone and the article the quote holds stays saved. It lingers six
+  seconds, or twenty while the picker is open.
+- **A listing page needs three article links to be believed — unless they sit
+  directly under it, where two is enough.** `abliteration.ai/blog` is the case:
+  no feed anywhere on the site, and exactly two posts, which the scraper
+  refused outright. A group of links in the pasted page's own directory
+  (/blog listing /blog/…) is a stronger signal than the count; a group
+  elsewhere still needs three, or any page with a couple of stray links to one
+  place would read as a blog. Diagnosed with a temporary `/api/debug-fetch`
+  route deployed to Vercel — the sandbox cannot reach the site, and neither
+  can WebFetch, but the deployment can. Removed again in the same session, as
+  ever.
+- **The note page is one contentEditable surface, and React must never render
+  into it twice.** Quotes are block quotes set apart in the writing, and the
+  whole note is a single editable region rather than a field per entry. Every edit hands a new entries array upwards, which
+  comes straight back down as a prop — so anything derived from that prop is
+  derived again on every keystroke, and React writing it back into the
+  contentEditable resets the cursor. Typing "He " gave " eH". The page is
+  captured once in a `useState` initialiser, its JSX memoised on that, and the
+  callbacks reached through a ref so nothing can bust the memo. The component
+  holds no state and never re-renders: the placeholder is shown and hidden
+  through a ref.
+- **Enter is handled by hand.** Left to itself the browser answers Enter by
+  cutting the surface into nested blocks of its own invention, with the quotes
+  somewhere inside them, and `readFlow` would have to reason about arbitrary
+  trees. A plain newline plus `white-space: pre-wrap` keeps the DOM a flat run
+  of text nodes and marks. Paste is intercepted for the same reason, and takes
+  plain text only. `readFlow` still walks anything nested, because a gesture
+  nobody anticipated must not turn a quote into undeletable plain text.
+- **A newline at the end of the surface needs something after it.** Otherwise
+  there is no cursor position past it, the browser leaves the cursor in front
+  of the break, and the next thing typed lands on the line above — measured. A
+  zero-width space is appended in that one case, and stripped on the way back
+  out like the others.
+- **An empty run between two quotes is a real space, not nothing.** Two quotes
+  with nothing between them leave the cursor nowhere to go — and the tap aimed
+  at the gap lands on a highlight, which opens the article instead of letting
+  you write. A real space plus the marks' margins makes that 9px of target,
+  measured; elsewhere a zero-width space does, since the start of the line and
+  the rest of the page are targets already.
+- **There is no delete button on a quote, deliberately.** One was tried, sat
+  immediately after the highlight, and was hit twice in testing by a click
+  aimed at "just after the quote" — which is exactly where a reader clicks to
+  write there. The browser already deletes a `contenteditable=false` span
+  whole on a backspace from the character after it: both what was asked for
+  from the start ("deleting it using the text tools") and the only thing that
+  leaves that spot free.
+- **A run of writing is identified by the quote it sits in front of.** Not by
+  index, and not by a fresh id per keystroke: syncing matches entries by id,
+  so churning them would make every keystroke a delete and an add on the other
+  device. Adding or removing a quote does shift a run's identity, which is a
+  deliberate act and settles at once.
+- **What arrives while the page is open is not the page's to delete.** The
+  surface is built once, so it never learns of a quote that syncs in behind
+  it; folding the page as it stands would find that quote missing and bury it.
+  `foldIntoNote` keeps anything the page never knew about, so only what it was
+  holding and has let go of counts as deleted.
+- **The note page is a document, not a form.** It was a list of entries with a
+  bordered compose box and an Add button underneath; it is now text you type
+  straight onto, with the quotes sitting in it as blocks. The waiting line at
+  the end hands its text over on blur *and* on unmount — leaving the page
+  should not lose what was being typed — with a `handedOver` flag between them,
+  or the blur commit and the unmount that follows it file the same line twice.
+- **`.list-head` never existed.** The note page used it for its title, so the
+  heading had no padding at all and sat flat against the left edge of the
+  phone. It is `.main-head`, like every other page.
+- **The quote's delete button no longer hides until hover.** A phone has no
+  hover, so on the device most of these notes are written on, a quote could
+  not be deleted at all.
+- **The quote button follows the selection on scroll rather than dropping.**
+  Dropping on any scroll looked fine on a desktop and broke on a phone: the
+  momentum scroll that follows a selection took the button away before it
+  could be tapped. It is also clamped to the viewport, because a selection
+  can run off the bottom of the screen and a button placed faithfully beside
+  it would be somewhere nobody can reach.
+- **The quote button watches `pointerup`, not `selectionchange`.** The latter
+  fires on every character of a drag and the button chases the cursor. It also
+  checks that *both* ends of the selection are inside the article body, so
+  dragging out of the text quotes nothing, and it sits below the selection
+  where there is room — on a phone the browser's own copy bar takes the strip
+  above it.
+- **A team feed is not a second sync.** Sync writes a whole device document and
+  resolves by most recent change: one copy wins and the other is dropped. That
+  is right for one person's devices and wrong for several people — two
+  colleagues saving a story in the same minute must both end up on the list. So
+  `addToTeam` merges *one article* into the array **in a single SQL statement**
+  (`jsonb_array_elements … WITH ORDINALITY`, the new item at ordinal 0, the
+  existing ones filtered on link, capped with `LIMIT`). A read-modify-write
+  would lose whichever save landed second; the test that fires three saves
+  concurrently is there to hold that.
+- **Only the article crosses to a team feed.** `cleanArticle` rebuilds the
+  record field by field rather than passing through what the client sent, so a
+  sourceId, a vault, a feed list or anything else in the sender's copy cannot
+  ride along. There is a test asserting exactly which keys survive — keep it.
+  Nothing records who saved what, by design: the user asked for the feed and
+  nothing else to be shared.
+- **A team feed is readable on a device with no sources of its own.** Someone
+  can join with a connect code before following anything, and the list used to
+  render "Start with one link." over their shared stories. The empty state is
+  now skipped for a team selection.
+- **Team articles are never written to local storage.** Several people write to
+  the list, so only the server's copy can be current; it is fetched on open and
+  on focus, the same moments sync pulls. What *does* sync between a person's own
+  devices is which feeds they have joined — name and code, in the sync payload
+  under `teams`.
+- **The offline progress bar is off by default** (`settings.showDownloadBar`).
+  The download runs on every visit, and a bar appearing unbidden reads as the
+  app loading something the user asked for. Settings' count is the honest
+  answer to "is this working?" and stays visible either way.
 - **API keys are encrypted in the browser (`lib/vault.ts`) before they sync.**
   AES-GCM under a PBKDF2 key from the passphrase; the server stores the blob
   and cannot read it. Keys reach the server only in the `x-sr-api-keys` header,
@@ -353,11 +551,11 @@ Don't re-litigate this without the user asking.
 
 ## Outstanding
 
-1. **Sync is built but off** — needs a database. Vercel dashboard → Storage →
+1. **Sync and team feeds are built but off** — both need a database. Vercel dashboard → Storage →
    Create Database → **Neon Postgres** (free), connect to this project, which
-   adds `POSTGRES_URL`, then redeploy. The table creates itself. Until then
-   `/api/sync` returns a clean 503 and everything else works. *This is the one
-   thing waiting on the user.*
+   adds `POSTGRES_URL`, then redeploy. Both tables create themselves. Until
+   then `/api/sync` and `/api/team` return a clean 503 and everything else
+   works. *This is the one thing waiting on the user.*
 2. **X accounts need `X_BEARER_TOKEN`** (paid X API tier). Without it, pasting
    `@handle` returns an actionable message and nothing else is affected.
    The user was advised this is probably not worth $100/mo for personal use.

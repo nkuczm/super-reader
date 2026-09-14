@@ -5,6 +5,8 @@ import { xHandleFrom, fetchXFeed } from "./x";
 import { parseApiSourceUrl, fetchApiSource } from "./apis";
 import { subredditFrom, subredditFeedUrl, subredditPageUrl } from "./reddit";
 import { knownFeedFor } from "./publishers";
+import { parseBundle, mergeBundled } from "./bundle";
+import { canonicalUrl } from "./url";
 import { sortNewestFirst } from "./sort";
 import type { DiscoverResult } from "./types";
 
@@ -150,6 +152,30 @@ function feedLinksInHtml(html: string, base: string) {
 }
 
 async function tryFeed(url: string, limit: number) {
+  // A source that names several feeds — see lib/bundle.ts. The preview has to
+  // show what the source will actually carry, which is all of them.
+  const members = parseBundle(url);
+  if (members) {
+    const parts = await Promise.all(
+      members.map(async (member) => {
+        try {
+          const { body, finalUrl } = await fetchText(member);
+          if (!looksLikeFeed(body)) return null;
+          return parseFeed(body, finalUrl);
+        } catch {
+          return null;
+        }
+      }),
+    );
+    const alive = parts.filter((part) => part !== null);
+    if (alive.length === 0) throw new Error("No feed in this source could be read");
+    const merged = mergeBundled(
+      [sortNewestFirst(alive.flatMap((part) => part.articles))],
+      canonicalUrl,
+    );
+    return { meta: alive[0].meta, total: merged.length, articles: merged.slice(0, limit) };
+  }
+
   const { body, finalUrl } = await fetchText(url);
   if (!looksLikeFeed(body)) throw new Error("Response was not a feed");
   const { meta, articles } = parseFeed(body, finalUrl);
@@ -189,6 +215,10 @@ export async function discover(
       total,
       title: wanted.title,
       siteUrl: wanted.siteUrl,
+      // The source is what was asked for, not the first feed read to preview
+      // it: a bundle's meta comes from whichever section answered first, and
+      // saving that would follow that one section for ever.
+      feedUrl: wanted.feedUrl,
       favicon: faviconFor(wanted.faviconHost),
       // No enrichment: these feeds carry summaries and images already, and
       // anything still missing one could only be filled from a host that

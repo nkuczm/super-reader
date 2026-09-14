@@ -240,3 +240,47 @@ test("bookmarks survive a feed list arriving from another device", async () => {
   assert.equal((after?.payload.feeds[0] as { name: string }).name, "New arrangement");
   assert.deepEqual((after?.payload.saved ?? []).map((a) => a.link), ["https://a.example/1"]);
 });
+
+test("notes merge through storage rather than replacing each other", async () => {
+  const { code } = await createSync();
+  const at = Date.now();
+  const note = (entries: any[]) => ({
+    id: "n1",
+    name: "Reading",
+    at,
+    updatedAt: at,
+    entries,
+  });
+  const quote = (id: string, when: number) => ({
+    id,
+    kind: "quote",
+    text: "What it said",
+    link: `https://example.com/${id}`,
+    articleTitle: "A story",
+    at: when,
+  });
+
+  // The phone quotes something; the desktop, not having heard, quotes another.
+  await writeSync(code, { feeds: [], notes: [note([quote("q1", at)])], updatedAt: 1 });
+  await writeSync(code, { feeds: [], notes: [note([quote("q2", at + 1)])], updatedAt: 2 });
+
+  const record = await readSync(code);
+  assert.deepEqual(
+    record!.payload.notes![0].entries.map((entry) => entry.id),
+    ["q1", "q2"],
+    "the second device's push must not delete the first device's quote",
+  );
+
+  // Deleting one, with a tombstone, removes it for good.
+  await writeSync(code, {
+    feeds: [],
+    notes: [note([quote("q2", at + 1)])],
+    noteRemovals: [{ id: "q1", at: at + 100 }],
+    updatedAt: 3,
+  });
+  const after = await readSync(code);
+  assert.deepEqual(
+    after!.payload.notes![0].entries.map((entry) => entry.id),
+    ["q2"],
+  );
+});
