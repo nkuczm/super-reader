@@ -75,7 +75,7 @@ News sitemap vs. declared feeds, per publisher:
 
 | Publisher | News sitemap | Items | Declared RSS | Notes |
 |---|---|---|---|---|
-| The Guardian | `/sitemaps/news.xml` (robots) | **429** | 1 | every guessed path 404'd |
+| The Guardian | `/sitemaps/news.xml` (robots) | **431** | 1 | every guessed path 404'd |
 | New York Times | `/sitemaps/new/news.xml.gz` | **442** | 1 | 25 sitemaps in robots.txt |
 | CNN | `/sitemap/news.xml` | **108** | **0** | sitemap is the only structured route |
 | BBC | index, 39 sitemaps | index | **0** | needs index descent + edition picking |
@@ -96,6 +96,23 @@ Also measured:
   publisher's own words.
 - **Feed windows**: WSJ markets turns over in under 2 days; tech press 3–5
   days; independent blogs weeks; government newsrooms months.
+- **Item count is not window coverage.** The Guardian's `/us/rss` returns 131
+  items — but spanning 598 days, of which only **87 fall in the last 48 hours**.
+  Its news sitemap lists 431, effectively all of them in-window. Judging that
+  feed by its item count would have called it healthy.
+
+### Live result of the union (14 Sep 2026, `/api/feed` coverage report)
+
+Following `theguardian.com/us/rss` as a source:
+
+| Route | In-window stories | Found by no other route |
+|---|---|---|
+| news sitemap | 400 (hit the read cap; the site lists 431) | **317** |
+| the RSS feed | 87 | 4 |
+
+The feed alone was catching roughly a fifth of the window. The recall figure
+in that report reads `1.0` with `referenceTruncated: true`, which means *upper
+bound*, not *perfect* — see §1.
 
 ### What those numbers mean
 
