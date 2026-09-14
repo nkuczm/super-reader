@@ -1,5 +1,7 @@
 import { fetchText, parseFeed, looksLikeFeed, faviconFor } from "./feed";
 import { scrapePage } from "./scrape";
+import { looksLikeSitemap, parseSitemap } from "./sitemap";
+import { keepArticles } from "./authentic";
 import { enrichArticles } from "./enrich";
 import { xHandleFrom, fetchXFeed } from "./x";
 import { parseApiSourceUrl, fetchApiSource } from "./apis";
@@ -177,9 +179,32 @@ async function tryFeed(url: string, limit: number) {
   }
 
   const { body, finalUrl } = await fetchText(url);
-  if (!looksLikeFeed(body)) throw new Error("Response was not a feed");
-  const { meta, articles } = parseFeed(body, finalUrl);
-  return { meta, total: articles.length, articles: articles.slice(0, limit) };
+
+  // Sitemaps are checked first: looksLikeFeed accepts anything that opens
+  // with an XML declaration, so a sitemap passes it and then parses as an
+  // empty feed.
+  if (looksLikeSitemap(body)) {
+    const parsedSitemap = parseSitemap(body, finalUrl);
+    if (parsedSitemap.kind === "urls" && parsedSitemap.articles.length > 0) {
+      const origin = new URL(finalUrl).origin;
+      const { kept } = keepArticles(parsedSitemap.articles, { origin, from: "sitemap" });
+      if (kept.length > 0) {
+        const host = new URL(origin).hostname.replace(/^www\./, "");
+        return {
+          meta: { feedUrl: finalUrl, siteUrl: origin, title: host, description: undefined },
+          total: kept.length,
+          articles: sortNewestFirst(kept).slice(0, limit),
+        };
+      }
+    }
+  }
+
+  if (looksLikeFeed(body)) {
+    const { meta, articles } = parseFeed(body, finalUrl);
+    return { meta, total: articles.length, articles: articles.slice(0, limit) };
+  }
+
+  throw new Error("Response was not a feed");
 }
 
 export async function discover(
