@@ -276,6 +276,70 @@ export async function auditSlice(slice: number): Promise<AuditResult> {
   return { slice, slices, checked };
 }
 
+/**
+ * The API directory checked against reality, the same way the feeds are.
+ *
+ * The fixture tests in test/coverage.test.ts guard our end: every record a
+ * recorded response holds has to become an article, so a mapper that starts
+ * dropping rows fails the suite. What a fixture cannot catch is the other
+ * end moving — a renamed field empties the source with no error anywhere,
+ * and the feed just looks like a quiet day. Only a live request finds that,
+ * which is what this is.
+ *
+ * Nothing is written and nothing is cached; this is a report.
+ */
+export type ApiAuditResult = {
+  slice: number;
+  slices: number;
+  checked: {
+    id: string;
+    ok: boolean;
+    /** How many articles came back, which is the number worth reading. */
+    items?: number;
+    /** Set when the provider needs a credential this deployment has not got. */
+    skipped?: "no key";
+    error?: string;
+  }[];
+};
+
+/** Providers per slice. Each is one request, so these can go wider than feeds. */
+const API_AUDIT_PER_SLICE = 6;
+
+export async function auditApiSlice(slice: number): Promise<ApiAuditResult> {
+  const { API_PROVIDERS, buildApiSourceUrl, fetchApiSource, apiKeyFor } = await import("./apis");
+  const slices = Math.ceil(API_PROVIDERS.length / API_AUDIT_PER_SLICE);
+  const mine = API_PROVIDERS.slice(
+    slice * API_AUDIT_PER_SLICE,
+    slice * API_AUDIT_PER_SLICE + API_AUDIT_PER_SLICE,
+  );
+
+  const checked = await Promise.all(
+    mine.map(async (provider) => {
+      // A provider whose key this deployment does not hold is not broken —
+      // reporting it as such would bury the ones that are.
+      if (provider.envKey && !provider.keyOptional && !apiKeyFor(provider)) {
+        return { id: provider.id, ok: true, skipped: "no key" as const };
+      }
+      try {
+        const source = buildApiSourceUrl(provider.id, provider.sample);
+        const { articles } = await fetchApiSource(source, 10);
+        // An empty answer is the failure this exists to catch: the request
+        // worked, and every record fell out of the mapper on the way.
+        if (articles.length === 0) throw new Error("Answered, but no articles");
+        return { id: provider.id, ok: true, items: articles.length };
+      } catch (error) {
+        return {
+          id: provider.id,
+          ok: false,
+          error: error instanceof Error ? error.message : "failed",
+        };
+      }
+    }),
+  );
+
+  return { slice, slices, checked };
+}
+
 export function auditSliceCount() {
   return Math.ceil(sweepJobs().filter((job) => job.kind === "outlet").length / AUDIT_PER_SLICE);
 }

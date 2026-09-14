@@ -294,8 +294,13 @@ export function articleEndpoint(url: string, feedUrl?: string, title?: string) {
 
 /**
  * Fetch and store the newest articles so they can be read with no connection.
+ *
  * Runs a few at a time: this is a background chore, not something to saturate
- * a phone's radio for.
+ * a phone's radio for. Six rather than three, because the first visit is the
+ * slow one — fifteen articles per source across twenty sources is three
+ * hundred fetches, and at three at a time that is a hundred rounds. Most are
+ * now served from the edge rather than re-read from the publisher, so the
+ * rounds are cheap; it is the number of them that was the wait.
  */
 export async function downloadForOffline(
   targets: OfflineTarget[],
@@ -319,7 +324,7 @@ export async function downloadForOffline(
   const step = (savedUrl?: string) =>
     onProgress?.({ done: (settled += 1), total: wanted.length, saved: savedUrl });
 
-  const concurrency = 3;
+  const concurrency = 6;
   for (let i = 0; i < wanted.length; i += concurrency) {
     const batch = wanted.slice(i, i + concurrency);
     await Promise.all(

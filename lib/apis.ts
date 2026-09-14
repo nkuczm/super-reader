@@ -20,6 +20,7 @@ import type { Article, Attachment, SourceMeta } from "./types";
  *
  *   id/name/category/description  what the catalogue shows
  *   params                        what the user fills in (query, court, state…)
+ *   sample                        inputs that return something, for the audit
  *   request()                     the URL (and headers) to call
  *   items()                       the array of records in the response
  *   article()                     one record as an Article
@@ -103,6 +104,13 @@ export type ApiProvider = {
   /** How to get a key, shown when one is missing. */
   keyHint?: string;
   params: ApiParam[];
+  /**
+   * Inputs that return something real, for the live audit — see
+   * `auditApiSlice` in lib/sweep.ts. Required, because a provider nobody can
+   * make an example request to is a provider nobody can check, and these rot
+   * exactly like the feed directory does.
+   */
+  sample: ApiParams;
   /** "json" (the default) or "feed" when the API answers with RSS/Atom. */
   format?: "json" | "feed";
   request: (
@@ -162,6 +170,7 @@ export const API_PROVIDERS: ApiProvider[] = [
     keyOptional: true,
     keyHint:
       "Free from courtlistener.com/profile/api/ — without it the API rate-limits hard.",
+    sample: { q: "first amendment" },
     params: [
       {
         key: "q",
@@ -299,6 +308,7 @@ export const API_PROVIDERS: ApiProvider[] = [
       "Rules, proposed rules and notices published daily by US federal agencies.",
     siteUrl: "https://www.federalregister.gov",
     docsUrl: "https://www.federalregister.gov/developers/documentation/api/v1",
+    sample: { type: "RULE" },
     params: [
       { key: "q", label: "Search", placeholder: "artificial intelligence" },
       {
@@ -365,6 +375,7 @@ export const API_PROVIDERS: ApiProvider[] = [
     docsUrl: "https://open.gsa.gov/api/regulationsgov/",
     envKey: "REGULATIONS_GOV_API_KEY",
     keyHint: "Free key from api.data.gov/signup — the same key works for several US APIs.",
+    sample: { q: "water" },
     params: [
       { key: "q", label: "Search", placeholder: "emissions standards" },
       { key: "agency", label: "Agency ID", placeholder: "EPA" },
@@ -407,6 +418,7 @@ export const API_PROVIDERS: ApiProvider[] = [
     docsUrl: "https://api.congress.gov/",
     envKey: "CONGRESS_GOV_API_KEY",
     keyHint: "Free key from api.data.gov/signup.",
+    sample: { congress: "119" },
     params: [
       {
         key: "congress",
@@ -462,6 +474,7 @@ export const API_PROVIDERS: ApiProvider[] = [
     description: "Full-text search across company filings — 8-Ks, 10-Ks, S-1s.",
     siteUrl: "https://www.sec.gov",
     docsUrl: "https://www.sec.gov/edgar/sec-api-documentation",
+    sample: { q: "artificial intelligence" },
     params: [
       { key: "q", label: "Search", placeholder: "\"artificial intelligence\"", required: true },
       { key: "forms", label: "Forms", placeholder: "8-K,10-K — blank for all" },
@@ -514,6 +527,7 @@ export const API_PROVIDERS: ApiProvider[] = [
     description: "Registered studies, newest updates first.",
     siteUrl: "https://clinicaltrials.gov",
     docsUrl: "https://clinicaltrials.gov/data-api/api",
+    sample: { q: "mrna" },
     params: [
       { key: "q", label: "Condition or term", placeholder: "pancreatic cancer" },
       {
@@ -575,6 +589,7 @@ export const API_PROVIDERS: ApiProvider[] = [
     envKey: "OPENFDA_API_KEY",
     keyOptional: true,
     keyHint: "Optional — a free api.data.gov key raises the rate limit.",
+    sample: { endpoint: "drug/enforcement" },
     params: [
       {
         key: "endpoint",
@@ -629,6 +644,7 @@ export const API_PROVIDERS: ApiProvider[] = [
     docsUrl: "https://info.arxiv.org/help/api/user-manual.html",
     // arXiv answers in Atom, so the existing feed parser reads it as-is.
     format: "feed",
+    sample: { q: "cat:cs.AI" },
     params: [
       {
         key: "q",
@@ -660,6 +676,7 @@ export const API_PROVIDERS: ApiProvider[] = [
     description: "Newly registered journal articles across every publisher.",
     siteUrl: "https://www.crossref.org",
     docsUrl: "https://api.crossref.org/swagger-ui/index.html",
+    sample: { q: "mrna vaccine" },
     params: [
       { key: "q", label: "Search", placeholder: "mRNA vaccine", required: true },
     ],
@@ -695,6 +712,7 @@ export const API_PROVIDERS: ApiProvider[] = [
     description: "Stories matching a query, newest first, via the Algolia index.",
     siteUrl: "https://news.ycombinator.com",
     docsUrl: "https://hn.algolia.com/api",
+    sample: { q: "postgres" },
     params: [
       { key: "q", label: "Search", placeholder: "postgres" },
       { key: "points", label: "Minimum points", placeholder: "50 — optional" },
@@ -748,6 +766,7 @@ export const API_PROVIDERS: ApiProvider[] = [
     envKey: "GITHUB_TOKEN",
     keyOptional: true,
     keyHint: "Optional — a token raises the hourly rate limit from 60 to 5,000.",
+    sample: { repo: "vercel/next.js" },
     params: [
       { key: "repo", label: "Repository", placeholder: "vercel/next.js", required: true },
     ],
@@ -782,6 +801,7 @@ export const API_PROVIDERS: ApiProvider[] = [
     description: "Active National Weather Service warnings and watches by state.",
     siteUrl: "https://www.weather.gov",
     docsUrl: "https://www.weather.gov/documentation/services-web-api",
+    sample: { area: "CA" },
     params: [
       {
         key: "area",

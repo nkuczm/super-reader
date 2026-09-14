@@ -84,12 +84,12 @@ import ArticleReader from "./ArticleReader";
 import SourceIcon from "./SourceIcon";
 import { Icon } from "./icons";
 import { published, hostOf } from "./format";
-import { sortNewestFirst, timeOf } from "@/lib/sort";
+import { timeOf } from "@/lib/sort";
 import type { RankedArticle } from "@/lib/pulse";
 import type { PickedSource } from "./OutletCatalog";
 import ScoreExplainer from "./ScoreExplainer";
 import type { CorpusStats } from "./ScoreExplainer";
-import { canonicalUrl } from "@/lib/url";
+import { mergeBySource } from "@/lib/merge";
 import { mergeSaved, differsFrom, slimForSync } from "@/lib/saved";
 import type { SavedRemoval } from "@/lib/saved";
 import "./reader.css";
@@ -133,6 +133,20 @@ function keyHeadersFrom(keys: Record<string, string>): HeadersInit | undefined {
     ? undefined
     : { [KEYS_HEADER]: encodeKeysHeader(keys) };
 }
+
+/**
+ * Whether a source is one the reader's own API keys are for.
+ *
+ * Only the API directory's sources read anything that takes a credential. An
+ * ordinary feed asked for with a keys header would be answered privately and
+ * could not be served from the edge, so one saved key would have cost every
+ * feed its cache. `kind` is what the sidebar stores; the scheme is checked
+ * too, because a source saved before `kind` existed has none.
+ */
+function usesApiKeys(source: Source) {
+  return source.kind === "api" || source.feedUrl.startsWith("api:");
+}
+
 type Selection =
   | { type: "all" }
   | { type: "saved" }
@@ -799,49 +813,92 @@ export default function Reader() {
     [feeds],
   );
 
-  /** Fetch every known feed and merge the results newest-first. */
+  /**
+   * Which refresh is the current one. A source added or removed while feeds
+   * are still answering starts a new refresh, and the old one's replies must
+   * not land in the list afterwards.
+   */
+  const refreshRun = useRef(0);
+
+  /**
+   * Fetch every known feed and merge the results newest-first.
+   *
+   * One request per source rather than one for all of them. Two reasons, and
+   * the first is what the reader notices: the list paints as each source
+   * answers instead of waiting on the slowest, so the fast feeds are readable
+   * in about a second. The second is that `?url=<one feed>` is the same
+   * request every reader following that feed makes, so the edge can serve it
+   * — a batched URL is one reader's own set and can never be shared.
+   */
   const refresh = useCallback(async (sources: Source[]) => {
+    // Bumped before the early return too: a refresh may still be in flight
+    // over the sources that were just removed, and its answers must not paint
+    // into a list that should now be empty.
+    const run = (refreshRun.current += 1);
     if (sources.length === 0) {
       setArticles([]);
+      setRefreshing(false);
       return;
     }
     setRefreshing(true);
-    try {
-      const params = new URLSearchParams();
-      for (const source of sources) params.append("url", source.feedUrl);
-      const res = await fetch(`/api/feed?${params}`, { headers: keyHeadersFrom(apiKeysRef.current) });
-      const data = await res.json();
 
-      const byUrl = new Map(sources.map((s) => [s.feedUrl, s.id]));
-      const merged: Loaded[] = [];
-      for (const result of data.results ?? []) {
-        const sourceId = byUrl.get(result.feedUrl);
-        if (!sourceId) continue;
-        for (const article of result.articles as Article[]) {
-          merged.push({ ...article, sourceId, id: `${sourceId}:${article.id}` });
-        }
-      }
-      // One article, once. Two of a paper's feeds carry the same story with
-      // different tracking parameters, which is how the list ended up showing
-      // the same WSJ piece twice in a row.
-      const seen = new Set<string>();
-      const unique = merged.filter((article) => {
-        const key = canonicalUrl(article.link);
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-      const ordered = sortNewestFirst(unique);
+    // Held per source and rebuilt in the order the sidebar lists them, so
+    // which copy of a story survives deduplication is decided by that order
+    // and not by which request happened to answer first.
+    const bySource = new Map<string, Loaded[]>();
+
+    const order = sources.map((source) => source.id);
+    const paint = () => {
+      const ordered = mergeBySource(order, bySource);
       setArticles(ordered);
-      // Keep a copy so the list is still there with no connection.
-      void saveListSnapshot(ordered);
-    } catch {
-      // Offline or the feeds are unreachable: show what was last saved.
+      return ordered;
+    };
+
+    let answered = 0;
+    await Promise.all(
+      sources.map(async (source) => {
+        try {
+          const res = await fetch(
+            `/api/feed?url=${encodeURIComponent(source.feedUrl)}`,
+            // Only the sources that read an API need the reader's keys, and a
+            // request carrying them cannot be served to anyone else. Sending
+            // them with every feed would make the whole refresh uncacheable
+            // for anyone who has ever saved one.
+            { headers: usesApiKeys(source) ? keyHeadersFrom(apiKeysRef.current) : undefined },
+          );
+          const data = await res.json();
+          const result = data.results?.[0];
+          if (!result?.ok || run !== refreshRun.current) return;
+
+          bySource.set(
+            source.id,
+            (result.articles as Article[]).map((article) => ({
+              ...article,
+              sourceId: source.id,
+              id: `${source.id}:${article.id}`,
+            })),
+          );
+          answered += 1;
+          paint();
+        } catch {
+          // One source being unreachable is not the list being unreachable.
+        }
+      }),
+    );
+
+    // Superseded while it ran: the newer refresh owns the list, and the
+    // spinner it is running under.
+    if (run !== refreshRun.current) return;
+
+    if (answered === 0) {
+      // Offline, or every source is refusing: show what was last saved.
       const snapshot = await loadListSnapshot<Loaded>();
       if (snapshot && snapshot.length > 0) setArticles(snapshot);
-    } finally {
-      setRefreshing(false);
+    } else {
+      // Keep a copy so the list is still there with no connection.
+      void saveListSnapshot(paint());
     }
+    setRefreshing(false);
   }, []);
 
   // Reload whenever the set of sources changes.
@@ -1419,9 +1476,14 @@ export default function Reader() {
    * downloads whatever is missing — a partial cache repairs itself instead of
    * waiting for a slot. Articles already stored cost one lookup each and are
    * skipped, so topping up is cheap when there is nothing to do.
+   *
+   * Not while a refresh is in flight. The list arrives one source at a time
+   * now, and a download started against a partial list fetches articles that
+   * are about to be superseded — while competing for the connection with the
+   * refresh the reader is actually waiting on.
    */
   useEffect(() => {
-    if (!ready || articles.length === 0) return;
+    if (!ready || refreshing || articles.length === 0) return;
     let cancelled = false;
 
     const check = async () => {
@@ -1456,7 +1518,7 @@ export default function Reader() {
       window.removeEventListener("online", check);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [ready, articles.length, runDownload, offlineTargets]);
+  }, [ready, refreshing, articles.length, runDownload, offlineTargets]);
 
   /**
    * Ask the server how big each story is.
