@@ -1,0 +1,139 @@
+#!/usr/bin/env node
+/**
+ * Does the app still collect what these sources publish?
+ *
+ * The unit tests prove the parsing against fixtures that never change. This
+ * asks the other question — whether the internet still behaves the way the
+ * fixtures say it does — by running the real sources in test/watchlist.json
+ * through a deployment and checking what comes back.
+ *
+ * It needs to reach the sites, so run it from a machine that can: the sandbox
+ * this app is built in cannot, which is exactly how a source can quietly stop
+ * working without a single test going red.
+ *
+ *   node scripts/coverage.mjs https://your-deployment.vercel.app
+ *   node scripts/coverage.mjs https://... --only wsj      (substring filter)
+ *   node scripts/coverage.mjs https://... --json          (for a dashboard)
+ *
+ * Exits non-zero if any source fails what the watchlist expects of it, so it
+ * can be a scheduled job rather than something to remember to run.
+ */
+
+import { readFile } from "node:fs/promises";
+
+const args = process.argv.slice(2);
+const base = (args.find((a) => a.startsWith("http")) ?? "").replace(/\/$/, "");
+const only = args[args.indexOf("--only") + 1];
+const asJson = args.includes("--json");
+
+if (!base) {
+  console.error("Usage: node scripts/coverage.mjs https://your-deployment [--only text] [--json]");
+  process.exit(2);
+}
+
+const HOUR = 60 * 60 * 1000;
+
+const watchlist = JSON.parse(
+  await readFile(new URL("../test/watchlist.json", import.meta.url), "utf8"),
+);
+const sources = watchlist.sources.filter(
+  (source) => !only || source.input.toLowerCase().includes(only.toLowerCase()),
+);
+
+/** What the app makes of one input, and what is wrong with it. */
+async function check({ input, why, expect = {} }) {
+  const url = `${base}/api/discover?q=${encodeURIComponent(input)}`;
+  const started = Date.now();
+  let payload;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+    payload = await res.json();
+    if (!res.ok) {
+      return { input, why, ok: false, problems: [`${res.status}: ${payload.error ?? "no reason given"}`] };
+    }
+  } catch (error) {
+    return { input, why, ok: false, problems: [`could not be reached: ${error.message}`] };
+  }
+
+  const articles = payload.articles ?? [];
+  const dated = articles
+    .map((a) => Date.parse(a.publishedAt ?? ""))
+    .filter((t) => Number.isFinite(t))
+    .sort((a, b) => b - a);
+  const newestAgeHours = dated.length ? (Date.now() - dated[0]) / HOUR : null;
+  const spanDays = dated.length > 1 ? (dated[0] - dated[dated.length - 1]) / (24 * HOUR) : 0;
+  const bundled = payload.feedUrl?.startsWith("bundle:")
+    ? payload.feedUrl.slice("bundle:".length).split("|").length
+    : 0;
+
+  const problems = [];
+  const duplicates = articles.length - new Set(articles.map((a) => a.link)).size;
+
+  if (expect.minArticles && payload.total < expect.minArticles) {
+    problems.push(`only ${payload.total} articles, expected ${expect.minArticles}+`);
+  }
+  if (expect.maxAgeHours && newestAgeHours !== null && newestAgeHours > expect.maxAgeHours) {
+    // The failure that looks like success: a feed answering 200 with old news.
+    problems.push(`newest item is ${newestAgeHours.toFixed(1)}h old, expected under ${expect.maxAgeHours}h`);
+  }
+  if (expect.bundleOfAtLeast && bundled < expect.bundleOfAtLeast) {
+    problems.push(`covers ${bundled || 1} feed(s), expected ${expect.bundleOfAtLeast}+`);
+  }
+  if (expect.scopeIs && payload.scope !== expect.scopeIs) {
+    problems.push(`scope is "${payload.scope}", expected "${expect.scopeIs}"`);
+  }
+  if (expect.kindIs && payload.kind !== expect.kindIs) {
+    problems.push(`kind is "${payload.kind}", expected "${expect.kindIs}"`);
+  }
+  if (expect.titleIs && payload.title !== expect.titleIs) {
+    problems.push(`called "${payload.title}", expected "${expect.titleIs}"`);
+  }
+  if (duplicates > 0) problems.push(`${duplicates} duplicate link(s) in the preview`);
+  if (articles.length === 0) problems.push("no articles at all");
+
+  return {
+    input,
+    why,
+    ok: problems.length === 0,
+    problems,
+    title: payload.title,
+    kind: payload.kind,
+    scope: payload.scope,
+    feeds: bundled || 1,
+    total: payload.total,
+    newestAgeHours: newestAgeHours === null ? null : Number(newestAgeHours.toFixed(1)),
+    spanDays: Number(spanDays.toFixed(1)),
+    tookMs: Date.now() - started,
+  };
+}
+
+const results = [];
+for (const source of sources) {
+  // One at a time: several of these sites rate-limit, and a burst from one
+  // address reads as a scraper rather than a reader.
+  results.push(await check(source));
+}
+
+if (asJson) {
+  console.log(JSON.stringify({ base, at: new Date().toISOString(), results }, null, 2));
+} else {
+  for (const r of results) {
+    const head = r.ok ? "PASS" : "FAIL";
+    console.log(`\n${head}  ${r.input}`);
+    console.log(`      ${r.why}`);
+    if (r.title) {
+      console.log(
+        `      ${r.title} · ${r.kind}/${r.scope} · ${r.feeds} feed(s) · ${r.total} items` +
+          ` · newest ${r.newestAgeHours ?? "?"}h · spans ${r.spanDays}d · ${r.tookMs}ms`,
+      );
+    }
+    for (const problem of r.problems) console.log(`      - ${problem}`);
+  }
+  const failed = results.filter((r) => !r.ok).length;
+  console.log(
+    `\n${results.length - failed}/${results.length} sources healthy` +
+      (failed ? ` — ${failed} need looking at` : ""),
+  );
+}
+
+process.exit(results.some((r) => !r.ok) ? 1 : 0);

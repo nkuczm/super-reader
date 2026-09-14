@@ -91,6 +91,7 @@ import type { PickedSource } from "./OutletCatalog";
 import ScoreExplainer from "./ScoreExplainer";
 import type { CorpusStats } from "./ScoreExplainer";
 import { canonicalUrl } from "@/lib/url";
+import { mergeWindow, stamp } from "@/lib/window";
 import { mergeSaved, differsFrom, slimForSync } from "@/lib/saved";
 import type { SavedRemoval } from "@/lib/saved";
 import "./reader.css";
@@ -817,9 +818,22 @@ export default function Reader() {
         seen.add(key);
         return true;
       });
-      const ordered = sortNewestFirst(unique);
+
+      /**
+       * Merged into what was already held, not swapped for it. A feed is a
+       * window of the last few dozen things a desk filed; showing only that
+       * window meant everything published between two visits was missed, with
+       * nothing to show it had happened — see lib/window.ts.
+       */
+      const held = (await loadListSnapshot<Loaded>()) ?? [];
+      const ordered = sortNewestFirst(
+        mergeWindow(stamp(unique), held, {
+          sources: new Set(sources.map((source) => source.id)),
+          canonical: canonicalUrl,
+        }),
+      );
       setArticles(ordered);
-      // Keep a copy so the list is still there with no connection.
+      // Also what the list falls back to with no connection.
       void saveListSnapshot(ordered);
     } catch {
       // Offline or the feeds are unreachable: show what was last saved.

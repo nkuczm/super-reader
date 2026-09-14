@@ -1,0 +1,45 @@
+{
+  "comment": [
+    "Real sources, checked against a running deployment by scripts/coverage.mjs.",
+    "The unit tests prove the parsing; this proves the internet still behaves.",
+    "Add a line whenever a source misbehaves in real use, with what you expect",
+    "of it — the entry becomes the thing that notices if it regresses."
+  ],
+  "sources": [
+    {
+      "input": "https://www.wsj.com/news/latest-headlines?mod=nav_left_section",
+      "why": "Reported missing stories: this is where the WSJ files everything.",
+      "expect": {
+        "minArticles": 40,
+        "maxAgeHours": 12,
+        "bundleOfAtLeast": 6,
+        "titleIs": "The Wall Street Journal"
+      }
+    },
+    {
+      "input": "https://www.wsj.com/finance",
+      "why": "A section must stay a section, not widen to the whole paper.",
+      "expect": { "minArticles": 10, "maxAgeHours": 24, "scopeIs": "section" }
+    },
+    {
+      "input": "https://abliteration.ai/blog",
+      "why": "No feed, two posts: the scraper's minimum used to refuse it.",
+      "expect": { "minArticles": 2, "kindIs": "page" }
+    },
+    {
+      "input": "https://www.theverge.com",
+      "why": "An ordinary declared RSS feed — the common case.",
+      "expect": { "minArticles": 10, "maxAgeHours": 24 }
+    },
+    {
+      "input": "https://simonwillison.net",
+      "why": "An independent blog syndicating full text in Atom.",
+      "expect": { "minArticles": 5, "maxAgeHours": 336 }
+    },
+    {
+      "input": "https://www.federalreserve.gov/newsevents/pressreleases.htm",
+      "why": "A government listing page with no feed of its own.",
+      "expect": { "minArticles": 5 }
+    }
+  ]
+}

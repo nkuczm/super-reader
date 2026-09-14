@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { parseBundle } from "../lib/bundle";
 import { knownFeedFor, WSJ_CHOICES } from "../lib/publishers";
 import { OUTLETS, SUBREDDITS, PACKS } from "../lib/outlets";
 
@@ -19,6 +20,7 @@ test("recognises the WSJ however it is asked for", () => {
     assert.equal(known.title, "The Wall Street Journal");
     assert.equal(known.scope, "site");
     assert.equal(known.siteUrl, "https://www.wsj.com");
+    assert.ok(parseBundle(known.feedUrl), `${input} should carry every section`);
   }
 });
 
@@ -48,7 +50,10 @@ test("a single WSJ story falls back to the whole paper", () => {
     "https://www.wsj.com/articles/some-headline-a4f0f219?mod=rss_worldnews",
   );
   assert.equal(known?.scope, "site");
-  assert.equal(known?.feedUrl, "https://feeds.content.dowjones.io/public/rss/RSSWorldNews");
+  // The whole paper is every section — it used to be the world desk under the
+  // paper's name, which is how markets, business and tech went missing.
+  const feeds = parseBundle(known!.feedUrl);
+  assert.ok(feeds && feeds.length >= 8, "the paper is a bundle of its sections");
 });
 
 test("rewrites the abandoned RSS host onto the live one", () => {
