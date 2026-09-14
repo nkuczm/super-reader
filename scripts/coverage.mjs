@@ -43,7 +43,16 @@ const sources = watchlist.sources.filter(
 
 /** What the app makes of one input, and what is wrong with it. */
 async function check({ input, why, expect = {} }) {
-  const url = `${base}/api/discover?q=${encodeURIComponent(input)}`;
+  /**
+   * Ask for a hundred, not the preview's default twelve.
+   *
+   * `minInWindow` and `maxUndated` are counted from the articles that come
+   * back, so with twelve of them an expectation of "40 from the last 48 hours"
+   * could never be met however well the source was doing — the yardstick was
+   * measuring its own request size. `minArticles` reads `total`, which is the
+   * real count either way.
+   */
+  const url = `${base}/api/discover?q=${encodeURIComponent(input)}&limit=100`;
   const started = Date.now();
   let payload;
   try {

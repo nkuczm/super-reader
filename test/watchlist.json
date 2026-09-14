@@ -4,10 +4,21 @@
     "The unit tests prove the parsing; this proves the internet still behaves.",
     "The expectation that matters is minInWindow: coverage is how much of what a",
     "publisher filed recently we caught, not how many articles came back. Add a",
-    "line whenever a source misbehaves in real use, with what you expect of it \u2014",
+    "line whenever a source misbehaves in real use, with what you expect of it —",
     "the entry becomes the thing that notices if it regresses."
   ],
   "sources": [
+    {
+      "input": "Associated Press",
+      "why": "Reported five days stale. apnews.com 403s every path, so this checks the aggregator route is still fresh — a wire whose newest story is hours old is the failure.",
+      "expect": {
+        "minArticles": 60,
+        "minInWindow": 40,
+        "maxAgeHours": 4,
+        "titleIs": "AP News",
+        "scopeIs": "section"
+      }
+    },
     {
       "input": "https://www.wsj.com/news/latest-headlines?mod=nav_left_section",
       "why": "Reported missing stories: this is where the WSJ files everything.",
@@ -39,7 +50,7 @@
     },
     {
       "input": "https://www.theverge.com",
-      "why": "An ordinary declared RSS feed \u2014 the common case.",
+      "why": "An ordinary declared RSS feed — the common case.",
       "expect": {
         "minArticles": 10,
         "minInWindow": 10,
@@ -72,7 +83,7 @@
     },
     {
       "input": "https://www.cnn.com",
-      "why": "Declares no RSS at all \u2014 if this returns nothing, the sitemap route has broken.",
+      "why": "Declares no RSS at all — if this returns nothing, the sitemap route has broken.",
       "expect": {
         "minInWindow": 15,
         "maxAgeHours": 12
