@@ -169,3 +169,21 @@ test("a source with no site at all still refreshes", async () => {
   const result = await augment(feed, {});
   assert.equal(result.articles.length, 1);
 });
+
+test("a publisher with opaque article paths defeats prefix inference", () => {
+  // The BBC files every story at /news/articles/<id>, so its technology feed
+  // and its site-wide feed look identical here. This is why scope is recorded
+  // when a source is added rather than inferred at refresh time: inferring it
+  // filled a BBC Technology source with football.
+  const bbcTech = [
+    article("https://www.bbc.co.uk/news/articles/c7v48vp31mdo"),
+    article("https://www.bbc.co.uk/news/articles/cwyzp47py48o"),
+    article("https://www.bbc.co.uk/news/articles/c1kx0gyje9wo"),
+    article("https://www.bbc.co.uk/news/articles/cq635037g18o"),
+  ];
+  assert.equal(
+    sharedPathPrefix(bbcTech),
+    "/news/articles",
+    "the shared path says nothing about which desk this is",
+  );
+});

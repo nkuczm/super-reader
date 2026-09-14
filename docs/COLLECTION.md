@@ -157,10 +157,24 @@ publish at `/a-post` with a four-word headline. `lib/authentic.ts` trusts
 **A section must stay a section.** A site's news sitemap lists the whole
 newsroom, so merging it wholesale into "BBC Technology" would quietly turn it
 into "BBC" — the same failure as the WSJ bug, arriving from the other
-direction. Nothing stores whether a source is a section, so
-`sharedPathPrefix()` infers it from the path the source's own stories share.
-Fewer than four stories yields `/` and constrains nothing: two articles in a
-folder is a coincidence, not a beat.
+direction.
+
+This was first attempted by *inferring* scope from the path a source's own
+stories share (`sharedPathPrefix()`), and that was wrong. It works only where
+a publisher's URLs carry their section. The BBC files every story at
+`/news/articles/<id>`, so its technology feed is indistinguishable from a
+site-wide one, and the technology source filled up with football.
+
+**Scope is therefore recorded, not guessed.** `Source.scope` is captured at
+the moment a source is added, because that is the only moment anything knows
+it: by refresh time all that is left is a feed URL. The refresh passes
+`&whole=` for site-scoped sources only, and augmentation is off by default.
+`sharedPathPrefix()` remains as a second line of defence, not the first.
+
+The general rule this produced: **where guessing wrong means collecting the
+wrong thing, do not guess — carry the fact from where it was known.**
+Collecting less is recoverable; a source that silently became a different
+source is not.
 
 **Bundles.** One source may name several feeds (`bundle:` + encoded members).
 Everything about a source stays inside one string, so refresh, dedupe, offline

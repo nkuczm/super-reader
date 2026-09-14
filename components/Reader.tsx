@@ -876,6 +876,12 @@ export default function Reader() {
     try {
       const params = new URLSearchParams();
       for (const source of sources) params.append("url", source.feedUrl);
+      // Sources that follow a whole publisher may also collect from that
+      // publisher's news sitemap. Sections may not: the sitemap covers the
+      // whole newsroom, and merging it in would widen the source.
+      for (const source of sources) {
+        if (source.scope === "site") params.append("whole", source.feedUrl);
+      }
       const res = await fetch(`/api/feed?${params}`, { headers: keyHeadersFrom(apiKeysRef.current) });
       const data = await res.json();
 
@@ -935,6 +941,7 @@ export default function Reader() {
     const source: Source = {
       id: newId(),
       kind: result.kind,
+      scope: result.scope,
       feedUrl: result.feedUrl,
       siteUrl: result.siteUrl,
       title: result.title,

@@ -69,7 +69,20 @@ function originOf(siteUrl: string | undefined) {
 
 /** Refresh one known feed URL. Accepts ?url= repeated for a batch. */
 export async function GET(request: Request) {
-  const urls = new URL(request.url).searchParams.getAll("url").filter(Boolean);
+  const params = new URL(request.url).searchParams;
+  const urls = params.getAll("url").filter(Boolean);
+  /**
+   * Sources the caller says follow a whole publisher, and may therefore also
+   * collect from that publisher's news sitemap.
+   *
+   * Opt-in rather than inferred. It was briefly inferred from the paths a
+   * feed's own stories shared, which works until a publisher files every
+   * story under an opaque path: the BBC puts all of them at
+   * /news/articles/<id>, so a technology feed looks exactly like a site-wide
+   * one and its source filled up with football. Guessing wrong in that
+   * direction is worse than collecting less, so it is no longer guessed.
+   */
+  const whole = new Set(params.getAll("whole"));
   // Used for this request only — never logged, never stored.
   const keys = decodeKeysHeader(request.headers.get(KEYS_HEADER));
   if (urls.length === 0) {
@@ -124,7 +137,9 @@ export async function GET(request: Request) {
           const ready = await enrichArticles(merged, {
             siteDescription: meta.description,
           });
-          const whole = await augment(ready, {
+          // A bundle names a publisher's sections explicitly, so it is
+          // whole-publisher by construction.
+          const full = await augment(ready, {
             origin: originOf(meta.siteUrl),
             limit: MAX_PER_SOURCE,
           });
@@ -133,8 +148,8 @@ export async function GET(request: Request) {
             ...meta,
             feedUrl: url,
             favicon: faviconFor(meta.siteUrl),
-            articles: whole.articles,
-            coverage: whole.coverage,
+            articles: full.articles,
+            coverage: full.coverage,
           };
         }
 
@@ -159,17 +174,16 @@ export async function GET(request: Request) {
          * a source collects what was published rather than what its feed
          * happened to still be holding.
          */
-        const whole = await augment(ready, {
-          origin: originOf(meta.siteUrl),
-          limit: MAX_PER_SOURCE,
-        });
+        const full = whole.has(url)
+          ? await augment(ready, { origin: originOf(meta.siteUrl), limit: MAX_PER_SOURCE })
+          : { articles: ready, coverage: undefined };
         return {
           ok: true as const,
           ...meta,
           feedUrl: url,
           favicon: faviconFor(meta.siteUrl),
-          articles: whole.articles,
-          coverage: whole.coverage,
+          articles: full.articles,
+          coverage: full.coverage,
         };
       } catch (error) {
         return {
