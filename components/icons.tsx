@@ -20,6 +20,11 @@ export const Icon = {
       <path d="M21 12a9 9 0 1 1-2.6-6.4" /><path d="M21 3v6h-6" />
     </svg>
   ),
+  arrowDown: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 5v14M6 13l6 6 6-6" />
+    </svg>
+  ),
   back: (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
       <path d="M15 5l-7 7 7 7" />

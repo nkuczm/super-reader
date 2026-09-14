@@ -2491,36 +2491,78 @@ export default function Reader() {
           />
         ) : (
           <>
-        {/* The pull-to-refresh indicator. It says what will happen, and only
-            promises a refresh once the pull is far enough to cause one. */}
-        {(pullDistance > 0 || (refreshing && pullRefresh)) && (
-          <div
-            className="pull-note"
-            style={{ height: refreshing ? 34 : Math.round(pullDistance) }}
-            aria-live="polite"
-          >
-            {refreshing ? (
-              <>
-                <span className="spinner" /> Refreshing…
-              </>
-            ) : pullDistance >= 72 ? (
-              "Release to refresh"
-            ) : (
-              "Pull to refresh"
-            )}
-          </div>
-        )}
-
-        {/* Checking for new articles over a list that is already readable.
-            Said out loud so a list from the last visit is not mistaken for
-            everything there is. */}
-        {slowRefresh && !pullRefresh && shown.length > 0 && (
-          <div className="list-updating" aria-live="polite">
-            <span className="spinner" /> Checking for new articles…
-          </div>
-        )}
+        {/*
+          * What a refresh looks like, said out loud for a screen reader.
+          *
+          * The indicators themselves sit inside the header below, where they
+          * float over the list rather than pushing it: both used to be rows
+          * above the header, which put them under a phone's status bar — the
+          * clock sitting on top of the words — and moved the whole page down
+          * and back up again every time one appeared.
+          */}
+        <p className="sr-only" aria-live="polite">
+          {refreshing
+            ? "Checking for new articles"
+            : pullDistance >= PULL_TRIGGER
+              ? "Release to refresh"
+              : pullDistance > 0
+                ? "Pull to refresh"
+                : ""}
+        </p>
 
         <div className="main-head">
+          {/*
+            * The pull indicator follows the finger down from under the
+            * header, turning over as it passes the point where letting go
+            * refreshes — the gesture's own progress, rather than a caption
+            * describing it. Anchored to the header, so it clears the status
+            * bar on a phone and costs the list no layout.
+            */}
+          {(pullDistance > 0 || (refreshing && pullRefresh)) && (
+            <div
+              className={`pull-ring${refreshing ? " spinning" : ""}${
+                pullDistance >= PULL_TRIGGER ? " ready" : ""
+              }`}
+              style={{
+                // Parked at a fixed spot once the refresh is under way; before
+                // that it is wherever the finger has dragged it to.
+                transform: `translate(-50%, ${
+                  refreshing ? PULL_TRIGGER * 0.5 : Math.round(pullDistance)
+                }px)`,
+                // Fully there well before the trigger, so what the reader
+                // is deciding about is a solid thing, not a hint of one.
+                opacity: refreshing
+                  ? 1
+                  : Math.min(1, pullDistance / (PULL_TRIGGER * 0.35)),
+              }}
+              aria-hidden
+            >
+              {refreshing ? (
+                <span className="spinner" />
+              ) : (
+                <span
+                  className="pull-arrow"
+                  style={{
+                    transform: `rotate(${
+                      pullDistance >= PULL_TRIGGER ? 180 : 0
+                    }deg)`,
+                  }}
+                >
+                  {Icon.arrowDown}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Checking for new articles over a list that is already readable,
+              so a list from the last visit is not mistaken for everything
+              there is. A pill on the header's edge: it says the same thing
+              without the page moving under the reader's thumb. */}
+          {slowRefresh && !pullRefresh && shown.length > 0 && (
+            <div className="list-updating" aria-hidden>
+              <span className="spinner" /> Checking for new articles…
+            </div>
+          )}
           <button
             className="menu-btn"
             onClick={() => setMenuOpen(true)}
