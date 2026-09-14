@@ -373,3 +373,139 @@ test("markup that is not preformatted is left alone", async () => {
   const html = "<p>Already flowing.</p><p>Two paragraphs.</p>";
   assert.equal(reflowPreformatted(html), html);
 });
+
+/**
+ * Dates come from when the thing was published, never from when the API's
+ * own record of it was created or last touched.
+ *
+ * Every case below is the shape the live API really returns, with both kinds
+ * of field present — because the bug was preferring the wrong one, not
+ * missing it. Left alone, a 2020 clinical trial edited this morning arrived
+ * dated today and sorted above the day's news.
+ */
+const provider = (id: string) => {
+  const found = API_PROVIDERS.find((entry) => entry.id === id);
+  assert.ok(found, `no provider called ${id}`);
+  return found;
+};
+
+const dateOf = (id: string, item: unknown) =>
+  provider(id).article?.(item, {})?.publishedAt;
+
+test("CourtListener dates an opinion when it was filed", () => {
+  assert.equal(
+    dateOf("courtlistener", {
+      id: 9,
+      caseName: "United States v. Example",
+      absolute_url: "/opinion/9/us-v-example/",
+      dateFiled: "1998-04-21",
+      dateCreated: "2026-09-14T01:00:00Z",
+    }),
+    "1998-04-21T00:00:00.000Z",
+  );
+});
+
+test("ClinicalTrials dates a study when it was first posted", () => {
+  assert.equal(
+    dateOf("clinicaltrials", {
+      protocolSection: {
+        identificationModule: { nctId: "NCT04381130", briefTitle: "A Phase I/IIa Study" },
+        statusModule: {
+          studyFirstPostDateStruct: { date: "2020-05-08" },
+          studyFirstSubmitDateStruct: { date: "2020-05-06" },
+          lastUpdatePostDateStruct: { date: "2026-09-11" },
+        },
+      },
+    }),
+    "2020-05-08T00:00:00.000Z",
+  );
+});
+
+test("ClinicalTrials asks for the newest registrations, not the newest edits", () => {
+  // Otherwise the page it fetches is full of old studies touched today, and
+  // dating them honestly just buries them.
+  const { url } = provider("clinicaltrials").request({ q: "cancer" }, { limit: 20 });
+  assert.match(url, /sort=StudyFirstPostDate/);
+});
+
+test("Crossref dates a paper when it was published, not when it was registered", () => {
+  assert.equal(
+    dateOf("crossref", {
+      DOI: "10.4268/cjcmm20110224",
+      title: ["Effect of Jinqiaomai"],
+      URL: "https://doi.org/10.4268/cjcmm20110224",
+      published: { "date-parts": [[2011, 2, 24]] },
+      created: { "date-time": "2026-09-05T11:05:08Z" },
+      deposited: { "date-time": "2026-09-06T02:00:00Z" },
+    }),
+    "2011-02-24T00:00:00.000Z",
+  );
+
+  // Falls through the other shapes Crossref uses, and copes with a
+  // year-only date.
+  assert.equal(
+    dateOf("crossref", {
+      DOI: "10.1/x",
+      title: ["Year only"],
+      URL: "https://doi.org/10.1/x",
+      issued: { "date-parts": [[1999]] },
+      created: { "date-time": "2026-01-01T00:00:00Z" },
+    }),
+    "1999-01-01T00:00:00.000Z",
+  );
+
+  // Registration time is the last resort, not the first choice.
+  assert.equal(
+    dateOf("crossref", {
+      DOI: "10.1/y",
+      title: ["No publication date"],
+      URL: "https://doi.org/10.1/y",
+      created: { "date-time": "2026-03-04T05:06:07Z" },
+    }),
+    "2026-03-04T05:06:07.000Z",
+  );
+});
+
+test("Congress dates a bill when it was introduced", () => {
+  assert.equal(
+    dateOf("congress", {
+      congress: 119,
+      number: "1234",
+      type: "hr",
+      title: "An Act to do something",
+      introducedDate: "2025-03-11",
+      updateDate: "2026-09-14",
+      latestAction: { actionDate: "2025-06-02" },
+    }),
+    "2025-03-11T00:00:00.000Z",
+  );
+});
+
+test("Regulations.gov dates a document when it was posted", () => {
+  assert.equal(
+    dateOf("regulations-gov", {
+      id: "EPA-HQ-OAR-2025-0001-0001",
+      attributes: {
+        title: "Proposed rule",
+        postedDate: "2025-01-15T05:00:00Z",
+        lastModifiedDate: "2026-09-14T01:00:00Z",
+      },
+    }),
+    "2025-01-15T05:00:00.000Z",
+  );
+});
+
+test("openFDA dates a recall when it was reported", () => {
+  assert.equal(
+    dateOf("openfda", {
+      recall_number: "D-1234-2025",
+      product_description: "Widget",
+      reason_for_recall: "Mislabelled",
+      classification: "Class II",
+      report_date: "20250310",
+      recall_initiation_date: "20250204",
+      center_classification_date: "20260914",
+    }),
+    "2025-03-10T00:00:00.000Z",
+  );
+});
