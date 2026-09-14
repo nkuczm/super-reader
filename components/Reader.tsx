@@ -29,6 +29,7 @@ import {
   loadVault,
   saveVault,
   loadUpdatedAt,
+  pullable,
   saveUpdatedAt,
   loadUnlockedKeys,
   saveUnlockedKeys,
@@ -346,14 +347,29 @@ export default function Reader() {
     teams?: unknown;
     vault?: unknown;
     updatedAt?: number;
-  }) => {
+  },
+  /**
+   * The synced document is older than what this device holds. Only the parts
+   * that resolve by "most recent change wins" are then this device's to keep:
+   * bookmarks, notes and watch marks merge whoever is newer, because a stamp
+   * can say which arrangement of the feed list is newer but cannot say that
+   * the other device's bookmarks matter less. Skipping the whole document was
+   * how a computer came to show one saved article while another device held
+   * five.
+   */
+  stale = false,
+  ) => {
     applying.current = true;
-    if (Array.isArray(payload.feeds) && !unchanged(payload.feeds, feedsRef.current)) {
+    if (
+      !stale &&
+      Array.isArray(payload.feeds) &&
+      !unchanged(payload.feeds, feedsRef.current)
+    ) {
       setFeeds(payload.feeds);
     }
     // Which team feeds this person is on travels between their own devices;
     // what is *in* those feeds does not, and never touches local storage.
-    if (Array.isArray(payload.teams)) {
+    if (!stale && Array.isArray(payload.teams)) {
       const next = sanitizeTeams(payload.teams);
       if (!unchanged(next, teamsRef.current)) {
         setTeams(next);
@@ -362,14 +378,18 @@ export default function Reader() {
     }
     // The vault arrives encrypted; it stays locked until a passphrase is
     // entered on this device, which is the whole point of it.
-    if (payload.vault) {
+    if (!stale && payload.vault) {
       setVault(payload.vault);
       saveVault(payload.vault);
     }
     // Compared before applying: a fresh Set of the same ids is still a new
     // identity, and the stamping effect reads that as a local change — which
     // is how two idle devices came to push to each other on every focus.
-    if (Array.isArray(payload.read) && !unchanged(payload.read, [...readRef.current])) {
+    if (
+      !stale &&
+      Array.isArray(payload.read) &&
+      !unchanged(payload.read, [...readRef.current])
+    ) {
       const next = new Set(payload.read);
       setRead(next);
       saveRead(next);
@@ -457,7 +477,9 @@ export default function Reader() {
         { notes: payload.notes ?? [], removals: payload.noteRemovals ?? [] },
       );
 
-    if (typeof payload.updatedAt === "number" && payload.updatedAt > 0) {
+    // Never taken from a document this device has already moved past: the
+    // stamp only ever goes forward, or the next push looks like the stale one.
+    if (!stale && typeof payload.updatedAt === "number" && payload.updatedAt > 0) {
       updatedAtRef.current = payload.updatedAt;
       setUpdatedAt(payload.updatedAt);
       saveUpdatedAt(payload.updatedAt);
@@ -489,8 +511,13 @@ export default function Reader() {
 
       const remote = data.payload ?? {};
       const theirs = Number(remote.updatedAt ?? 0);
-      // Older than what this device has? Keep ours; the push below sends it.
-      if (theirs >= loadUpdatedAt()) applyRemote(remote);
+      /*
+       * An older document still has bookmarks and notes in it. Those merge
+       * whichever way round the two devices are — only the feed list, the
+       * read marks, the team list and the vault are decided by the stamp —
+       * so a stale pull is applied too, with the replaced parts held back.
+       */
+      applyRemote(remote, !pullable(theirs, loadUpdatedAt()).replace);
     },
     [applyRemote],
   );
@@ -1714,7 +1741,16 @@ export default function Reader() {
   }, [articles, ready]);
 
   const shown = useMemo(() => {
-    const list = settings.hideRead ? visible.filter((a) => !read.has(a.id)) : visible;
+    /*
+     * Hide-read triages a feed; it has no business emptying the keep-list.
+     * Saved is where an article was deliberately put so it would still be
+     * there later, and the read mark that would hide it often arrives from
+     * another device — so the computer that synced showed one of five
+     * bookmarks, while the badge beside it, counting the list itself, said
+     * five.
+     */
+    const hideRead = settings.hideRead && selection.type !== "saved";
+    const list = hideRead ? visible.filter((a) => !read.has(a.id)) : visible;
     if (settings.sort !== "top") return list;
     // Ranked first, by score; everything else keeps its date order below,
     // which is what an unranked story deserves — not a guess at a score.
@@ -1723,7 +1759,7 @@ export default function Reader() {
       const scoreB = ranking.get(b.id)?.score ?? -1;
       return scoreB - scoreA || timeOf(b) - timeOf(a);
     });
-  }, [visible, settings.hideRead, settings.sort, read, ranking]);
+  }, [visible, settings.hideRead, settings.sort, selection.type, read, ranking]);
 
   /**
    * How much of the list is actually rendered.
