@@ -215,6 +215,10 @@ export async function discover(
       total,
       title: wanted.title,
       siteUrl: wanted.siteUrl,
+      // The source is what was asked for, not the first feed read to preview
+      // it: a bundle's meta comes from whichever section answered first, and
+      // saving that would follow that one section for ever.
+      feedUrl: wanted.feedUrl,
       favicon: faviconFor(wanted.faviconHost),
       // No enrichment: these feeds carry summaries and images already, and
       // anything still missing one could only be filled from a host that

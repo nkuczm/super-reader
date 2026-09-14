@@ -121,3 +121,32 @@ test("no two directory entries claim the same id or feed", () => {
     names.add(key);
   }
 });
+
+test("the paper is saved as the paper, not as the first feed read", async () => {
+  // The preview builds its metadata from whichever section answered first.
+  // Saving that would quietly follow that one section for ever — which is the
+  // bug this whole bundle exists to fix, reintroduced one layer down.
+  const { discover } = await import("../lib/discover");
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const slug = url.split("/").pop();
+    return new Response(
+      `<?xml version="1.0"?><rss version="2.0"><channel><title>WSJ.com: ${slug}</title>
+       <link>https://www.wsj.com</link><description>${slug}</description>
+       <item><title>A ${slug} story</title><link>https://www.wsj.com/${slug}/story-1234</link>
+       <pubDate>Sun, 13 Sep 2026 10:00:00 GMT</pubDate></item></channel></rss>`,
+      { status: 200, headers: { "content-type": "application/rss+xml" } },
+    );
+  }) as typeof fetch;
+
+  try {
+    const result = await discover("wsj");
+    assert.ok(parseBundle(result.feedUrl), `saved ${result.feedUrl}, expected the bundle`);
+    assert.equal(result.title, "The Wall Street Journal");
+    // Every section contributed, and each story arrived once.
+    assert.ok(result.articles.length >= 8, `expected a story per section, got ${result.articles.length}`);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
