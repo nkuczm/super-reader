@@ -218,7 +218,9 @@ export function slugTextOf(link: string): string {
       .filter(Boolean)
       // Trailing ids and dates are not words anyone searched for.
       .filter((part) => !/^\d+$/.test(part) && !/^[0-9a-f]{6,}$/i.test(part))
-      .join(" ");
+      .join(" ")
+      // Slugs join words with hyphens; the words are the point.
+      .replace(/[-_]+/g, " ");
   } catch {
     return "";
   }

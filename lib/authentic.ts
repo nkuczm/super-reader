@@ -153,13 +153,19 @@ export function judge(candidate: Candidate, options: Options = {}): Judgement {
     reasons.push("no headline");
   } else if (CHROME_TITLES.has(flattened)) {
     return { score: 0, keep: false, reasons: [`"${title}" is a button, not a headline`] };
-  } else if (title.length < 12 || flattened.split(" ").length < 3) {
+  } else if ((title.length < 12 || flattened.split(" ").length < 3) && options.from !== "feed") {
     score -= 0.3;
     reasons.push("headline too short to be one");
   }
 
+  // A feed item is an article because the publisher put it in their feed.
+  // Shape heuristics exist to judge links we found ourselves; applying them
+  // to a declaration would mean overruling the only party who actually knows.
+  // Plenty of blogs publish at /a-post with a four-word headline.
+  const declared = options.from === "feed";
+
   if (looksLikeSlug(url.pathname)) score += 0.2;
-  else if (parts.length === 1) {
+  else if (parts.length === 1 && !declared) {
     score -= 0.2;
     reasons.push("a single path segment, which is usually a section");
   }
@@ -169,7 +175,7 @@ export function judge(candidate: Candidate, options: Options = {}): Judgement {
   if (candidate.summary && candidate.summary.length > 40) score += 0.05;
 
   // A link with a query string but no path shape is nearly always a control.
-  if (parts.length <= 1 && url.search) {
+  if (parts.length <= 1 && url.search && !declared) {
     score -= 0.2;
     reasons.push("looks like a link that does something rather than one to read");
   }

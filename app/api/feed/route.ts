@@ -8,6 +8,7 @@ import { parseApiSourceUrl, fetchApiSource } from "@/lib/apis";
 import { decodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import { parseBundle, mergeBundled, PER_MEMBER } from "@/lib/bundle";
 import { canonicalUrl } from "@/lib/url";
+import { augment } from "@/lib/harvest";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +21,16 @@ export const maxDuration = 60;
  * threw away a day and a half of it on every refresh.
  */
 const MAX_PER_SOURCE = 100;
+
+/** The site root a sitemap would live at, or nothing if this is not a site. */
+function originOf(siteUrl: string | undefined) {
+  if (!siteUrl) return undefined;
+  try {
+    return new URL(siteUrl).origin;
+  } catch {
+    return undefined;
+  }
+}
 
 /** Refresh one known feed URL. Accepts ?url= repeated for a batch. */
 export async function GET(request: Request) {
@@ -73,12 +84,17 @@ export async function GET(request: Request) {
           const ready = await enrichArticles(merged, {
             siteDescription: meta.description,
           });
+          const whole = await augment(ready, {
+            origin: originOf(meta.siteUrl),
+            limit: MAX_PER_SOURCE,
+          });
           return {
             ok: true as const,
             ...meta,
             feedUrl: url,
             favicon: faviconFor(meta.siteUrl),
-            articles: ready,
+            articles: whole.articles,
+            coverage: whole.coverage,
           };
         }
 
@@ -97,12 +113,23 @@ export async function GET(request: Request) {
         const ready = await enrichArticles(recent, {
           siteDescription: meta.description,
         });
+        /**
+         * A feed is one route into a publisher, not the whole of what they
+         * filed. Everything their news sitemap carries is merged in here, so
+         * a source collects what was published rather than what its feed
+         * happened to still be holding.
+         */
+        const whole = await augment(ready, {
+          origin: originOf(meta.siteUrl),
+          limit: MAX_PER_SOURCE,
+        });
         return {
           ok: true as const,
           ...meta,
           feedUrl: url,
           favicon: faviconFor(meta.siteUrl),
-          articles: ready,
+          articles: whole.articles,
+          coverage: whole.coverage,
         };
       } catch (error) {
         return {
