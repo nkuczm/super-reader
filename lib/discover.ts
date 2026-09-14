@@ -240,6 +240,9 @@ export async function discover(
       total,
       title: wanted.title,
       siteUrl: wanted.siteUrl,
+      // An aggregator's feed describes the aggregator ("Google News"), which
+      // is not what this source is.
+      description: wanted.note ?? meta.description,
       // The source is what was asked for, not the first feed read to preview
       // it: a bundle's meta comes from whichever section answered first, and
       // saving that would follow that one section for ever.

@@ -26,6 +26,11 @@ export type KnownFeed = {
   faviconHost: string;
   /** A section reads as narrower than the publisher's whole output. */
   scope: "site" | "section";
+  /**
+   * What to say about the source, where the feed's own description would say
+   * something misleading — an aggregator names itself, not the publisher.
+   */
+  note?: string;
 };
 
 const DJ = "https://feeds.content.dowjones.io/public/rss/";
@@ -118,6 +123,7 @@ function apNews(): KnownFeed {
     title: "AP News",
     siteUrl: "https://apnews.com",
     faviconHost: "apnews.com",
+    note: "The AP wire, gathered through Google News: apnews.com refuses every server request, so the headlines are here and each story opens on AP's site.",
     /**
      * Not because AP is a section of something. Scope decides whether the
      * refresh also collects from the publisher's sitemap, and the host behind

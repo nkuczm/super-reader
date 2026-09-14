@@ -221,3 +221,11 @@ test("a repaired AP feed is the one the directory offers", () => {
   // Ordered by the clock, so it says nothing about what AP led with.
   assert.equal(ap.front, undefined);
 });
+
+test("AP says what it is rather than naming the aggregator", () => {
+  const ap = knownFeedFor("AP");
+  assert.ok(ap?.note);
+  assert.match(ap.note, /apnews\.com/);
+  // Only the sources that need it carry one.
+  assert.equal(knownFeedFor("WSJ")?.note, undefined);
+});
