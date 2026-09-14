@@ -2,8 +2,10 @@
   "comment": [
     "Real sources, checked against a running deployment by scripts/coverage.mjs.",
     "The unit tests prove the parsing; this proves the internet still behaves.",
-    "Add a line whenever a source misbehaves in real use, with what you expect",
-    "of it — the entry becomes the thing that notices if it regresses."
+    "The expectation that matters is minInWindow: coverage is how much of what a",
+    "publisher filed recently we caught, not how many articles came back. Add a",
+    "line whenever a source misbehaves in real use, with what you expect of it \u2014",
+    "the entry becomes the thing that notices if it regresses."
   ],
   "sources": [
     {
@@ -11,6 +13,7 @@
       "why": "Reported missing stories: this is where the WSJ files everything.",
       "expect": {
         "minArticles": 40,
+        "minInWindow": 25,
         "maxAgeHours": 12,
         "bundleOfAtLeast": 6,
         "titleIs": "The Wall Street Journal"
@@ -19,27 +22,77 @@
     {
       "input": "https://www.wsj.com/finance",
       "why": "A section must stay a section, not widen to the whole paper.",
-      "expect": { "minArticles": 10, "maxAgeHours": 24, "scopeIs": "section" }
+      "expect": {
+        "minArticles": 10,
+        "minInWindow": 5,
+        "maxAgeHours": 24,
+        "scopeIs": "section"
+      }
     },
     {
       "input": "https://abliteration.ai/blog",
       "why": "No feed, two posts: the scraper's minimum used to refuse it.",
-      "expect": { "minArticles": 2, "kindIs": "page" }
+      "expect": {
+        "minArticles": 2,
+        "kindIs": "page"
+      }
     },
     {
       "input": "https://www.theverge.com",
-      "why": "An ordinary declared RSS feed — the common case.",
-      "expect": { "minArticles": 10, "maxAgeHours": 24 }
+      "why": "An ordinary declared RSS feed \u2014 the common case.",
+      "expect": {
+        "minArticles": 10,
+        "minInWindow": 10,
+        "maxAgeHours": 24
+      }
     },
     {
       "input": "https://simonwillison.net",
       "why": "An independent blog syndicating full text in Atom.",
-      "expect": { "minArticles": 5, "maxAgeHours": 336 }
+      "expect": {
+        "minArticles": 5,
+        "maxAgeHours": 336
+      }
     },
     {
       "input": "https://www.federalreserve.gov/newsevents/pressreleases.htm",
       "why": "A government listing page with no feed of its own.",
-      "expect": { "minArticles": 5 }
+      "expect": {
+        "minArticles": 5
+      }
+    },
+    {
+      "input": "https://www.theguardian.com/us",
+      "why": "A news sitemap ten times deeper than the feed: the case the union design exists for.",
+      "expect": {
+        "minInWindow": 40,
+        "maxAgeHours": 6,
+        "maxUndated": 5
+      }
+    },
+    {
+      "input": "https://www.cnn.com",
+      "why": "Declares no RSS at all \u2014 if this returns nothing, the sitemap route has broken.",
+      "expect": {
+        "minInWindow": 15,
+        "maxAgeHours": 12
+      }
+    },
+    {
+      "input": "https://techcrunch.com",
+      "why": "The reverse case: its feed carries more than its sitemap, so the merge must keep both.",
+      "expect": {
+        "minInWindow": 5,
+        "maxAgeHours": 48
+      }
+    },
+    {
+      "input": "https://www.bbc.com/news/technology",
+      "why": "A section that must stay one: the site sitemap covers the whole newsroom.",
+      "expect": {
+        "minInWindow": 5,
+        "scopeIs": "section"
+      }
     }
   ]
 }
