@@ -123,6 +123,12 @@ const BAND_LABELS: Record<"major" | "big" | "notable" | "quiet", string> = {
   quiet: "No wider coverage found",
 };
 
+/**
+ * How many articles are added to the rendered list at a time. Two screenfuls
+ * on a phone, so the next batch is built while there is still list to scroll.
+ */
+const PAGE = 40;
+
 function fileTitleFor(file: Attachment, parentTitle: string) {
   const kind = file.kind === "pdf" ? "PDF" : file.kind.toUpperCase();
   return `${parentTitle} (${kind})`;
@@ -1552,10 +1558,22 @@ export default function Reader() {
     downloading.current = true;
     setOffline({ state: "working", done: 0, total: links.length });
     try {
+      /**
+       * Topping up the offline copy can run to a couple of hundred articles,
+       * and reporting every one of them was a render of the reader per
+       * article — a background job making the foreground slow. The counter is
+       * a progress note, so it is worth a redraw every quarter second and no
+       * more; the last one always lands, whatever the clock says.
+       */
+      let told = 0;
       const result = await downloadForOffline(
         links,
         ({ saved, ...progress }) => {
-          setOffline({ state: "working", ...progress });
+          const now = Date.now();
+          if (progress.done === progress.total || now - told > 250) {
+            told = now;
+            setOffline({ state: "working", ...progress });
+          }
           // Tick each article's mark on as it lands, not all at the end.
           if (saved) markSaved(saved);
         },
@@ -1609,7 +1627,13 @@ export default function Reader() {
       }
     };
 
-    void check();
+    /**
+     * Not straight away. This competes with the refresh for the network and
+     * with the first render for the main thread, and the reader is reading —
+     * a second and a half puts the top of the list on screen and answering
+     * before the topping-up starts.
+     */
+    const settle = setTimeout(check, 1500);
     const onVisible = () => {
       if (document.visibilityState === "visible") void check();
     };
@@ -1618,6 +1642,7 @@ export default function Reader() {
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
+      clearTimeout(settle);
       window.removeEventListener("focus", check);
       window.removeEventListener("online", check);
       document.removeEventListener("visibilitychange", onVisible);
@@ -1699,6 +1724,54 @@ export default function Reader() {
       return scoreB - scoreA || timeOf(b) - timeOf(a);
     });
   }, [visible, settings.hideRead, settings.sort, read, ranking]);
+
+  /**
+   * How much of the list is actually rendered.
+   *
+   * A source now carries up to 250 articles (app/api/feed), so a dozen
+   * sources is a few thousand — and rendering all of them meant 48,000 DOM
+   * nodes, three seconds before the first headline appeared on a desktop, and
+   * a phone that stopped answering taps whenever a refresh landed, because
+   * every arriving article re-rendered the whole pile. Nothing scrolls past
+   * the first screenful before it is asked for, so only a screenful and a
+   * margin is built, and more is appended as the reader reaches the end.
+   *
+   * The list itself is untouched: `shown` is still the whole thing, which is
+   * what the counts, the ranking and the offline copy are made from.
+   */
+  const [rendered, setRendered] = useState(PAGE);
+  const tail = useRef<HTMLDivElement | null>(null);
+
+  const inView = useMemo(() => shown.slice(0, rendered), [shown, rendered]);
+  const more = shown.length > inView.length;
+
+  // A different list starts at its own beginning, not part-way down the last
+  // one's depth.
+  const listKey = `${selection.type}:${"id" in selection ? selection.id : ""}:${settings.sort}:${settings.hideRead}`;
+  useEffect(() => {
+    setRendered(PAGE);
+  }, [listKey]);
+
+  /**
+   * Grow the rendered list as its end comes into view. The sentinel sits a
+   * long way below the fold, so the next batch is built before the reader
+   * arrives at it and the scroll never stops at a seam.
+   */
+  useEffect(() => {
+    const sentinel = tail.current;
+    const root = listRef.current;
+    if (!sentinel || !root || !more) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setRendered((count) => count + PAGE);
+        }
+      },
+      { root, rootMargin: "1200px 0px" },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [more, inView.length]);
 
   /** The article whose score page is open, with its ranking. */
   const explainRank = useMemo(() => {
@@ -1908,7 +1981,11 @@ export default function Reader() {
         return;
       }
       // Rubber-band it, so the list follows the finger without racing it.
-      setPullDistance(Math.min(travelled * 0.45, PULL_TRIGGER * 1.6));
+      const next = Math.min(travelled * 0.45, PULL_TRIGGER * 1.6);
+      // A touchmove arrives every few milliseconds, and each one that changes
+      // this re-renders the list. Rounded to four pixels, which is under what
+      // the eye can see move and a fraction of the renders.
+      setPullDistance((current) => (Math.abs(next - current) >= 4 ? next : current));
     },
     [],
   );
@@ -2601,7 +2678,7 @@ export default function Reader() {
           </div>
         ) : (
           <div className={`articles view-${settings.view}`}>
-            {shown.map((article) => {
+            {inView.map((article) => {
               const source = sourceById.get(article.sourceId);
               return (
                 <article
@@ -2860,6 +2937,13 @@ export default function Reader() {
                 </article>
               );
             })}
+            {/* Where the next batch comes in. Kept out of the list itself so
+                it cannot be mistaken for an article with nothing in it. */}
+            {more && (
+              <div className="list-tail" ref={tail} aria-hidden>
+                <span className="spinner" />
+              </div>
+            )}
           </div>
         )}
           </>

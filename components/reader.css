@@ -1003,6 +1003,11 @@
   background: var(--bg-sub); border-bottom: 1px solid var(--line);
 }
 
+.list-tail {
+  display: flex; align-items: center; justify-content: center;
+  padding: 22px 0 30px; color: var(--text-dim);
+}
+
 /* ---- The score page ----------------------------------------------------- */
 
 .score-body { max-width: 680px; margin: 0 auto; padding: 0 0 90px; }
