@@ -23,7 +23,8 @@ import { readFile } from "node:fs/promises";
 
 const args = process.argv.slice(2);
 const base = (args.find((a) => a.startsWith("http")) ?? "").replace(/\/$/, "");
-const only = args[args.indexOf("--only") + 1];
+const onlyAt = args.indexOf("--only");
+const only = onlyAt === -1 ? undefined : args[onlyAt + 1];
 const asJson = args.includes("--json");
 
 if (!base) {
@@ -47,7 +48,17 @@ async function check({ input, why, expect = {} }) {
   let payload;
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(60_000) });
-    payload = await res.json();
+    const text = await res.text();
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      // Not the app answering: usually a proxy or network that cannot reach
+      // the deployment, which is a different problem from a failing source.
+      return {
+        input, why, ok: false,
+        problems: [`${res.status} but not the app answering: ${text.slice(0, 80).trim()}`],
+      };
+    }
     if (!res.ok) {
       return { input, why, ok: false, problems: [`${res.status}: ${payload.error ?? "no reason given"}`] };
     }
