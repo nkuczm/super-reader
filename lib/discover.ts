@@ -7,6 +7,7 @@ import { xHandleFrom, fetchXFeed } from "./x";
 import { parseApiSourceUrl, fetchApiSource } from "./apis";
 import { subredditFrom, subredditFeedUrl, subredditPageUrl } from "./reddit";
 import { knownFeedFor } from "./publishers";
+import { frontOutletForHost } from "./outlets";
 import { parseBundle, mergeBundled } from "./bundle";
 import { canonicalUrl } from "./url";
 import { sortNewestFirst } from "./sort";
@@ -467,6 +468,53 @@ export async function discover(
       if (found) return found;
     } catch {
       /* try the next index page */
+    }
+  }
+
+  /*
+   * 3b. Nothing answered, and the outlet directory already holds a feed for
+   *     this domain — verified when it was added and re-checked by
+   *     /api/outlets/audit, which is more than a scrape of the front page can
+   *     claim. cnbc.com is why this rung exists: CNBC serves its RSS from a
+   *     search endpoint (search.cnbc.com/rs/search/combinedcms/view.xml?…)
+   *     that is neither declared in the HTML nor guessable from a path, so
+   *     every candidate above 404s and the reader was left with whatever the
+   *     homepage scrape made of it — the confident, useless list of §6.
+   *
+   *     Only for a bare domain. A section URL that found no feed is better
+   *     served by scraping the section than by a site-wide feed wearing the
+   *     section's name, which is the WSJ bug in another costume.
+   */
+  if (!hasSection) {
+    const outlet = frontOutletForHost(asUrl.hostname);
+    if (outlet) {
+      try {
+        const { meta, total, articles } = await tryFeed(outlet.feedUrl, limit);
+        if (articles.length > 0) {
+          return {
+            ...meta,
+            kind: "feed",
+            // A front page carries the whole newsroom, so it may be augmented
+            // site-wide at refresh; a desk may not (docs/COLLECTION.md §3).
+            scope: outlet.front || !outlet.section ? "site" : "section",
+            total,
+            // The newsroom's name, not the desk's: a bare domain asked for
+            // the paper, and the feed's own title is often a search query.
+            title:
+              outlet.front || !outlet.section
+                ? outlet.name
+                : `${outlet.name} · ${outlet.section}`,
+            siteUrl: outlet.siteUrl,
+            feedUrl: outlet.feedUrl,
+            favicon: faviconFor(outlet.siteUrl),
+            articles: await enrichArticles(articles, {
+              siteDescription: meta.description,
+            }),
+          };
+        }
+      } catch {
+        /* the directory entry is stale too — fall through to the page */
+      }
     }
   }
 

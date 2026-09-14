@@ -351,6 +351,41 @@ export const PACKS: { id: string; name: string; blurb: string; outlets: string[]
   { id: "culture", name: "Culture", blurb: "Film, music and television.", outlets: ["variety", "hollywoodreporter", "deadline", "pitchfork", "rollingstone"], subreddits: ["movies", "television"] },
 ];
 
+/**
+ * The directory entry that means a bare domain.
+ *
+ * The directory already holds a verified feed for every outlet in it — it is
+ * audited by `/api/outlets/audit`, and the panel is swept every run — but
+ * discovery never consulted it, so pasting `cnbc.com` went off to crawl a
+ * site that publishes its RSS through a search endpoint no amount of looking
+ * at the HTML will find.
+ *
+ * A front-page entry is preferred, then the lowest tier, then whichever entry
+ * carries no section: a bare domain means the newsroom, not one of its desks.
+ */
+export function frontOutletForHost(host: string): Outlet | null {
+  const wanted = host.replace(/^www\./, "").toLowerCase();
+  if (!wanted) return null;
+
+  const matches = OUTLETS.filter((outlet) => {
+    let outletHost: string;
+    try {
+      outletHost = new URL(outlet.siteUrl).hostname.replace(/^www\./, "").toLowerCase();
+    } catch {
+      return false;
+    }
+    return outletHost === wanted;
+  });
+  if (matches.length === 0) return null;
+
+  return [...matches].sort((a, b) => {
+    const front = Number(Boolean(b.front)) - Number(Boolean(a.front));
+    if (front !== 0) return front;
+    if (a.tier !== b.tier) return a.tier - b.tier;
+    return Number(Boolean(a.section)) - Number(Boolean(b.section));
+  })[0];
+}
+
 export function outletById(id: string) {
   return OUTLETS.find((outlet) => outlet.id === id);
 }

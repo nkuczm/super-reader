@@ -65,10 +65,19 @@ function run<T>(
 
 export async function readCached(url: string): Promise<CachedArticle | null> {
   try {
-    const hit = await run<CachedArticle>(ARTICLES, "readonly", (s) => s.get(url));
-    if (!hit) return null;
+    const direct = await run<CachedArticle>(ARTICLES, "readonly", (s) => s.get(url));
     // Showing the wrong article is worse than fetching it again: a copy from
     // an older extraction is ignored rather than served.
+    if (direct) return direct.v === EXTRACT_VERSION ? direct : null;
+
+    // Filed under the URL the server resolved it to, rather than the link
+    // that was asked for — a topic source's links go through a redirector.
+    // Without this the copy on the device was invisible to the reader that
+    // asked for it and to the download that was trying to keep it.
+    const storedAs = await filedUnder(url);
+    if (!storedAs || storedAs === url) return null;
+    const hit = await run<CachedArticle>(ARTICLES, "readonly", (s) => s.get(storedAs));
+    if (!hit) return null;
     return hit.v === EXTRACT_VERSION ? hit : null;
   } catch {
     return null;
@@ -84,7 +93,7 @@ export async function writeCached(article: ReadableArticle, requestedUrl?: strin
     await run(ARTICLES, "readwrite", (s) =>
       s.put({ ...article, cachedAt: Date.now(), v: EXTRACT_VERSION }),
     );
-    await rememberLink(requestedUrl ?? article.url);
+    await rememberLink(requestedUrl ?? article.url, article.url);
   } catch {
     /* storage full or unavailable — reading online still works */
   }
@@ -137,9 +146,12 @@ export async function pruneTo(keep: Set<string>, keepLinks?: Set<string>) {
       }
     }
     const links = keepLinks ?? keep;
+    const filed = await linkIndex();
     await setMeta(
       LINKS,
-      (await savedLinks()).filter((url) => links.has(url)),
+      Object.fromEntries(
+        Object.entries(filed).filter(([requested]) => links.has(requested)),
+      ),
     );
   } catch {
     /* ignore */
@@ -157,22 +169,51 @@ export async function pruneTo(keep: Set<string>, keepLinks?: Set<string>) {
  */
 const LINKS = "links";
 
+/**
+ * Requested link → the URL its article is actually filed under.
+ *
+ * This was a plain list of requested links, which could say *that* an article
+ * was on the device but not *where*. So a link whose article is filed
+ * elsewhere looked like a miss on every run: it was fetched again, and if the
+ * fetch failed — a dropped connection, a publisher refusing us that minute —
+ * the good copy already on the device was not in the run's keep-set and was
+ * deleted. A bookmark could lose its text that way while still being a
+ * bookmark, which is the one thing saving an article is supposed to prevent.
+ *
+ * Older devices hold the array; it is read as a map to itself.
+ */
+type LinkIndex = Record<string, string>;
+
+async function linkIndex(): Promise<LinkIndex> {
+  const stored = await meta<LinkIndex | string[]>(LINKS);
+  if (!stored) return {};
+  if (Array.isArray(stored)) {
+    return Object.fromEntries(stored.map((url) => [url, url]));
+  }
+  return stored;
+}
+
 export async function savedLinks(): Promise<string[]> {
-  return (await meta<string[]>(LINKS)) ?? [];
+  return Object.keys(await linkIndex());
+}
+
+/** Where a link's article is filed, when that is not the link itself. */
+export async function filedUnder(url: string): Promise<string | null> {
+  return (await linkIndex())[url] ?? null;
 }
 
 /**
  * Serialised, because the download saves three articles at once: two
- * concurrent read-modify-writes of this list would each start from the same
- * array and the last one to finish would drop the other's link.
+ * concurrent read-modify-writes of this index would each start from the same
+ * object and the last one to finish would drop the other's link.
  */
 let linkWrites: Promise<void> = Promise.resolve();
 
-async function rememberLink(url: string) {
+async function rememberLink(url: string, storedAs: string) {
   linkWrites = linkWrites.then(async () => {
-    const current = await savedLinks();
-    if (current.includes(url)) return;
-    await setMeta(LINKS, [...current, url]);
+    const current = await linkIndex();
+    if (current[url] === storedAs) return;
+    await setMeta(LINKS, { ...current, [url]: storedAs });
   });
   await linkWrites;
 }
@@ -353,6 +394,27 @@ export async function downloadForOffline(
     );
   }
 
-  await pruneTo(storedKeys, new Set(wanted.map((t) => t.url)));
+  /*
+   * Housekeeping, and only on a run that knows enough to do it safely.
+   *
+   * Pruning deletes everything outside the keep-set, and the keep-set is what
+   * this run could account for. A run where some fetches failed — a dropped
+   * connection, a publisher refusing us for a minute — cannot tell "no longer
+   * wanted" from "could not be reached just now", and deleting on that
+   * reading took the text of articles the device still lists away with it.
+   * A bookmark losing its copy is the worst version of that: keeping the
+   * article readable after it leaves its feed is the whole point of saving
+   * it. So a run with any failure leaves the store alone; the next clean run
+   * tidies up, and the cost of waiting is a little disk.
+   */
+  if (failed === 0) {
+    // What each wanted link is filed under, for the ones this run skipped
+    // because they were already there under a different URL.
+    for (const target of wanted) {
+      const filed = await filedUnder(target.url);
+      if (filed) storedKeys.add(filed);
+    }
+    await pruneTo(storedKeys, new Set(wanted.map((t) => t.url)));
+  }
   return { saved, failed };
 }

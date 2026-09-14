@@ -205,7 +205,16 @@ Each of these is a bug that shipped. Do not undo them.
    it would have been.
 6. **A known-publisher entry comes before everything.** `wsj.com` would
    otherwise be crawled into a 401, and the word "wsj" would become a news
-   search.
+   search. The outlet directory is the same fact in bulk: it holds an audited
+   feed for 160-odd domains, and discovery now falls back to it for a bare
+   domain whose feeds cannot be found by looking. `cnbc.com` is the case —
+   CNBC serves RSS from `search.cnbc.com/rs/search/combinedcms/view.xml?id=…`,
+   which is neither declared in the HTML nor guessable from a path, so every
+   candidate 404'd and the reader was handed a scrape of the front page. The
+   rung sits *after* the feed probing and *before* the page scrape: a verified
+   feed beats a heuristic, and a site that answers for itself still wins. Only
+   for a bare domain — a section URL with no feed is better scraped than given
+   a site-wide feed wearing the section's name.
 7. **Order the discovery ladder deliberately.** Subreddits before URLs
    (`reddit.com/...` would be scraped as a page); X before URLs (login wall);
    topics last.
