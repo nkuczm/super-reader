@@ -8,6 +8,16 @@ export type Source = SourceMeta & {
   id: string;
   kind: "feed" | "topic" | "page" | "x" | "api";
   /**
+   * Whether this follows a whole publisher or one section of one.
+   *
+   * Recorded at the moment it is added, because only discovery knows: by the
+   * time a source is refreshed, all that is left is a feed URL, and a section
+   * feed and a site feed are indistinguishable from one. It decides whether
+   * the publisher's news sitemap may be merged in — doing that to a section
+   * would quietly turn "BBC Technology" into "the BBC".
+   */
+  scope?: "section" | "site";
+  /**
    * Watch this source for new posts: highlight it in the sidebar and list it
    * in Notifications until it has been looked at. Kept on the source itself
    * so it travels with the feed list that already syncs.

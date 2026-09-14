@@ -67,6 +67,7 @@ async function check({ input, why, expect = {} }) {
   }
 
   const articles = payload.articles ?? [];
+  const now = Date.now();
   const dated = articles
     .map((a) => Date.parse(a.publishedAt ?? ""))
     .filter((t) => Number.isFinite(t))
@@ -80,8 +81,32 @@ async function check({ input, why, expect = {} }) {
   const problems = [];
   const duplicates = articles.length - new Set(articles.map((a) => a.link)).size;
 
+  /**
+   * How many of the returned articles were published inside the window.
+   *
+   * This, not `total`, is what coverage means: a source returning four
+   * hundred articles spanning a year is covering less than one returning
+   * fifty from the last day. `minArticles` is kept for sources where the
+   * count is the point (a blog with no dates), but `minInWindow` is the
+   * expectation worth writing for anything that publishes regularly.
+   */
+  const windowHours = expect.windowHours ?? 48;
+  const inWindow = dated.filter((t) => now - t <= windowHours * HOUR).length;
+  const undated = articles.length - dated.length;
+
+  if (expect.minInWindow && inWindow < expect.minInWindow) {
+    problems.push(
+      `only ${inWindow} articles from the last ${windowHours}h, expected ${expect.minInWindow}+` +
+        ` (${articles.length} returned in total, so the volume is there and the freshness is not)`,
+    );
+  }
   if (expect.minArticles && payload.total < expect.minArticles) {
     problems.push(`only ${payload.total} articles, expected ${expect.minArticles}+`);
+  }
+  if (expect.maxUndated !== undefined && undated > expect.maxUndated) {
+    // Undated items cannot be placed in the window at all, so a source that
+    // stops dating its articles silently stops being measurable.
+    problems.push(`${undated} articles arrived with no date, expected at most ${expect.maxUndated}`);
   }
   if (expect.maxAgeHours && newestAgeHours !== null && newestAgeHours > expect.maxAgeHours) {
     // The failure that looks like success: a feed answering 200 with old news.
@@ -112,6 +137,9 @@ async function check({ input, why, expect = {} }) {
     scope: payload.scope,
     feeds: bundled || 1,
     total: payload.total,
+    inWindow,
+    windowHours,
+    undated,
     newestAgeHours: newestAgeHours === null ? null : Number(newestAgeHours.toFixed(1)),
     spanDays: Number(spanDays.toFixed(1)),
     tookMs: Date.now() - started,
@@ -135,6 +163,8 @@ if (asJson) {
     if (r.title) {
       console.log(
         `      ${r.title} · ${r.kind}/${r.scope} · ${r.feeds} feed(s) · ${r.total} items` +
+          ` · ${r.inWindow} in last ${r.windowHours}h` +
+          (r.undated ? ` · ${r.undated} undated` : "") +
           ` · newest ${r.newestAgeHours ?? "?"}h · spans ${r.spanDays}d · ${r.tookMs}ms`,
       );
     }
