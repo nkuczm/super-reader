@@ -29,3 +29,21 @@ export function canonicalUrl(input: string) {
   }
 }
 
+
+/**
+ * The little square next to a source's name. Google's service rather than
+ * fetching each site's own icon: a publisher that answers 403 to our server
+ * has no icon we could read, and this works for every host either way.
+ *
+ * Here rather than in lib/feed.ts so the reader can ask for one without
+ * pulling an XML parser into the browser bundle.
+ */
+export function faviconFor(siteUrl: string) {
+  let domain = siteUrl;
+  try {
+    domain = new URL(siteUrl).hostname;
+  } catch {
+    /* fall back to the raw string */
+  }
+  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
+}

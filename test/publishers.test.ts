@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseBundle } from "../lib/bundle";
-import { knownFeedFor, WSJ_CHOICES } from "../lib/publishers";
+import { knownFeedFor, WSJ_CHOICES, repairSources } from "../lib/publishers";
 import { OUTLETS, SUBREDDITS, PACKS } from "../lib/outlets";
 
 test("recognises the WSJ however it is asked for", () => {
@@ -149,4 +149,75 @@ test("the paper is saved as the paper, not as the first feed read", async () => 
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test("recognises the Associated Press however it is asked for", () => {
+  for (const input of [
+    "ap",
+    "AP",
+    "AP News",
+    "apnews",
+    "apnews.com",
+    "Associated Press",
+    "the associated press",
+    "https://apnews.com",
+    "https://www.apnews.com/hub/politics",
+    "https://apnews.com/article/some-story-0123456789",
+    // The hosts that used to serve AP's feeds.
+    "https://hosted.ap.org/dynamic/fronts/HOME",
+    "https://feeds.apnews.com/rss/apf-topnews",
+  ]) {
+    const known = knownFeedFor(input);
+    assert.ok(known, `should recognise ${input}`);
+    assert.equal(known.title, "AP News");
+    assert.equal(known.siteUrl, "https://apnews.com");
+    assert.equal(known.faviconHost, "apnews.com");
+    // The feed is Google's, so sitemap collection must not be aimed at it.
+    assert.equal(known.scope, "section");
+    assert.match(known.feedUrl, /^https:\/\/news\.google\.com\/rss\/search\?q=site%3Aapnews\.com/);
+  }
+});
+
+test("repairs a stored source whose feed has since died", () => {
+  // What a device saved back when these hosts worked.
+  const stored = [
+    { feedUrl: "https://apnews.com/rss/apf-topnews", title: "AP Top News", favicon: "old" },
+    { feedUrl: "https://feeds.a.dj.com/rss/RSSMarketsMain.xml", title: "WSJ Markets" },
+    { feedUrl: "https://feeds.bbci.co.uk/news/rss.xml", title: "BBC News" },
+  ];
+  const fixed = repairSources(stored);
+
+  assert.match(fixed[0].feedUrl, /news\.google\.com/);
+  assert.equal(fixed[0].title, "AP News");
+  assert.equal(fixed[1].feedUrl, "https://feeds.content.dowjones.io/public/rss/RSSMarketsMain");
+  // A feed that still works is left exactly as it was.
+  assert.deepEqual(fixed[2], stored[2]);
+});
+
+test("repairs an AP source built from a Bing search", () => {
+  const fixed = repairSources([
+    { feedUrl: "https://www.bing.com/news/search?q=site%3Aapnews.com&format=RSS", title: "AP" },
+  ]);
+  assert.match(fixed[0].feedUrl, /news\.google\.com/);
+  // A Bing search for anything else is left alone: it is a working feed and
+  // there is no measured better route for it.
+  const other = [
+    { feedUrl: "https://www.bing.com/news/search?q=semiconductors&format=RSS", title: "Chips" },
+  ];
+  assert.equal(repairSources(other), other);
+});
+
+test("leaves a list with nothing to repair identical", () => {
+  const stored = [{ feedUrl: "https://www.theguardian.com/uk/rss", title: "The Guardian" }];
+  // Same array, not a copy: a load that changes nothing must not read as an
+  // edit and get stamped and pushed to the other devices.
+  assert.equal(repairSources(stored), stored);
+});
+
+test("a repaired AP feed is the one the directory offers", () => {
+  const ap = OUTLETS.find((outlet) => outlet.id === "ap-wire");
+  assert.ok(ap);
+  assert.equal(ap.feedUrl, knownFeedFor("Associated Press")?.feedUrl);
+  // Ordered by the clock, so it says nothing about what AP led with.
+  assert.equal(ap.front, undefined);
 });

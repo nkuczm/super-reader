@@ -41,13 +41,16 @@ export type OutletCategory =
   | "aggregator";
 
 /**
- * Four newsrooms are missing on purpose, and it is the first thing anyone
- * will notice: the Associated Press, Reuters, USA Today and PBS NewsHour.
- * Each was checked from the deployment — AP answers 403 to anything that is
- * not a browser, Reuters retired its feeds (404), and USA Today and PBS
- * serve HTML where their feed used to be. A directory entry that can never
- * load is worse than an absence, so the wires are absent until they publish
- * something fetchable again. `/api/outlets/audit` is how that gets rechecked.
+ * Three newsrooms are missing on purpose: Reuters, USA Today and PBS
+ * NewsHour. Each was checked from the deployment — Reuters retired its feeds
+ * (404), and USA Today and PBS serve HTML where their feed used to be. A
+ * directory entry that can never load is worse than an absence, so they stay
+ * out until they publish something fetchable again. `/api/outlets/audit` is
+ * how that gets rechecked.
+ *
+ * The Associated Press was in that list and is now back, through the only
+ * route that answers — see the note on AP in lib/publishers.ts. It is the one
+ * entry here whose feed is not the publisher's own.
  */
 export type Outlet = {
   id: string;
@@ -67,6 +70,9 @@ export type Outlet = {
 /* eslint-disable prettier/prettier */
 export const OUTLETS: Outlet[] = [
   // ---- Wires and agenda-setting general news (tier 1, the ranking panel) --
+  // Not a front page: this feed is ordered by the clock, so it carries no
+  // signal about what AP chose to lead with, and `front` must stay off.
+  { id: "ap-wire", name: "AP News", section: "The wire", feedUrl: "https://news.google.com/rss/search?q=site%3Aapnews.com+when%3A2d&hl=en-US&gl=US&ceid=US:en", siteUrl: "https://apnews.com", category: "general", region: "US", tier: 1, panel: true },
   { id: "nyt-home", name: "The New York Times", section: "Front page", feedUrl: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml", siteUrl: "https://www.nytimes.com", category: "general", region: "US", tier: 1, panel: true, front: true },
   { id: "nyt-world", name: "The New York Times", section: "World", feedUrl: "https://rss.nytimes.com/services/xml/rss/nyt/World.xml", siteUrl: "https://www.nytimes.com/section/world", category: "world", region: "US", tier: 1, panel: true },
   { id: "nyt-politics", name: "The New York Times", section: "Politics", feedUrl: "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml", siteUrl: "https://www.nytimes.com/section/politics", category: "politics", region: "US", tier: 1, panel: true },
@@ -331,7 +337,7 @@ export const SUBREDDITS: SubredditEntry[] = [
 
 /** Ready-made bundles, so a reader can follow a beat in one tap. */
 export const PACKS: { id: string; name: string; blurb: string; outlets: string[]; subreddits?: string[] }[] = [
-  { id: "front-pages", name: "Front pages", blurb: "What the big newsrooms are leading with today.", outlets: ["nyt-home", "wapo-national", "wsj-world", "bbc-top", "guardian-front", "npr-news", "aljazeera", "cnn-top", "nbc-news"] },
+  { id: "front-pages", name: "Front pages", blurb: "What the big newsrooms are leading with today.", outlets: ["ap-wire", "nyt-home", "wapo-national", "wsj-world", "bbc-top", "guardian-front", "npr-news", "aljazeera", "cnn-top", "nbc-news"] },
   { id: "us-politics", name: "U.S. politics", blurb: "Washington from several directions at once.", outlets: ["politico", "thehill", "npr-politics", "nyt-politics", "wapo-politics", "axios", "nationalreview", "motherjones", "thedispatch"], subreddits: ["politics"] },
   { id: "markets", name: "Markets & business", blurb: "Markets, earnings and the economy.", outlets: ["wsj-markets", "ft-home", "cnbc-top", "bloomberg-markets", "marketwatch", "businessinsider", "economist"], subreddits: ["Economics", "investing"] },
   { id: "tech", name: "Technology", blurb: "The industry, its politics and its hardware.", outlets: ["verge", "arstechnica", "techcrunch", "wired", "404media", "techmeme", "hn-frontpage", "bloomberg-tech"], subreddits: ["technology", "programming"] },

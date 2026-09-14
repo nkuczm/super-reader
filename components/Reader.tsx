@@ -93,6 +93,7 @@ import type { PickedSource } from "./OutletCatalog";
 import ScoreExplainer from "./ScoreExplainer";
 import type { CorpusStats } from "./ScoreExplainer";
 import { canonicalUrl } from "@/lib/url";
+import { repairSources } from "@/lib/publishers";
 import { mergeWindow, stamp } from "@/lib/window";
 import { mergeSaved, differsFrom, slimForSync } from "@/lib/saved";
 import {
@@ -287,7 +288,18 @@ export default function Reader() {
   const noteRemovalsRef = useRef<NoteRemoval[]>([]);
 
   useEffect(() => {
-    setFeeds(loadFeeds());
+    /**
+     * Repair on load: a source whose feed has died since it was added points
+     * at a URL that cannot answer, and the list just quietly stops growing —
+     * see repairSources in lib/publishers.ts. Each device fixes its own copy
+     * the next time it opens.
+     */
+    setFeeds(
+      loadFeeds().map((feed) => {
+        const sources = repairSources(feed.sources);
+        return sources === feed.sources ? feed : { ...feed, sources };
+      }),
+    );
     setRead(loadRead());
     setSyncCode(loadSyncCode());
     setSettings(loadSettings());

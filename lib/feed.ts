@@ -219,15 +219,8 @@ export function unwrapRedirect(url: string): string {
   return current;
 }
 
-export function faviconFor(siteUrl: string) {
-  let domain = siteUrl;
-  try {
-    domain = new URL(siteUrl).hostname;
-  } catch {
-    /* fall back to the raw string */
-  }
-  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
-}
+/** Moved to lib/url.ts, and re-exported so its callers here keep working. */
+export { faviconFor } from "./url";
 
 /**
  * The full article text a feed carries for one of its entries, when it has
@@ -327,7 +320,52 @@ export function parseFeed(
       title: text(rss.title) || site,
       description: stripHtml(text(rss.description), 200) || undefined,
     },
-    articles: sortNewestFirst(items.map((item: any) => rssItem(item, site))),
+    articles: sortNewestFirst(
+      items.map((item: any) => {
+        const article = rssItem(item, site);
+        return isAggregatorFeed(feedUrl) ? withoutSourceSuffix(article, item) : article;
+      }),
+    ),
+  };
+}
+
+/** A search feed from an aggregator rather than a publisher's own feed. */
+function isAggregatorFeed(feedUrl: string) {
+  try {
+    return new URL(feedUrl).hostname.endsWith("news.google.com");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Google News appends the publisher to every headline — "… postponed - AP
+ * News" — which is noise in a list where the publisher is already named
+ * beside it, on every single item. Removed using the <source> element the
+ * item carries, so this strips the name the feed actually stated rather than
+ * guessing at whatever follows the last dash in a headline.
+ */
+function withoutSourceSuffix(article: Article, item: any): Article {
+  const source = text(item?.source);
+  let title = article.title;
+  if (source) {
+    const suffix = ` - ${source}`;
+    if (title.endsWith(suffix)) title = title.slice(0, -suffix.length).trim() || article.title;
+  }
+  /**
+   * Its description is the headline again, wrapped in a link, with the
+   * publisher after it. Printed under the headline that way it reads as the
+   * same sentence twice, so a summary that only repeats the title is dropped
+   * — better an item with no summary than one that says nothing new.
+   */
+  const summary = article.summary?.trim();
+  const echoes =
+    summary !== undefined &&
+    summary.replace(/\s+/g, " ").toLowerCase().startsWith(title.replace(/\s+/g, " ").toLowerCase());
+  return {
+    ...article,
+    title,
+    summary: echoes ? undefined : article.summary,
   };
 }
 

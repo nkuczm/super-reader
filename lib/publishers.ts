@@ -14,6 +14,7 @@
  */
 
 import { bundleOf } from "./bundle";
+import { faviconFor } from "./url";
 
 export type KnownFeed = {
   feedUrl: string;
@@ -83,6 +84,57 @@ function wsjWhole(): KnownFeed {
   };
 }
 
+/**
+ * The Associated Press, which cannot be read from a server at all.
+ *
+ * Measured from the deployment on 2026-09-14: every path on apnews.com
+ * answers 403 — the front page, robots.txt, and all six sitemaps robots.txt
+ * itself declares (ap-sitemap, news-sitemap-content, hubs, video, author,
+ * elections). There is no user agent to fix: the block is on the request, not
+ * the client, and AP's own machine-readable route is its paid API. The old
+ * app backend (afs-prod.appspot.com) answers, but its feed endpoints are
+ * gone, and feeds.apnews.com no longer resolves.
+ *
+ * So AP arrives through Google News, scoped to apnews.com. Measured the same
+ * day: 100 items, the newest 47 minutes old, spanning 46 hours. What this
+ * costs is the link — Google wraps each story in a token only a browser can
+ * follow — so AP is a headline source in the app, with the story one tap
+ * away on apnews.com. Bing was the alternative and is worse on the only axis
+ * that matters here: 12 items, the newest 8 hours old.
+ *
+ * The window is deliberate. `when:1d` packs 100 items into a single day and
+ * `when:7d` spreads the same 100 across a week (14 a day, measured); two days
+ * is the pair of them at their best — about fifty a day, and two days of
+ * cover for a reader who has been away. Nothing is lost between refreshes
+ * either way: the reader merges each refresh into what it already holds
+ * (lib/window.ts).
+ */
+const AP_FEED =
+  "https://news.google.com/rss/search?q=site%3Aapnews.com+when%3A2d&hl=en-US&gl=US&ceid=US:en";
+
+function apNews(): KnownFeed {
+  return {
+    feedUrl: AP_FEED,
+    title: "AP News",
+    siteUrl: "https://apnews.com",
+    faviconHost: "apnews.com",
+    /**
+     * Not because AP is a section of something. Scope decides whether the
+     * refresh also collects from the publisher's sitemap, and the host behind
+     * this feed is Google's — pointing sitemap collection at it would gather
+     * nothing and ask Google for it repeatedly.
+     */
+    scope: "section",
+  };
+}
+
+const AP_NAMES =
+  /^(ap|the ap|ap ?news|apnews\.com|associated press|the associated press)$/i;
+
+/** Hosts that once served AP or WSJ feeds and now serve nothing usable. */
+const RETIRED_HOSTS =
+  /^(apnews\.com|feeds\.apnews\.com|hosted2?\.ap\.org|ap\.org|feeds\.a\.dj\.com)$/;
+
 const WSJ_NAMES = /^(wsj|wsj\.com|the wsj|wall ?st(reet)? ?journal|the wall street journal)$/i;
 
 /**
@@ -94,6 +146,7 @@ export function knownFeedFor(input: string): KnownFeed | null {
   if (!raw) return null;
 
   if (WSJ_NAMES.test(raw)) return wsjWhole();
+  if (AP_NAMES.test(raw)) return apNews();
 
   let url: URL;
   try {
@@ -102,6 +155,12 @@ export function knownFeedFor(input: string): KnownFeed | null {
     return null;
   }
   const host = url.hostname.replace(/^www\./, "").toLowerCase();
+
+  // Every route into AP — its site, a hub, a story, the hosts that used to
+  // serve its feeds — names the one feed of AP that can be read.
+  if (/^(apnews\.com|feeds\.apnews\.com|hosted2?\.ap\.org|ap\.org)$/.test(host)) {
+    return apNews();
+  }
 
   // The abandoned RSS host, and the current one pasted directly: both name a
   // slug we can title properly.
@@ -124,4 +183,74 @@ export function knownFeedFor(input: string): KnownFeed | null {
   // of it — /news/latest-headlines above all, which is where the newsroom
   // puts everything it files. Anything but a section is the whole paper.
   return section ? wsjSection(section) : wsjWhole();
+}
+
+/**
+ * A source already on the device whose feed has since died.
+ *
+ * `knownFeedFor` only runs when a source is added, so a source saved back
+ * when its feed worked keeps pointing at a URL that now answers 403 or, worse,
+ * answers 200 with items frozen months ago. The reader holds what it last
+ * collected for fourteen days (lib/window.ts), so the symptom is not an error
+ * anywhere — it is a source whose newest story is five days old and getting
+ * older, which is exactly how this was reported.
+ *
+ * Only hosts known to be dead are rewritten, and only to a feed that was
+ * measured working. A source that still loads is never touched.
+ */
+export function repairedFeed(feedUrl: string): KnownFeed | null {
+  let url: URL;
+  try {
+    url = new URL(feedUrl);
+  } catch {
+    return null;
+  }
+  const host = url.hostname.replace(/^www\./, "").toLowerCase();
+
+  /**
+   * An AP source built from a Bing news search — what "add Associated Press"
+   * used to produce, since Bing is the aggregator whose links unwrap
+   * (lib/discover.ts). It works, which is why it is not in RETIRED_HOSTS, but
+   * measured against the Google route on the same morning it carried 12 items
+   * with the newest 8 hours old, against 100 with the newest 47 minutes old.
+   * For a wire service that difference is the whole point of following it.
+   */
+  if (host === "bing.com" && /apnews\.com/i.test(url.searchParams.get("q") ?? "")) {
+    return apNews();
+  }
+
+  if (!RETIRED_HOSTS.test(host)) return null;
+  const known = knownFeedFor(feedUrl);
+  return known && known.feedUrl !== feedUrl ? known : null;
+}
+
+type Repairable = {
+  feedUrl: string;
+  title?: string;
+  siteUrl?: string;
+  favicon?: string;
+  scope?: "site" | "section";
+};
+
+/**
+ * Rewrite the dead sources in a saved list, keeping everything else as it is.
+ * Returns the same array when there is nothing to repair, so a load that
+ * changes nothing cannot look like an edit.
+ */
+export function repairSources<T extends Repairable>(sources: T[]): T[] {
+  let changed = false;
+  const next = sources.map((source) => {
+    const known = repairedFeed(source.feedUrl);
+    if (!known) return source;
+    changed = true;
+    return {
+      ...source,
+      feedUrl: known.feedUrl,
+      title: known.title,
+      siteUrl: known.siteUrl,
+      favicon: faviconFor(known.faviconHost),
+      scope: known.scope,
+    };
+  });
+  return changed ? next : sources;
 }
