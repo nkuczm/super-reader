@@ -28,7 +28,7 @@
 
 import { canonicalUrl } from "./url";
 import { fetchText, looksLikeFeed, parseFeed } from "./feed";
-import { harvestSitemap } from "./sitemap";
+import { harvestSitemap, MAX_SITEMAP_ITEMS } from "./sitemap";
 import { articlesFromStructured, searchTemplateFrom } from "./structured";
 import { searchRoutes, webSearchFeed } from "./sitesearch";
 import { scrapePage } from "./scrape";
@@ -412,10 +412,18 @@ export async function augment(
 ): Promise<{ articles: Article[]; added: number; coverage: CoverageReport }> {
   const byRoute: Record<string, Article[]> = { feed: articles };
   let fromSitemap: Article[] = [];
+  let truncated = false;
 
   if (origin) {
     try {
-      fromSitemap = (await harvestSitemap(origin, { limit })).articles;
+      // Read deeper than the reader's cap on purpose: the sitemap is the
+      // yardstick coverage is scored against, and a yardstick cut to the
+      // length of the thing being measured always reports a perfect fit.
+      const found = await harvestSitemap(origin, {
+        limit: Math.max(limit, MAX_SITEMAP_ITEMS),
+      });
+      fromSitemap = found.articles;
+      truncated = found.truncated;
     } catch {
       // No sitemap, or the site refused. The feeds still stand.
     }
@@ -440,7 +448,11 @@ export async function augment(
   }
 
   const all = sortNewestFirst([...merged.values()]);
-  const coverage = coverageOf(all, byRoute, { hours: windowHours, sitemap: fromSitemap });
+  const coverage = coverageOf(all, byRoute, {
+    hours: windowHours,
+    sitemap: fromSitemap,
+    sitemapTruncated: truncated,
+  });
   return {
     articles: all.slice(0, limit),
     added: Math.max(0, merged.size - articles.length),

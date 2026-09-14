@@ -59,6 +59,17 @@ export type Reference = {
   count: number;
 };
 
+/**
+ * Was the yardstick itself cut short?
+ *
+ * If the sitemap read stopped at its cap, the denominator is not "what was
+ * published" but "as much of it as we bothered to read", and a recall of 1.0
+ * computed against it means nothing. Reporting that number without this flag
+ * would be exactly the silent truncation this module exists to detect —
+ * applied to the detector.
+ */
+export type Truncation = { reference: boolean };
+
 export function referenceOf(
   sitemapArticles: Windowed[],
   allArticles: Windowed[],
@@ -103,6 +114,11 @@ export type CoverageReport = {
   published: number;
   recall: number;
   basis: Reference["basis"];
+  /**
+   * True when the reference set hit a cap, so `recall` is an upper bound
+   * rather than a measurement. Never report recall without it.
+   */
+  referenceTruncated: boolean;
   /** What each route contributed, worst-to-best left to the caller. */
   byRoute: RouteCoverage[];
   /** In-window stories some route found that the final list does not carry. */
@@ -124,7 +140,14 @@ export function coverageOf(
     hours = DEFAULT_WINDOW_HOURS,
     now = Date.now(),
     sitemap = [],
-  }: { hours?: number; now?: number; sitemap?: Windowed[] } = {},
+    sitemapTruncated = false,
+  }: {
+    hours?: number;
+    now?: number;
+    sitemap?: Windowed[];
+    /** The sitemap read stopped at its cap rather than at the end. */
+    sitemapTruncated?: boolean;
+  } = {},
 ): CoverageReport {
   const everything = Object.values(byRoute).flat();
   const reference = referenceOf(sitemap, everything, hours, now);
@@ -163,6 +186,7 @@ export function coverageOf(
     published: reference.count,
     recall: reference.count === 0 ? 0 : round(caught / reference.count),
     basis: reference.basis,
+    referenceTruncated: reference.basis === "news sitemap" && sitemapTruncated,
     byRoute: routes.sort((a, b) => b.recall - a.recall),
     lostToFiltering: lost,
   };

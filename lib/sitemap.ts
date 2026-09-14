@@ -180,6 +180,8 @@ export function rankSitemaps(urls: string[], pagePath: string): string[] {
 
 export type Harvested = {
   articles: Article[];
+  /** The read stopped at the cap, so this is not all the site listed. */
+  truncated: boolean;
   /** Which sitemap documents were actually read, for explaining the result. */
   read: string[];
   /** True when at least one document carried real news metadata. */
@@ -206,7 +208,7 @@ export async function harvestSitemap(
     origin = url.origin;
     pagePath = url.pathname;
   } catch {
-    return { articles: [], read: [], authoritative: false };
+    return { articles: [], read: [], authoritative: false, truncated: false };
   }
 
   const declared = await sitemapsFromRobots(origin);
@@ -261,5 +263,10 @@ export async function harvestSitemap(
     await readOne(candidate, 0);
   }
 
-  return { articles: articles.slice(0, limit), read, authoritative };
+  return {
+    articles: articles.slice(0, limit),
+    read,
+    authoritative,
+    truncated: articles.length > limit,
+  };
 }

@@ -151,3 +151,30 @@ test("the earliest publication date wins over a later touch", () => {
   assert.equal(combine(touched, first).publishedAt, "2026-09-14T06:00:00Z");
   assert.equal(combine(first, touched).publishedAt, "2026-09-14T06:00:00Z");
 });
+
+test("a truncated yardstick does not get to report perfect recall", () => {
+  const published = Array.from({ length: 10 }, (_, i) => at(i, `p${i}`));
+  const honest = coverageOf(published, { feed: published }, {
+    hours: 48, now: NOW, sitemap: published,
+  });
+  assert.equal(honest.referenceTruncated, false);
+  assert.equal(honest.recall, 1);
+
+  const cut = coverageOf(published, { feed: published }, {
+    hours: 48, now: NOW, sitemap: published, sitemapTruncated: true,
+  });
+  assert.equal(
+    cut.referenceTruncated,
+    true,
+    "recall of 1.0 against a reference that stopped at its cap is an upper bound, not a measurement",
+  );
+});
+
+test("truncation of the union reference is not claimed as a sitemap cap", () => {
+  const published = Array.from({ length: 3 }, (_, i) => at(i, `p${i}`));
+  const report = coverageOf(published, { feed: published }, {
+    hours: 48, now: NOW, sitemap: published, sitemapTruncated: true,
+  });
+  assert.equal(report.basis, "every route combined", "three entries is not a census");
+  assert.equal(report.referenceTruncated, false, "the flag belongs to the sitemap basis only");
+});
