@@ -140,10 +140,35 @@ function clean(value: unknown, max = 400): string | undefined {
 }
 
 /** YYYYMMDD, as openFDA and a few others report dates. */
+/**
+ * Crossref carries the real publication date as parts — [[2024, 5, 17]] —
+ * separately from the timestamps that record when the DOI was registered
+ * with Crossref.
+ */
+function fromDateParts(value: unknown): string | undefined {
+  const parts = (value as { "date-parts"?: unknown[][] } | undefined)?.["date-parts"]?.[0];
+  if (!Array.isArray(parts) || parts.length === 0) return undefined;
+  const [year, month = 1, day = 1] = parts.map((part) => Number(part));
+  if (!Number.isFinite(year)) return undefined;
+  const iso = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(
+    day,
+  ).padStart(2, "0")}T00:00:00Z`;
+  return toIso(iso);
+}
+
+/**
+ * A date is when the thing happened or was published — filed, introduced,
+ * posted, issued — and never when the API's own record of it was created or
+ * last touched. Those bookkeeping timestamps move whenever the publisher
+ * reindexes, so they read as "just now" for documents that are years old,
+ * which sorted a 2020 trial above this morning's news.
+ */
 function fromCompactDate(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const match = value.match(/^(\d{4})(\d{2})(\d{2})$/);
-  return match ? `${match[1]}-${match[2]}-${match[3]}T00:00:00Z` : toIso(value);
+  // Normalised like every other provider's date, so one shape reaches the
+  // reader and the story corpus.
+  return toIso(match ? `${match[1]}-${match[2]}-${match[3]}T00:00:00Z` : value);
 }
 
 const query = (value: string) => encodeURIComponent(value.trim());
@@ -210,7 +235,9 @@ export const API_PROVIDERS: ApiProvider[] = [
         link,
         author: pick(item.court, item.court_id),
         publishedAt: toIso(
-          pick(item.dateFiled, item.date_filed, item.dateArgued, item.dateCreated),
+          // Filed, then argued. Not dateCreated: that is when CourtListener
+          // ingested the record, which for a decades-old opinion is today.
+          pick(item.dateFiled, item.date_filed, item.dateArgued, item.date_argued),
         ),
         summary: clean(snippet),
       };
@@ -387,7 +414,9 @@ export const API_PROVIDERS: ApiProvider[] = [
         title: String(attributes.title),
         link: `https://www.regulations.gov/document/${item.id}`,
         author: pick(attributes.agencyId),
-        publishedAt: toIso(pick(attributes.postedDate, attributes.lastModifiedDate)),
+        // Posted, not lastModifiedDate — a comment period reopening should
+        // not redate the document to today.
+        publishedAt: toIso(pick(attributes.postedDate)),
         summary: clean(pick(attributes.documentType, attributes.subtype)),
       };
     },
@@ -446,7 +475,9 @@ export const API_PROVIDERS: ApiProvider[] = [
         title: `${type.toUpperCase()} ${number} — ${title}`,
         link: `https://www.congress.gov/bill/${item.congress}th-congress/${slug}/${number}`,
         author: pick(item.originChamber),
-        publishedAt: toIso(pick(item.updateDate, item.introducedDate)),
+        // Introduced, or the latest action on it. updateDate is when the
+        // API last touched its own row, and it is usually today.
+        publishedAt: toIso(pick(item.introducedDate, item.latestAction?.actionDate)),
         summary: clean(item.latestAction?.text),
       };
     },
@@ -510,7 +541,7 @@ export const API_PROVIDERS: ApiProvider[] = [
     id: "clinicaltrials",
     name: "ClinicalTrials.gov",
     category: "Health",
-    description: "Registered studies, newest updates first.",
+    description: "Registered studies, newest registrations first.",
     siteUrl: "https://clinicaltrials.gov",
     docsUrl: "https://clinicaltrials.gov/data-api/api",
     params: [
@@ -530,7 +561,9 @@ export const API_PROVIDERS: ApiProvider[] = [
     request: ({ q = "", status = "" }, { limit }) => {
       const search = new URLSearchParams({
         pageSize: String(Math.min(limit, 100)),
-        sort: "LastUpdatePostDate:desc",
+        // Sorted by first posting, to match the date shown: sorting by last
+        // update returns studies from years ago that were touched today.
+        sort: "StudyFirstPostDate:desc",
         countTotal: "true",
       });
       if (q.trim()) search.set("query.term", q.trim());
@@ -552,9 +585,11 @@ export const API_PROVIDERS: ApiProvider[] = [
         link: `https://clinicaltrials.gov/study/${nctId}`,
         author: pick(section.sponsorCollaboratorsModule?.leadSponsor?.name),
         publishedAt: toIso(
+          // When the study was first posted, not when its record was last
+          // revised — a 2020 trial edited this morning is not today's news.
           pick(
-            section.statusModule?.lastUpdatePostDateStruct?.date,
             section.statusModule?.studyFirstPostDateStruct?.date,
+            section.statusModule?.studyFirstSubmitDateStruct?.date,
           ),
         ),
         summary: clean(section.descriptionModule?.briefSummary),
@@ -610,7 +645,9 @@ export const API_PROVIDERS: ApiProvider[] = [
         )}#tabs-2`,
         author: pick(item.recalling_firm, item.state),
         publishedAt: fromCompactDate(
-          pick(item.report_date, item.recall_initiation_date, item.center_classification_date),
+          // Reported, then initiated. Not the classification date, which the
+          // centre revises after the fact.
+          pick(item.report_date, item.recall_initiation_date),
         ),
         summary: clean(item.reason_for_recall),
       };
@@ -680,7 +717,15 @@ export const API_PROVIDERS: ApiProvider[] = [
         title,
         link,
         author: authors.slice(0, 3).join(", ") || pick(item["container-title"]?.[0]),
-        publishedAt: toIso(pick(item.created?.["date-time"], item.deposited?.["date-time"])),
+        publishedAt:
+          // The publication date, in any of the forms Crossref records it.
+          // created and deposited are registration events — a 2011 paper
+          // deposited last week would otherwise arrive as last week's news.
+          fromDateParts(item.published) ??
+          fromDateParts(item.issued) ??
+          fromDateParts(item["published-print"]) ??
+          fromDateParts(item["published-online"]) ??
+          toIso(pick(item.created?.["date-time"])),
         summary: clean(item.abstract),
       };
     },

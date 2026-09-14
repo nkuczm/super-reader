@@ -2,8 +2,18 @@
 
 import type { Article, SourceMeta } from "./types";
 import type { SavedArticle, SavedRemoval } from "./saved";
+import type { WatchMarks } from "./alerts";
 
-export type Source = SourceMeta & { id: string; kind: "feed" | "topic" | "page" | "x" | "api" };
+export type Source = SourceMeta & {
+  id: string;
+  kind: "feed" | "topic" | "page" | "x" | "api";
+  /**
+   * Watch this source for new posts: highlight it in the sidebar and list it
+   * in Notifications until it has been looked at. Kept on the source itself
+   * so it travels with the feed list that already syncs.
+   */
+  notify?: boolean;
+};
 export type Feed = { id: string; name: string; sources: Source[] };
 
 const KEY = "super-reader:v1";
@@ -202,6 +212,31 @@ export function saveSettings(settings: Settings) {
     window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   } catch {
     /* storage unavailable; the choice just won't persist */
+  }
+}
+
+const MARKS_KEY = "super-reader:watch-marks:v1";
+
+/**
+ * How far each watched source has been read up to. Synced as well as stored,
+ * so looking at a source on one device clears its badge on the other.
+ */
+export function loadWatchMarks(): WatchMarks {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(MARKS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? (parsed as WatchMarks) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveWatchMarks(marks: WatchMarks) {
+  try {
+    window.localStorage.setItem(MARKS_KEY, JSON.stringify(marks));
+  } catch {
+    /* storage unavailable; badges just won't persist across reloads */
   }
 }
 

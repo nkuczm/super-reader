@@ -2,6 +2,8 @@ import { getSql, ensureSchema } from "./db";
 import { hashCode, newSyncCode } from "./sync-code";
 import { mergeSaved } from "./saved";
 import type { SavedArticle, SavedRemoval } from "./saved";
+import { mergeMarks } from "./alerts";
+import type { WatchMarks } from "./alerts";
 import { mergeNotes } from "./notes";
 import type { Note, NoteRemoval } from "./notes";
 
@@ -15,6 +17,12 @@ export type SyncPayload = {
    */
   saved?: SavedArticle[];
   savedRemovals?: SavedRemoval[];
+  /**
+   * How far each watched source has been read up to. Merged by taking the
+   * later of each, so looking at a source on one device clears its badge on
+   * the other.
+   */
+  watchMarks?: WatchMarks;
   /**
    * Notes and their quotes, merged rather than replaced for the same reason
    * bookmarks are: both devices write to them between syncs, and one of them
@@ -123,6 +131,9 @@ export async function writeSync(
     ...payload,
     saved: bookmarks.saved,
     savedRemovals: bookmarks.removals,
+    // A mark only moves forward, so the later one always has more
+    // information — no stamps needed to resolve these.
+    watchMarks: mergeMarks(payload.watchMarks ?? {}, stored.watchMarks ?? {}),
     notes: notes.notes,
     noteRemovals: notes.removals,
   };
