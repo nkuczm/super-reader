@@ -406,6 +406,47 @@ export function startRedditSite(port = 8792) {
   );
 }
 
+/**
+ * A server that rate-limits, and records what asked.
+ *
+ * `/limited` answers 429 the first `failures` times and then succeeds, which
+ * is the transient per-second bucket a retry is for. `/always` never relents,
+ * which is the case a retry must give up on rather than hang. Both record the
+ * User-Agent, because which one is sent is the whole question with Reddit.
+ */
+export function startRateLimitedSite(port = 8793, { failures = 1, retryAfter = "1" } = {}) {
+  const seen = [];
+  let left = failures;
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      const path = new URL(req.url, "http://x").pathname;
+      seen.push({ path, userAgent: req.headers["user-agent"] ?? "" });
+
+      const limit = () => {
+        const headers = { "content-type": "text/plain" };
+        if (retryAfter !== null) headers["retry-after"] = retryAfter;
+        res.writeHead(429, headers);
+        res.end("Too Many Requests");
+      };
+
+      if (path === "/always") return limit();
+      if (path === "/limited") {
+        if (left > 0) {
+          left -= 1;
+          return limit();
+        }
+        res.writeHead(200, { "content-type": "application/rss+xml" });
+        return res.end(pressFeed);
+      }
+      res.writeHead(404);
+      res.end("nope");
+    });
+    server.listen(port, () =>
+      resolve({ seen, close: () => server.close() }),
+    );
+  });
+}
+
 export function startFileSite(port = 8791) {
   return serve(
     {

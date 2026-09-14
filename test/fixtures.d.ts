@@ -15,3 +15,10 @@ export function startCommentSite(port?: number): Promise<{ close: () => void }>;
 export function startFileSite(port?: number): Promise<{ close: () => void }>;
 export const OPINION_HTML: string;
 export function startRedditSite(port?: number): Promise<{ close: () => void }>;
+export function startRateLimitedSite(
+  port?: number,
+  options?: { failures?: number; retryAfter?: string | null },
+): Promise<{
+  seen: { path: string; userAgent: string }[];
+  close: () => void;
+}>;

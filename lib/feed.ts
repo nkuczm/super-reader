@@ -13,26 +13,105 @@ const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
+/**
+ * Reddit is the exception, and wants the opposite of the above.
+ *
+ * It asks callers to identify themselves — its own guidance is that a unique
+ * descriptive User-Agent gets its own rate-limit budget, while common and
+ * browser-shaped ones are pooled and throttled hard. A browser string coming
+ * from a datacenter is also the plainest scraper signal there is, and a
+ * deployed reader has no browser's residential address to hide behind. So it
+ * gets told what this actually is, which is what the guidance asks for.
+ */
+const REDDIT_UA = "web:super-reader:0.1 (by /u/super-reader)";
+
+export function userAgentFor(url: string) {
+  try {
+    return /(^|\.)reddit\.com$/i.test(new URL(url).hostname) ? REDDIT_UA : UA;
+  } catch {
+    return UA;
+  }
+}
+
+/**
+ * How long to wait after a "too many requests", given what the server said.
+ *
+ * Retry-After is either seconds or an HTTP date. A server that names a wait
+ * is worth believing; one that does not gets a short pause, which is enough
+ * for the per-second buckets these usually are.
+ */
+export function retryAfterMs(header: string | null, now = Date.now()): number {
+  if (!header?.trim()) return 600;
+  const seconds = Number(header.trim());
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const at = Date.parse(header);
+  return Number.isNaN(at) ? 600 : Math.max(0, at - now);
+}
+
+/** The least time a retry needs to be worth starting rather than aborting. */
+const MIN_RETRY_WINDOW_MS = 1500;
+
+/** Statuses worth trying again: a rate limit, or a server briefly unavailable. */
+function worthRetrying(status: number) {
+  return status === 429 || status === 503;
+}
+
 export async function fetchText(url: string, timeoutMs = 12000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // Retries come out of the same budget as the request itself, so a caller
+  // that allowed twelve seconds still waits twelve seconds at most.
+  const deadline = Date.now() + timeoutMs;
+
   try {
-    const res = await fetch(url, {
-      headers: {
-        "user-agent": UA,
-        accept:
-          "text/html,application/xhtml+xml,application/rss+xml,application/atom+xml," +
-          "application/xml;q=0.9,*/*;q=0.8",
-        "accept-language": "en-US,en;q=0.9",
-      },
-      redirect: "follow",
-      signal: controller.signal,
-    });
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    return { body: await res.text(), finalUrl: res.url || url };
+    for (let attempt = 0; ; attempt += 1) {
+      const res = await fetch(url, {
+        headers: {
+          "user-agent": userAgentFor(url),
+          accept:
+            "text/html,application/xhtml+xml,application/rss+xml,application/atom+xml," +
+            "application/xml;q=0.9,*/*;q=0.8",
+          "accept-language": "en-US,en;q=0.9",
+        },
+        redirect: "follow",
+        signal: controller.signal,
+      });
+      if (res.ok) return { body: await res.text(), finalUrl: res.url || url };
+
+      // A rate limit is a "not yet", not a "no" — but only once. Asking a
+      // third time is how a throttle becomes a block, and rarely changes the
+      // answer. The wait has to fit the caller's own budget with room left to
+      // make the request: a refresh cannot sit out the minute some servers
+      // name, and saying so beats hanging until the timeout.
+      const wait = retryAfterMs(res.headers.get("retry-after"));
+      const canRetry =
+        attempt < 1 &&
+        worthRetrying(res.status) &&
+        Date.now() + wait + MIN_RETRY_WINDOW_MS < deadline;
+
+      if (!canRetry) throw new Error(describe(res.status, res.statusText, url));
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * What went wrong, in terms that mean something to whoever pasted the URL.
+ * "429 Too Many Requests" in the preview dialog reads as the reader being
+ * broken, when it is the other end declining to answer this deployment.
+ */
+function describe(status: number, statusText: string, url: string) {
+  const plain = `${status} ${statusText}`.trim();
+  if (status !== 429) return plain;
+  let host = url;
+  try {
+    host = new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    /* keep the raw string */
+  }
+  return `${host} is rate-limiting this server (429). Try again shortly.`;
 }
 
 const parser = new XMLParser({
