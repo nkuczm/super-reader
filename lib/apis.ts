@@ -141,6 +141,23 @@ function clean(value: unknown, max = 400): string | undefined {
 
 /** YYYYMMDD, as openFDA and a few others report dates. */
 /**
+ * A date the publisher put in the future is not a publication date.
+ *
+ * Crossref carries whatever the publisher registered, and that includes
+ * cover dates months ahead of the issue and outright mistakes — one 2011
+ * paper is filed as published in the year 2100. Either way the article would
+ * sit at the top of the reader until the date passed, which is worse than
+ * the ingestion dates this set out to fix. A small grace period allows for
+ * clock skew and same-day publication in a later timezone.
+ */
+function notFuture(iso: string | undefined, now = Date.now()): string | undefined {
+  if (!iso) return undefined;
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return undefined;
+  return at <= now + 36 * 60 * 60 * 1000 ? iso : undefined;
+}
+
+/**
  * Crossref carries the real publication date as parts — [[2024, 5, 17]] —
  * separately from the timestamps that record when the DOI was registered
  * with Crossref.
@@ -718,13 +735,15 @@ export const API_PROVIDERS: ApiProvider[] = [
         link,
         author: authors.slice(0, 3).join(", ") || pick(item["container-title"]?.[0]),
         publishedAt:
-          // The publication date, in any of the forms Crossref records it.
-          // created and deposited are registration events — a 2011 paper
-          // deposited last week would otherwise arrive as last week's news.
-          fromDateParts(item.published) ??
-          fromDateParts(item.issued) ??
-          fromDateParts(item["published-print"]) ??
-          fromDateParts(item["published-online"]) ??
+          // The publication date, in any of the forms Crossref records it,
+          // skipping any that has not happened yet. created is a
+          // registration event and the last resort — a 2011 paper deposited
+          // last week would otherwise arrive as last week's news — but it is
+          // a real moment, which a publisher's cover date is not.
+          notFuture(fromDateParts(item.published)) ??
+          notFuture(fromDateParts(item.issued)) ??
+          notFuture(fromDateParts(item["published-print"])) ??
+          notFuture(fromDateParts(item["published-online"])) ??
           toIso(pick(item.created?.["date-time"])),
         summary: clean(item.abstract),
       };
