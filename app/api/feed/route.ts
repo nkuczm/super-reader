@@ -96,10 +96,12 @@ export async function GET(request: Request) {
     // the body tells us. Sitemaps matter here because some publishers — CNN
     // among them — declare no RSS at all, so the sitemap is the only
     // structured route they offer and has to be followable as a source.
-    const { meta, articles } = looksLikeFeed(body)
-      ? parseFeed(body, finalUrl)
-      : looksLikeSitemap(body)
-        ? readSitemapAsSource(body, finalUrl)
+    // Sitemap first: looksLikeFeed accepts anything opening with an XML
+    // declaration, so a sitemap passes it and parses as an empty feed.
+    const { meta, articles } = looksLikeSitemap(body)
+      ? readSitemapAsSource(body, finalUrl)
+      : looksLikeFeed(body)
+        ? parseFeed(body, finalUrl)
         : scrapePage(body, finalUrl);
     // A big archive feed can carry hundreds of entries; only the recent ones
     // are ever read, and the cap bounds both payload and enrichment.

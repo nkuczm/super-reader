@@ -179,20 +179,15 @@ async function tryFeed(url: string, limit: number) {
   }
 
   const { body, finalUrl } = await fetchText(url);
-  if (looksLikeFeed(body)) {
-    const { meta, articles } = parseFeed(body, finalUrl);
-    return { meta, total: articles.length, articles: articles.slice(0, limit) };
-  }
 
-  // A news sitemap is a perfectly good source, and at some publishers it is
-  // the only one they offer: CNN declares no RSS anywhere. It carries a
-  // headline and an exact publication time per entry, which is more than a
-  // scraped page gives us, so it is tried before the page is read.
+  // Sitemaps are checked first: looksLikeFeed accepts anything that opens
+  // with an XML declaration, so a sitemap passes it and then parses as an
+  // empty feed.
   if (looksLikeSitemap(body)) {
-    const parsed = parseSitemap(body, finalUrl);
-    if (parsed.kind === "urls" && parsed.articles.length > 0) {
+    const parsedSitemap = parseSitemap(body, finalUrl);
+    if (parsedSitemap.kind === "urls" && parsedSitemap.articles.length > 0) {
       const origin = new URL(finalUrl).origin;
-      const { kept } = keepArticles(parsed.articles, { origin, from: "sitemap" });
+      const { kept } = keepArticles(parsedSitemap.articles, { origin, from: "sitemap" });
       if (kept.length > 0) {
         const host = new URL(origin).hostname.replace(/^www\./, "");
         return {
@@ -202,6 +197,11 @@ async function tryFeed(url: string, limit: number) {
         };
       }
     }
+  }
+
+  if (looksLikeFeed(body)) {
+    const { meta, articles } = parseFeed(body, finalUrl);
+    return { meta, total: articles.length, articles: articles.slice(0, limit) };
   }
 
   throw new Error("Response was not a feed");
