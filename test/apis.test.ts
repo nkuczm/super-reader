@@ -512,3 +512,47 @@ test("openFDA dates a recall when it was reported", () => {
     "2025-03-10T00:00:00.000Z",
   );
 });
+
+test("Crossref ignores a publication date that has not happened yet", () => {
+  // Real record: this 2011 paper is registered with a print date of 2100,
+  // and journals routinely post-date an issue by months. Either way the
+  // article would sit at the top of the reader until the date arrived.
+  assert.equal(
+    dateOf("crossref", {
+      DOI: "10.4268/cjcmm20110224",
+      title: ["Effect of Jinqiaomai"],
+      URL: "https://doi.org/10.4268/cjcmm20110224",
+      "published-print": { "date-parts": [[2100, 1, 15]] },
+      created: { "date-time": "2011-01-28T07:32:17Z" },
+    }),
+    "2011-01-28T07:32:17.000Z",
+    "falls back to when it was actually registered",
+  );
+
+  // A cover date a few months out is skipped the same way.
+  const nextYear = new Date().getUTCFullYear() + 1;
+  assert.equal(
+    dateOf("crossref", {
+      DOI: "10.1/future",
+      title: ["Post-dated issue"],
+      URL: "https://doi.org/10.1/future",
+      issued: { "date-parts": [[nextYear, 10, 1]] },
+      created: { "date-time": "2026-08-03T12:39:18Z" },
+    }),
+    "2026-08-03T12:39:18.000Z",
+  );
+
+  // Today's publication is not the future, even across a timezone.
+  const today = new Date();
+  const parts = [today.getUTCFullYear(), today.getUTCMonth() + 1, today.getUTCDate()];
+  assert.match(
+    dateOf("crossref", {
+      DOI: "10.1/today",
+      title: ["Published today"],
+      URL: "https://doi.org/10.1/today",
+      published: { "date-parts": [parts] },
+      created: { "date-time": "2020-01-01T00:00:00Z" },
+    }) ?? "",
+    new RegExp(`^${parts[0]}-`),
+  );
+});
