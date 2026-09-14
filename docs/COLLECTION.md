@@ -69,7 +69,7 @@ losses.
 
 ---
 
-## 2. The measurements (14 Sep 2026, via `/api/lab` on the deployment)
+## 2. The measurements (14 Sep 2026, via a temporary `/api/lab` probe on the deployment)
 
 News sitemap vs. declared feeds, per publisher:
 
@@ -231,8 +231,12 @@ Four layers, each answering a question the others cannot:
 | Telemetry | *not built* | is coverage drifting over time |
 
 To measure a real site from here, go through the deployment — add a temporary
-`/api/lab`-style probe, deploy, read it with the Vercel fetch tool, and remove
-it in the same session. That is how every number in section 2 was obtained.
+`/api/lab`-style probe (robots.txt sitemaps, news-sitemap candidates and their
+item counts, declared feeds, JSON-LD types, and a feed's window), deploy, read
+it with the Vercel fetch tool, and remove it in the same session. That is how
+every number in section 2 was obtained, and the probe is deliberately not in
+the repository: a permanent endpoint that fetches arbitrary URLs on request is
+not something a reader app should carry.
 
 `test/watchlist.json` is the accumulating record: whenever a source misbehaves
 in real use, add an entry with what you expect of it. The entry becomes the
