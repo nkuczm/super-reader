@@ -136,3 +136,63 @@ export async function GET(request: Request) {
 
   return NextResponse.json(out);
 }
+
+/** Compact sweep: one line per site, so many can be compared at once. */
+export async function POST(request: Request) {
+  const { sites } = (await request.json()) as { sites: string[] };
+  const rows = await Promise.all(
+    sites.slice(0, 30).map(async (site) => {
+      const row: Record<string, unknown> = { site };
+      let origin = site;
+      try { origin = new URL(site).origin; } catch { return { site, err: "bad url" }; }
+
+      let robotsMaps: string[] = [];
+      try {
+        const { body } = await fetchText(`${origin}/robots.txt`, 8000);
+        robotsMaps = body
+          .split("\n")
+          .map((l) => l.match(/^\s*sitemap:\s*(\S+)/i)?.[1])
+          .filter((v): v is string => Boolean(v));
+      } catch { row.robots = "x"; }
+
+      const candidates = [
+        ...robotsMaps.filter((u) => /news/i.test(u)),
+        `${origin}/sitemap-news.xml`,
+        `${origin}/news-sitemap.xml`,
+        `${origin}/sitemaps/news.xml`,
+        `${origin}/arc/outboundfeeds/news-sitemap/`,
+      ];
+      row.maps = robotsMaps.length;
+      for (const candidate of [...new Set(candidates)].slice(0, 5)) {
+        try {
+          const { body } = await fetchText(candidate, 9000);
+          const urls = countTag(body, "url");
+          if (urls > 0 || countTag(body, "sitemap") > 0) {
+            row.news = candidate.replace(origin, "");
+            row.newsUrls = urls;
+            row.newsTags = countTag(body, "news:news");
+            row.newsIsIndex = urls === 0;
+            break;
+          }
+        } catch { /* next candidate */ }
+      }
+
+      try {
+        const { body } = await fetchText(site, 12000);
+        row.html = body.length;
+        row.feeds = ((body.match(/<link\b[^>]*>/gi) ?? []).filter(
+          (t) => /rel=["']?[^"'>]*alternate/i.test(t) &&
+                 /type=["']?application\/(rss|atom)\+xml/i.test(t),
+        )).length;
+        row.ld = (body.match(/type=["']application\/ld\+json["']/gi) ?? []).length;
+        row.ldTypes = [...new Set([...body.matchAll(/"@type"\s*:\s*"([^"]+)"/g)].map((m) => m[1]))]
+          .filter((t) => /Article|ItemList|Blog|NewsArticle|Posting/i.test(t)).slice(0, 5);
+        row.wpSearch = /wp-content|wp-json/.test(body);
+      } catch (error) {
+        row.html = `ERR ${error instanceof Error ? error.message : "?"}`;
+      }
+      return row;
+    }),
+  );
+  return NextResponse.json({ rows });
+}
