@@ -89,6 +89,18 @@ export const Icon = {
       <path d="M4 12.5l5.5 5.5L20 6.5" />
     </svg>
   ),
+  bell: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 9a6 6 0 1 0-12 0c0 4-1.5 5.5-2 6h16c-.5-.5-2-2-2-6" />
+      <path d="M10.5 20a2 2 0 0 0 3 0" />
+    </svg>
+  ),
+  bellOn: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 9a6 6 0 1 0-12 0c0 4-1.5 5.5-2 6h16c-.5-.5-2-2-2-6" />
+      <path d="M10.5 20a2 2 0 0 0 3 0" fill="none" />
+    </svg>
+  ),
   download: (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 3v12" />

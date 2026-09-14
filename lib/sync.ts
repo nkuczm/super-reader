@@ -2,6 +2,8 @@ import { getSql, ensureSchema } from "./db";
 import { hashCode, newSyncCode } from "./sync-code";
 import { mergeSaved } from "./saved";
 import type { SavedArticle, SavedRemoval } from "./saved";
+import { mergeMarks } from "./alerts";
+import type { WatchMarks } from "./alerts";
 
 export type SyncPayload = {
   feeds: unknown[];
@@ -13,6 +15,12 @@ export type SyncPayload = {
    */
   saved?: SavedArticle[];
   savedRemovals?: SavedRemoval[];
+  /**
+   * How far each watched source has been read up to. Merged by taking the
+   * later of each, so looking at a source on one device clears its badge on
+   * the other.
+   */
+  watchMarks?: WatchMarks;
   /**
    * The API-key vault, encrypted in the browser before it ever reaches here.
    * The server stores these bytes and cannot read them: it has no passphrase,
@@ -103,6 +111,9 @@ export async function writeSync(
     ...payload,
     saved: bookmarks.saved,
     savedRemovals: bookmarks.removals,
+    // A mark only moves forward, so the later one always has more
+    // information — no stamps needed to resolve these.
+    watchMarks: mergeMarks(payload.watchMarks ?? {}, stored.watchMarks ?? {}),
   };
 
   await ensureSchema();

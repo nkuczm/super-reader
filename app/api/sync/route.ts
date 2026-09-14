@@ -9,6 +9,7 @@ import {
 } from "@/lib/sync";
 import { isValidCode } from "@/lib/sync-code";
 import type { SavedArticle, SavedRemoval } from "@/lib/saved";
+import type { WatchMarks } from "@/lib/alerts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,6 +61,7 @@ export async function PUT(request: Request) {
     read?: unknown;
     saved?: unknown;
     savedRemovals?: unknown;
+    watchMarks?: unknown;
     vault?: unknown;
     updatedAt?: unknown;
   };
@@ -86,6 +88,11 @@ export async function PUT(request: Request) {
     savedRemovals: Array.isArray(body.savedRemovals)
       ? (body.savedRemovals as SavedRemoval[])
       : [],
+    // Merged by writeSync, which is the only place that sees both sides.
+    watchMarks:
+      body.watchMarks && typeof body.watchMarks === "object"
+        ? (body.watchMarks as WatchMarks)
+        : {},
     // Opaque to this server by design; stored and handed back untouched.
     ...(body.vault ? { vault: body.vault } : {}),
     updatedAt: Number.isFinite(Number(body.updatedAt)) ? Number(body.updatedAt) : 0,

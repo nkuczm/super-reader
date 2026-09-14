@@ -914,3 +914,71 @@
   .outlet-tags { display: none; }
   .outlet-list label { grid-template-columns: auto 1fr; }
 }
+
+/* ---- Watching a source ------------------------------------------------- */
+
+/*
+ * A watched source with new posts stays lit until it has been looked at.
+ * Colour alone would not carry it, so the name also goes bold and the count
+ * sits in a filled pill.
+ */
+.nav-item.has-alerts { color: var(--accent); font-weight: 650; }
+.nav-item.has-alerts .feed-name { font-weight: 650; }
+.nav-item.has-alerts.active { background: var(--accent-soft); }
+.alert-count {
+  background: var(--accent); color: #fff; border-radius: 999px;
+  padding: 0 6px; min-width: 18px; text-align: center;
+  font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.nav-item.active .alert-count { background: var(--accent); color: #fff; }
+
+/* The bell is a per-source switch; off is quiet, on is unmistakable. */
+.bell-btn { opacity: 0.45; }
+.bell-btn:hover { opacity: 1; }
+.bell-btn.on { opacity: 1; color: var(--accent); }
+
+/* ---- The notifications view -------------------------------------------- */
+
+.alerts-view { padding: 14px 28px 60px; max-width: 760px; }
+.alerts-head {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.alerts-head p { margin: 0; font-size: 13.5px; color: var(--text-dim); }
+.alerts-head .btn { width: auto; margin-left: auto; }
+
+.alert-card {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px 14px; margin-bottom: 12px; background: var(--bg-sub);
+}
+.alert-card header {
+  display: flex; align-items: center; gap: 9px; margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.alert-card header .btn { width: auto; }
+.alert-source {
+  border: 0; background: transparent; padding: 0; color: var(--text);
+  font-size: 14.5px; font-weight: 650; letter-spacing: -0.01em;
+}
+.alert-source:hover { color: var(--accent); text-decoration: underline; }
+.alert-n {
+  font-size: 11.5px; font-weight: 700; color: var(--accent);
+  margin-right: auto;
+}
+.alert-card ul { list-style: none; margin: 0; padding: 0; }
+.alert-card li {
+  display: flex; align-items: baseline; gap: 8px; padding: 4px 0;
+}
+.alert-title {
+  border: 0; background: transparent; padding: 0; text-align: left;
+  color: var(--text); font-size: 13.5px; line-height: 1.4; min-width: 0;
+}
+.alert-title:hover { color: var(--accent); }
+.alert-card .when { font-size: 11.5px; color: var(--text-dim); flex: none; margin-left: auto; }
+.alert-more { font-size: 12px; color: var(--text-dim); }
+
+@media (max-width: 860px) {
+  .alerts-view { padding: 12px 16px 64px; }
+  /* The bell is a touch target here, not a hover affordance. */
+  .bell-btn { opacity: 0.7; width: 34px; height: 34px; }
+}

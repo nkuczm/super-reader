@@ -21,6 +21,8 @@ import {
   saveSaved,
   loadSavedRemovals,
   saveSavedRemovals,
+  loadWatchMarks,
+  saveWatchMarks,
   loadVault,
   saveVault,
   loadUpdatedAt,
@@ -68,6 +70,14 @@ import ScoreExplainer from "./ScoreExplainer";
 import type { CorpusStats } from "./ScoreExplainer";
 import { canonicalUrl } from "@/lib/url";
 import { mergeSaved, differsFrom, slimForSync } from "@/lib/saved";
+import {
+  alertsFor,
+  acknowledge,
+  mergeMarks,
+  pruneMarks,
+  markFrom,
+} from "@/lib/alerts";
+import type { WatchMarks } from "@/lib/alerts";
 import type { SavedRemoval } from "@/lib/saved";
 import "./reader.css";
 
@@ -100,6 +110,7 @@ function keyHeadersFrom(keys: Record<string, string>): HeadersInit | undefined {
 type Selection =
   | { type: "all" }
   | { type: "saved" }
+  | { type: "alerts" }
   | { type: "feed" | "source"; id: string };
 
 export default function Reader() {
@@ -148,6 +159,8 @@ export default function Reader() {
   const [saved, setSaved] = useState<SavedArticle[]>([]);
   /** Un-saves, dated, so they survive syncing with a device that still has it. */
   const [savedRemovals, setSavedRemovals] = useState<SavedRemoval[]>([]);
+  /** How far each watched source has been read up to. */
+  const [watchMarks, setWatchMarks] = useState<WatchMarks>({});
   /** Whether the browser promised to keep this cache rather than evict it. */
   const [persisted, setPersisted] = useState(false);
   const [vault, setVault] = useState<unknown | null>(null);
@@ -194,7 +207,10 @@ export default function Reader() {
   const pushedAt = useRef(0);
   /** The bookmark list as it stands, for merging inside applyRemote. */
   const savedRef = useRef<SavedArticle[]>([]);
+  /** The feed list as it stands, for handlers that must not re-bind on it. */
+  const feedsRef = useRef<Feed[]>([]);
   const removalsRef = useRef<SavedRemoval[]>([]);
+  const marksRef = useRef<WatchMarks>({});
 
   useEffect(() => {
     setFeeds(loadFeeds());
@@ -204,6 +220,7 @@ export default function Reader() {
     setCollapsed(loadCollapsed());
     setSaved(loadSaved());
     setSavedRemovals(loadSavedRemovals());
+    setWatchMarks(loadWatchMarks());
     setVault(loadVault());
     setApiKeys(loadUnlockedKeys());
     updatedAtRef.current = loadUpdatedAt();
@@ -224,6 +241,7 @@ export default function Reader() {
     read?: string[];
     saved?: SavedArticle[];
     savedRemovals?: SavedRemoval[];
+    watchMarks?: WatchMarks;
     vault?: unknown;
     updatedAt?: number;
   }) => {
@@ -255,6 +273,13 @@ export default function Reader() {
     saveSaved(bookmarks.saved);
     setSavedRemovals(bookmarks.removals);
     saveSavedRemovals(bookmarks.removals);
+    // Watch marks merge by taking the later of each: looking at a source on
+    // one device should clear its badge on the other, and a mark only ever
+    // moves forward, so there is nothing to resolve.
+    const marks = mergeMarks(marksRef.current, payload.watchMarks ?? {});
+    setWatchMarks(marks);
+    saveWatchMarks(marks);
+
     // If the merge kept something the other side had not seen, this device
     // still has news — so it must not mark itself up to date.
     const owes = differsFrom(bookmarks, {
@@ -305,9 +330,28 @@ export default function Reader() {
   }, [feeds, ready]);
 
   useEffect(() => {
+    feedsRef.current = feeds;
+  }, [feeds]);
+
+  // A removed source must not leave its mark behind to accumulate.
+  useEffect(() => {
+    if (!ready) return;
+    setWatchMarks((current) => {
+      const kept = pruneMarks(
+        current,
+        feeds.flatMap((feed) => feed.sources.map((source) => source.id)),
+      );
+      if (Object.keys(kept).length === Object.keys(current).length) return current;
+      saveWatchMarks(kept);
+      return kept;
+    });
+  }, [feeds, ready]);
+
+  useEffect(() => {
     savedRef.current = saved;
     removalsRef.current = savedRemovals;
-  }, [saved, savedRemovals]);
+    marksRef.current = watchMarks;
+  }, [saved, savedRemovals, watchMarks]);
 
   /**
    * Stamp a real local change. The first run is the load from storage, which
@@ -328,7 +372,7 @@ export default function Reader() {
     updatedAtRef.current = now;
     setUpdatedAt(now);
     saveUpdatedAt(now);
-  }, [feeds, read, saved, savedRemovals, vault, ready]);
+  }, [feeds, read, saved, savedRemovals, watchMarks, vault, ready]);
 
   // Pull once the code is known, and again whenever the window regains focus,
   // so a device left open picks up changes made elsewhere.
@@ -374,6 +418,7 @@ export default function Reader() {
             // past the size the route accepts, and then nothing syncs.
             saved: slimForSync(saved),
             savedRemovals,
+            watchMarks,
             vault,
             updatedAt,
           }),
@@ -393,7 +438,18 @@ export default function Reader() {
       }
     }, 900);
     return () => clearTimeout(timer);
-  }, [feeds, read, saved, savedRemovals, ready, syncCode, vault, updatedAt, applyRemote]);
+  }, [
+    feeds,
+    read,
+    saved,
+    savedRemovals,
+    watchMarks,
+    ready,
+    syncCode,
+    vault,
+    updatedAt,
+    applyRemote,
+  ]);
 
   const startSync = useCallback(async () => {
     setSyncState("working");
@@ -418,6 +474,7 @@ export default function Reader() {
         read: [...read],
         saved: slimForSync(saved),
         savedRemovals,
+        watchMarks,
         vault,
         updatedAt: Math.max(Date.now(), updatedAtRef.current + 1),
       }),
@@ -430,7 +487,7 @@ export default function Reader() {
     saveSyncCode(data.code);
     setSyncCode(data.code);
     setSyncState("saved");
-  }, [feeds, read, saved, savedRemovals, vault]);
+  }, [feeds, read, saved, savedRemovals, watchMarks, vault]);
 
   const connectSync = useCallback(
     async (entered: string) => {
@@ -760,9 +817,16 @@ export default function Reader() {
     [settings.openOnSite],
   );
 
+  /**
+   * Set below, where the alert logic lives. Reading an article counts as
+   * having seen its source, and openArticle is defined before that code.
+   */
+  const clearAlertsRef = useRef<(sourceIds: string[]) => void>(() => {});
+
   const openArticle = useCallback(
     (article: Loaded, feedUrl?: string) => {
       markRead(article.id);
+      if (article.sourceId) clearAlertsRef.current([article.sourceId]);
       if (opensOnSite(article.link)) {
         window.open(article.link, "_blank", "noreferrer,noopener");
         return;
@@ -864,6 +928,8 @@ export default function Reader() {
   const visible = useMemo(() => {
     if (selection.type === "all") return articles;
     if (selection.type === "saved") return savedAsArticles;
+    // Notifications is its own view, not a list of articles.
+    if (selection.type === "alerts") return [];
     if (selection.type === "source") {
       return articles.filter((a) => a.sourceId === selection.id);
     }
@@ -1085,6 +1151,105 @@ export default function Reader() {
     open(true);
   }
 
+  /** Articles grouped by source, for working out what is unread per source. */
+  const bySource = useMemo(() => {
+    const groups = new Map<string, Loaded[]>();
+    for (const article of articles) {
+      const list = groups.get(article.sourceId) ?? [];
+      list.push(article);
+      groups.set(article.sourceId, list);
+    }
+    return groups;
+  }, [articles]);
+
+  const watchedSources = useMemo(
+    () => allSources.filter((source) => source.notify),
+    [allSources],
+  );
+
+  /** One entry per watched source with posts newer than its mark. */
+  const alerts = useMemo(
+    () => alertsFor(watchedSources, bySource, watchMarks),
+    [watchedSources, bySource, watchMarks],
+  );
+  const alertBySource = useMemo(
+    () => new Map(alerts.map((alert) => [alert.sourceId, alert])),
+    [alerts],
+  );
+  const alertTotal = alerts.reduce((sum, alert) => sum + alert.articles.length, 0);
+
+  const persistMarks = useCallback((next: WatchMarks) => {
+    setWatchMarks(next);
+    saveWatchMarks(next);
+  }, []);
+
+  /**
+   * Mark a watched source as looked at. Called from every route by which
+   * someone can be said to have seen it — opening the source, opening the
+   * feed it sits in, reading one of its articles, or acknowledging it in
+   * Notifications — because a badge that outlives the reading is worse than
+   * no badge at all.
+   */
+  const clearAlerts = useCallback(
+    (sourceIds: string[]) => {
+      if (sourceIds.length === 0) return;
+      setWatchMarks((current) => {
+        let next = current;
+        let changed = false;
+        for (const sourceId of sourceIds) {
+          const source = allSources.find((entry) => entry.id === sourceId);
+          if (!source?.notify) continue;
+          const updated = acknowledge(next, sourceId, bySource.get(sourceId) ?? []);
+          if (updated !== next) {
+            next = updated;
+            changed = true;
+          }
+        }
+        if (changed) saveWatchMarks(next);
+        return next;
+      });
+    },
+    [allSources, bySource],
+  );
+
+  /** Turn watching on or off for one source. */
+  const toggleNotify = useCallback(
+    (feedId: string, sourceId: string) => {
+      let turningOn = false;
+      setFeeds((current) =>
+        current.map((feed) =>
+          feed.id !== feedId
+            ? feed
+            : {
+                ...feed,
+                sources: feed.sources.map((source) => {
+                  if (source.id !== sourceId) return source;
+                  turningOn = !source.notify;
+                  return { ...source, notify: !source.notify };
+                }),
+              },
+        ),
+      );
+      // Start the mark at what is already there, so turning notifications on
+      // announces the next post rather than the last forty.
+      if (turningOn) {
+        setWatchMarks((current) => {
+          const next = {
+            ...current,
+            [sourceId]: markFrom(bySource.get(sourceId) ?? []),
+          };
+          saveWatchMarks(next);
+          return next;
+        });
+      }
+    },
+    [bySource],
+  );
+
+  useEffect(() => {
+    clearAlertsRef.current = clearAlerts;
+  }, [clearAlerts]);
+
   /** Back to the first headline. */
   const scrollToTop = useCallback(() => {
     listRef.current?.scrollTo({ top: 0, behavior: "auto" });
@@ -1094,6 +1259,14 @@ export default function Reader() {
     (next: Selection) => {
       setSelection(next);
       setMenuOpen(false);
+      // Navigating to a source — or to the feed holding it — counts as having
+      // seen it. "All articles" deliberately does not: it is the default
+      // view, and clearing there would mean never seeing a badge at all.
+      if (next.type === "source") clearAlerts([next.id]);
+      if (next.type === "feed") {
+        const feed = feedsRef.current.find((entry) => entry.id === next.id);
+        clearAlerts((feed?.sources ?? []).map((source) => source.id));
+      }
       // Picking a feed means going back to the list; staying in the article you
       // were reading made the sidebar look unresponsive.
       setReading(null);
@@ -1103,7 +1276,7 @@ export default function Reader() {
       // middle of a feed you had just opened.
       scrollToTop();
     },
-    [scrollToTop],
+    [scrollToTop, clearAlerts],
   );
 
   /**
@@ -1163,7 +1336,7 @@ export default function Reader() {
   const selectedSourceCount =
     selection.type === "all"
       ? allSources.length
-      : selection.type === "saved"
+      : selection.type === "saved" || selection.type === "alerts"
         ? 0
         : selection.type === "source"
           ? 1
@@ -1174,7 +1347,9 @@ export default function Reader() {
       ? "All articles"
       : selection.type === "saved"
         ? "Saved"
-        : selection.type === "feed"
+        : selection.type === "alerts"
+          ? "Notifications"
+          : selection.type === "feed"
           ? (feeds.find((f) => f.id === selection.id)?.name ?? "Feed")
           : (sourceById.get(selection.id)?.title ?? "Source");
 
@@ -1206,6 +1381,20 @@ export default function Reader() {
             <span className="feed-name">Saved</span>
             <span className="count">{saved.length || ""}</span>
           </button>
+
+          {/* Only worth a row once something is being watched. */}
+          {watchedSources.length > 0 && (
+            <button
+              className={`nav-item ${selection.type === "alerts" ? "active" : ""}${
+                alertTotal > 0 ? " has-alerts" : ""
+              }`}
+              onClick={() => choose({ type: "alerts" })}
+            >
+              {alertTotal > 0 ? Icon.bellOn : Icon.bell}
+              <span className="feed-name">Notifications</span>
+              <span className="count alert-count">{alertTotal || ""}</span>
+            </button>
+          )}
 
           {feeds.map((feed) => {
             const ids = new Set(feed.sources.map((s) => s.id));
@@ -1318,11 +1507,32 @@ export default function Reader() {
                         selection.type === "source" && selection.id === source.id
                           ? "active"
                           : ""
-                      }`}
+                      }${alertBySource.has(source.id) ? " has-alerts" : ""}`}
                       onClick={() => choose({ type: "source", id: source.id })}
                     >
                       <SourceIcon src={source.favicon} title={source.title} />
                       <span className="feed-name">{source.title}</span>
+                      {/* Stays lit until the source has been looked at. */}
+                      {alertBySource.has(source.id) && (
+                        <span className="count alert-count">
+                          {alertBySource.get(source.id)!.articles.length}
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      className={`icon-btn bell-btn${source.notify ? " on" : ""}`}
+                      onClick={() => toggleNotify(feed.id, source.id)}
+                      aria-pressed={Boolean(source.notify)}
+                      aria-label={`${
+                        source.notify ? "Stop watching" : "Watch"
+                      } ${source.title} for new posts`}
+                      title={
+                        source.notify
+                          ? "Notifications on — click to turn off"
+                          : "Notify me of new posts"
+                      }
+                    >
+                      {source.notify ? Icon.bellOn : Icon.bell}
                     </button>
                     <button
                       className="icon-btn danger"
@@ -1513,7 +1723,91 @@ export default function Reader() {
           </div>
         </div>
 
-        {!ready ? null : allSources.length === 0 ? (
+        {!ready ? null : selection.type === "alerts" ? (
+          <div className="alerts-view">
+            {alerts.length === 0 ? (
+              <div className="state">
+                <h2>Nothing new.</h2>
+                <p>
+                  {watchedSources.length === 1
+                    ? "You’re watching one source. "
+                    : `You’re watching ${watchedSources.length} sources. `}
+                  When one of them posts, it shows up here and lights up in the
+                  sidebar until you’ve looked at it.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="alerts-head">
+                  <p>
+                    {alertTotal} new post{alertTotal === 1 ? "" : "s"} from{" "}
+                    {alerts.length} source{alerts.length === 1 ? "" : "s"}
+                  </p>
+                  <button
+                    className="btn ghost small"
+                    onClick={() => clearAlerts(alerts.map((alert) => alert.sourceId))}
+                  >
+                    {Icon.check} Acknowledge all
+                  </button>
+                </div>
+
+                {alerts.map((alert) => {
+                  const source = sourceById.get(alert.sourceId);
+                  return (
+                    <section className="alert-card" key={alert.sourceId}>
+                      <header>
+                        <SourceIcon
+                          src={source?.favicon ?? ""}
+                          title={source?.title ?? "Source"}
+                          size={18}
+                        />
+                        <button
+                          className="alert-source"
+                          onClick={() => choose({ type: "source", id: alert.sourceId })}
+                        >
+                          {source?.title ?? "Source"}
+                        </button>
+                        <span className="alert-n">
+                          {alert.articles.length} new
+                        </span>
+                        <button
+                          className="btn ghost small"
+                          onClick={() => clearAlerts([alert.sourceId])}
+                        >
+                          {Icon.check} Acknowledge
+                        </button>
+                      </header>
+                      <ul>
+                        {alert.articles.slice(0, 5).map((article) => (
+                          <li key={article.id}>
+                            <button
+                              className="alert-title"
+                              onClick={() =>
+                                openArticle(article, source?.feedUrl)
+                              }
+                            >
+                              {article.title}
+                            </button>
+                            {article.publishedAt && (
+                              <span className="when">
+                                {timeAgo(article.publishedAt)}
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                        {alert.articles.length > 5 && (
+                          <li className="alert-more">
+                            and {alert.articles.length - 5} more
+                          </li>
+                        )}
+                      </ul>
+                    </section>
+                  );
+                })}
+              </>
+            )}
+          </div>
+        ) : allSources.length === 0 ? (
           <div className="state">
             <h2>Start with one link.</h2>
             <p>
