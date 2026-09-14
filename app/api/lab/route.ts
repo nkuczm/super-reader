@@ -29,6 +29,8 @@ function countTag(xml: string, tag: string) {
 
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
+  const sweep = params.get("sweep");
+  if (sweep) return NextResponse.json({ rows: await sweepSites(sweep.split(",")) });
   const site = params.get("site");
   if (!site) return NextResponse.json({ error: "Missing ?site" }, { status: 400 });
   const origin = new URL(site).origin;
@@ -138,9 +140,8 @@ export async function GET(request: Request) {
 }
 
 /** Compact sweep: one line per site, so many can be compared at once. */
-export async function POST(request: Request) {
-  const { sites } = (await request.json()) as { sites: string[] };
-  const rows = await Promise.all(
+async function sweepSites(sites: string[]) {
+  return await Promise.all(
     sites.slice(0, 30).map(async (site) => {
       const row: Record<string, unknown> = { site };
       let origin = site;
@@ -194,5 +195,4 @@ export async function POST(request: Request) {
       return row;
     }),
   );
-  return NextResponse.json({ rows });
 }
