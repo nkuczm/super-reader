@@ -28,8 +28,69 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "this probe only reads nytimes.com" }, { status: 400 });
   }
 
+  /*
+   * Header sets to try, to find out what the 403 on an article is actually
+   * objecting to: our request's shape, or where it comes from.
+   */
+  const UA_CHROME =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+  const variants: Record<string, Record<string, string>> = {
+    plain: {},
+    browserish: {
+      "sec-ch-ua": '"Chromium";v="131", "Not_A Brand";v="24"',
+      "sec-ch-ua-mobile": "?0",
+      "sec-ch-ua-platform": '"macOS"',
+      "sec-fetch-dest": "document",
+      "sec-fetch-mode": "navigate",
+      "sec-fetch-site": "none",
+      "sec-fetch-user": "?1",
+      "upgrade-insecure-requests": "1",
+    },
+    referred: { referer: "https://www.nytimes.com/", "sec-fetch-site": "same-origin" },
+    googlebot: {
+      "user-agent":
+        "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+    },
+    safari: {
+      "user-agent":
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 " +
+        "(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+    },
+  };
+
+  const which = new URL(request.url).searchParams.get("as");
+  if (which === "all") {
+    const results: Record<string, unknown> = { ua: UA_CHROME };
+    for (const [name, headers] of Object.entries(variants)) {
+      try {
+        const { body } = await fetchText(target.toString(), 20000, headers);
+        results[name] = {
+          ok: true,
+          bytes: body.length,
+          accessFlag: body.match(/"isAccessibleForFree"\s*:\s*"?(\w+)"?/)?.[1] ?? null,
+          proseWords: (body.match(/<p[ >][\s\S]*?<\/p>/gi) ?? [])
+            .join(" ")
+            .replace(/<[^>]+>/g, " ")
+            .split(/\s+/)
+            .filter(Boolean).length,
+        };
+      } catch (error) {
+        results[name] = {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
+    return NextResponse.json(results);
+  }
+
   try {
-    const { body, finalUrl } = await fetchText(target.toString(), 20000);
+    const { body, finalUrl } = await fetchText(
+      target.toString(),
+      20000,
+      which ? variants[which] : undefined,
+    );
     return NextResponse.json({
       ok: true,
       finalUrl,
