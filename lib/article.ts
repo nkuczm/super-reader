@@ -2,6 +2,7 @@ import { Readability } from "@mozilla/readability";
 import { JSDOM, VirtualConsole } from "jsdom";
 import sanitizeHtml from "sanitize-html";
 import { fetchText, stripHtml, absolute, toIso, stripChrome } from "./feed";
+import { isPaywalled } from "./subscriptions";
 import type { Attachment } from "./types";
 
 export type ReadableArticle = {
@@ -22,6 +23,17 @@ export type ReadableArticle = {
   truncated: boolean;
   /** Files this article points at — the filed PDF, say. */
   attachments?: Attachment[];
+  /**
+   * The publisher's own `isAccessibleForFree: false` on the copy we were
+   * given — so a walled stub can be recognised as one rather than shown as
+   * a short article. See lib/subscriptions.ts.
+   */
+  paywalled?: boolean;
+  /**
+   * Whether a stored subscription was sent with this request, and the site
+   * it was stored for. Only set when one was used.
+   */
+  subscription?: { host: string; applied: boolean };
 };
 
 /**
@@ -386,8 +398,12 @@ export async function previewFromMetadata(url: string): Promise<ReadableArticle 
   };
 }
 
-export async function extractArticle(url: string): Promise<ReadableArticle> {
-  const { body, finalUrl } = await fetchText(url, 15000);
+export async function extractArticle(
+  url: string,
+  /** Headers for this fetch alone — a reader's subscription cookie. */
+  extraHeaders?: Record<string, string>,
+): Promise<ReadableArticle> {
+  const { body, finalUrl } = await fetchText(url, 15000, extraHeaders);
 
   // jsdom logs noisily about CSS it cannot parse; none of it matters here.
   const virtualConsole = new VirtualConsole();
@@ -444,5 +460,9 @@ export async function extractArticle(url: string): Promise<ReadableArticle> {
     html,
     wordCount: text ? text.split(/\s+/).length : 0,
     truncated,
+    // Read off the page the publisher served, not guessed from how short the
+    // text looks: a two-paragraph stub and a two-paragraph story are the same
+    // shape. Extraction succeeds either way — this is what says which it was.
+    ...(isPaywalled(body) ? { paywalled: true } : {}),
   };
 }

@@ -11,6 +11,9 @@ export function startFakeX(port?: number): Promise<{
 export function startBlockedHomepageSite(port?: number): Promise<{ close: () => void }>;
 export function startAnchorFeedSite(port?: number): Promise<{ close: () => void }>;
 export function startGuardedSite(port?: number): Promise<{ close: () => void }>;
+export function startPaperSite(
+  port?: number,
+): Promise<{ close: () => void; seen: (string | null)[] }>;
 export function startCommentSite(port?: number): Promise<{ close: () => void }>;
 export function startFileSite(port?: number): Promise<{ close: () => void }>;
 export const OPINION_HTML: string;

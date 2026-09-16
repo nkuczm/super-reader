@@ -10,6 +10,7 @@ import { fileKindFor, fileNameFrom, imageUrlFor, readFileAsArticle } from "@/lib
 import { apiKeyFor, apiReaderFor } from "@/lib/apis";
 import { readRedditPost, redditPostHtml, redditPostUrl } from "@/lib/reddit";
 import { decodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
+import { credentialFor } from "@/lib/subscriptions";
 import { sanitizeArticleHtml } from "@/lib/article";
 
 export const runtime = "nodejs";
@@ -171,21 +172,55 @@ export async function GET(request: Request) {
     }
   }
 
+  /*
+   * A subscription the reader stored for this site, decrypted in their
+   * browser and sent with this one request. Used for the host it was stored
+   * for and no other, and kept nowhere: it exists for the length of the
+   * fetch below. See lib/subscriptions.ts.
+   */
+  const credential = credentialFor(
+    target.toString(),
+    decodeKeysHeader(request.headers.get(KEYS_HEADER)),
+  );
+
   try {
-    const article = await extractArticle(target.toString());
-    return NextResponse.json(article, {
-      headers: {
-        // An article's text does not change; let the CDN serve repeat opens
-        // instead of re-fetching and re-parsing the page every time.
-        // Next strips s-maxage from route handlers, so the CDN lifetime has
-        // to be stated in the CDN-specific headers, which it leaves alone.
-        "cache-control": "public, max-age=300",
-        "cdn-cache-control":
-          "public, s-maxage=86400, stale-while-revalidate=604800",
-        "vercel-cdn-cache-control":
-          "public, s-maxage=86400, stale-while-revalidate=604800",
+    const article = await extractArticle(
+      target.toString(),
+      credential ? { cookie: credential.cookie } : undefined,
+    );
+    return NextResponse.json(
+      credential
+        ? {
+            ...article,
+            subscription: { host: credential.host, applied: !article.paywalled },
+          }
+        : article,
+      {
+        headers: credential
+          ? {
+              /*
+               * A page fetched as a signed-in subscriber is that reader's
+               * copy, and this deployment is public behind a shared CDN. It
+               * must never be stored where the next request could be handed
+               * it — that would turn one person's subscription into everyone's.
+               */
+              "cache-control": "private, no-store",
+              "cdn-cache-control": "no-store",
+              "vercel-cdn-cache-control": "no-store",
+            }
+          : {
+              // An article's text does not change; let the CDN serve repeat opens
+              // instead of re-fetching and re-parsing the page every time.
+              // Next strips s-maxage from route handlers, so the CDN lifetime has
+              // to be stated in the CDN-specific headers, which it leaves alone.
+              "cache-control": "public, max-age=300",
+              "cdn-cache-control":
+                "public, s-maxage=86400, stale-while-revalidate=604800",
+              "vercel-cdn-cache-control":
+                "public, s-maxage=86400, stale-while-revalidate=604800",
+            },
       },
-    });
+    );
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Could not load that article";
@@ -226,10 +261,13 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         error: blocked
-          ? "This site doesn't allow reader view, and its feed doesn't carry the full text."
+          ? credential
+            ? `${credential.host} refused the request even with your saved subscription. The sign-in may have expired — open it on the site, then save a fresh one.`
+            : "This site doesn't allow reader view, and its feed doesn't carry the full text."
           : message,
+        ...(credential ? { subscription: { host: credential.host, applied: false } } : {}),
       },
-      { status: 502 },
+      { status: 502, headers: credential ? { "cache-control": "private, no-store" } : {} },
     );
   }
 }

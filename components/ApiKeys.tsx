@@ -9,6 +9,13 @@ import {
   WrongPassphrase,
   type Secrets,
 } from "@/lib/vault";
+import {
+  SUB_PREFIX,
+  normaliseHost,
+  subscriptionId,
+  subscriptionsIn,
+  tidyCookie,
+} from "@/lib/subscriptions";
 import { Icon } from "./icons";
 
 type Props = {
@@ -35,6 +42,8 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [newSite, setNewSite] = useState("");
+  const [newCookie, setNewCookie] = useState("");
 
   /**
    * What is in the fields versus what is actually stored. Without this the
@@ -113,10 +122,10 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
     return (
       <div className="offline-box">
         <div className="offline-status">
-          <strong>API keys are locked</strong>
+          <strong>Keys and subscriptions are locked</strong>
           <span>
-            Your keys synced from another device. Enter the passphrase to use
-            them here — it never leaves this browser.
+            They synced from another device. Enter the passphrase to use them
+            here — it never leaves this browser.
           </span>
         </div>
         <div className="row" style={{ marginTop: 11 }}>
@@ -144,8 +153,8 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
       <div className="offline-status">
         <strong>
           {Object.keys(keys).length > 0
-            ? `${Object.keys(keys).length} key${Object.keys(keys).length === 1 ? "" : "s"} saved`
-            : "No keys saved"}
+            ? `${Object.keys(keys).length} saved`
+            : "Nothing saved yet"}
           {dirty ? (
             <em className="badge warn">unsaved changes</em>
           ) : savedAt ? (
@@ -178,6 +187,96 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
           <small>{api.keyNote}</small>
         </label>
       ))}
+
+      <p className="field-label reading-label">Subscriptions</p>
+      <div className="offline-status">
+        <span>
+          Outlets you pay for have no full-text feed: to anyone who is not
+          signed in they serve a headline and a wall. Paste the cookie your
+          browser holds for one and the reader signs in as you when it fetches
+          an article from that site — and only that site. It is encrypted with
+          the same passphrase, sent with the one request that needs it, and
+          never stored on the server or cached where anyone else could be
+          handed it.
+        </span>
+      </div>
+
+      {subscriptionsIn(draft).map(({ host }) => (
+        <label key={host} className="api-field" style={{ marginTop: 10 }}>
+          <span>
+            {host}
+            <em className="badge">saved</em>
+            <button
+              className="link-btn danger"
+              style={{ marginLeft: "auto" }}
+              onClick={() =>
+                setDraft((current) => {
+                  const next = { ...current };
+                  delete next[subscriptionId(host)];
+                  return next;
+                })
+              }
+            >
+              Remove
+            </button>
+          </span>
+          <input
+            className="input"
+            type="password"
+            autoComplete="off"
+            value={draft[subscriptionId(host)] ?? ""}
+            onChange={(event) =>
+              setDraft((current) => ({
+                ...current,
+                [subscriptionId(host)]: event.target.value,
+              }))
+            }
+          />
+        </label>
+      ))}
+
+      <label className="api-field" style={{ marginTop: 10 }}>
+        <span>Add a subscription</span>
+        <input
+          className="input"
+          placeholder="wsj.com"
+          autoComplete="off"
+          value={newSite}
+          onChange={(event) => setNewSite(event.target.value)}
+        />
+        <input
+          className="input"
+          type="password"
+          style={{ marginTop: 6 }}
+          placeholder="Paste the cookie for that site"
+          autoComplete="off"
+          value={newCookie}
+          onChange={(event) => setNewCookie(event.target.value)}
+        />
+        <div className="api-actions" style={{ marginTop: 6 }}>
+          <button
+            className="btn ghost small"
+            disabled={!normaliseHost(newSite) || !tidyCookie(newCookie)}
+            onClick={() => {
+              const host = normaliseHost(newSite);
+              const cookie = tidyCookie(newCookie);
+              if (!host || !cookie) return;
+              setDraft((current) => ({ ...current, [`${SUB_PREFIX}${host}`]: cookie }));
+              setNewSite("");
+              setNewCookie("");
+            }}
+          >
+            {Icon.plus} Add
+          </button>
+        </div>
+        <small>
+          In the outlet&rsquo;s tab while signed in: dev tools →
+          Application → Cookies, or run <code>document.cookie</code> in the
+          console and copy what it prints. A sign-in expires after a few weeks
+          — when an article says the subscription did not apply, paste a fresh
+          one.
+        </small>
+      </label>
 
       <label className="api-field">
         <span>Passphrase</span>
@@ -219,12 +318,12 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
               setSavedAt(null);
             }}
           >
-            Remove all keys
+            Remove everything
           </button>
         )}
         <button className="btn small" disabled={busy || !dirty} onClick={save}>
           {busy ? <span className="spinner" /> : Icon.check}
-          {dirty ? "Save keys" : "Saved"}
+          {dirty ? "Save" : "Saved"}
         </button>
       </div>
     </div>

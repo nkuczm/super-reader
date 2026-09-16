@@ -173,7 +173,14 @@ export default function ArticleReader({
         // Keep it, so reopening is instant and works offline. The link asked
         // for is recorded alongside, which is not always the URL it came back
         // under.
-        void writeCached(data as ReadableArticle, url);
+        //
+        // A walled preview is not kept: it is a few sentences the publisher
+        // showed to a stranger, and storing it would serve that stub back for
+        // ever — including after a working subscription is saved, since the
+        // cache is read before the network.
+        if (!(data as ReadableArticle).paywalled) {
+          void writeCached(data as ReadableArticle, url);
+        }
       } catch (err) {
         if (cancelled) return;
         const timedOut =
@@ -299,6 +306,39 @@ export default function ArticleReader({
                 >
                   Always open {hostOf(url)} on the site
                 </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/*
+          * The publisher said, in the page, that this copy is not the whole
+          * thing (schema.org isAccessibleForFree). Said here rather than in
+          * Settings because this is the moment it matters: the article is
+          * open, it is short, and without this line a stub is indistinguishable
+          * from a brief story.
+          */}
+        {article && (article.paywalled || article.subscription?.applied === false) && (
+          <div className="reader-walled">
+            <p>
+              {article.subscription
+                ? `${article.subscription.host} served the subscriber-only preview — your saved sign-in didn't apply. It has probably expired.`
+                : "This is the preview the publisher serves to readers who aren't signed in."}
+            </p>
+            <div className="reader-error-actions">
+              <a
+                className="btn small"
+                href={url}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                Read it on the site
+              </a>
+              {article.subscription && (
+                <span className="reader-walled-hint">
+                  Settings → API keys &amp; subscriptions to save a fresh cookie
+                  for {article.subscription.host}.
+                </span>
               )}
             </div>
           </div>

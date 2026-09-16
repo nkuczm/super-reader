@@ -214,6 +214,43 @@ export function startGuardedSite(port = 8789) {
   });
 }
 
+/*
+ * A paper behind a subscription, answering the way the real ones do: the same
+ * URL serves a stub to anyone and the whole story to a signed-in reader, and
+ * says which it served in its own JSON-LD.
+ */
+function paywalledPage({ signedIn }) {
+  const body = signedIn
+    ? Array.from({ length: 12 }, (_, i) =>
+        `<p>Paragraph ${i + 1} of the story, which runs on at some length and is only served to a subscriber who is signed in.</p>`,
+      ).join("")
+    : `<p>The opening paragraph, which anyone may read before the wall.</p>
+       <aside class="paywall">Subscribe to keep reading.</aside>`;
+  return `<html><head><title>The story</title>
+    <script type="application/ld+json">${JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "NewsArticle",
+      headline: "The story",
+      isAccessibleForFree: signedIn ? "True" : "False",
+    })}</script></head>
+    <body><article>${body}</article></body></html>`;
+}
+
+export function startPaperSite(port = 8793) {
+  return new Promise((resolve) => {
+    const seen = [];
+    const server = http.createServer((req, res) => {
+      seen.push(req.headers.cookie ?? null);
+      const signedIn = (req.headers.cookie ?? "").includes("session=paid");
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(paywalledPage({ signedIn }));
+    });
+    server.listen(port, () =>
+      resolve({ server, seen, close: () => server.close() }),
+    );
+  });
+}
+
 // A site that links its feed with a plain anchor instead of declaring it.
 const anchorOnlyPage = `<html><head><title>Acme News</title></head><body>
 <main><p>Welcome.</p></main>

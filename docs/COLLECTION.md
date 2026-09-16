@@ -318,3 +318,25 @@ them rather than re-discovering them:
 
 When adding a publisher that walls us, put it in the known-publisher table with
 a route that works, or leave it out. Do not ship an entry that 403s.
+
+**A subscription is the one wall a reader can open.** Where someone pays a
+publisher, `lib/subscriptions.ts` stores one cookie per site in the encrypted
+vault and `/api/article` attaches it to that fetch alone. Two rules hold it
+together, and both were designed in rather than found:
+
+- A page fetched with a credential is *that reader's* copy and is marked
+  `private, no-store` on all three cache headers. This deployment is public
+  behind a shared CDN; caching a subscriber's article would hand one person's
+  subscription to whoever asked next. It is also never written to the offline
+  store, nor is a walled preview — the cache is read before the network, so a
+  stored stub would outlive the expired sign-in that produced it.
+- A credential goes only to the host it was stored for, matched on a dot
+  boundary so `wsj.com` never reaches `notwsj.com`.
+
+Whether the copy we got is the whole article is read off the page, not guessed
+from its length: schema.org `isAccessibleForFree` is the publisher's own
+statement, and NYT, WSJ and the FT all ship it. That is what lets the reader
+say "your subscription did not apply" instead of showing two paragraphs and
+leaving the reader to wonder. A datacentre request can still be refused
+whatever cookie it carries — the fallbacks are unchanged, so an outlet that
+refuses behaves exactly as it did before.
