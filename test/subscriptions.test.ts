@@ -5,6 +5,7 @@ import { extractArticle } from "../lib/article";
 import {
   credentialFor,
   isPaywalled,
+  knownRefusal,
   normaliseHost,
   subscriptionsIn,
   tidyCookie,
@@ -84,4 +85,19 @@ test("the subscription cookie reaches the publisher, and the wall lifts", async 
   } finally {
     site.close();
   }
+});
+
+test("a site measured as refusing a server fetch says so up front", () => {
+  // Measured 16 Sep 2026 from the deployment: nytimes.com serves its homepage
+  // to us and 403s every article, under five different header shapes. The
+  // refusal lands before a cookie is read, so "your sign-in expired" would be
+  // the wrong thing to tell someone — hence a named refusal.
+  assert.match(knownRefusal("nytimes.com") ?? "", /refuses article requests/);
+  assert.match(knownRefusal("www.nytimes.com") ?? "", /403/);
+  assert.equal(knownRefusal("cooking.nytimes.com") !== null, true, "and its subdomains");
+
+  // Not a guess about publishers in general: only what has been measured.
+  assert.equal(knownRefusal("ft.com"), null);
+  assert.equal(knownRefusal("wsj.com"), null);
+  assert.equal(knownRefusal("notnytimes.com"), null, "matched on a dot boundary");
 });

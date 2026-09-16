@@ -315,6 +315,17 @@ them rather than re-discovering them:
   purpose; see the note at the top of `lib/outlets.ts`. A directory entry that
   can never load is worse than an absence.
 - **X** — login wall to logged-out visitors; the API is the only route.
+- **New York Times** — *articles only*, and the shape of it matters. Measured
+  16 Sep 2026 from the deployment: `nytimes.com/` answers **200 with 1.25 MB**
+  of real homepage, and every article URL answers **403**. Five header shapes
+  against the same story — plain, browser-like `sec-ch-ua` + `sec-fetch`, with
+  a nytimes.com referer, as Googlebot, as mobile Safari — all 403. So the
+  refusal is not about the request's shape; it is the source, a datacentre
+  address and a server's TLS fingerprint. Note what this rules out: the block
+  lands *before* any cookie is read, so **a subscription cannot lift it** —
+  there is no authentication step to reach. Its feeds and sitemap still list
+  the stories, so NYT belongs in a reader's lists; the article opens on
+  nytimes.com, where their subscription works.
 
 When adding a publisher that walls us, put it in the known-publisher table with
 a route that works, or leave it out. Do not ship an entry that 403s.
@@ -340,3 +351,18 @@ say "your subscription did not apply" instead of showing two paragraphs and
 leaving the reader to wonder. A datacentre request can still be refused
 whatever cookie it carries — the fallbacks are unchanged, so an outlet that
 refuses behaves exactly as it did before.
+
+**Where a refusal has been measured, say so rather than blaming the cookie.**
+`REFUSES_SERVER_FETCH` in `lib/subscriptions.ts` holds those hosts with the
+measurement behind each. Without it, the New York Times reads as an expired
+sign-in, and someone spends an evening re-pasting a cookie that was never the
+problem. Add a host only after measuring it, and record the numbers in §8.
+
+**What this app will not do to get past one.** These blocks key on the source
+of the request — datacentre IP ranges, the TLS fingerprint of a server's HTTP
+client. Defeating that means impersonating a residential browser: proxying
+through consumer connections, or forging a fingerprint. That is evading an
+access-control decision the publisher has deliberately made, and it stays out
+of this repository regardless of how good the reader's reason is. A paid
+subscription is a reason to open the story on the publisher's own site, not a
+licence to look like someone we are not.

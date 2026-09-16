@@ -10,7 +10,7 @@ import { fileKindFor, fileNameFrom, imageUrlFor, readFileAsArticle } from "@/lib
 import { apiKeyFor, apiReaderFor } from "@/lib/apis";
 import { readRedditPost, redditPostHtml, redditPostUrl } from "@/lib/reddit";
 import { decodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
-import { credentialFor } from "@/lib/subscriptions";
+import { credentialFor, knownRefusal } from "@/lib/subscriptions";
 import { sanitizeArticleHtml } from "@/lib/article";
 
 export const runtime = "nodejs";
@@ -261,11 +261,19 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         error: blocked
-          ? credential
-            ? `${credential.host} refused the request even with your saved subscription. The sign-in may have expired — open it on the site, then save a fresh one.`
-            : "This site doesn't allow reader view, and its feed doesn't carry the full text."
+          ? // Some sites refuse a server's request outright, before any
+            // credential is looked at. Saying "your sign-in expired" there
+            // sends the reader off to re-paste a cookie that was never the
+            // problem, so a measured refusal is named as what it is.
+            (knownRefusal(target.hostname) ??
+            (credential
+              ? `${credential.host} refused the request even with your saved subscription. The sign-in may have expired — open it on the site, then save a fresh one.`
+              : "This site doesn't allow reader view, and its feed doesn't carry the full text."))
           : message,
-        ...(credential ? { subscription: { host: credential.host, applied: false } } : {}),
+        ...(credential
+          ? { subscription: { host: credential.host, applied: false } }
+          : {}),
+        ...(knownRefusal(target.hostname) ? { refusesServerFetch: true } : {}),
       },
       { status: 502, headers: credential ? { "cache-control": "private, no-store" } : {} },
     );

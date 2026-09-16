@@ -11,6 +11,7 @@ import {
 } from "@/lib/vault";
 import {
   SUB_PREFIX,
+  knownRefusal,
   normaliseHost,
   subscriptionId,
   subscriptionsIn,
@@ -220,6 +221,9 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
               Remove
             </button>
           </span>
+          {knownRefusal(host) && (
+            <small className="sub-warn">{knownRefusal(host)}</small>
+          )}
           <input
             className="input"
             type="password"
@@ -269,12 +273,16 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
             {Icon.plus} Add
           </button>
         </div>
+        {knownRefusal(newSite) && (
+          <small className="sub-warn">{knownRefusal(newSite)}</small>
+        )}
         <small>
-          In the outlet&rsquo;s tab while signed in: dev tools →
-          Application → Cookies, or run <code>document.cookie</code> in the
-          console and copy what it prints. A sign-in expires after a few weeks
-          — when an article says the subscription did not apply, paste a fresh
-          one.
+          In the outlet&rsquo;s tab while signed in, open dev tools →
+          Application → Cookies and copy the whole row. Not{" "}
+          <code>document.cookie</code> — the session cookie that carries a
+          subscription is usually HttpOnly, which that leaves out. A sign-in
+          expires after a few weeks; when an article says the subscription did
+          not apply, paste a fresh one.
         </small>
       </label>
 
