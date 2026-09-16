@@ -1062,6 +1062,20 @@
   padding: 22px 0 30px; color: var(--text-dim);
 }
 
+/*
+ * A copy the publisher walled. Warm rather than red: nothing has gone wrong
+ * with the app, the reader is simply not being shown the whole article, and
+ * the useful thing is the way out rather than the complaint.
+ */
+.reader-walled {
+  margin: 4px 0 18px; padding: 12px 14px;
+  border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: 10px; background: var(--bg-sub);
+}
+.reader-walled p { margin: 0 0 10px; font-size: 13.5px; line-height: 1.5; }
+.reader-walled .reader-error-actions { flex-wrap: wrap; gap: 8px; }
+.reader-walled-hint { font-size: 12.5px; color: var(--text-dim); align-self: center; }
+
 /* ---- The score page ----------------------------------------------------- */
 
 .score-body { max-width: 680px; margin: 0 auto; padding: 0 0 90px; }

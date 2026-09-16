@@ -379,6 +379,12 @@ export async function downloadForOffline(
           const res = await fetch(articleEndpoint(url, feedUrl, title), { headers });
           if (!res.ok) throw new Error("failed");
           const article = await res.json();
+          // The publisher served the preview it shows a stranger. Storing that
+          // would put a stub on the device under the headline of the article,
+          // and keep serving it after a subscription starts working — the
+          // cache is read before the network. Left unstored, it is simply
+          // fetched again next time, by which point it may be readable.
+          if (article?.paywalled) return;
           await writeCached(article, url);
           storedKeys.add(article.url ?? url);
           saved += 1;

@@ -13,7 +13,16 @@ const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-export async function fetchText(url: string, timeoutMs = 12000) {
+export async function fetchText(
+  url: string,
+  timeoutMs = 12000,
+  /**
+   * Extra headers for this one request — a reader's own subscription cookie,
+   * and nothing else so far. Passed per call rather than held anywhere: the
+   * server has no business keeping a credential between requests.
+   */
+  extraHeaders?: Record<string, string>,
+) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -24,6 +33,7 @@ export async function fetchText(url: string, timeoutMs = 12000) {
           "text/html,application/xhtml+xml,application/rss+xml,application/atom+xml," +
           "application/xml;q=0.9,*/*;q=0.8",
         "accept-language": "en-US,en;q=0.9",
+        ...extraHeaders,
       },
       redirect: "follow",
       signal: controller.signal,

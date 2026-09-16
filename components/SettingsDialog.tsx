@@ -264,7 +264,7 @@ export default function SettingsDialog({
             onLeave={onLeaveTeam}
           />
 
-          <p className="field-label reading-label">API keys</p>
+          <p className="field-label reading-label">API keys &amp; subscriptions</p>
           <ApiKeys vault={vault} keys={apiKeys} onChange={onKeysChange} />
 
           <p className="field-label reading-label">Offline</p>
