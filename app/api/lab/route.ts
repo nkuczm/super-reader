@@ -14,7 +14,7 @@ import { isPaywalled } from "@/lib/subscriptions";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ALLOWED = /^(www\.)?nytimes\.com$/;
+const ALLOWED = /(^|\.)nytimes\.com$/;
 
 export async function GET(request: Request) {
   const asked = new URL(request.url).searchParams.get("url") ?? "https://www.nytimes.com/";
@@ -41,8 +41,25 @@ export async function GET(request: Request) {
       accessFlag: body.match(/"isAccessibleForFree"\s*:\s*"?(\w+)"?/)?.[1] ?? null,
       looksLikeBotWall: /captcha|are you a robot|access denied|unusual traffic/i.test(body),
       title: body.match(/<title[^>]*>([^<]{0,160})/i)?.[1] ?? null,
-      // Enough of the top of the document to see what kind of page it is.
-      head: body.slice(0, 700),
+      // How much prose is actually in the document we were handed. A locked
+      // article and an open one are the same URL; this is what tells them
+      // apart without a subscription in hand.
+      paragraphs: (body.match(/<p[ >]/g) ?? []).length,
+      proseWords: (body
+        .replace(/<script[\s\S]*?<\/script>/gi, " ")
+        .replace(/<style[\s\S]*?<\/style>/gi, " ")
+        .match(/<p[ >][\s\S]*?<\/p>/gi) ?? [])
+        .join(" ")
+        .replace(/<[^>]+>/g, " ")
+        .split(/\s+/)
+        .filter(Boolean).length,
+      // Article links, so the next call can ask about a real story.
+      links: [
+        ...new Set(
+          (body.match(/https:\/\/www\.nytimes\.com\/20\d\d\/\d\d\/\d\d\/[a-z0-9/-]+\.html/g) ?? []),
+        ),
+      ].slice(0, 6),
+      head: body.slice(0, 400),
     });
   } catch (error) {
     return NextResponse.json({
