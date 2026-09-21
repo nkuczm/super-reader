@@ -240,8 +240,10 @@ export { faviconFor } from "./url";
 export async function fetchFeedItemContent(
   feedUrl: string,
   articleUrl: string,
+  /** How long this step may take, when the caller is running out of time. */
+  timeoutMs = 10000,
 ): Promise<string | null> {
-  const { body } = await fetchText(feedUrl, 10000);
+  const { body } = await fetchText(feedUrl, timeoutMs);
   if (!looksLikeFeed(body)) return null;
 
   const doc = parser.parse(body);

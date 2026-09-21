@@ -83,6 +83,9 @@ import {
   articleEndpoint,
   type OfflineTarget,
   PER_SOURCE,
+  storedArticles,
+  storedBytes,
+  type StoredArticle,
 } from "@/lib/offline";
 import ArticleReader from "./ArticleReader";
 import SourceIcon from "./SourceIcon";
@@ -97,6 +100,7 @@ import { canonicalUrl } from "@/lib/url";
 import { repairSources } from "@/lib/publishers";
 import { mergeWindow, stamp } from "@/lib/window";
 import { mergeSaved, differsFrom, slimForSync } from "@/lib/saved";
+import { knownRefusal } from "@/lib/subscriptions";
 import {
   alertsFor,
   acknowledge,
@@ -156,6 +160,8 @@ function keyHeadersFrom(keys: Record<string, string>): HeadersInit | undefined {
 type Selection =
   | { type: "all" }
   | { type: "saved" }
+  /** Only what is actually on this device, readable with no connection. */
+  | { type: "downloaded" }
   | { type: "alerts" }
   /** A shared list: its id is the team's connect code. */
   | { type: "team"; id: string }
@@ -250,13 +256,16 @@ export default function Reader() {
     total?: number;
     at?: number | null;
     /** How the last run ended, so Settings can say more than "it ran". */
-    result?: { saved: number; failed: number };
+    result?: { saved: number; failed: number; skipped?: number };
   }>({ state: "idle" });
   /**
    * Which articles are on the device already. Kept as a set of links so the
    * list can mark them without asking IndexedDB per row on every render.
    */
   const [savedOffline, setSavedOffline] = useState<Set<string>>(new Set());
+  /** What the device is holding, for the Downloaded list. */
+  const [downloaded, setDownloaded] = useState<StoredArticle[]>([]);
+  const [downloadedBytes, setDownloadedBytes] = useState(0);
   const downloading = useRef(false);
   const prefetched = useRef<Set<string>>(new Set());
   const [syncState, setSyncState] = useState<
@@ -1176,6 +1185,24 @@ export default function Reader() {
     })();
   }, []);
 
+  /**
+   * Re-read what the device is holding.
+   *
+   * Called on load and after each download run rather than kept in step by
+   * hand: the store is written from several places — the reader caching an
+   * article it just showed, the background top-up, the prune — and a list
+   * that quietly disagreed with the store would be worse than no list.
+   */
+  const refreshDownloaded = useCallback(async () => {
+    const [rows, bytes] = await Promise.all([storedArticles(), storedBytes()]);
+    setDownloaded(rows);
+    setDownloadedBytes(bytes);
+  }, []);
+
+  useEffect(() => {
+    void refreshDownloaded();
+  }, [refreshDownloaded]);
+
   const savedMeta = useCallback(
     (link: string) => saved.find((a) => a.link === link),
     [saved],
@@ -1524,6 +1551,42 @@ export default function Reader() {
     [saved],
   );
 
+  /**
+   * What is on the device, as list rows.
+   *
+   * Read from the offline store rather than filtered out of the feed: an
+   * article stays downloaded long after it falls out of the window its source
+   * shows, and the point of this list is to answer "what can I read on the
+   * train" exactly. `sourceId` is matched back where the source is still
+   * followed, so rows keep their outlet name and favicon.
+   */
+  const downloadedAsArticles = useMemo<Loaded[]>(() => {
+    const byHost = new Map<string, string>();
+    for (const source of allSources) {
+      try {
+        byHost.set(new URL(source.siteUrl || source.feedUrl).hostname, source.id);
+      } catch {
+        /* a source with no usable URL simply lends no name */
+      }
+    }
+    return downloaded.map((row) => {
+      let sourceId = "";
+      try {
+        sourceId = byHost.get(new URL(row.link).hostname) ?? "";
+      } catch {
+        /* keep it unattributed */
+      }
+      return {
+        id: `offline:${row.url}`,
+        title: row.title,
+        link: row.link,
+        publishedAt: row.publishedAt,
+        summary: row.excerpt,
+        sourceId,
+      };
+    });
+  }, [downloaded, allSources]);
+
   /** A team feed's articles, in the same shape the list renders. */
   const teamAsArticles = useCallback(
     (code: string): Loaded[] =>
@@ -1534,6 +1597,7 @@ export default function Reader() {
   const visible = useMemo(() => {
     if (selection.type === "all") return articles;
     if (selection.type === "saved") return savedAsArticles;
+    if (selection.type === "downloaded") return downloadedAsArticles;
     // Notifications is its own view, not a list of articles.
     if (selection.type === "alerts") return [];
     if (selection.type === "team") return teamAsArticles(selection.id);
@@ -1543,7 +1607,7 @@ export default function Reader() {
     const feed = feeds.find((f) => f.id === selection.id);
     const ids = new Set(feed?.sources.map((s) => s.id));
     return articles.filter((a) => ids.has(a.sourceId));
-  }, [articles, feeds, selection, savedAsArticles, teamAsArticles]);
+  }, [articles, feeds, selection, savedAsArticles, downloadedAsArticles, teamAsArticles]);
 
   const sourceById = useMemo(
     () => new Map(allSources.map((s) => [s.id, s])),
@@ -1574,7 +1638,21 @@ export default function Reader() {
       title: article.title,
     }));
 
-    return [...bookmarks, ...[...perSource.values()].flat()];
+    /*
+     * Never queue a host that has already been measured as refusing a request
+     * from this app's server (lib/subscriptions.ts). Asking is not free: each
+     * one is a function invocation that fetches, fails, and falls back twice
+     * before answering 502 — fifteen articles a source, on every visit.
+     */
+    return [...bookmarks, ...[...perSource.values()].flat()].filter(
+      (target) => {
+        try {
+          return !knownRefusal(new URL(target.url).hostname);
+        } catch {
+          return true;
+        }
+      },
+    );
   }, [articles, sourceById, saved]);
 
   const runDownload = useCallback(async () => {
@@ -1611,13 +1689,14 @@ export default function Reader() {
       // marks are re-read rather than only added to.
       const [saved, keys] = await Promise.all([savedLinks(), cachedUrls()]);
       setSavedOffline(new Set([...saved, ...keys]));
+      void refreshDownloaded();
       setOffline({ state: "done", at: await lastDownloadedAt(), result });
     } catch {
       setOffline({ state: "error" });
     } finally {
       downloading.current = false;
     }
-  }, [offlineTargets, markSaved]);
+  }, [offlineTargets, markSaved, refreshDownloaded]);
 
   /**
    * Keep the device topped up.
@@ -1749,7 +1828,10 @@ export default function Reader() {
      * bookmarks, while the badge beside it, counting the list itself, said
      * five.
      */
-    const hideRead = settings.hideRead && selection.type !== "saved";
+    const hideRead =
+      settings.hideRead &&
+      selection.type !== "saved" &&
+      selection.type !== "downloaded";
     const list = hideRead ? visible.filter((a) => !read.has(a.id)) : visible;
     if (settings.sort !== "top") return list;
     // Ranked first, by score; everything else keeps its date order below,
@@ -2047,6 +2129,7 @@ export default function Reader() {
     selection.type === "all"
       ? allSources.length
       : selection.type === "saved" ||
+          selection.type === "downloaded" ||
           selection.type === "alerts" ||
           selection.type === "team"
         ? 0
@@ -2059,6 +2142,8 @@ export default function Reader() {
       ? "All articles"
       : selection.type === "saved"
         ? "Saved"
+        : selection.type === "downloaded"
+          ? "On this device"
         : selection.type === "alerts"
           ? "Notifications"
           : selection.type === "team"
@@ -2100,6 +2185,16 @@ export default function Reader() {
             {Icon.bookmark}
             <span className="feed-name">Saved</span>
             <span className="count">{saved.length || ""}</span>
+          </button>
+
+          <button
+            className={`nav-item ${selection.type === "downloaded" ? "active" : ""}`}
+            onClick={() => choose({ type: "downloaded" })}
+            title="Articles stored on this device, readable with no connection"
+          >
+            {Icon.download}
+            <span className="feed-name">On this device</span>
+            <span className="count">{downloaded.length || ""}</span>
           </button>
 
           {/* Only worth a row once something is being watched. */}
@@ -2574,6 +2669,14 @@ export default function Reader() {
             <h1>{heading}</h1>
             <p className="sub">
               {shown.length} article{shown.length === 1 ? "" : "s"}
+              {/* What the download is costing in storage, where that is the
+                  question the list is being looked at to answer. */}
+              {selection.type === "downloaded" && downloadedBytes > 0 &&
+                ` · ${
+                  downloadedBytes >= 1_000_000
+                    ? `${(downloadedBytes / 1_000_000).toFixed(1)} MB`
+                    : `${Math.max(1, Math.round(downloadedBytes / 1000))} KB`
+                } of text`}
               {selectedSourceCount > 0 &&
                 ` · ${selectedSourceCount} source${selectedSourceCount === 1 ? "" : "s"}`}
               {settings.sort === "top" &&
@@ -2743,6 +2846,12 @@ export default function Reader() {
                   Nothing shared yet. Use <strong>Save to Team</strong> on any
                   article and everyone with this feed&rsquo;s connect code will
                   see it here.
+                </p>
+              ) : selection.type === "downloaded" ? (
+                <p>
+                  Nothing downloaded yet. Articles are fetched for offline
+                  reading in the background — open the app on a connection for
+                  a minute and they will collect here.
                 </p>
               ) : selection.type === "saved" ? (
                 <p>

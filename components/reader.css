@@ -365,6 +365,26 @@
   max-width: 100%; height: auto; display: block;
   border-radius: 8px; margin: 1.4em auto;
   background: var(--bg-sub);
+  /*
+   * No aspect-ratio is declared here on purpose. Every current browser
+   * derives one from an <img>'s own width and height attributes when the
+   * height is auto, which is why carrying those attributes through the
+   * sanitizer (lib/article.ts) is the whole fix: the box is the right shape
+   * before the bytes land, and the paragraph being read does not get shoved
+   * down the screen. Forcing a ratio in CSS would instead squash every photo
+   * whose real shape differs, and `attr()` outside `content` is not something
+   * iOS Safari can be relied on for yet.
+   */
+}
+/*
+ * A photo that will not load — a moved file, a CDN refusing us, an offline
+ * device that never cached it — used to leave a grey slab the size of the
+ * picture that should have been there. Reduced to a thin, quiet line: the
+ * article still reads, and the gap does not pretend something is coming.
+ */
+.prose img.failed {
+  aspect-ratio: auto; height: 3px; min-height: 3px;
+  background: var(--border); border-radius: 2px; margin: 1.4em auto;
 }
 .prose figure img { margin-bottom: 0; }
 .prose figure { margin-inline: 0; }

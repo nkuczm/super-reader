@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   currentSlot,
   downloadForOffline,
+  retryAfterFor,
+  shouldSkip,
   type DownloadProgress,
 } from "../lib/offline";
 
@@ -169,4 +171,55 @@ test("copies from an older extraction are thrown away, not counted", async () =>
   const { purgeStaleVersion, EXTRACT_VERSION } = await import("../lib/offline");
   assert.equal(typeof EXTRACT_VERSION, "number");
   assert.equal(await purgeStaleVersion(), 0, "nothing stored, nothing to drop");
+});
+
+test("how long a failure is left alone depends on what it was", () => {
+  const hour = 3_600_000;
+  // A refusal is a decision; asking again tomorrow will not change it.
+  for (const status of [401, 403, 404, 410, 451]) {
+    assert.equal(retryAfterFor(status), 7 * 24 * hour, String(status));
+  }
+  // Worth another look, but not soon.
+  assert.equal(retryAfterFor(402), 24 * hour, "a walled preview");
+  // A site having a bad afternoon is readable again this evening.
+  assert.equal(retryAfterFor(500), 6 * hour);
+  assert.equal(retryAfterFor(504), 6 * hour, "a timeout is not a refusal");
+});
+
+test("a failure inside its back-off is left alone, and outside it is not", () => {
+  const now = Date.UTC(2026, 8, 21, 12, 0, 0);
+  const hour = 3_600_000;
+
+  assert.equal(shouldSkip(undefined, now), false, "never asked before");
+  assert.equal(
+    shouldSkip({ at: now - hour, status: 403 }, now),
+    true,
+    "a refusal an hour ago is not worth repeating",
+  );
+  assert.equal(
+    shouldSkip({ at: now - 8 * hour, status: 500 }, now),
+    false,
+    "a server error eight hours ago is worth one more try",
+  );
+  assert.equal(
+    shouldSkip({ at: now - 8 * 24 * hour, status: 403 }, now),
+    false,
+    "even a refusal is re-checked eventually — sites change",
+  );
+});
+
+test("one run asks for no more than its share", async () => {
+  // Seventy-nine sources at fifteen articles each is about twelve hundred, and
+  // the top-up fires on every visit and every return to the foreground.
+  const targets = Array.from({ length: 200 }, (_, i) => ({
+    url: `https://example.com/${i}`,
+  }));
+
+  const result = await withStubbedFetch(
+    () => ({ ok: true }),
+    () => downloadForOffline(targets, undefined, undefined, 25),
+  );
+
+  assert.equal(result.saved, 25, "stops at the ceiling");
+  assert.equal(result.skipped, 175, "and says how much is still waiting");
 });

@@ -81,6 +81,24 @@ function sanitize(html: string, baseUrl: string) {
           // Some publishers block hot-linked images by Referer; sending none
           // is far more likely to load than sending ours.
           next.referrerpolicy = "no-referrer";
+
+          /*
+           * Carry the publisher's own dimensions through.
+           *
+           * They were being dropped here, and a lazily-loaded image with no
+           * width or height has no shape until its bytes arrive: every photo
+           * in the article was a zero-height line that snapped open as it
+           * loaded, shoving the paragraph you were reading down the screen.
+           * With both numbers the browser reserves the right box up front and
+           * nothing moves. `height: auto` in the stylesheet still scales it to
+           * the column, so these are a ratio, not a size.
+           */
+          const width = Number.parseInt(attribs.width ?? "", 10);
+          const height = Number.parseInt(attribs.height ?? "", 10);
+          if (Number.isFinite(width) && Number.isFinite(height) && width > 1 && height > 1) {
+            next.width = String(width);
+            next.height = String(height);
+          }
         }
         return { tagName, attribs: next };
       },
@@ -363,7 +381,11 @@ async function oEmbedPreview(url: string): Promise<ReadableArticle | null> {
   };
 }
 
-export async function previewFromMetadata(url: string): Promise<ReadableArticle | null> {
+export async function previewFromMetadata(
+  url: string,
+  /** How long this step may take, when the caller is running out of time. */
+  timeoutMs = 12000,
+): Promise<ReadableArticle | null> {
   // A video's own oEmbed beats whatever its page says to a crawler.
   try {
     const embed = await oEmbedPreview(url);
@@ -372,7 +394,7 @@ export async function previewFromMetadata(url: string): Promise<ReadableArticle 
     /* not an embeddable host, or it would not answer */
   }
 
-  const { body, finalUrl } = await fetchText(url, 15000);
+  const { body, finalUrl } = await fetchText(url, timeoutMs);
   const dom = new JSDOM(body, { url: finalUrl, virtualConsole: new VirtualConsole() });
 
   const title = metaOf(dom, ["og:title", "twitter:title"]) ?? dom.window.document.title?.trim();

@@ -43,7 +43,28 @@ function isPrivateHost(hostname: string) {
   );
 }
 
+/**
+ * How long this function may spend before the platform kills it.
+ *
+ * Measured on the deployment, 21 Sep 2026: 36 requests in a week ended in
+ * `Vercel Runtime Timeout Error: Task timed out after 30 seconds`. The cause
+ * is arithmetic, not bad luck. A failing article runs three steps in
+ * sequence — extract the page (15s), read the source feed (10s), then fetch
+ * the page *again* for its metadata (12s) — which is 37 seconds of budget
+ * inside a 30-second function. A timeout bills the whole 30 seconds and
+ * returns nothing, so the slowest failures were the most expensive ones.
+ *
+ * Each step now gets what is actually left, and a step with no room is
+ * skipped. The reader gets the same answer sooner, and the function stops
+ * being killed mid-sentence.
+ */
+const BUDGET_MS = 24_000;
+/** Below this there is no point starting another fetch. */
+const MIN_STEP_MS = 3_000;
+
 export async function GET(request: Request) {
+  const startedAt = Date.now();
+  const remaining = () => BUDGET_MS - (Date.now() - startedAt);
   const params = new URL(request.url).searchParams;
   const url = params.get("url");
   // The source feed, so a syndicated copy can stand in when the site refuses.
@@ -227,9 +248,13 @@ export async function GET(request: Request) {
 
     // The site would not give us the page. Many publishers syndicate the full
     // text in their own feed, so use the copy they chose to hand out.
-    if (feed) {
+    if (feed && remaining() > MIN_STEP_MS) {
       try {
-        const content = await fetchFeedItemContent(feed, target.toString());
+        const content = await fetchFeedItemContent(
+          feed,
+          target.toString(),
+          Math.min(10_000, remaining()),
+        );
         if (content) {
           return NextResponse.json(
             articleFromFeedContent(content, target.toString(), title),
@@ -246,7 +271,11 @@ export async function GET(request: Request) {
     // extract and used to fail outright; this is what every other app shows
     // when it unfurls a link, and it beats an error message.
     try {
-      const preview = await previewFromMetadata(target.toString());
+      if (remaining() <= MIN_STEP_MS) throw new Error("out of budget");
+      const preview = await previewFromMetadata(
+        target.toString(),
+        Math.min(12_000, remaining()),
+      );
       if (preview) {
         return NextResponse.json(preview, {
           headers: { "cache-control": "public, max-age=600" },
@@ -275,7 +304,24 @@ export async function GET(request: Request) {
           : {}),
         ...(knownRefusal(target.hostname) ? { refusesServerFetch: true } : {}),
       },
-      { status: 502, headers: credential ? { "cache-control": "private, no-store" } : {} },
+      {
+        status: 502,
+        headers: credential
+          ? { "cache-control": "private, no-store" }
+          : {
+              /*
+               * A failure is worth caching too. Without this every retry of a
+               * dead link is a fresh function invocation doing the same three
+               * fetches to reach the same answer — and a list refreshed in
+               * two tabs asks twice. Five minutes at the edge absorbs the
+               * bursts; short enough that a reader who taps a story again
+               * after a site recovers is not told no for long.
+               */
+              "cache-control": "public, max-age=60",
+              "cdn-cache-control": "public, s-maxage=300",
+              "vercel-cdn-cache-control": "public, s-maxage=300",
+            },
+      },
     );
   }
 }
