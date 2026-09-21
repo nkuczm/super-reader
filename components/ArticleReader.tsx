@@ -72,6 +72,26 @@ export default function ArticleReader({
   const [slow, setSlow] = useState(false);
   /** The article's own text — the only place a highlight becomes a quote. */
   const prose = useRef<HTMLDivElement | null>(null);
+
+  /*
+   * Mark photos that never arrive.
+   *
+   * A broken <img> keeps the box its width and height attributes reserved, so
+   * a moved file or a CDN that refuses us leaves a grey slab in the middle of
+   * the article, exactly where a picture ought to be. `error` does not bubble,
+   * so it is caught on the way down instead — one listener for however many
+   * pictures the article has, and it works for images injected as HTML.
+   */
+  useEffect(() => {
+    const container = prose.current;
+    if (!container) return;
+    const onError = (event: Event) => {
+      const target = event.target;
+      if (target instanceof HTMLImageElement) target.classList.add("failed");
+    };
+    container.addEventListener("error", onError, true);
+    return () => container.removeEventListener("error", onError, true);
+  }, [article?.html]);
   /** Where the quote being returned to sits, in boxes to paint over it. */
   const [flash, setFlash] = useState<
     { top: number; left: number; width: number; height: number }[]

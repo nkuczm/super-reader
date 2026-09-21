@@ -95,7 +95,7 @@ export default function SettingsDialog({
     done?: number;
     total?: number;
     at?: number | null;
-    result?: { saved: number; failed: number };
+    result?: { saved: number; failed: number; skipped?: number };
   };
   onDownload: () => void;
   /** How many notes exist, so the switch can say what it is switching off. */

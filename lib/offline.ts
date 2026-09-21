@@ -110,6 +110,70 @@ export async function cachedUrls(): Promise<string[]> {
   }
 }
 
+/**
+ * Everything on the device, as list rows.
+ *
+ * The offline store is keyed by the URL an article was filed under, which is
+ * not always the link the list holds, so this reads the store itself rather
+ * than trying to work out from a feed what ought to be in it. What comes back
+ * is what can actually be read with no connection — which is the only honest
+ * answer to "what have I got".
+ */
+export type StoredArticle = {
+  url: string;
+  title: string;
+  siteName?: string;
+  byline?: string;
+  publishedAt?: string;
+  excerpt?: string;
+  wordCount: number;
+  cachedAt: number;
+  /** The link the reader asked for, when the article is filed under another. */
+  link: string;
+};
+
+export async function storedArticles(): Promise<StoredArticle[]> {
+  try {
+    const rows = await run<CachedArticle[]>(ARTICLES, "readonly", (s) => s.getAll());
+    const index = await linkIndex();
+    // Filed URL → the link the list knows it by, so opening a row from here
+    // reaches the same article the rest of the app would.
+    const askedFor = new Map(Object.entries(index).map(([asked, filed]) => [filed, asked]));
+
+    return (rows ?? [])
+      // A copy from an older extraction is not readable — readCached refuses
+      // it — so listing it would promise something the reader cannot open.
+      .filter((row) => row?.url && row.v === EXTRACT_VERSION)
+      .map((row) => ({
+        url: row.url,
+        title: row.title || row.url,
+        siteName: row.siteName,
+        byline: row.byline,
+        publishedAt: row.publishedAt,
+        excerpt: row.excerpt,
+        wordCount: row.wordCount ?? 0,
+        cachedAt: row.cachedAt ?? 0,
+        link: askedFor.get(row.url) ?? row.url,
+      }))
+      .sort((a, b) => b.cachedAt - a.cachedAt);
+  } catch {
+    return [];
+  }
+}
+
+/** Roughly how much room the downloaded articles take up. */
+export async function storedBytes(): Promise<number> {
+  try {
+    const rows = await run<CachedArticle[]>(ARTICLES, "readonly", (s) => s.getAll());
+    return (rows ?? []).reduce(
+      (total, row) => total + (row?.html?.length ?? 0) + (row?.title?.length ?? 0),
+      0,
+    );
+  } catch {
+    return 0;
+  }
+}
+
 const VERSION_KEY = "extractVersion";
 
 /**
@@ -200,6 +264,82 @@ export async function savedLinks(): Promise<string[]> {
 /** Where a link's article is filed, when that is not the link itself. */
 export async function filedUnder(url: string): Promise<string | null> {
   return (await linkIndex())[url] ?? null;
+}
+
+/**
+ * Articles the server could not extract, and when it gave up on them.
+ *
+ * Measured on the deployment, 21 Sep 2026: of 573 logged `/api/article`
+ * requests in a week, **373 answered 502 and 36 timed out** — two thirds of
+ * everything the reader asked for, and nearly all of it the background
+ * top-up. Nothing recorded those failures, so every visit, every return to
+ * the foreground and every reconnection asked for the very same dead articles
+ * again. One publisher that refuses us, times fifteen articles, times a
+ * hundred app switches a week.
+ *
+ * A failure is worth remembering for a while. Not for ever: a 500 or a
+ * timeout is usually the site having a moment, and the story is readable an
+ * hour later. A refusal — 401, 403, 404, 451 — is a decision, and asking
+ * again tomorrow will not change it.
+ */
+const FAILURES = "failures";
+
+export type FailureRecord = { at: number; status: number };
+type Failures = Record<string, FailureRecord>;
+
+/** How long to leave an article alone after the server could not read it. */
+export function retryAfterFor(status: number): number {
+  const hour = 3_600_000;
+  // A settled refusal. The publisher is not going to change its mind today.
+  if ([401, 403, 404, 410, 451].includes(status)) return 7 * 24 * hour;
+  // Paywalled, or extraction found no prose: worth another look, but not soon.
+  if (status === 422 || status === 402) return 24 * hour;
+  // Everything else — 500s, timeouts, a dropped connection — is a bad moment.
+  return 6 * hour;
+}
+
+async function failures(): Promise<Failures> {
+  return (await meta<Failures>(FAILURES)) ?? {};
+}
+
+/** Is this one still inside its back-off? */
+export function shouldSkip(record: FailureRecord | undefined, now = Date.now()) {
+  if (!record) return false;
+  return now - record.at < retryAfterFor(record.status);
+}
+
+let failureWrites: Promise<void> = Promise.resolve();
+
+async function rememberFailure(url: string, status: number) {
+  failureWrites = failureWrites.then(async () => {
+    const current = await failures();
+    // Bounded: the list only has to outlive the back-off, and a device that
+    // has seen ten thousand dead links does not need to remember them all.
+    const entries = Object.entries({ ...current, [url]: { at: Date.now(), status } })
+      .sort((a, b) => b[1].at - a[1].at)
+      .slice(0, 2000);
+    await setMeta(FAILURES, Object.fromEntries(entries));
+  });
+  await failureWrites;
+}
+
+/** A success clears the record, so a site coming back works straight away. */
+async function forgetFailure(url: string) {
+  failureWrites = failureWrites.then(async () => {
+    const current = await failures();
+    if (!(url in current)) return;
+    delete current[url];
+    await setMeta(FAILURES, current);
+  });
+  await failureWrites;
+}
+
+/** What the device has given up on for now — for the download report. */
+export async function skippedLinks(now = Date.now()): Promise<string[]> {
+  const current = await failures();
+  return Object.entries(current)
+    .filter(([, record]) => shouldSkip(record, now))
+    .map(([url]) => url);
 }
 
 /**
@@ -316,6 +456,13 @@ export async function requestPersistence(): Promise<boolean> {
 /** How many of each source's newest stories are kept for offline reading. */
 export const PER_SOURCE = 15;
 
+/**
+ * Most articles one top-up will fetch. The device catches up across visits
+ * instead of asking for everything at once — see the note in
+ * downloadForOffline.
+ */
+export const MAX_PER_RUN = 60;
+
 export type DownloadProgress = {
   done: number;
   total: number;
@@ -334,6 +481,82 @@ export function articleEndpoint(url: string, feedUrl?: string, title?: string) {
 }
 
 /**
+ * The photographs inside an article, put on the device with its text.
+ *
+ * Must match the cache name in public/sw.js — the worker is what answers the
+ * browser's own <img> request from it later.
+ */
+const PHOTOS = "super-reader-photos-v1";
+
+/**
+ * At most this many pictures per article. A long feature can carry dozens,
+ * and a downloaded library of them is the reader's storage and mobile data,
+ * spent on pictures they may never scroll to. The first few are the ones the
+ * article is actually about.
+ */
+const PHOTOS_PER_ARTICLE = 8;
+
+/**
+ * Warm the photo cache for one article.
+ *
+ * Opaque responses, because a publisher's CDN sends no CORS headers: they
+ * cannot be read here, but they can be stored and handed to an <img>, which
+ * is all that is needed. Failures are ignored on purpose — a missing picture
+ * must never cost the article its download.
+ */
+export async function cachePhotos(html: string): Promise<number> {
+  if (typeof caches === "undefined") return 0;
+  const urls = [
+    ...new Set(
+      [...html.matchAll(/<img[^>]+src="([^"]+)"/g)]
+        .map((match) => match[1])
+        .filter((src) => /^https?:\/\//.test(src)),
+    ),
+  ].slice(0, PHOTOS_PER_ARTICLE);
+  if (urls.length === 0) return 0;
+
+  let stored = 0;
+  try {
+    const cache = await caches.open(PHOTOS);
+    await Promise.all(
+      urls.map(async (url) => {
+        try {
+          if (await cache.match(url)) return;
+          const response = await fetch(url, { mode: "no-cors", credentials: "omit" });
+          if (response.ok || response.type === "opaque") {
+            await cache.put(url, response);
+            stored += 1;
+          }
+        } catch {
+          /* one picture that would not come; the article is still readable */
+        }
+      }),
+    );
+  } catch {
+    /* no Cache Storage on this device */
+  }
+  return stored;
+}
+
+/** Drop stored photographs for articles the device no longer holds. */
+export async function prunePhotos(keepHtml: string[]) {
+  if (typeof caches === "undefined") return;
+  try {
+    const wanted = new Set(
+      keepHtml.flatMap((html) =>
+        [...html.matchAll(/<img[^>]+src="([^"]+)"/g)].map((match) => match[1]),
+      ),
+    );
+    const cache = await caches.open(PHOTOS);
+    for (const request of await cache.keys()) {
+      if (!wanted.has(request.url)) await cache.delete(request);
+    }
+  } catch {
+    /* nothing stored, or storage unavailable */
+  }
+}
+
+/**
  * Fetch and store the newest articles so they can be read with no connection.
  * Runs a few at a time: this is a background chore, not something to saturate
  * a phone's radio for.
@@ -343,13 +566,38 @@ export async function downloadForOffline(
   onProgress?: (progress: DownloadProgress) => void,
   /** API keys, for sources whose text comes from an API that needs one. */
   headers?: HeadersInit,
-): Promise<{ saved: number; failed: number }> {
+  /** Most articles to fetch in one run — see the note on `wanted` below. */
+  limit = MAX_PER_RUN,
+): Promise<{ saved: number; failed: number; skipped: number }> {
   const seen = new Set<string>();
-  const wanted = targets.filter((t) => {
+  const deduped = targets.filter((t) => {
     if (seen.has(t.url)) return false;
     seen.add(t.url);
     return true;
   });
+
+  /*
+   * Leave alone what the server has already failed to read, until its
+   * back-off is up. This is the whole of the 502 storm: without it the
+   * top-up re-asks for every dead article on every visit, every return to
+   * the foreground and every reconnection.
+   */
+  const known = await failures();
+  const now = Date.now();
+  const live = deduped.filter((t) => !shouldSkip(known[t.url], now));
+
+  /*
+   * A ceiling on one run. Seventy-nine sources at fifteen articles each is
+   * about twelve hundred extractions, and the top-up fires on every visit,
+   * every return to the foreground and every reconnection — so one reader
+   * flicking between apps can ask for more in an afternoon than the whole
+   * plan allows in a month. Bookmarks sort first (see offlineTargets), so
+   * what matters is fetched first and the rest arrives over the next few
+   * visits rather than all at once.
+   */
+  const wanted = live.slice(0, limit);
+  const skipped = deduped.length - wanted.length;
+
   let saved = 0;
   let failed = 0;
   let settled = 0;
@@ -377,15 +625,29 @@ export async function downloadForOffline(
           }
 
           const res = await fetch(articleEndpoint(url, feedUrl, title), { headers });
-          if (!res.ok) throw new Error("failed");
+          if (!res.ok) {
+            // Remembered with its status, because what the status means for
+            // trying again differs by an order of magnitude — see
+            // retryAfterFor.
+            await rememberFailure(url, res.status);
+            throw new Error(`failed ${res.status}`);
+          }
           const article = await res.json();
           // The publisher served the preview it shows a stranger. Storing that
           // would put a stub on the device under the headline of the article,
           // and keep serving it after a subscription starts working — the
           // cache is read before the network. Left unstored, it is simply
           // fetched again next time, by which point it may be readable.
-          if (article?.paywalled) return;
+          if (article?.paywalled) {
+            // Not a server failure, but not worth re-asking every hour either.
+            await rememberFailure(url, 402);
+            return;
+          }
           await writeCached(article, url);
+          // The pictures too, or a downloaded article opens on a train as a
+          // headline, its words, and a column of empty boxes.
+          if (typeof article?.html === "string") await cachePhotos(article.html);
+          await forgetFailure(url);
           storedKeys.add(article.url ?? url);
           saved += 1;
           stored = true;
@@ -416,11 +678,13 @@ export async function downloadForOffline(
   if (failed === 0) {
     // What each wanted link is filed under, for the ones this run skipped
     // because they were already there under a different URL.
-    for (const target of wanted) {
+    for (const target of deduped) {
       const filed = await filedUnder(target.url);
       if (filed) storedKeys.add(filed);
     }
-    await pruneTo(storedKeys, new Set(wanted.map((t) => t.url)));
+    // Pruning compares against everything this device wants, not just what
+    // this run fetched — an article skipped for its back-off is still wanted.
+    await pruneTo(storedKeys, new Set(deduped.map((t) => t.url)));
   }
-  return { saved, failed };
+  return { saved, failed, skipped };
 }

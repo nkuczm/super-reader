@@ -298,6 +298,53 @@ something you can see drift.
 
 ---
 
+## 5b. What the reader costs to run (21 Sep 2026)
+
+Collection is not free, and the bill is mostly made of requests that fail.
+Read from the deployment's runtime logs over seven days:
+
+| | requests | share |
+|---|---|---|
+| `/api/article` 502 | **373** | 65% |
+| `/api/article` 200 | 232 | 38% |
+| `/api/article` 504 (`Task timed out after 30 seconds`) | **36** | 6% |
+| `/api/sync`, `/api/team` | 15 | — |
+
+Two thirds of everything the reader asked for came back as nothing, and
+almost all of it was the background offline top-up rather than a person
+opening a story. Three things made that as expensive as it was:
+
+1. **Nothing remembered a failure.** The top-up runs on every visit, every
+   return to the foreground and every reconnection, and re-asked for exactly
+   the same dead articles each time. One publisher that refuses us, times
+   fifteen articles a source, times however often a phone is picked up.
+2. **A failure costs more than a success.** The route falls back twice —
+   re-reading the source feed, then fetching the page again for its
+   metadata — so a dead link is up to three outbound fetches and two DOM
+   parses, where a live one is one of each.
+3. **The fallbacks outlasted the function.** 15s + 10s + 12s is 37 seconds of
+   budget inside a 30-second function, and a timeout bills the full thirty
+   and returns nothing. The slowest failures were the most expensive.
+
+What answers each, in `lib/offline.ts` and `app/api/article/route.ts`:
+a failure is recorded with its status and left alone for six hours (a bad
+afternoon) to seven days (a refusal); a host already measured as refusing is
+never queued at all; one run fetches at most `MAX_PER_RUN`, so a device
+catches up across visits instead of asking for twelve hundred articles at
+once; every step gets the time actually left rather than its own timeout; and
+a failure is cacheable at the edge for five minutes so a burst of retries
+does not become a burst of invocations.
+
+**A reader opening a story is never skipped** — only the background top-up
+consults the back-off. The rule is that the app may stop *guessing* at work,
+never stop doing what someone asked for.
+
+Re-measure from the logs rather than trusting this table: `get_runtime_logs`
+grouped by `statusCode` is the whole check, and the ratio of 200s to 502s is
+the number that says whether collection is paying its way.
+
+---
+
 ## 6. Failure shapes to recognise
 
 Every outage that has mattered here returned HTTP 200. Collection does not
@@ -325,6 +372,9 @@ crash, it thins out.
   `lib/publishers.ts` rewrites the hosts measured dead when a device loads its
   list — and only those, because rewriting a working feed would be the
   plausible-substitute failure at the top of this list.
+- **The retry that never gives up** — work that fails, is not recorded as
+  having failed, and is therefore repeated on every visit for ever. Costs
+  nothing visible and everything in the bill; see §5b.
 
 ---
 
@@ -370,6 +420,17 @@ them rather than re-discovering them:
   see the note at the top of `lib/outlets.ts`. A directory entry that can never
   load is worse than an absence.
 - **X** — login wall to logged-out visitors; the API is the only route.
+- **New York Times** — *articles only*, and the shape of it matters. Measured
+  16 Sep 2026 from the deployment: `nytimes.com/` answers **200 with 1.25 MB**
+  of real homepage, and every article URL answers **403**. Five header shapes
+  against the same story — plain, browser-like `sec-ch-ua` + `sec-fetch`, with
+  a nytimes.com referer, as Googlebot, as mobile Safari — all 403. So the
+  refusal is not about the request's shape; it is the source, a datacentre
+  address and a server's TLS fingerprint. Note what this rules out: the block
+  lands *before* any cookie is read, so **a subscription cannot lift it** —
+  there is no authentication step to reach. Its feeds and sitemap still list
+  the stories, so NYT belongs in a reader's lists; the article opens on
+  nytimes.com, where their subscription works.
 
 When adding a publisher that walls us, put it in the known-publisher table with
 a route that works, or leave it out. Do not ship an entry that 403s.
@@ -395,3 +456,18 @@ say "your subscription did not apply" instead of showing two paragraphs and
 leaving the reader to wonder. A datacentre request can still be refused
 whatever cookie it carries — the fallbacks are unchanged, so an outlet that
 refuses behaves exactly as it did before.
+
+**Where a refusal has been measured, say so rather than blaming the cookie.**
+`REFUSES_SERVER_FETCH` in `lib/subscriptions.ts` holds those hosts with the
+measurement behind each. Without it, the New York Times reads as an expired
+sign-in, and someone spends an evening re-pasting a cookie that was never the
+problem. Add a host only after measuring it, and record the numbers in §8.
+
+**What this app will not do to get past one.** These blocks key on the source
+of the request — datacentre IP ranges, the TLS fingerprint of a server's HTTP
+client. Defeating that means impersonating a residential browser: proxying
+through consumer connections, or forging a fingerprint. That is evading an
+access-control decision the publisher has deliberately made, and it stays out
+of this repository regardless of how good the reader's reason is. A paid
+subscription is a reason to open the story on the publisher's own site, not a
+licence to look like someone we are not.
