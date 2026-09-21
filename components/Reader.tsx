@@ -1833,7 +1833,23 @@ export default function Reader() {
       selection.type !== "saved" &&
       selection.type !== "downloaded";
     const list = hideRead ? visible.filter((a) => !read.has(a.id)) : visible;
-    if (settings.sort !== "top") return list;
+
+    if (settings.sort !== "top") {
+      /*
+       * "Newest" sorts. It used to assume, handing back whatever order the
+       * list arrived in, which was right only because every list happened to
+       * be built newest-first — until one was not. The offline store is
+       * ordered by when each article was *downloaded*, so On this device came
+       * out in the order the top-up happened to fetch things, which is not a
+       * publication order and is not what the control says.
+       *
+       * Saved keeps its own order: it is newest-*saved* first by design
+       * (lib/saved.ts), because what you just put there is what you are
+       * looking for. Undated articles sort last and, the sort being stable,
+       * hold whatever order they came in.
+       */
+      return selection.type === "saved" ? list : sortNewestFirst(list);
+    }
     // Ranked first, by score; everything else keeps its date order below,
     // which is what an unranked story deserves — not a guess at a score.
     return [...list].sort((a, b) => {
