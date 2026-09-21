@@ -114,6 +114,46 @@ The feed alone was catching roughly a fifth of the window. The recall figure
 in that report reads `1.0` with `referenceTruncated: true`, which means *upper
 bound*, not *perfect* — see §1.
 
+### Reading a walled publisher through an aggregator (14 Sep 2026)
+
+AP refuses every server request, so the routes in §3 have nothing to read. The
+question becomes which aggregator's index of that publisher is freshest, and
+that is a measurement like any other:
+
+| Route | Items | Newest | Span |
+|---|---|---|---|
+| Google News, `site:apnews.com when:2d` | **100** | **47 min** | 46h |
+| Google News, `site:apnews.com when:7d` | 100 | 50 min | 167h |
+| Bing, `site:apnews.com` | 12 | 8h | 19h |
+
+Three things in that table decided the shape:
+
+- **Google News over Bing, against the standing preference.** `lib/discover.ts`
+  prefers Bing for topic feeds because Bing's wrapper carries the publisher's
+  URL in a query parameter and Google's does not (a token only a browser can
+  resolve). That reasoning holds for topics and loses here: for a wire service,
+  twelve items eight hours stale is not the same product as a hundred items
+  fifty minutes old. Where the publisher's own text is unreachable anyway — AP
+  403s the article too — the link was never going to be readable in the app,
+  so freshness is the only axis left.
+- **The `when:` window is a density knob, not a depth knob.** Google returns at
+  most 100 items and spreads them across whatever window is asked for: one day
+  is ~100/day, seven days is ~14/day. Two days is the compromise, and
+  `lib/window.ts` makes the choice cheap — each refresh merges into what the
+  device already holds, so a narrow window loses nothing between visits.
+- **Scope must be recorded as `section`, whatever the source really is.** The
+  feed's host is Google's. Sitemap augmentation aimed at it would gather
+  nothing and ask Google for it on every refresh. This is the §3 rule ("a
+  section must stay a section") arriving from a third direction: what `scope`
+  controls is where collection is *pointed*, not how broad the source reads.
+
+An aggregator's feed also lies about two things, and both are corrected in
+`parseFeed`: it appends the publisher to every headline (removed using the
+item's own `<source>` element, never by guessing at the last dash), and its
+description is the headline again inside a link (dropped when it only repeats
+the title). The channel description names the aggregator, so a known-publisher
+entry carries its own `note`.
+
 ### What those numbers mean
 
 **No ordering of routes wins everywhere.** Sitemaps-first loses stories at the
@@ -323,6 +363,15 @@ crash, it thins out.
 - **The filter that ate the news** — an authenticity or relevance rule too
   strict, dropping real articles. `lostToFiltering` in the coverage report is
   the number that catches this.
+- **The source that died after it was added** — the known-publisher table is
+  consulted when a source is *added*, so a source saved while its feed worked
+  keeps pointing at a URL that has since started refusing. Nothing reports it:
+  the held window (§4.2) keeps fourteen days of what was collected before, so a
+  dead source reads as a quiet one whose newest story is a few days old and
+  getting older. This is how AP was reported. `repairSources()` in
+  `lib/publishers.ts` rewrites the hosts measured dead when a device loads its
+  list — and only those, because rewriting a working feed would be the
+  plausible-substitute failure at the top of this list.
 - **The retry that never gives up** — work that fails, is not recorded as
   having failed, and is therefore repeated on every visit for ever. Costs
   nothing visible and everything in the bill; see §5b.
@@ -361,9 +410,15 @@ them rather than re-discovering them:
 - **WSJ** — 401 on HTML and on `/rss`. Dow Jones feed hosts are the entire
   available surface, which is why the bundle matters so much there.
 - **Politico** — 403 on both robots.txt and HTML.
-- **AP, Reuters, USA Today, PBS** — absent from the outlet directory on
-  purpose; see the note at the top of `lib/outlets.ts`. A directory entry that
-  can never load is worse than an absence.
+- **AP** — 403 on *every* path, robots.txt and all six sitemaps that robots.txt
+  itself declares (14 Sep 2026). No user agent changes it; AP's own
+  machine-readable route is its paid API. `feeds.apnews.com` no longer
+  resolves, and the old app backend (`afs-prod.appspot.com`) answers but its
+  feed endpoints are gone. Now in the known-publisher table via an aggregator —
+  see §2, "Reading a walled publisher through an aggregator".
+- **Reuters, USA Today, PBS** — absent from the outlet directory on purpose;
+  see the note at the top of `lib/outlets.ts`. A directory entry that can never
+  load is worse than an absence.
 - **X** — login wall to logged-out visitors; the API is the only route.
 - **New York Times** — *articles only*, and the shape of it matters. Measured
   16 Sep 2026 from the deployment: `nytimes.com/` answers **200 with 1.25 MB**
