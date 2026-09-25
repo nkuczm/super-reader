@@ -72,7 +72,25 @@ async function look(url: string, extra?: Record<string, string>) {
         ),
       ].slice(0, 10),
       title: body.match(/<title[^>]*>([^<]{0,140})/i)?.[1] ?? null,
-      head: body.slice(0, 500),
+      // For a feed: what each item actually carries. This is what decides
+      // whether the reader can show the article without ever touching the
+      // publisher's own site, and whether a section can be told apart.
+      feedItems: isFeed
+        ? [...body.matchAll(/<item[\s>][\s\S]*?<\/item>/gi)].slice(0, 8).map((m) => {
+            const item = m[0];
+            const content = item.match(/<content:encoded>([\s\S]*?)<\/content:encoded>/i)?.[1] ?? "";
+            const description = item.match(/<description>([\s\S]*?)<\/description>/i)?.[1] ?? "";
+            return {
+              title: (item.match(/<title>(?:<!\[CDATA\[)?([\s\S]{0,90})/i)?.[1] ?? "").trim(),
+              link: item.match(/<link>([\s\S]*?)<\/link>/i)?.[1]?.trim() ?? null,
+              pubDate: item.match(/<pubDate>([\s\S]*?)<\/pubDate>/i)?.[1]?.trim() ?? null,
+              categories: [...item.matchAll(/<category>(?:<!\[CDATA\[)?([^<\]]{0,40})/gi)].map((c) => c[1].trim()),
+              contentChars: content.length,
+              descriptionChars: description.length,
+            };
+          })
+        : undefined,
+      head: body.slice(0, 300),
     };
   } catch (error) {
     return { url, error: error instanceof Error ? error.message : String(error) };
