@@ -255,3 +255,42 @@ test("every directory domain resolves to an entry with a feed", () => {
     assert.ok(/^https?:\/\//.test(found.feedUrl), `${host} has a fetchable feed`);
   }
 });
+
+test("every way into Pirate Wires names the one feed that answers", () => {
+  // piratewires.com answers 429 "Vercel Security Checkpoint" on every path,
+  // measured 25 Sep 2026 — including robots.txt, and including as Googlebot.
+  // Their Substack mirror carries the full text of every article.
+  const expected = "https://piratewires.substack.com/feed";
+
+  for (const input of [
+    "piratewires.com",
+    "https://www.piratewires.com",
+    "https://www.piratewires.com/c/technology",
+    "https://www.piratewires.com/p/some-story",
+    "https://piratewires.substack.com/feed",
+    "pirate wires",
+    "Pirate Wires",
+  ]) {
+    assert.equal(knownFeedFor(input)?.feedUrl, expected, input);
+  }
+});
+
+test("Pirate Wires is named as the publication it is, not the section asked for", () => {
+  // The WSJ bug (§4.1) arriving from the other direction: there is no
+  // technology-only feed — /feed/s/technology is a 404 and no item carries a
+  // category — so a section URL must not come back wearing the section's name.
+  const fromSection = knownFeedFor("https://www.piratewires.com/c/technology");
+  assert.equal(fromSection?.title, "Pirate Wires");
+  assert.equal(fromSection?.scope, "site", "it really is everything they file");
+  assert.match(fromSection?.note ?? "", /one feed/, "and the preview says so");
+
+  // The favicon and "open on the site" still belong to the publisher, not to
+  // the mirror their feed happens to be served from.
+  assert.equal(fromSection?.siteUrl, "https://www.piratewires.com");
+  assert.equal(fromSection?.faviconHost, "piratewires.com");
+});
+
+test("a lookalike domain is not Pirate Wires", () => {
+  assert.equal(knownFeedFor("https://notpiratewires.com/c/technology"), null);
+  assert.equal(knownFeedFor("https://piratewires.com.evil.example/p/x"), null);
+});

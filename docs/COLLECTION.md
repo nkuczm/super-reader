@@ -154,6 +154,41 @@ description is the headline again inside a link (dropped when it only repeats
 the title). The channel description names the aggregator, so a known-publisher
 entry carries its own `note`.
 
+### A publication whose own site cannot be read, but whose feed can (25 Sep 2026)
+
+Pirate Wires was asked for by its technology section,
+`piratewires.com/c/technology`. What the routes in §3 found there:
+
+| Route | Result |
+|---|---|
+| `piratewires.com/c/technology` | 429, "Vercel Security Checkpoint" |
+| `piratewires.com/robots.txt` | 429, the same page |
+| …as Googlebot | 429, the same page |
+| `piratewires.substack.com/feed` | **200**, 20 items, **full text** |
+| `piratewires.substack.com/feed/s/technology` | 404 |
+
+Three things that table decided:
+
+- **A mirror on another host is a route, and often a better one.** The
+  Substack feed carries 11k–26k characters of `content:encoded` an article —
+  the whole piece, not a summary — so the reader never has to reach
+  piratewires.com to *show* an article, which is just as well because it
+  cannot. Newest item the same morning, twenty items across about four days
+  of a daily publication.
+- **A section that has no feed does not get invented.** `/feed/s/technology`
+  is a 404, no item carries a `<category>`, and Substack's own 404 page
+  declares exactly one feed for this publisher. So there is no technology-only
+  route, and the source is recorded as the whole publication under the
+  publication's name. Naming it "Pirate Wires · Technology" because that is
+  the URL someone pasted would be the WSJ bug of §4.1 — a site-wide feed
+  wearing a section's name — and the preview's note says plainly that one feed
+  covers everything they file.
+- **Scope follows what the source holds, not the URL that was pasted.**
+  Recorded `site`, because it genuinely is everything. Compare AP, recorded
+  `section` though it is a whole wire, because *there* scope had to stop
+  sitemap collection being pointed at Google's host. Scope is about where
+  collection is aimed, and the two cases pull in opposite directions.
+
 ### What those numbers mean
 
 **No ordering of routes wins everywhere.** Sitemaps-first loses stories at the
@@ -420,6 +455,12 @@ them rather than re-discovering them:
   see the note at the top of `lib/outlets.ts`. A directory entry that can never
   load is worse than an absence.
 - **X** — login wall to logged-out visitors; the API is the only route.
+- **Pirate Wires** — *their own domain only*. Measured 25 Sep 2026: every path
+  on piratewires.com — `/c/technology`, an article, even `robots.txt` —
+  answers **429** with a 31KB page titled "Vercel Security Checkpoint". It is
+  a JavaScript challenge, not a rate limit: no `retry-after`, and identical as
+  Googlebot and as a browser user agent. Nothing on that host is discoverable.
+  Their Substack mirror is the route, and it is a good one — see below.
 - **New York Times** — *articles only*, and the shape of it matters. Measured
   16 Sep 2026 from the deployment: `nytimes.com/` answers **200 with 1.25 MB**
   of real homepage, and every article URL answers **403**. Five header shapes

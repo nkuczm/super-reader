@@ -137,6 +137,56 @@ function apNews(): KnownFeed {
 const AP_NAMES =
   /^(ap|the ap|ap ?news|apnews\.com|associated press|the associated press)$/i;
 
+/**
+ * Pirate Wires, whose own site cannot be read by a server at all.
+ *
+ * Measured 25 Sep 2026 from the deployment. piratewires.com runs Vercel's
+ * attack-challenge mode, so **every** path — `/c/technology`, an article,
+ * even `robots.txt` — answers `429` with a 31KB HTML page titled "Vercel
+ * Security Checkpoint". It is a JavaScript challenge, not a rate limit: no
+ * `retry-after`, and it came back identically as Googlebot and as a browser
+ * user agent. There is nothing on that host to discover.
+ *
+ * Their Substack mirror is a different matter, and is the publisher's own
+ * route: `piratewires.substack.com/feed` answers 200 through Cloudflare with
+ * 20 items, **the full text of each in `content:encoded`** (11k–26k
+ * characters an article, not a summary), newest the same morning, spanning
+ * about four days of a daily publication. Because the text is in the feed,
+ * the reader never has to reach piratewires.com to show an article — which
+ * matters, because it could not.
+ *
+ * **It is the whole publication, and it is named as one.** There is no
+ * technology-only route: `/feed/s/technology` is a 404, no item carries a
+ * `<category>`, and Substack's own 404 page declares exactly one feed for
+ * this publisher. Calling this "Pirate Wires · Technology" because a section
+ * URL was pasted would be the WSJ bug in §4.1 — a site-wide feed wearing a
+ * section's name. So a section URL resolves here too, under the publication's
+ * own name, and says so.
+ */
+const PIRATE_WIRES_FEED = "https://piratewires.substack.com/feed";
+
+function pirateWires(): KnownFeed {
+  return {
+    feedUrl: PIRATE_WIRES_FEED,
+    title: "Pirate Wires",
+    siteUrl: "https://www.piratewires.com",
+    faviconHost: "piratewires.com",
+    note:
+      "The whole of Pirate Wires, full text, from their Substack feed — piratewires.com itself " +
+      "answers every server request with a security checkpoint. They publish one feed, so this " +
+      "covers technology along with everything else rather than that section on its own.",
+    /**
+     * Site, not section, and deliberately: this really is everything the
+     * publication files, and scope is what decides whether the refresh may
+     * also collect site-wide. Recording it as a section to reflect the URL
+     * someone pasted would misdescribe what the source actually holds.
+     */
+    scope: "site",
+  };
+}
+
+const PIRATE_WIRES_NAMES = /^(pirate ?wires|piratewires\.com)$/i;
+
 /** Hosts that once served AP or WSJ feeds and now serve nothing usable. */
 const RETIRED_HOSTS =
   /^(apnews\.com|feeds\.apnews\.com|hosted2?\.ap\.org|ap\.org|feeds\.a\.dj\.com)$/;
@@ -153,6 +203,7 @@ export function knownFeedFor(input: string): KnownFeed | null {
 
   if (WSJ_NAMES.test(raw)) return wsjWhole();
   if (AP_NAMES.test(raw)) return apNews();
+  if (PIRATE_WIRES_NAMES.test(raw)) return pirateWires();
 
   let url: URL;
   try {
@@ -166,6 +217,16 @@ export function knownFeedFor(input: string): KnownFeed | null {
   // serve its feeds — names the one feed of AP that can be read.
   if (/^(apnews\.com|feeds\.apnews\.com|hosted2?\.ap\.org|ap\.org)$/.test(host)) {
     return apNews();
+  }
+
+  /*
+   * Any route into Pirate Wires — the domain, a section like /c/technology,
+   * a single story, or the Substack mirror pasted directly — names the one
+   * feed of theirs that can be read. Every path on piratewires.com answers
+   * 429; see the note above.
+   */
+  if (/^(piratewires\.com|piratewires\.substack\.com)$/.test(host)) {
+    return pirateWires();
   }
 
   // The abandoned RSS host, and the current one pasted directly: both name a
