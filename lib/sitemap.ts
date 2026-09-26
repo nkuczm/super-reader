@@ -136,6 +136,54 @@ export function titleFromSlug(link: string): string {
   }
 }
 
+/**
+ * A section of a sitemap, carried inside the source's own URL.
+ *
+ * A plain sitemap lists a whole site. When someone asks for a section of a
+ * site that has no feed — institute.deepmind.com/essays is the case — the
+ * sitemap is still the best route, but only the part of it under that path is
+ * what was asked for (§3, "a section must stay a section"). The path rides in
+ * the URL's fragment, the way a bundle rides in its own string, so refresh,
+ * sync and offline never learn a new shape — and a fragment is never sent to
+ * the server, so the sitemap itself is fetched exactly as before.
+ */
+const WITHIN = "within=";
+
+export function sitemapSource(sitemapUrl: string, within?: string): string {
+  const clean = sitemapUrl.split("#")[0];
+  if (!within || within === "/") return clean;
+  const path = `/${within.replace(/^\/+|\/+$/g, "")}/`;
+  return `${clean}#${WITHIN}${encodeURIComponent(path)}`;
+}
+
+/** The section a sitemap source is limited to, if any. */
+export function withinOf(sourceUrl: string): string | null {
+  const hash = sourceUrl.split("#")[1] ?? "";
+  if (!hash.startsWith(WITHIN)) return null;
+  try {
+    return decodeURIComponent(hash.slice(WITHIN.length)) || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Only the entries under that path — and never the section's own landing
+ * page, which is a list of the articles rather than one of them.
+ */
+export function keepWithin<T extends { link: string }>(articles: T[], within: string | null): T[] {
+  if (!within) return articles;
+  return articles.filter((article) => {
+    try {
+      const path = new URL(article.link).pathname;
+      const normalised = path.endsWith("/") ? path : `${path}/`;
+      return normalised.startsWith(within) && normalised !== within;
+    } catch {
+      return false;
+    }
+  });
+}
+
 /** Sitemaps named in robots.txt — the only reliable way to find the real one. */
 export async function sitemapsFromRobots(origin: string): Promise<string[]> {
   try {
@@ -146,7 +194,7 @@ export async function sitemapsFromRobots(origin: string): Promise<string[]> {
       .filter((url): url is string => Boolean(url))
       // robots.txt still names http:// at plenty of sites; the redirect costs
       // a round trip we do not need to spend.
-      .map((url) => url.replace(/^http:\/\//i, "https://"));
+      .map((url) => (origin.startsWith("https:") ? url.replace(/^http:\/\//i, "https://") : url));
   } catch {
     return [];
   }

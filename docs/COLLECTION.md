@@ -189,6 +189,21 @@ Three things that table decided:
   sitemap collection being pointed at Google's host. Scope is about where
   collection is aimed, and the two cases pull in opposite directions.
 
+### A section with no feed, listed only in a plain sitemap (26 Sep 2026)
+
+`institute.deepmind.com/essays` redirects to a 57KB minified homepage with
+unquoted attributes, declares no feed, and `/feed`, `/rss.xml`,
+`/essays/rss.xml` and `/feed.xml` all 404. robots.txt names one plain
+`/sitemap.xml` (homepage + eight essays under `/essays/<slug>/`, no news
+block). Discovery now tries robots-declared sitemaps before scraping a
+section (and after the outlet directory for a bare domain), keeps only
+entries under the pasted path, and records the path in the source's
+fragment (`sitemap.xml#within=%2Fessays%2F`) so refresh keeps it a section.
+Titles and dates come from each page's `og:title` and
+`article:published_time` — only for plain sitemaps, never news ones, which
+already carry both and list hundreds. `lib/enrich.ts` now reads unquoted meta
+attributes; minified pages ship them.
+
 ### What those numbers mean
 
 **No ordering of routes wins everywhere.** Sitemaps-first loses stories at the

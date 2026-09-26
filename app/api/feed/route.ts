@@ -9,7 +9,7 @@ import { decodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import { parseBundle, mergeBundled, PER_MEMBER } from "@/lib/bundle";
 import { canonicalUrl } from "@/lib/url";
 import { augment } from "@/lib/harvest";
-import { looksLikeSitemap, parseSitemap } from "@/lib/sitemap";
+import { looksLikeSitemap, parseSitemap, withinOf, keepWithin } from "@/lib/sitemap";
 import { keepArticles } from "@/lib/authentic";
 
 export const runtime = "nodejs";
@@ -37,13 +37,13 @@ const MAX_PER_SOURCE = 250;
  * entries are judged before they are returned: a sitemap that is not a news
  * sitemap lists every page a site has, contact forms included.
  */
-function readSitemapAsSource(body: string, finalUrl: string) {
+function readSitemapAsSource(body: string, finalUrl: string, within: string | null = null) {
   const parsed = parseSitemap(body, finalUrl);
   if (parsed.kind !== "urls" || parsed.articles.length === 0) {
     throw new Error("That sitemap lists no articles");
   }
   const origin = new URL(finalUrl).origin;
-  const { kept } = keepArticles(parsed.articles, { origin, from: "sitemap" });
+  const { kept } = keepArticles(keepWithin(parsed.articles, within), { origin, from: "sitemap" });
   if (kept.length === 0) throw new Error("That sitemap lists no articles");
   return {
     meta: {
@@ -54,6 +54,8 @@ function readSitemapAsSource(body: string, finalUrl: string) {
       favicon: "",
     },
     articles: kept,
+    /** No news block anywhere: titles are slugs and dates are lastmods. */
+    plain: parsed.withNews === 0,
   };
 }
 
@@ -91,21 +93,26 @@ export async function GET(request: Request) {
 
   /** One feed, read and parsed. The unit a source is built out of. */
   async function readFeed(url: string, cap: number) {
-    const { body, finalUrl } = await fetchText(url);
+    // A sitemap source may carry the section it is limited to in its
+    // fragment (lib/sitemap.ts, `sitemapSource`); the fetch never sees it.
+    const { body, finalUrl } = await fetchText(url.split("#")[0]);
     // A source may be a real feed, a news sitemap, or a page to be scraped;
     // the body tells us. Sitemaps matter here because some publishers — CNN
     // among them — declare no RSS at all, so the sitemap is the only
     // structured route they offer and has to be followable as a source.
     // Sitemap first: looksLikeFeed accepts anything opening with an XML
     // declaration, so a sitemap passes it and parses as an empty feed.
-    const { meta, articles } = looksLikeSitemap(body)
-      ? readSitemapAsSource(body, finalUrl)
-      : looksLikeFeed(body)
-        ? parseFeed(body, finalUrl)
-        : scrapePage(body, finalUrl);
+    const sitemap = looksLikeSitemap(body)
+      ? readSitemapAsSource(body, finalUrl, withinOf(url))
+      : null;
+    const { meta, articles } = sitemap
+      ?? (looksLikeFeed(body) ? parseFeed(body, finalUrl) : scrapePage(body, finalUrl));
+    // Only a plain sitemap needs every page read for its date; a news
+    // sitemap already carries the real one, and has hundreds of entries.
+    const isSitemap = sitemap?.plain ?? false;
     // A big archive feed can carry hundreds of entries; only the recent ones
     // are ever read, and the cap bounds both payload and enrichment.
-    return { meta, articles: sortNewestFirst(articles).slice(0, cap) };
+    return { meta, isSitemap, articles: sortNewestFirst(articles).slice(0, cap) };
   }
 
   const results = await Promise.all(
@@ -166,9 +173,11 @@ export async function GET(request: Request) {
           return { ok: true as const, ...meta, feedUrl: url, articles };
         }
 
-        const { meta, articles: recent } = await readFeed(url, MAX_PER_SOURCE);
+        const { meta, isSitemap, articles: recent } = await readFeed(url, MAX_PER_SOURCE);
         const ready = await enrichArticles(recent, {
           siteDescription: meta.description,
+          // A plain sitemap's lastmod drifts; the page says when it was published.
+          preferPageDates: isSitemap,
         });
         /**
          * A feed is one route into a publisher, not the whole of what they

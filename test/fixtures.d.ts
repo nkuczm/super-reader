@@ -18,3 +18,4 @@ export function startCommentSite(port?: number): Promise<{ close: () => void }>;
 export function startFileSite(port?: number): Promise<{ close: () => void }>;
 export const OPINION_HTML: string;
 export function startRedditSite(port?: number): Promise<{ close: () => void }>;
+export function startSitemapOnlySite(port?: number): Promise<{ close: () => void }>;

@@ -1,6 +1,13 @@
 import { fetchText, parseFeed, looksLikeFeed, faviconFor } from "./feed";
 import { scrapePage } from "./scrape";
-import { looksLikeSitemap, parseSitemap } from "./sitemap";
+import {
+  looksLikeSitemap,
+  parseSitemap,
+  sitemapsFromRobots,
+  sitemapSource,
+  keepWithin,
+  withinOf,
+} from "./sitemap";
 import { keepArticles } from "./authentic";
 import { enrichArticles } from "./enrich";
 import { xHandleFrom, fetchXFeed } from "./x";
@@ -188,11 +195,14 @@ async function tryFeed(url: string, limit: number) {
     const parsedSitemap = parseSitemap(body, finalUrl);
     if (parsedSitemap.kind === "urls" && parsedSitemap.articles.length > 0) {
       const origin = new URL(finalUrl).origin;
-      const { kept } = keepArticles(parsedSitemap.articles, { origin, from: "sitemap" });
+      const { kept } = keepArticles(keepWithin(parsedSitemap.articles, withinOf(url)), {
+        origin,
+        from: "sitemap",
+      });
       if (kept.length > 0) {
         const host = new URL(origin).hostname.replace(/^www\./, "");
         return {
-          meta: { feedUrl: finalUrl, siteUrl: origin, title: host, description: undefined },
+          meta: { feedUrl: url, siteUrl: origin, title: host, description: undefined },
           total: kept.length,
           articles: sortNewestFirst(kept).slice(0, limit),
         };
@@ -206,6 +216,78 @@ async function tryFeed(url: string, limit: number) {
   }
 
   throw new Error("Response was not a feed");
+}
+
+/**
+ * A site with no feed at all, whose robots.txt names a plain sitemap.
+ *
+ * institute.deepmind.com is the case (measured 26 Sep 2026): /essays
+ * redirects to a minified homepage, every feed path 404s, and the only
+ * machine-readable list of its essays is the sitemap robots.txt declares.
+ * Asked for a section, only the entries under that path are kept, and the
+ * path travels with the source (lib/sitemap.ts, `sitemapSource`) so refresh
+ * keeps it a section. Titles and dates come from each page's own metadata,
+ * because a plain sitemap has only a slug and a drifting lastmod.
+ */
+async function fromDeclaredSitemap(
+  origin: string,
+  sectionPath: string,
+  limit: number,
+  siteTitle: string | undefined,
+): Promise<DiscoverResult | null> {
+  const within = sectionPath ? `${sectionPath.replace(/\/+$/, "")}/` : null;
+  for (const declared of (await sitemapsFromRobots(origin)).slice(0, 3)) {
+    try {
+      let { body, finalUrl } = await fetchText(declared, 10000);
+      if (!looksLikeSitemap(body)) continue;
+      let parsed = parseSitemap(body, finalUrl);
+      if (parsed.kind === "index") {
+        // Descend once, into the child most likely to hold this section.
+        const child = parsed.children
+          .map((c) => c.url)
+          .sort((a, b) => Number(!!within && b.includes(within)) - Number(!!within && a.includes(within)))[0];
+        if (!child) continue;
+        ({ body, finalUrl } = await fetchText(child, 10000));
+        if (!looksLikeSitemap(body)) continue;
+        parsed = parseSitemap(body, finalUrl);
+        if (parsed.kind !== "urls") continue;
+      }
+      const scoped = keepWithin(parsed.articles, within);
+      const { kept } = keepArticles(scoped, { origin, from: "sitemap" });
+      if (kept.length === 0) continue;
+      const articles = sortNewestFirst(
+        await enrichArticles(sortNewestFirst(kept).slice(0, limit), { preferPageDates: true }),
+      );
+      const host = new URL(origin).hostname.replace(/^www\./, "");
+      const name = siteTitle?.trim() || host;
+      const label = within ? titleFromPath(within) : "";
+      return {
+        kind: "feed",
+        scope: within ? "section" : "site",
+        title: label ? `${name} · ${label}` : name,
+        siteUrl: origin,
+        feedUrl: sitemapSource(declared, within ?? undefined),
+        favicon: faviconFor(origin),
+        total: kept.length,
+        articles,
+      };
+    } catch {
+      /* try the next declared sitemap */
+    }
+  }
+  return null;
+}
+
+function titleFromPath(path: string): string {
+  const last = path.split("/").filter(Boolean).pop() ?? "";
+  const words = last.replace(/[-_]+/g, " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "";
+}
+
+function pageTitle(html: string | null): string | undefined {
+  const raw = html?.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim();
+  // "Essays | DeepMind Institute" → the site's part, not the page's.
+  return raw ? raw.split(/\s+[|–—-]\s+/).pop()?.trim() || raw : undefined;
 }
 
 export async function discover(
@@ -406,6 +488,11 @@ export async function discover(
   const sectionFeed = await tryAll(sectionCandidates, "section");
   if (sectionFeed) return sectionFeed;
 
+  if (wantsSection) {
+    const mapped = await fromDeclaredSitemap(origin, sectionPath, limit, pageTitle(pageBody));
+    if (mapped) return mapped;
+  }
+
   // No feed for the section, but the page itself lists exactly its articles —
   // still closer to what was asked for than the whole site's feed.
   if (wantsSection && pageBody) {
@@ -516,6 +603,12 @@ export async function discover(
         /* the directory entry is stale too — fall through to the page */
       }
     }
+  }
+
+  // 3c. A declared sitemap, after the audited directory and before a scrape.
+  if (!wantsSection) {
+    const mapped = await fromDeclaredSitemap(origin, "", limit, pageTitle(pageBody));
+    if (mapped) return mapped;
   }
 
   // 4. No feed anywhere. Read the page itself, the way Feedly does for sites
