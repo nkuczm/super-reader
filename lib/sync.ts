@@ -3,6 +3,7 @@ import { hashCode, newSyncCode } from "./sync-code";
 import { mergeSaved } from "./saved";
 import type { SavedArticle, SavedRemoval } from "./saved";
 import { mergeMarks } from "./alerts";
+import { mergePositions, type Positions } from "./position";
 import type { WatchMarks } from "./alerts";
 import { mergeNotes } from "./notes";
 import type { Note, NoteRemoval } from "./notes";
@@ -23,6 +24,12 @@ export type SyncPayload = {
    * the other.
    */
   watchMarks?: WatchMarks;
+  /**
+   * How far through each article the reader got. Merged per article, most
+   * recent change winning — including a dated clear for finished or restarted
+   * stories, so one device cannot resurrect a place the other has let go.
+   */
+  positions?: Positions;
   /**
    * Notes and their quotes, merged rather than replaced for the same reason
    * bookmarks are: both devices write to them between syncs, and one of them
@@ -134,6 +141,7 @@ export async function writeSync(
     // A mark only moves forward, so the later one always has more
     // information — no stamps needed to resolve these.
     watchMarks: mergeMarks(payload.watchMarks ?? {}, stored.watchMarks ?? {}),
+    positions: mergePositions(payload.positions ?? {}, stored.positions ?? {}),
     notes: notes.notes,
     noteRemovals: notes.removals,
   };

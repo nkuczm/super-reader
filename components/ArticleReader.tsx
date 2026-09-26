@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { forgetPosition, positionFor, rememberPosition } from "@/lib/position";
 import type { ReadableArticle } from "@/lib/article";
 import { Icon } from "./icons";
 import { downloadUrlFor } from "@/lib/download";
@@ -72,6 +73,109 @@ export default function ArticleReader({
   const [slow, setSlow] = useState(false);
   /** The article's own text — the only place a highlight becomes a quote. */
   const prose = useRef<HTMLDivElement | null>(null);
+  /** Set when the article reopened part-way through, for the note offering the top. */
+  const [resumed, setResumed] = useState<number | null>(null);
+
+  /*
+   * Pick up where the reader left off.
+   *
+   * How far through the prose they were, not a pixel offset: pixels are only
+   * true at the width and text size they were measured at, and a story left
+   * on the phone and reopened on the laptop would land somewhere arbitrary.
+   * A quote being jumped to wins — that is a place asked for explicitly.
+   */
+  useEffect(() => {
+    setResumed(null);
+    if (!article || highlight) return;
+    const fraction = positionFor(url);
+    if (fraction === null) return;
+
+    let cancelled = false;
+    // After layout, and again shortly after: photos now reserve their boxes
+    // up front, but a late web font can still nudge the prose's height.
+    const place = () => {
+      if (cancelled) return;
+      const host = prose.current;
+      const scroller = host?.closest(".main") as HTMLElement | null;
+      if (!host || !scroller) return;
+      const hostTop =
+        host.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      scroller.scrollTo({ top: Math.max(0, hostTop + fraction * host.offsetHeight - 120) });
+    };
+    const frame = requestAnimationFrame(place);
+    const settle = setTimeout(place, 350);
+    setResumed(fraction);
+    // Long enough to read and reach for; after that it is in the way.
+    const fade = setTimeout(() => !cancelled && setResumed(null), 7000);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+      clearTimeout(settle);
+      clearTimeout(fade);
+    };
+  }, [article, url, highlight]);
+
+  /*
+   * Remember the place as it changes, and once more on the way out: leaving
+   * is usually a tap on Back, a switch to another app, or the phone locking,
+   * and each of those has to land the last position, not the one from a
+   * second ago.
+   */
+  useEffect(() => {
+    const host = prose.current;
+    const scroller = host?.closest(".main") as HTMLElement | null;
+    if (!article || !host || !scroller) return;
+
+    const measure = () => {
+      const hostTop =
+        host.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      const height = host.offsetHeight;
+      if (height <= 0 || !host.isConnected) return null;
+      // The line a reader is on sits a little below the top of the screen.
+      return (scroller.scrollTop + 120 - hostTop) / height;
+    };
+    // `settled` is leaving: that save is announced so the place syncs. The
+    // saves while scrolling stay local — announcing every one would be a sync
+    // request every few hundred milliseconds of reading.
+    /*
+     * The last good measurement, kept because the save that matters most can
+     * no longer measure: React runs this effect's cleanup after the article
+     * has left the DOM, so on Back the prose is a detached node with no
+     * height. Measuring there saved nothing — and that was the one save that
+     * tells the sync to carry the place to other devices.
+     */
+    let last: number | null = measure();
+    const save = (settled = false) => {
+      const fraction = measure() ?? last;
+      if (fraction === null) return;
+      last = fraction;
+      rememberPosition(url, fraction, settled);
+    };
+
+    let pending: ReturnType<typeof setTimeout> | null = null;
+    const onScroll = () => {
+      if (pending) return;
+      pending = setTimeout(() => {
+        pending = null;
+        save(false);
+      }, 400);
+    };
+    const onHide = () => {
+      if (document.visibilityState === "hidden") save(true);
+    };
+    const onPageHide = () => save(true);
+
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      if (pending) clearTimeout(pending);
+      save(true);
+      scroller.removeEventListener("scroll", onScroll);
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", onPageHide);
+    };
+  }, [article, url]);
 
   /*
    * Mark photos that never arrive.
@@ -421,6 +525,24 @@ export default function ArticleReader({
                 The quoted passage is not in this copy of the article — it may
                 have been edited since.
               </p>
+            )}
+            {resumed !== null && (
+              <div className="resume-note" role="status">
+                <span>Picked up where you left off · {Math.round(resumed * 100)}% in</span>
+                <button
+                  className="link-btn"
+                  onClick={() => {
+                    forgetPosition(url);
+                    setResumed(null);
+                    (prose.current?.closest(".main") as HTMLElement | null)?.scrollTo({
+                      top: 0,
+                      behavior: "smooth",
+                    });
+                  }}
+                >
+                  Start from the top
+                </button>
+              </div>
             )}
             <div
               className="prose"

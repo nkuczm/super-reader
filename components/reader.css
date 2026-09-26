@@ -1105,6 +1105,25 @@
   font-size: 12.5px; line-height: 1.5;
 }
 
+/*
+ * "Picked up where you left off" — floating, because the article has just
+ * been scrolled past wherever it would sit in the flow. Clear of the home
+ * indicator on a phone, and gone on its own after a few seconds.
+ */
+.resume-note {
+  position: fixed; left: 50%; transform: translateX(-50%); z-index: 60;
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 14px; border-radius: 999px; white-space: nowrap;
+  background: var(--bg); border: 1px solid var(--border);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  font-size: 13px; color: var(--text-dim);
+  animation: resume-in 0.22s ease-out;
+}
+.resume-note .link-btn { font-weight: 600; color: var(--accent); }
+@keyframes resume-in { from { opacity: 0; transform: translate(-50%, 8px); } }
+@media (prefers-reduced-motion: reduce) { .resume-note { animation: none; } }
+
 /* ---- The score page ----------------------------------------------------- */
 
 .score-body { max-width: 680px; margin: 0 auto; padding: 0 0 90px; }

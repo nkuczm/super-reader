@@ -11,6 +11,7 @@ import { isValidCode } from "@/lib/sync-code";
 import type { Note, NoteRemoval } from "@/lib/notes";
 import type { SavedArticle, SavedRemoval } from "@/lib/saved";
 import type { WatchMarks } from "@/lib/alerts";
+import type { Positions } from "@/lib/position";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -63,6 +64,7 @@ export async function PUT(request: Request) {
     saved?: unknown;
     savedRemovals?: unknown;
     watchMarks?: unknown;
+    positions?: unknown;
     notes?: unknown;
     noteRemovals?: unknown;
     teams?: unknown;
@@ -96,6 +98,11 @@ export async function PUT(request: Request) {
     watchMarks:
       body.watchMarks && typeof body.watchMarks === "object"
         ? (body.watchMarks as WatchMarks)
+        : {},
+    // Merged by writeSync, per article, most recent change winning.
+    positions:
+      body.positions && typeof body.positions === "object" && !Array.isArray(body.positions)
+        ? (body.positions as Positions)
         : {},
     // Merged by writeSync, like bookmarks: a device that has been away must
     // not delete the notes written while it was.
