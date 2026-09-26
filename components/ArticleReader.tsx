@@ -130,13 +130,26 @@ export default function ArticleReader({
       const hostTop =
         host.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
       const height = host.offsetHeight;
-      if (height <= 0) return null;
+      if (height <= 0 || !host.isConnected) return null;
       // The line a reader is on sits a little below the top of the screen.
       return (scroller.scrollTop + 120 - hostTop) / height;
     };
-    const save = () => {
-      const fraction = measure();
-      if (fraction !== null) rememberPosition(url, fraction);
+    // `settled` is leaving: that save is announced so the place syncs. The
+    // saves while scrolling stay local — announcing every one would be a sync
+    // request every few hundred milliseconds of reading.
+    /*
+     * The last good measurement, kept because the save that matters most can
+     * no longer measure: React runs this effect's cleanup after the article
+     * has left the DOM, so on Back the prose is a detached node with no
+     * height. Measuring there saved nothing — and that was the one save that
+     * tells the sync to carry the place to other devices.
+     */
+    let last: number | null = measure();
+    const save = (settled = false) => {
+      const fraction = measure() ?? last;
+      if (fraction === null) return;
+      last = fraction;
+      rememberPosition(url, fraction, settled);
     };
 
     let pending: ReturnType<typeof setTimeout> | null = null;
@@ -144,22 +157,23 @@ export default function ArticleReader({
       if (pending) return;
       pending = setTimeout(() => {
         pending = null;
-        save();
+        save(false);
       }, 400);
     };
     const onHide = () => {
-      if (document.visibilityState === "hidden") save();
+      if (document.visibilityState === "hidden") save(true);
     };
+    const onPageHide = () => save(true);
 
     scroller.addEventListener("scroll", onScroll, { passive: true });
     document.addEventListener("visibilitychange", onHide);
-    window.addEventListener("pagehide", save);
+    window.addEventListener("pagehide", onPageHide);
     return () => {
       if (pending) clearTimeout(pending);
-      save();
+      save(true);
       scroller.removeEventListener("scroll", onScroll);
       document.removeEventListener("visibilitychange", onHide);
-      window.removeEventListener("pagehide", save);
+      window.removeEventListener("pagehide", onPageHide);
     };
   }, [article, url]);
 

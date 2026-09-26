@@ -102,6 +102,15 @@ import { mergeWindow, stamp } from "@/lib/window";
 import { mergeSaved, differsFrom, slimForSync } from "@/lib/saved";
 import { knownRefusal } from "@/lib/subscriptions";
 import {
+  loadPositions,
+  mergePositions,
+  samePositions,
+  savePositions,
+  slimPositionsForSync,
+  POSITIONS_EVENT,
+  type Positions,
+} from "@/lib/position";
+import {
   alertsFor,
   acknowledge,
   mergeMarks,
@@ -226,6 +235,14 @@ export default function Reader() {
   const [savedRemovals, setSavedRemovals] = useState<SavedRemoval[]>([]);
   /** How far each watched source has been read up to. */
   const [watchMarks, setWatchMarks] = useState<WatchMarks>({});
+  /**
+   * How far through each article the reader got, mirrored from local storage
+   * so that a change to it is a change the sync can see. The reader writes
+   * storage directly as you scroll; this is refreshed only when a place is
+   * *left*, so reading does not become a stream of sync requests.
+   */
+  const [positions, setPositions] = useState<Positions>({});
+  const positionsRef = useRef<Positions>({});
   /** Notes, and the quotes pulled into them. Per device, like Settings. */
   const [notes, setNotes] = useState<Note[]>([]);
   const [addingNote, setAddingNote] = useState(false);
@@ -351,6 +368,7 @@ export default function Reader() {
     saved?: SavedArticle[];
     savedRemovals?: SavedRemoval[];
     watchMarks?: WatchMarks;
+    positions?: Positions;
     notes?: Note[];
     noteRemovals?: NoteRemoval[];
     teams?: unknown;
@@ -419,6 +437,15 @@ export default function Reader() {
     // moves forward, so there is nothing to resolve. Guarded like the rest,
     // so an identical pull does not set state and start the two devices
     // talking past each other.
+    // Places in articles merge the same way: per article, the more recent
+    // change wins — so where you stopped on the phone is where the laptop
+    // opens, and a story finished on one is not resurrected by the other.
+    const places = mergePositions(positionsRef.current, payload.positions ?? {});
+    if (!samePositions(places, positionsRef.current)) {
+      positionsRef.current = places;
+      setPositions(places);
+      savePositions(places);
+    }
     const marks = mergeMarks(marksRef.current, payload.watchMarks ?? {});
     if (!unchanged(marks, marksRef.current)) {
       marksRef.current = marks;
@@ -477,6 +504,10 @@ export default function Reader() {
         removals: payload.savedRemovals ?? [],
       }) ||
       releasable.length > 0 ||
+      // A place read further here than the other device knows about. Compared
+      // as sent — the wire copy is the newest 200 — for the same reason as
+      // notes below: comparing the full set would push forever.
+      !samePositions(slimPositionsForSync(places), slimPositionsForSync(payload.positions ?? {})) ||
       // Compared as it would be *sent*, not as it is held: the wire copy is
       // cut to a budget, and comparing the full set against the server's copy
       // would report news this device can never deliver — and push forever
@@ -539,6 +570,18 @@ export default function Reader() {
     feedsRef.current = feeds;
   }, [feeds]);
 
+  useEffect(() => {
+    const load = () => {
+      const current = loadPositions();
+      if (samePositions(current, positionsRef.current)) return;
+      positionsRef.current = current;
+      setPositions(current);
+    };
+    load();
+    window.addEventListener(POSITIONS_EVENT, load);
+    return () => window.removeEventListener(POSITIONS_EVENT, load);
+  }, []);
+
   // A removed source must not leave its mark behind to accumulate.
   useEffect(() => {
     if (!ready) return;
@@ -587,6 +630,7 @@ export default function Reader() {
     saved,
     savedRemovals,
     watchMarks,
+    positions,
     notes,
     noteRemovals,
     vault,
@@ -639,6 +683,7 @@ export default function Reader() {
             saved: slimForSync(saved),
             savedRemovals,
             watchMarks,
+            positions: slimPositionsForSync(positions),
             notes: slimNotesForSync(notes),
             noteRemovals,
             teams,
@@ -667,6 +712,7 @@ export default function Reader() {
     saved,
     savedRemovals,
     watchMarks,
+    positions,
     notes,
     noteRemovals,
     teams,
@@ -701,6 +747,7 @@ export default function Reader() {
         saved: slimForSync(saved),
         savedRemovals,
         watchMarks,
+        positions: slimPositionsForSync(positions),
         notes: slimNotesForSync(notes),
         noteRemovals,
         teams,
@@ -722,6 +769,7 @@ export default function Reader() {
     saved,
     savedRemovals,
     watchMarks,
+    positions,
     notes,
     noteRemovals,
     teams,
