@@ -285,6 +285,9 @@ Each of these is a bug that shipped. Do not undo them.
    used to do this, so anything published and pushed out between two visits was
    never seen. `lib/window.ts` merges; 14 days, capped per source so a busy desk
    cannot crowd out a weekly column.
+   The age cut never empties a source: each keeps its newest ten however old
+   (`KEEP_NEWEST`). journal.nyphilosophy.org, a weekly whose latest essay was
+   a month old, previewed twenty and refreshed to none (28 Sep 2026).
 3. **Dedupe before capping, never after.** The same story under two tracking
    tags is two stories unless links are canonicalised first, and a cap spent on
    duplicates is coverage thrown away silently.

@@ -26,6 +26,14 @@ export type Held = {
 
 export const KEEP_DAYS = 14;
 export const KEEP_PER_SOURCE = 250;
+/**
+ * Each source's newest few are kept whatever their age. A journal that files
+ * monthly has nothing inside fourteen days, and the age cut alone emptied it:
+ * journal.nyphilosophy.org (28 Sep 2026) previewed twenty essays, the newest a
+ * month old, and refreshed to nothing. Quiet is not dead; it still belongs in
+ * the list.
+ */
+export const KEEP_NEWEST = 10;
 
 type Options = {
   /** Sources the reader still follows; anything else is dropped. */
@@ -34,6 +42,7 @@ type Options = {
   now?: number;
   keepDays?: number;
   perSource?: number;
+  newest?: number;
 };
 
 function ageOf(article: Held, now: number) {
@@ -54,7 +63,7 @@ function ageOf(article: Held, now: number) {
 export function mergeWindow<T extends Held>(
   fetched: T[],
   held: T[],
-  { sources, canonical, now = Date.now(), keepDays = KEEP_DAYS, perSource = KEEP_PER_SOURCE }: Options,
+  { sources, canonical, now = Date.now(), keepDays = KEEP_DAYS, perSource = KEEP_PER_SOURCE, newest = KEEP_NEWEST }: Options,
 ): T[] {
   const cutoff = keepDays * 24 * 60 * 60 * 1000;
   const byKey = new Map<string, T>();
@@ -62,7 +71,6 @@ export function mergeWindow<T extends Held>(
   // Held first, so a fetched copy of the same story overwrites it.
   for (const article of [...held, ...fetched]) {
     if (!article?.link || !sources.has(article.sourceId)) continue;
-    if (ageOf(article, now) > cutoff) continue;
     const key = canonical(article.link);
     const existing = byKey.get(key);
     byKey.set(key, {
@@ -81,6 +89,8 @@ export function mergeWindow<T extends Held>(
   )) {
     const count = counts.get(article.sourceId) ?? 0;
     if (count >= perSource) continue;
+    // Past the window, only a source's newest few survive.
+    if (count >= newest && ageOf(article, now) > cutoff) continue;
     counts.set(article.sourceId, count + 1);
     kept.push(article);
   }
