@@ -69,8 +69,19 @@ test("a story keeps the day it first turned up here", () => {
 
 test("anything older than the window is let go", () => {
   const old = [article("ancient", { daysAgo: KEEP_DAYS + 1 })];
-  const merged = mergeWindow([article("new")], old, opts());
+  const merged = mergeWindow([article("new")], old, opts({ newest: 0 }));
   assert.deepEqual(merged.map((a) => a.id), ["new"]);
+});
+
+test("a quiet source keeps its newest few however old", () => {
+  // journal.nyphilosophy.org: a month since its last essay, and the age cut
+  // alone refreshed it to an empty list.
+  const essays = Array.from({ length: 20 }, (_, i) =>
+    article(`e${i}`, { daysAgo: 30 + i * 7 }),
+  );
+  const merged = mergeWindow(essays, [], opts());
+  assert.equal(merged.length, 10);
+  assert.equal(merged[0].id, "e0");
 });
 
 test("a source no longer followed takes its stories with it", () => {
@@ -117,7 +128,7 @@ test("an undated item ages out on the day it arrived", () => {
     sourceId: "s1",
     seenAt: NOW - (KEEP_DAYS + 1) * DAY,
   };
-  assert.deepEqual(mergeWindow([], [stale as Held], opts()), []);
+  assert.deepEqual(mergeWindow([], [stale as Held], opts({ newest: 0 })), []);
 });
 
 test("stamping leaves an arrival date alone if it already has one", () => {

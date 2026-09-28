@@ -251,6 +251,52 @@ export function startPaperSite(port = 8793) {
   });
 }
 
+/*
+ * A site with no feed of any kind, shaped like institute.deepmind.com as
+ * measured on 26 Sep 2026: minified HTML with unquoted attributes, a section
+ * path (/essays) that redirects to the homepage, every feed path a 404 — and
+ * a plain sitemap, named in robots.txt, listing each essay with a lastmod.
+ */
+const ESSAYS = [
+  ["introducing-the-institute", "Introducing the Institute", "2026-09-16"],
+  ["economic-policy-for-agi", "Economic Policy for AGI", "2026-09-17"],
+  ["the-case-for-reasoning-transparency", "The Case for Reasoning Transparency", "2026-09-23"],
+  ["cheaters-and-whistleblowers", "Cheaters and Whistleblowers in the Agent Swarm", "2026-09-24"],
+];
+
+export function startSitemapOnlySite(port = 8794) {
+  const origin = `http://127.0.0.1:${port}`;
+  const home = `<!doctype html><html lang=en><head><meta charset=utf-8><title>The Institute</title>` +
+    `<link href=${origin}/ rel=canonical></head><body><header><nav><a href=${origin}/>Home</a>` +
+    `<a href=${origin}/about/>About</a></nav></header><main>` +
+    ESSAYS.map(([slug, title]) =>
+      `<div class=card><a href=${origin}/essays/${slug}/ class=card-link><span class=t>${title}</span></a></div>`).join("") +
+    `</main></body></html>`;
+  const essay = (slug, title, date) => `<!doctype html><html lang=en><head><title>${title}</title>` +
+    `<meta property=og:title content="${title}"><meta property=og:description content="An essay about ${title.toLowerCase()}.">` +
+    `<meta property=article:published_time content=${date}T09:00:00Z></head><body><article><h1>${title}</h1>` +
+    `<p>${"A paragraph of the essay, long enough to be read as prose. ".repeat(12)}</p></article></body></html>`;
+  const sitemap = `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">` +
+    `<url><loc>${origin}/</loc><lastmod>2026-09-16</lastmod></url>` +
+    ESSAYS.map(([slug, , date]) => `<url><loc>${origin}/essays/${slug}/</loc><lastmod>${date}</lastmod></url>`).join("") +
+    `</urlset>`;
+
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      const path = new URL(req.url, "http://x").pathname;
+      if (path === "/") { res.writeHead(200, { "content-type": "text/html" }); return res.end(home); }
+      if (path === "/essays" || path === "/essays/") { res.writeHead(301, { location: `${origin}/` }); return res.end(); }
+      if (path === "/robots.txt") { res.writeHead(200, { "content-type": "text/plain" }); return res.end(`User-agent: *\nAllow: /\n\nSitemap: ${origin}/sitemap.xml\n`); }
+      if (path === "/sitemap.xml") { res.writeHead(200, { "content-type": "text/xml" }); return res.end(sitemap); }
+      const match = ESSAYS.find(([slug]) => path === `/essays/${slug}/`);
+      if (match) { res.writeHead(200, { "content-type": "text/html" }); return res.end(essay(...match)); }
+      res.writeHead(404, { "content-type": "text/html" });
+      res.end("<html><body>Not found</body></html>");
+    });
+    server.listen(port, () => resolve({ server, close: () => server.close() }));
+  });
+}
+
 // A site that links its feed with a plain anchor instead of declaring it.
 const anchorOnlyPage = `<html><head><title>Acme News</title></head><body>
 <main><p>Welcome.</p></main>
