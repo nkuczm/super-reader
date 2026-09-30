@@ -8,6 +8,8 @@ import {
   applySynthesis,
   cardNoteId,
   cardsOf,
+  composeCardDoc,
+  quoteIdsIn,
   live,
   metaOf,
   migrateNoteWriting,
@@ -27,6 +29,7 @@ import {
   type SynthesisResult,
 } from "@/lib/subjects";
 import { canonicalUrl } from "@/lib/url";
+import { edgePath, layoutBoard, settle, GAP } from "@/lib/board-layout";
 import { PROVIDER_NAME, recordSpend, type AiProvider } from "@/lib/spend";
 
 type Props = {
@@ -37,6 +40,8 @@ type Props = {
   /** The note's entries after a quote is taken out — see NotePage. */
   onCommitEntries: (entries: NoteEntry[], known: ReadonlySet<string>) => void;
   onOpenMenu?: () => void;
+  /** Back to every subject. */
+  onBack?: () => void;
   /** Headers carrying the reader's keys, or undefined when there are none. */
   keyHeaders: () => HeadersInit | undefined;
   hasAiKey: boolean;
@@ -105,13 +110,17 @@ export default function SubjectPage(props: Props) {
           next = remove(next, item.id);
         }
       }
-      return remove(remove(next, cardNoteId(card.id)), posId(card.id));
+      for (const item of live(next)) {
+        if (item.kind === "cardnote" && item.card === card.id) next = remove(next, item.id);
+      }
+      return remove(next, posId(card.id));
     });
   };
 
-  const removeQuote = (quoteId: string) => {
+  const removeQuotes = (quoteIds: string[]) => {
+    const gone = new Set(quoteIds);
     const known = new Set(note.entries.map((entry) => entry.id));
-    props.onCommitEntries(note.entries.filter((entry) => entry.id !== quoteId), known);
+    props.onCommitEntries(note.entries.filter((entry) => !gone.has(entry.id)), known);
   };
 
   const setCardNote = (card: Card, html: string) =>
@@ -182,7 +191,7 @@ export default function SubjectPage(props: Props) {
     focusBox,
     onOpenArticle: props.onOpenArticle,
     removeCard,
-    removeQuote,
+    removeQuotes,
     setCardNote,
     decide,
     setBox: (box: BoxItem, html: string) => onBoard((current) => put(current, { ...box, html, at: Date.now() })),
@@ -195,6 +204,11 @@ export default function SubjectPage(props: Props) {
         {props.onOpenMenu && (
           <button className="menu-btn" onClick={props.onOpenMenu} aria-label="Open feeds">
             {Icon.menu}
+          </button>
+        )}
+        {props.onBack && (
+          <button className="btn ghost small" onClick={props.onBack} aria-label="All subjects">
+            {Icon.back} Subjects
           </button>
         )}
         <div>
@@ -238,7 +252,7 @@ type Shared = {
   focusBox: string | null;
   onOpenArticle: (link: string, title: string, quote: string) => void;
   removeCard: (card: Card) => void;
-  removeQuote: (id: string) => void;
+  removeQuotes: (ids: string[]) => void;
   setCardNote: (card: Card, html: string) => void;
   decide: (suggestion: SuggestItem, state: "accepted" | "dismissed") => void;
   setBox: (box: BoxItem, html: string) => void;
@@ -275,23 +289,23 @@ function StoryCard({
       </div>
       {card.source && <div className="subject-card-source">{card.source}</div>}
       <div className="subject-card-body">
-        {card.quotes.map((quote) => (
-          <blockquote key={quote.id} className="subject-quote">
-            <button className="subject-quote-text" onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => shared.onOpenArticle(card.link, card.title, quote.text)}>
-              “{quote.text}”
-            </button>
-            <button className="icon-btn subtle" aria-label="Remove quote" onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => shared.removeQuote(quote.id)}>
-              {Icon.close}
-            </button>
-          </blockquote>
-        ))}
+        {/* One document per story: the quotes are bullets in it, as links to
+            their passages, and everything around them is yours to write. */}
         <RichText
           className="subject-card-note"
-          html={card.note}
+          html={composeCardDoc(card.note, card.quotes)}
           placeholder="Add notes…"
-          onChange={(html) => shared.setCardNote(card, html)}
+          onOpenQuote={(id) => {
+            const quote = card.quotes.find((q) => q.id === id);
+            shared.onOpenArticle(card.link, card.title, quote?.text ?? "");
+          }}
+          onChange={(html) => {
+            // A quote's bullet deleted from the text is the quote deleted.
+            const kept = quoteIdsIn(html);
+            const gone = card.quotes.filter((quote) => !kept.has(quote.id)).map((quote) => quote.id);
+            if (gone.length > 0) shared.removeQuotes(gone);
+            shared.setCardNote(card, html);
+          }}
         />
         {own.map((insight) => (
           <div key={insight.id} className="subject-inline-insight">
@@ -426,6 +440,8 @@ function Whiteboard(
   const [view, setView] = useState({ x: 40, y: 40, zoom: 1 });
   const [drag, setDrag] = useState<{ id: string; x: number; y: number } | null>(null);
   const [connecting, setConnecting] = useState<string | null | false>(false);
+  const [focus, setFocus] = useState<string | null>(null);
+  const [showAiLinks, setShowAiLinks] = useState(false);
   const [sizes, setSizes] = useState<Record<string, { w: number; h: number }>>({});
   const nodeEls = useRef(new Map<string, HTMLDivElement>());
   const canvas = useRef<HTMLDivElement | null>(null);
@@ -449,44 +465,43 @@ function Whiteboard(
     })),
   ];
 
-  /** Where each node sits: its saved place, or a tidy default by kind. */
+  /**
+   * Where each node sits. A place someone chose is kept; a node nobody placed
+   * starts in its column (stories in two, your boxes and the AI's insights in
+   * a third, suggestions under the stories). Then every overlap is settled by
+   * measured height — lib/board-layout.ts — so cards never cover each other,
+   * however much they have grown since they were put down.
+   */
   const positions = useMemo(() => {
     const placed = new Map<string, { x: number; y: number; w: number }>();
     for (const item of live(board)) {
       if (item.kind === "pos") placed.set((item as PosItem).target, { x: item.x, y: item.y, w: item.w });
     }
-    const out = new Map<string, { x: number; y: number; w: number }>();
     const counters = { card: 0, box: 0, insight: 0, suggest: 0 };
-    for (const node of nodes) {
-      const saved = placed.get(node.id);
-      if (saved) {
-        out.set(node.id, saved);
-        continue;
-      }
-      const n = counters[node.kind]++;
-      // Stories in two columns, your boxes and the AI's insights in a third
-      // beside them, suggestions under the stories.
-      const cardRows = Math.ceil(shared.cards.length / 2) || 1;
-      const x =
-        node.kind === "card" ? (n % 2) * (CARD_W + 40)
-        : node.kind === "suggest" ? (n % 2) * (CARD_W + 40)
-        : 2 * (CARD_W + 40) + 40;
-      const y =
-        node.kind === "card" ? Math.floor(n / 2) * 340
-        : node.kind === "suggest" ? cardRows * 340 + Math.floor(n / 2) * 220
-        : node.kind === "box" ? n * 200
-        : shared.boxes.length * 200 + n * 190;
-      out.set(node.id, { x, y, w: CARD_W });
-    }
+    const cardsBottom = Math.ceil(shared.cards.length / 2) * 200;
+    const laid = layoutBoard(
+      nodes
+        .filter((node) => node.id !== drag?.id)
+        .map((node) => {
+          const h = sizes[node.id]?.h ?? 160;
+          const saved = placed.get(node.id);
+          if (saved) return { id: node.id, placed: true, x: saved.x, y: saved.y, w: saved.w, h };
+          const n = counters[node.kind]++;
+          const x =
+            node.kind === "card" || node.kind === "suggest" ? (n % 2) * (CARD_W + GAP) : 2 * (CARD_W + GAP) + 40;
+          const y = node.kind === "suggest" ? cardsBottom : 0;
+          return { id: node.id, placed: false, x, y, w: CARD_W, h };
+        }),
+    );
     if (drag) {
-      const current = out.get(drag.id);
-      if (current) out.set(drag.id, { ...current, x: drag.x, y: drag.y });
+      laid.set(drag.id, { x: drag.x, y: drag.y, w: placed.get(drag.id)?.w ?? CARD_W, h: sizes[drag.id]?.h ?? 160 });
     }
-    return out;
+    return laid;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [board, shared.cards, shared.boxes, shared.insights, shared.suggestions, drag]);
+  }, [board, shared.cards, shared.boxes, shared.insights, shared.suggestions, drag, sizes]);
 
-  // Heights are whatever the content makes them; lines need to know them.
+  // Heights are whatever the content makes them; the layout and the lines
+  // both need to know them.
   useLayoutEffect(() => {
     const observer = new ResizeObserver(() => {
       const next: Record<string, { w: number; h: number }> = {};
@@ -497,14 +512,12 @@ function Whiteboard(
     return () => observer.disconnect();
   });
 
-  const center = (id: string) => {
-    const pos = positions.get(id);
-    const size = sizes[id] ?? { w: CARD_W, h: 120 };
-    return pos ? { x: pos.x + size.w / 2, y: pos.y + size.h / 2 } : null;
-  };
-
   const userLinks = live(board).filter((item): item is LinkItem => item.kind === "link");
-  const aiLinks = shared.insights.flatMap((insight) => insight.refs.map((ref) => ({ id: `${insight.id}->${ref}`, from: insight.id, to: ref })));
+  // The AI's links are shown for what the pointer is on, or all of them when
+  // asked: drawn together they cross every card on the board.
+  const aiLinks = shared.insights
+    .flatMap((insight) => insight.refs.map((ref) => ({ id: `${insight.id}->${ref}`, from: insight.id, to: ref })))
+    .filter((link) => showAiLinks || (focus !== null && (link.from === focus || link.to === focus)));
 
   const startDrag = (id: string) => (event: React.PointerEvent) => {
     if (event.button !== 0) return;
@@ -549,7 +562,10 @@ function Whiteboard(
         setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 0);
       }
       if (moved && (last.x !== start.x || last.y !== start.y)) {
-        onBoard((current) => put(current, { id: posId(id), kind: "pos", target: id, x: Math.round(last.x), y: Math.round(last.y), w: origin.w, at: Date.now() }));
+        // Dropped on top of something: it lands just below instead.
+        const others = [...positions.entries()].filter(([other]) => other !== id).map(([, rect]) => rect);
+        const landed = settle({ x: last.x, y: last.y, w: origin.w, h: sizes[id]?.h ?? 160 }, others);
+        onBoard((current) => put(current, { id: posId(id), kind: "pos", target: id, x: Math.round(landed.x), y: Math.round(landed.y), w: origin.w, at: Date.now() }));
       }
     };
     window.addEventListener("pointermove", move);
@@ -587,14 +603,15 @@ function Whiteboard(
   };
 
   const line = (key: string, from: string, to: string, className: string, onRemove?: () => void) => {
-    const a = center(from);
-    const b = center(to);
+    const a = positions.get(from);
+    const b = positions.get(to);
     if (!a || !b) return null;
+    const { d, mid } = edgePath(a, b);
     return (
       <g key={key} className={className}>
-        <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
+        <path d={d} />
         {onRemove && (
-          <g className="wb-unlink" transform={`translate(${(a.x + b.x) / 2} ${(a.y + b.y) / 2})`} onClick={onRemove}>
+          <g className="wb-unlink" transform={`translate(${mid.x} ${mid.y})`} onClick={onRemove}>
             <circle r={9} />
             <text textAnchor="middle" dy="4">×</text>
             <title>Remove this connection</title>
@@ -614,7 +631,21 @@ function Whiteboard(
         <button className="btn ghost small" onClick={() => zoomBy(1.2)} aria-label="Zoom in">+</button>
         <button className="btn ghost small" onClick={() => zoomBy(1 / 1.2)} aria-label="Zoom out">−</button>
         <button className="btn ghost small" onClick={() => setView({ x: 40, y: 40, zoom: 1 })}>Reset view</button>
-        <span className="wb-hint">Drag cards by their top edge · double-click the board for a text box · ⌘/Ctrl + scroll to zoom</span>
+        <button className={`btn ghost small${showAiLinks ? " on" : ""}`} onClick={() => setShowAiLinks((v) => !v)}
+          title="Show every line from the AI's insights to the stories they draw on">
+          AI links
+        </button>
+        <button className="btn ghost small" title="Put everything back in tidy columns"
+          onClick={() =>
+            onBoard((current) => {
+              let next = current ?? {};
+              for (const item of live(next)) if (item.kind === "pos") next = remove(next, item.id);
+              return next;
+            })
+          }>
+          Tidy up
+        </button>
+        <span className="wb-hint">Drag by the title · point at a card to see its AI links · double-click for a text box</span>
       </div>
       <div
         ref={canvas}
@@ -643,6 +674,8 @@ function Whiteboard(
                 }}
                 className={`wb-node kind-${node.kind}${connecting === node.id ? " picked" : ""}${drag?.id === node.id ? " dragging" : ""}`}
                 style={{ left: pos.x, top: pos.y, width: pos.w }}
+                onPointerEnter={() => setFocus(node.id)}
+                onPointerLeave={() => setFocus((current) => (current === node.id ? null : current))}
                 onPointerDownCapture={(event) => {
                   // In connect mode, any click on a node picks it.
                   if (connecting !== false) startDrag(node.id)(event);

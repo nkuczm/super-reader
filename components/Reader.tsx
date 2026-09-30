@@ -68,6 +68,19 @@ import { useSourceDrag } from "./useSourceDrag";
 import SubjectPage from "./SubjectPage";
 import StatusPage from "./StatusPage";
 import SpendPage from "./SpendPage";
+import SubjectsHome from "./SubjectsHome";
+import {
+  linkIn,
+  liveManual,
+  loadManual,
+  manualKey,
+  mergeManual,
+  sameManual,
+  saveManual,
+  sourceFor,
+  type ManualStories,
+  type ManualStory,
+} from "@/lib/manual";
 import {
   addStory,
   loadBoards,
@@ -182,6 +195,29 @@ function keyHeadersFrom(keys: Record<string, string>): HeadersInit | undefined {
     ? undefined
     : { [KEYS_HEADER]: encodeKeysHeader(keys) };
 }
+/** A pasted story as a row in the list. */
+function pastedAsLoaded(story: ManualStory, sourceId: string): Loaded {
+  return {
+    id: `${sourceId || "manual"}:${story.link}`,
+    sourceId,
+    link: story.link,
+    title: story.title,
+    summary: story.summary,
+    image: story.image,
+    publishedAt: story.publishedAt,
+    seenAt: story.at,
+  } as Loaded;
+}
+
+/** The list with every pasted story filed under a followed source in it. */
+function withPastedStories(list: Loaded[], manual: ManualStories, following: ReadonlySet<string>): Loaded[] {
+  const have = new Set(list.map((article) => canonicalUrl(article.link)));
+  const extra = liveManual(manual)
+    .filter((story) => story.sourceId && following.has(story.sourceId) && !have.has(manualKey(story.link)))
+    .map((story) => pastedAsLoaded(story, story.sourceId!));
+  return extra.length === 0 ? list : sortNewestFirst([...list, ...extra]);
+}
+
 type Selection =
   | { type: "all" }
   | { type: "saved" }
@@ -195,6 +231,10 @@ type Selection =
   | { type: "status" }
   /** What the AI features have cost — reached from Settings. */
   | { type: "spend" }
+  /** Every subject, as tiles — the Subjects button in the sidebar. */
+  | { type: "subjects" }
+  /** Stories pasted in that no followed source covers. */
+  | { type: "manual" }
   | { type: "feed" | "source"; id: string };
 
 export default function Reader() {
@@ -269,6 +309,10 @@ export default function Reader() {
   const [notes, setNotes] = useState<Note[]>([]);
   /** Subject boards, one per note, when Subjects is on (lib/subjects.ts). */
   const [boards, setBoards] = useState<Boards>({});
+  /** Stories pasted in by hand (lib/manual.ts). */
+  const [manual, setManual] = useState<ManualStories>({});
+  const manualRef = useRef<ManualStories>({});
+  const [pasteNotice, setPasteNotice] = useState<{ kind: "busy" | "done" | "error"; text: string } | null>(null);
   const boardsRef = useRef<Boards>({});
   /** Per-source delivery history for the status page (lib/health.ts). */
   const [health, setHealth] = useState<HealthLog>({});
@@ -378,6 +422,9 @@ export default function Reader() {
     boardsRef.current = storedBoards;
     setBoards(storedBoards);
     setHealth(loadHealth());
+    const storedManual = loadManual();
+    manualRef.current = storedManual;
+    setManual(storedManual);
     setVault(loadVault());
     setApiKeys(loadUnlockedKeys());
     updatedAtRef.current = loadUpdatedAt();
@@ -403,6 +450,7 @@ export default function Reader() {
     notes?: Note[];
     noteRemovals?: NoteRemoval[];
     boards?: Boards;
+    manual?: ManualStories;
     teams?: unknown;
     vault?: unknown;
     updatedAt?: number;
@@ -485,6 +533,12 @@ export default function Reader() {
       setBoards(mergedBoards);
       saveBoards(mergedBoards);
     }
+    const mergedManual = mergeManual(manualRef.current, payload.manual ?? {});
+    if (!sameManual(mergedManual, manualRef.current)) {
+      manualRef.current = mergedManual;
+      setManual(mergedManual);
+      saveManual(mergedManual);
+    }
     const marks = mergeMarks(marksRef.current, payload.watchMarks ?? {});
     if (!unchanged(marks, marksRef.current)) {
       marksRef.current = marks;
@@ -549,6 +603,7 @@ export default function Reader() {
       !samePositions(slimPositionsForSync(places), slimPositionsForSync(payload.positions ?? {})) ||
       // The same for subject boards: compared as they would be sent.
       !sameBoards(slimBoardsForSync(mergedBoards), payload.boards ?? {}) ||
+      !sameManual(mergedManual, payload.manual ?? {}) ||
       // Compared as it would be *sent*, not as it is held: the wire copy is
       // cut to a budget, and comparing the full set against the server's copy
       // would report news this device can never deliver — and push forever
@@ -675,6 +730,7 @@ export default function Reader() {
     notes,
     noteRemovals,
     boards,
+    manual,
     vault,
     teams,
     ready,
@@ -729,6 +785,7 @@ export default function Reader() {
             notes: slimNotesForSync(notes),
             noteRemovals,
             boards: slimBoardsForSync(boards),
+            manual,
             teams,
             vault,
             updatedAt,
@@ -759,6 +816,7 @@ export default function Reader() {
     notes,
     noteRemovals,
     boards,
+    manual,
     teams,
     ready,
     syncCode,
@@ -795,6 +853,7 @@ export default function Reader() {
         notes: slimNotesForSync(notes),
         noteRemovals,
         boards: slimBoardsForSync(boards),
+        manual,
         teams,
         vault,
         updatedAt: Math.max(Date.now(), updatedAtRef.current + 1),
@@ -818,6 +877,7 @@ export default function Reader() {
     notes,
     noteRemovals,
     boards,
+    manual,
     teams,
     vault,
   ]);
@@ -1076,7 +1136,10 @@ export default function Reader() {
         }),
       );
       refreshed.current = true;
-      setArticles(ordered);
+      // Stories pasted in and filed under a source are not in its feed; put
+      // them back, or the refresh would take them away.
+      const withPasted = withPastedStories(ordered, manualRef.current, new Set(sources.map((s) => s.id)));
+      setArticles(withPasted);
 
       // What each source delivered, for the status page.
       const heldBySource = new Map<string, number>();
@@ -1105,7 +1168,7 @@ export default function Reader() {
         return next;
       });
       // Also what the list falls back to with no connection.
-      void saveListSnapshot(ordered);
+      void saveListSnapshot(withPasted);
     } catch {
       // Offline or the feeds are unreachable: show what was last saved.
       const snapshot = await loadListSnapshot<Loaded>();
@@ -1749,12 +1812,21 @@ export default function Reader() {
     [teamArticles],
   );
 
+  /** "Added by you": pasted stories no followed source covers. */
+  const manualAsArticles = useMemo(() => {
+    const following = new Set(allSources.map((source) => source.id));
+    return liveManual(manual)
+      .filter((story) => !story.sourceId || !following.has(story.sourceId))
+      .map((story) => pastedAsLoaded(story, ""));
+  }, [manual, allSources]);
+
   const visible = useMemo(() => {
     if (selection.type === "all") return articles;
     if (selection.type === "saved") return savedAsArticles;
+    if (selection.type === "manual") return manualAsArticles;
     if (selection.type === "downloaded") return downloadedAsArticles;
     // Notifications is its own view, not a list of articles.
-    if (selection.type === "alerts" || selection.type === "status" || selection.type === "spend") return [];
+    if (selection.type === "alerts" || selection.type === "status" || selection.type === "spend" || selection.type === "subjects") return [];
     if (selection.type === "team") return teamAsArticles(selection.id);
     if (selection.type === "source") {
       return articles.filter((a) => a.sourceId === selection.id);
@@ -1762,7 +1834,7 @@ export default function Reader() {
     const feed = feeds.find((f) => f.id === selection.id);
     const ids = new Set(feed?.sources.map((s) => s.id));
     return articles.filter((a) => ids.has(a.sourceId));
-  }, [articles, feeds, selection, savedAsArticles, downloadedAsArticles, teamAsArticles]);
+  }, [articles, feeds, selection, savedAsArticles, downloadedAsArticles, teamAsArticles, manualAsArticles]);
 
   const sourceById = useMemo(
     () => new Map(allSources.map((s) => [s.id, s])),
@@ -2209,6 +2281,114 @@ export default function Reader() {
   }, [clearAlerts]);
 
   /** Back to the first headline. */
+  const commitManual = useCallback((update: (current: ManualStories) => ManualStories) => {
+    const next = update(manualRef.current);
+    manualRef.current = next;
+    setManual(next);
+    saveManual(next);
+  }, []);
+
+  /**
+   * The sidebar's Paste story: whatever link is on the clipboard becomes a
+   * story in reader view. One the reader already has is simply opened; a new
+   * one is filed under the followed source it comes from, or into "Added by
+   * you" when no source covers it.
+   */
+  const pasteStory = useCallback(async () => {
+    let text = "";
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      // No clipboard permission (or no clipboard API): ask instead.
+      text = window.prompt("Paste a link to a story") ?? "";
+    }
+    const link = linkIn(text);
+    if (!link) {
+      setPasteNotice({
+        kind: "error",
+        text: text.trim() ? "That isn’t a link to a story." : "Nothing to paste — copy a story’s link first.",
+      });
+      return;
+    }
+    const key = manualKey(link);
+
+    // Already here: open it where it is.
+    const held = articles.find((article) => canonicalUrl(article.link) === key);
+    if (held) {
+      const source = sourceById.get(held.sourceId);
+      openArticle(held, source?.feedUrl);
+      setPasteNotice({ kind: "done", text: `Already in ${source?.title ?? "your list"} — opened it.` });
+      return;
+    }
+    const kept =
+      savedRef.current.find((article) => canonicalUrl(article.link) === key) ??
+      (manualRef.current[key] && !manualRef.current[key].deleted ? manualRef.current[key] : null);
+    if (kept) {
+      setReading({ url: kept.link, title: kept.title, summary: kept.summary });
+      setPasteNotice({ kind: "done", text: "You already have this one — opened it." });
+      return;
+    }
+
+    setPasteNotice({ kind: "busy", text: "Reading the story…" });
+    let data: { title?: string; url?: string; excerpt?: string; html?: string; publishedAt?: string; siteName?: string; via?: string } | null = null;
+    try {
+      const res = await fetch(`/api/article?url=${encodeURIComponent(link)}`, { headers: keyHeaders });
+      data = res.ok ? await res.json() : null;
+    } catch {
+      data = null;
+    }
+    if (!data?.title) {
+      setPasteNotice({ kind: "error", text: "Couldn’t read that page as a story." });
+      return;
+    }
+    // A site's front page is a source to follow, not a story to read.
+    let path = "/";
+    try {
+      path = new URL(data.url || link).pathname;
+    } catch {
+      /* treat as a front page */
+    }
+    if (path === "/" || path === "") {
+      setPasteNotice({ kind: "error", text: "That’s a site’s front page, not a story — use New feed to follow it." });
+      return;
+    }
+
+    const source = sourceFor(link, allSources);
+    const image = data.html?.match(/<img[^>]+src="(https?:[^"]+)"/i)?.[1];
+    const story: ManualStory = {
+      link,
+      title: data.title,
+      summary: data.excerpt,
+      image,
+      publishedAt: data.publishedAt,
+      siteName: data.siteName,
+      sourceId: source?.id,
+      at: Date.now(),
+    };
+    commitManual((current) => ({ ...current, [key]: story }));
+    if (source) {
+      setArticles((current) => {
+        const next = sortNewestFirst([
+          pastedAsLoaded(story, source.id),
+          ...current.filter((article) => canonicalUrl(article.link) !== key),
+        ]);
+        void saveListSnapshot(next);
+        return next;
+      });
+    }
+    setReading({ url: link, title: story.title, feedUrl: source?.feedUrl, summary: story.summary });
+    setPasteNotice({
+      kind: "done",
+      text: source ? `Filed under ${source.title}.` : "Added to “Added by you”.",
+    });
+  }, [articles, sourceById, openArticle, keyHeaders, allSources, commitManual]);
+
+  useEffect(() => {
+    if (!pasteNotice || pasteNotice.kind === "busy") return;
+    const timer = setTimeout(() => setPasteNotice(null), 5000);
+    return () => clearTimeout(timer);
+  }, [pasteNotice]);
+
   const scrollToTop = useCallback(() => {
     listRef.current?.scrollTo({ top: 0, behavior: "auto" });
   }, []);
@@ -2306,10 +2486,12 @@ export default function Reader() {
     selection.type === "all"
       ? allSources.length
       : selection.type === "saved" ||
+          selection.type === "manual" ||
           selection.type === "downloaded" ||
           selection.type === "alerts" ||
           selection.type === "status" ||
           selection.type === "spend" ||
+          selection.type === "subjects" ||
           selection.type === "team"
         ? 0
         : selection.type === "source"
@@ -2321,14 +2503,16 @@ export default function Reader() {
       ? "All articles"
       : selection.type === "saved"
         ? "Saved"
+        : selection.type === "manual"
+          ? "Added by you"
         : selection.type === "downloaded"
           ? "On this device"
         : selection.type === "alerts"
           ? "Notifications"
           : selection.type === "team"
             ? (teams.find((team) => team.code === selection.id)?.name ?? "Team")
-            : selection.type === "status" || selection.type === "spend"
-              ? selection.type === "status" ? "Source status" : "AI spending"
+            : selection.type === "status" || selection.type === "spend" || selection.type === "subjects"
+              ? selection.type === "status" ? "Source status" : selection.type === "spend" ? "AI spending" : "Subjects"
               : selection.type === "feed"
           ? (feeds.find((f) => f.id === selection.id)?.name ?? "Feed")
           : (sourceById.get(selection.id)?.title ?? "Source");
@@ -2351,6 +2535,19 @@ export default function Reader() {
 
         <div className="sidebar-scroll">
           <button
+            className="paste-btn"
+            onClick={() => void pasteStory()}
+            disabled={pasteNotice?.kind === "busy"}
+            title="Open the story whose link is on your clipboard"
+          >
+            {Icon.plus} Paste story
+          </button>
+          {pasteNotice && (
+            <p className={`paste-notice ${pasteNotice.kind}`} role="status">
+              {pasteNotice.text}
+            </p>
+          )}
+          <button
             className={`nav-item ${selection.type === "all" ? "active" : ""}`}
             onClick={() => choose({ type: "all" })}
           >
@@ -2367,6 +2564,18 @@ export default function Reader() {
             <span className="feed-name">Saved</span>
             <span className="count">{saved.length || ""}</span>
           </button>
+
+          {manualAsArticles.length > 0 && (
+            <button
+              className={`nav-item ${selection.type === "manual" ? "active" : ""}`}
+              onClick={() => choose({ type: "manual" })}
+              title="Stories you pasted in that none of your sources carry"
+            >
+              {Icon.plus}
+              <span className="feed-name">Added by you</span>
+              <span className="count">{manualAsArticles.length}</span>
+            </button>
+          )}
 
           <button
             className={`nav-item ${selection.type === "downloaded" ? "active" : ""}`}
@@ -2412,7 +2621,18 @@ export default function Reader() {
 
           {/* Notes sit with Saved and the team feeds: places things are kept,
               above the feeds things arrive in. */}
-          {(notes.length > 0 || addingNote) && (
+          {/* With Subjects on, one entry leads to all of them. */}
+          {settings.subjects && (
+            <button
+              className={`nav-item ${selection.type === "subjects" || selection.type === "note" ? "active" : ""}`}
+              onClick={() => choose({ type: "subjects" })}
+            >
+              {Icon.note}
+              <span className="feed-name">Subjects</span>
+              <span className="count">{notes.length || ""}</span>
+            </button>
+          )}
+          {!settings.subjects && (notes.length > 0 || addingNote) && (
             <div className="notes-nav">
               {notes.map((note) => (
                 <div className="note-row" key={note.id}>
@@ -2663,6 +2883,10 @@ export default function Reader() {
                 <button
                   className="btn ghost small"
                   onClick={() => {
+                    if (settings.subjects) {
+                      choose({ type: "subjects" });
+                      return;
+                    }
                     setAddingNote(true);
                     setMenuOpen(true);
                   }}
@@ -2749,6 +2973,16 @@ export default function Reader() {
             }}
             onClose={() => setReading(null)}
           />
+        ) : selection.type === "subjects" ? (
+          <SubjectsHome
+            notes={notes}
+            boards={boards}
+            onOpenMenu={() => setMenuOpen(true)}
+            onOpen={(id) => choose({ type: "note", id })}
+            onCreate={(name) => choose({ type: "note", id: createNote(name) })}
+            onRename={(id, name) => commitNotes((current) => renameNote(current, id, name))}
+            onDelete={(id) => removeNote(id)}
+          />
         ) : selection.type === "spend" ? (
           <SpendPage onOpenMenu={() => setMenuOpen(true)} onBack={backToSettings} />
         ) : selection.type === "status" ? (
@@ -2772,6 +3006,7 @@ export default function Reader() {
             key={openNote.id}
             note={openNote}
             board={boards[openNote.id]}
+            onBack={() => choose({ type: "subjects" })}
             onBoard={(update) => commitBoard(openNote.id, update)}
             keyHeaders={() => keyHeaders}
             hasAiKey={Boolean(apiKeys[settings.aiProvider])}

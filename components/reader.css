@@ -1298,7 +1298,7 @@
 }
 .subject-card-title:hover { color: var(--accent); }
 .subject-card-source { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
-.subject-card-body { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.subject-card-body { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
 .subject-quote {
   display: flex; gap: 6px; margin: 0; padding: 6px 8px 6px 12px;
   border-left: 3px solid var(--note-rule); background: var(--bg-sub); border-radius: 0 8px 8px 0;
@@ -1384,8 +1384,8 @@
 .wb-canvas.connecting, .wb-canvas.connecting .wb-node { cursor: crosshair; }
 .wb-layer { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .wb-lines { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
-.wb-line line { stroke: var(--text-dim); stroke-width: 2; }
-.wb-line.ai line { stroke: var(--accent); stroke-dasharray: 5 5; opacity: 0.8; }
+.wb-line path { fill: none; stroke: var(--text-dim); stroke-width: 2; }
+.wb-line.ai path { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 5 5; opacity: 0.85; }
 .wb-unlink { pointer-events: all; cursor: pointer; opacity: 0; }
 .wb-line:hover .wb-unlink, .wb-unlink:hover { opacity: 1; }
 .wb-unlink circle { fill: var(--bg); stroke: var(--border); }
@@ -1439,3 +1439,64 @@
 .spend-axis { stroke: var(--border); stroke-width: 1; }
 .spend-tick { fill: var(--text-dim); font-size: 11px; }
 .ai-choice { margin: 4px 0 14px 28px; }
+/* ---------- subjects home ---------- */
+.subjects-home { display: flex; flex-direction: column; min-height: 100%; }
+.subjects-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 18px; padding: 8px 20px 40px;
+}
+.subject-tile {
+  position: relative; display: flex; flex-direction: column;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--bg); overflow: hidden;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.subject-tile:hover { border-color: var(--accent); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08); }
+.subject-tile-open { display: flex; flex-direction: column; border: 0; padding: 0; background: none; text-align: left; color: var(--text); cursor: pointer; }
+/* A small page, like a document thumbnail. */
+.subject-tile-preview {
+  height: 150px; padding: 12px 12px 0; overflow: hidden; background: var(--bg-sub);
+  border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 7px;
+  font-size: 9.5px; line-height: 1.35; color: var(--text-dim);
+  mask-image: linear-gradient(to bottom, #000 70%, transparent);
+}
+.subject-tile-line strong { display: block; color: var(--text); font-size: 10px; }
+.subject-tile-line span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.subject-tile-empty { margin: auto; font-size: 12px; }
+.subject-tile-meta { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px 12px; }
+.subject-tile-name { font-weight: 650; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subject-tile-sub { font-size: 12px; color: var(--text-dim); }
+.subject-tile-actions { position: absolute; top: 6px; right: 6px; display: flex; gap: 2px; opacity: 0; transition: opacity 0.12s; }
+.subject-tile:hover .subject-tile-actions, .subject-tile:focus-within .subject-tile-actions { opacity: 1; }
+.subject-tile-actions .icon-btn { opacity: 1; background: var(--bg); }
+.subject-tile.new { border-style: dashed; min-height: 212px; }
+.subject-tile-new {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  border: 0; background: none; color: var(--text-dim); font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.subject-tile-new:hover { color: var(--accent); }
+.subject-tile-plus { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--bg-sub); }
+.subject-tile-form { display: flex; flex-direction: column; gap: 8px; padding: 16px; margin: auto 0; }
+@media (hover: none) { .subject-tile-actions { opacity: 1; } }
+
+/* A quote in a card: plain words in quotation marks, a link only on hover. */
+.rich { position: relative; }
+.rich-body a[data-quote] { color: inherit; text-decoration: none; cursor: text; }
+.rich-body a[data-quote]:hover { text-decoration: underline; text-decoration-color: var(--note-rule); text-underline-offset: 3px; }
+.quote-chip {
+  position: absolute; z-index: 4; transform: translateY(-110%);
+  border: 1px solid var(--border); background: var(--bg); color: var(--accent);
+  border-radius: 999px; padding: 2px 9px; font-size: 12px; font-weight: 600;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12); white-space: nowrap;
+}
+
+/* ---------- paste a story ---------- */
+.paste-btn {
+  display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%;
+  margin: 2px 0 8px; padding: 8px 10px; border-radius: 8px;
+  border: 1px dashed var(--border); background: var(--bg); color: var(--text);
+  font-size: 13.5px; font-weight: 600; cursor: pointer;
+}
+.paste-btn:hover { border-color: var(--accent); color: var(--accent); }
+.paste-btn:disabled { opacity: 0.6; cursor: progress; }
+.paste-notice { margin: -2px 2px 10px; font-size: 12px; line-height: 1.4; color: var(--text-dim); }
+.paste-notice.error { color: var(--danger); }
