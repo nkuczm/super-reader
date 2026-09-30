@@ -203,6 +203,8 @@ export default function Reader() {
   const [articles, setArticles] = useState<Loaded[]>([]);
   const [read, setRead] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<Selection>({ type: "all" });
+  /** Where the reader was before opening a page from Settings, for its Back. */
+  const beforeSettingsPage = useRef<Selection>({ type: "all" });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   /** Whether the refresh has gone on long enough to be worth mentioning. */
@@ -2235,6 +2237,12 @@ export default function Reader() {
     },
     [scrollToTop, clearAlerts],
   );
+  /** Back from a page opened in Settings: to Settings, over what was showing before. */
+  const backToSettings = useCallback(() => {
+    choose(beforeSettingsPage.current);
+    setSettingsOpen(true);
+  }, [choose]);
+
 
   /**
    * Pull the list past its top to refresh.
@@ -2742,7 +2750,7 @@ export default function Reader() {
             onClose={() => setReading(null)}
           />
         ) : selection.type === "spend" ? (
-          <SpendPage onOpenMenu={() => setMenuOpen(true)} />
+          <SpendPage onOpenMenu={() => setMenuOpen(true)} onBack={backToSettings} />
         ) : selection.type === "status" ? (
           <StatusPage
             sources={feeds.flatMap((feed) =>
@@ -2756,6 +2764,7 @@ export default function Reader() {
             health={health}
             refreshing={refreshing}
             onRefresh={() => void refresh(allSources)}
+            onBack={backToSettings}
             onOpenMenu={() => setMenuOpen(true)}
           />
         ) : openNote && settings.subjects ? (
@@ -3373,10 +3382,12 @@ export default function Reader() {
           onChange={updateSettings}
           onClose={() => setSettingsOpen(false)}
           onOpenSpend={() => {
+            if (selection.type !== "status" && selection.type !== "spend") beforeSettingsPage.current = selection;
             setSettingsOpen(false);
             choose({ type: "spend" });
           }}
           onOpenStatus={() => {
+            if (selection.type !== "status" && selection.type !== "spend") beforeSettingsPage.current = selection;
             setSettingsOpen(false);
             choose({ type: "status" });
           }}

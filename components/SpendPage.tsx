@@ -51,7 +51,7 @@ function DailyBars({ days }: { days: { day: string; cost: number; runs: number }
   );
 }
 
-export default function SpendPage({ onOpenMenu }: { onOpenMenu?: () => void }) {
+export default function SpendPage({ onOpenMenu, onBack }: { onOpenMenu?: () => void; onBack?: () => void }) {
   const [records, setRecords] = useState<SpendRecord[]>([]);
 
   useEffect(() => {
@@ -98,6 +98,11 @@ export default function SpendPage({ onOpenMenu }: { onOpenMenu?: () => void }) {
         {onOpenMenu && (
           <button className="menu-btn" onClick={onOpenMenu} aria-label="Open feeds">
             {Icon.menu}
+          </button>
+        )}
+        {onBack && (
+          <button className="btn ghost small" onClick={onBack} aria-label="Back to Settings">
+            {Icon.back} Settings
           </button>
         )}
         <div>

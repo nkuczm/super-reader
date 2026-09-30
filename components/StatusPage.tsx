@@ -78,7 +78,9 @@ export default function StatusPage({
   onOpenMenu,
   onRefresh,
   refreshing,
+  onBack,
 }: {
+  onBack?: () => void;
   sources: { id: string; title: string; feedUrl: string; feed: string }[];
   health: HealthLog;
   onOpenMenu?: () => void;
@@ -117,6 +119,11 @@ export default function StatusPage({
         {onOpenMenu && (
           <button className="menu-btn" onClick={onOpenMenu} aria-label="Open feeds">
             {Icon.menu}
+          </button>
+        )}
+        {onBack && (
+          <button className="btn ghost small" onClick={onBack} aria-label="Back to Settings">
+            {Icon.back} Settings
           </button>
         )}
         <div>
