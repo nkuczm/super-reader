@@ -346,23 +346,33 @@ function InsightCard({ insight, cards, dragHandle }: { insight: InsightItem; car
   );
 }
 
+/**
+ * A story the AI suggests: warm-coloured until decided. The tick makes it an
+ * ordinary story card; the cross dismisses it for good. The headline opens it
+ * to read first.
+ */
 function SuggestionCard({ suggestion, shared, dragHandle }: { suggestion: SuggestItem; shared: Shared; dragHandle?: (e: React.PointerEvent) => void }) {
-  const [open, setOpen] = useState(false);
   return (
-    <div className={`subject-suggest${open ? " open" : ""}`} onPointerDown={dragHandle}>
-      <span className="ai-tag">✦ Suggested reading</span>
-      <button className="subject-card-title" onClick={() => setOpen((v) => !v)}>
+    <div className="subject-suggest" onPointerDown={dragHandle}>
+      <div className="subject-suggest-head">
+        <span className="ai-tag">✦ Suggested reading</span>
+        <div className="subject-suggest-decide" onPointerDown={(e) => e.stopPropagation()}>
+          <button className="decide accept" aria-label="Add to subject" title="Add to subject"
+            onClick={() => shared.decide(suggestion, "accepted")}>
+            {Icon.check}
+          </button>
+          <button className="decide dismiss" aria-label="Not relevant" title="Not relevant"
+            onClick={() => shared.decide(suggestion, "dismissed")}>
+            {Icon.close}
+          </button>
+        </div>
+      </div>
+      <button className="subject-card-title" title="Read it"
+        onClick={() => shared.onOpenArticle(suggestion.link, suggestion.title, "")}>
         {suggestion.title}
       </button>
       {suggestion.source && <div className="subject-card-source">{suggestion.source}</div>}
       <p className="subject-suggest-why">{suggestion.why}</p>
-      {open && (
-        <div className="subject-suggest-actions" onPointerDown={(e) => e.stopPropagation()}>
-          <button className="btn small" onClick={() => shared.decide(suggestion, "accepted")}>Add to subject</button>
-          <button className="btn ghost small" onClick={() => shared.onOpenArticle(suggestion.link, suggestion.title, "")}>Read</button>
-          <button className="btn ghost small" onClick={() => shared.decide(suggestion, "dismissed")}>Not relevant</button>
-        </div>
-      )}
     </div>
   );
 }
