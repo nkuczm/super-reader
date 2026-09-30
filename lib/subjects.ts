@@ -374,7 +374,7 @@ export function synthesisInput(note: Note, board: Board | undefined): SynthesisI
       title: card.title,
       source: card.source,
       quotes: card.quotes.map((quote) => quote.text.slice(0, 1200)),
-      note: textOf(card.note).slice(0, 1500),
+      note: textOf(withoutQuotes(card.note)).slice(0, 1500),
     })),
     boxes: live(board)
       .filter((item): item is BoxItem => item.kind === "box")
@@ -480,7 +480,7 @@ export function applySynthesis(
 /* ------------------------------------------------------------------------ */
 
 const ALLOWED_TAGS = new Set([
-  "p", "div", "br", "b", "strong", "i", "em", "u", "s", "mark", "ul", "ol", "li", "h3", "blockquote", "span",
+  "p", "div", "br", "b", "strong", "i", "em", "u", "s", "mark", "ul", "ol", "li", "h3", "blockquote", "span", "a",
 ]);
 
 /**
@@ -524,6 +524,15 @@ export function sanitizeRichText(html: string): string {
       }
       continue;
     }
+    // A quote is a link to its passage, by the quote's id — never an href, so
+    // nothing synced can smuggle a destination in.
+    if (tag === "a" && !closing) {
+      const id = match[2].match(/data-quote=["']?([A-Za-z0-9_-]{1,40})/)?.[1];
+      if (!id) continue;
+      stack.push("a");
+      out.push(`<a data-quote="${id}">`);
+      continue;
+    }
     if (tag === "br") {
       out.push("<br>");
       continue;
@@ -545,4 +554,40 @@ export function sanitizeRichText(html: string): string {
     out.push(open === "span" ? "</mark>" : `</${open}>`);
   }
   return out.join("");
+}
+
+/* ------------------------------------------------------------------------ */
+/* Quotes inside a card's writing                                           */
+/* ------------------------------------------------------------------------ */
+
+/** The quotes a card's document still holds, by id. */
+export function quoteIdsIn(html: string): Set<string> {
+  return new Set([...html.matchAll(/data-quote="([A-Za-z0-9_-]+)"/g)].map((m) => m[1]));
+}
+
+/**
+ * A card's document: what was written on it, with every quote the subject
+ * holds for that story present as a bullet. A quote is only ever added here,
+ * never rewritten — once it is in the document its words are the reader's to
+ * edit, and what it links to stays the original passage, kept on the note.
+ * A new quote joins the list the last quote is in, or starts one at the top.
+ */
+export function composeCardDoc(html: string, quotes: { id: string; text: string }[]): string {
+  const present = quoteIdsIn(html);
+  const missing = quotes.filter((quote) => !present.has(quote.id));
+  if (missing.length === 0) return html;
+  const items = missing
+    .map((quote) => `<li><a data-quote="${quote.id}">“${escapeHtml(quote.text.trim())}”</a></li>`)
+    .join("");
+  const last = html.lastIndexOf('data-quote="');
+  if (last >= 0) {
+    const close = html.indexOf("</ul>", last);
+    if (close >= 0) return html.slice(0, close) + items + html.slice(close);
+  }
+  return `<ul>${items}</ul>${html}`;
+}
+
+/** A card's writing without its quotes — the AI is given those separately. */
+export function withoutQuotes(html: string): string {
+  return html.replace(/<li>\s*<a data-quote="[^"]+">[\s\S]*?<\/a>\s*<\/li>/g, "").replace(/<a data-quote="[^"]+">[\s\S]*?<\/a>/g, "");
 }

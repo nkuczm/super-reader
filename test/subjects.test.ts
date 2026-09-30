@@ -112,3 +112,25 @@ test("the wire copy drops the AI's work first when over budget", () => {
   assert.ok(slim.n1.box);
   assert.equal(slim.n1["insight:1"], undefined);
 });
+
+test("a card's quotes are bullets in its document, linked by id, never re-added once there", async () => {
+  const { composeCardDoc, quoteIdsIn, withoutQuotes } = await import("../lib/subjects");
+  const quotes = [{ id: "q1", text: "one " }, { id: "q2", text: "two" }];
+  const fresh = composeCardDoc("<p>my thought</p>", quotes);
+  assert.equal(fresh, '<ul><li><a data-quote="q1">“one”</a></li><li><a data-quote="q2">“two”</a></li></ul><p>my thought</p>');
+
+  // Edited words stay edited; a new quote joins the same list.
+  const edited = fresh.replace("“one”", "“one, shortened”");
+  const next = composeCardDoc(edited, [...quotes, { id: "q3", text: "three" }]);
+  assert.match(next, /one, shortened/);
+  assert.match(next, /<li><a data-quote="q3">“three”<\/a><\/li><\/ul><p>my thought/);
+  assert.deepEqual([...quoteIdsIn(next)], ["q1", "q2", "q3"]);
+  assert.equal(withoutQuotes(next), "<ul></ul><p>my thought</p>");
+});
+
+test("synced HTML keeps a quote link by id and drops any real href", () => {
+  assert.equal(
+    sanitizeRichText('<a data-quote="q1" href="javascript:x">“hi”</a><a href="https://evil">x</a>'),
+    '<a data-quote="q1">“hi”</a>x',
+  );
+});

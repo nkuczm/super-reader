@@ -68,6 +68,7 @@ import { useSourceDrag } from "./useSourceDrag";
 import SubjectPage from "./SubjectPage";
 import StatusPage from "./StatusPage";
 import SpendPage from "./SpendPage";
+import SubjectsHome from "./SubjectsHome";
 import {
   addStory,
   loadBoards,
@@ -195,6 +196,8 @@ type Selection =
   | { type: "status" }
   /** What the AI features have cost — reached from Settings. */
   | { type: "spend" }
+  /** Every subject, as tiles — the Subjects button in the sidebar. */
+  | { type: "subjects" }
   | { type: "feed" | "source"; id: string };
 
 export default function Reader() {
@@ -1754,7 +1757,7 @@ export default function Reader() {
     if (selection.type === "saved") return savedAsArticles;
     if (selection.type === "downloaded") return downloadedAsArticles;
     // Notifications is its own view, not a list of articles.
-    if (selection.type === "alerts" || selection.type === "status" || selection.type === "spend") return [];
+    if (selection.type === "alerts" || selection.type === "status" || selection.type === "spend" || selection.type === "subjects") return [];
     if (selection.type === "team") return teamAsArticles(selection.id);
     if (selection.type === "source") {
       return articles.filter((a) => a.sourceId === selection.id);
@@ -2310,6 +2313,7 @@ export default function Reader() {
           selection.type === "alerts" ||
           selection.type === "status" ||
           selection.type === "spend" ||
+          selection.type === "subjects" ||
           selection.type === "team"
         ? 0
         : selection.type === "source"
@@ -2327,8 +2331,8 @@ export default function Reader() {
           ? "Notifications"
           : selection.type === "team"
             ? (teams.find((team) => team.code === selection.id)?.name ?? "Team")
-            : selection.type === "status" || selection.type === "spend"
-              ? selection.type === "status" ? "Source status" : "AI spending"
+            : selection.type === "status" || selection.type === "spend" || selection.type === "subjects"
+              ? selection.type === "status" ? "Source status" : selection.type === "spend" ? "AI spending" : "Subjects"
               : selection.type === "feed"
           ? (feeds.find((f) => f.id === selection.id)?.name ?? "Feed")
           : (sourceById.get(selection.id)?.title ?? "Source");
@@ -2412,7 +2416,18 @@ export default function Reader() {
 
           {/* Notes sit with Saved and the team feeds: places things are kept,
               above the feeds things arrive in. */}
-          {(notes.length > 0 || addingNote) && (
+          {/* With Subjects on, one entry leads to all of them. */}
+          {settings.subjects && (
+            <button
+              className={`nav-item ${selection.type === "subjects" || selection.type === "note" ? "active" : ""}`}
+              onClick={() => choose({ type: "subjects" })}
+            >
+              {Icon.note}
+              <span className="feed-name">Subjects</span>
+              <span className="count">{notes.length || ""}</span>
+            </button>
+          )}
+          {!settings.subjects && (notes.length > 0 || addingNote) && (
             <div className="notes-nav">
               {notes.map((note) => (
                 <div className="note-row" key={note.id}>
@@ -2663,6 +2678,10 @@ export default function Reader() {
                 <button
                   className="btn ghost small"
                   onClick={() => {
+                    if (settings.subjects) {
+                      choose({ type: "subjects" });
+                      return;
+                    }
                     setAddingNote(true);
                     setMenuOpen(true);
                   }}
@@ -2749,6 +2768,16 @@ export default function Reader() {
             }}
             onClose={() => setReading(null)}
           />
+        ) : selection.type === "subjects" ? (
+          <SubjectsHome
+            notes={notes}
+            boards={boards}
+            onOpenMenu={() => setMenuOpen(true)}
+            onOpen={(id) => choose({ type: "note", id })}
+            onCreate={(name) => choose({ type: "note", id: createNote(name) })}
+            onRename={(id, name) => commitNotes((current) => renameNote(current, id, name))}
+            onDelete={(id) => removeNote(id)}
+          />
         ) : selection.type === "spend" ? (
           <SpendPage onOpenMenu={() => setMenuOpen(true)} onBack={backToSettings} />
         ) : selection.type === "status" ? (
@@ -2772,6 +2801,7 @@ export default function Reader() {
             key={openNote.id}
             note={openNote}
             board={boards[openNote.id]}
+            onBack={() => choose({ type: "subjects" })}
             onBoard={(update) => commitBoard(openNote.id, update)}
             keyHeaders={() => keyHeaders}
             hasAiKey={Boolean(apiKeys[settings.aiProvider])}

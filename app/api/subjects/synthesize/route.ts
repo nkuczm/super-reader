@@ -57,13 +57,15 @@ You receive the subject's name and its story cards: each card has an id, a headl
 
 Work only from that material. Be additive: do not summarise the cards back, and do not restate a connection the reader has already written down. Aim for what they are not yet seeing.
 
+Brevity is the point. Every insight is one plain sentence of at most 18 words — no preamble, no hedging, no restating the stories, no "This suggests" or "Interestingly". If it needs two sentences, it is not sharp enough yet.
+
 Return:
-- insights: 3 to 6 items, each one or two sentences.
-  - "connection": a link between two or more stories that is not obvious from either alone — a shared mechanism, a tension, a precedent, a contradiction.
+- insights: 3 or 4 items, the sharpest you have. Fewer good ones beat more.
+  - "connection": a link across stories that neither shows alone — a shared mechanism, a tension, a precedent, a contradiction.
   - "question": a question that spans several stories and would pull the subject further.
-  - "deeper": one or two questions a level below the surface of the topic — the assumption underneath it, or what would have to be true.
+  - "deeper": at most one — the assumption underneath the topic, or what would have to be true.
   refs lists the ids of the cards each insight draws on, copied exactly. Every connection names at least two.
-- reading: 2 or 3 news search queries (a few words each, the way you would type them into a news search) for coverage that would fill a gap in what is here, each with a one-sentence reason addressed to the reader. Never invent URLs.`;
+- reading: 2 news search queries (a few words each, as typed into a news search) for coverage that would fill a gap in what is here, each with a reason of at most 12 words. Never invent URLs.`;
 
 type Reading = { query: string; why: string };
 
@@ -132,7 +134,7 @@ export async function POST(request: Request) {
 
   const insights = (parsed.insights ?? [])
     .filter((insight) => insight && typeof insight.text === "string" && insight.text.trim())
-    .slice(0, 8)
+    .slice(0, 5)
     .map((insight) => ({
       type: (["connection", "question", "deeper"].includes(insight.type) ? insight.type : "question") as InsightKind,
       text: insight.text.trim(),
