@@ -22,7 +22,10 @@ export default function QuoteToNote({
   onCreateNote,
   onOpenNote,
   onMoveQuote,
+  noun = "note",
 }: {
+  /** "note", or "subject" with Subjects switched on. */
+  noun?: string;
   container: React.RefObject<HTMLElement | null>;
   notes: Note[];
   /** Add the highlighted text to this note; hands back the quote's own id. */
@@ -206,7 +209,7 @@ export default function QuoteToNote({
                 }
               }}
             >
-              {Icon.note} Add to note
+              {Icon.note} Add to {noun}
             </button>
           ) : (
             <div className="quote-menu" role="menu">
@@ -223,7 +226,7 @@ export default function QuoteToNote({
               <div className="quote-new">
                 <input
                   className="input"
-                  placeholder="New note…"
+                  placeholder={`New ${noun}…`}
                   value={newName}
                   autoFocus
                   onChange={(event) => setNewName(event.target.value)}
@@ -270,7 +273,7 @@ export default function QuoteToNote({
               <div className="quote-new">
                 <input
                   className="input"
-                  placeholder="New note…"
+                  placeholder={`New ${noun}…`}
                   value={renaming}
                   autoFocus
                   onChange={(event) => setRenaming(event.target.value)}

@@ -78,6 +78,8 @@ export default function SettingsDialog({
   onCreateTeam,
   onJoinTeam,
   onLeaveTeam,
+  onOpenStatus,
+  onOpenSpend,
 }: {
   settings: Settings;
   onChange: (next: Settings) => void;
@@ -106,6 +108,8 @@ export default function SettingsDialog({
   onCreateTeam: (name: string) => Promise<void>;
   onJoinTeam: (code: string) => Promise<void>;
   onLeaveTeam: (code: string) => void;
+  onOpenStatus: () => void;
+  onOpenSpend: () => void;
 }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -248,6 +252,74 @@ export default function SettingsDialog({
             {noteCount === 0
               ? "Notes live in the sidebar, beside your feeds. Make one with New note, or straight from your first highlight."
               : `${noteCount} note${noteCount === 1 ? "" : "s"} in the sidebar. Turning this off leaves them there; it only stops highlighting from offering to quote.`}
+          </p>
+
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={settings.subjects}
+              onChange={(event) =>
+                onChange({ ...settings, subjects: event.target.checked })
+              }
+            />
+            <span>
+              Subjects
+              <em>
+                Turns each note into a subject: a board of story cards with your
+                quotes and notes, free text boxes, a whiteboard view, and AI
+                insights and suggested reading (with your own Claude or OpenAI key under
+                API keys). Turning it off shows your notes exactly as before.
+              </em>
+            </span>
+          </label>
+
+          {settings.subjects && (
+            <div className="ai-choice">
+              <p className="field-note" style={{ marginTop: 0 }}>AI for insights and suggested reading</p>
+              <div className="seg" role="radiogroup" aria-label="AI provider">
+                {(["anthropic", "openai"] as const).map((provider) => (
+                  <button
+                    key={provider}
+                    role="radio"
+                    aria-checked={settings.aiProvider === provider}
+                    className={settings.aiProvider === provider ? "on" : ""}
+                    onClick={() => onChange({ ...settings, aiProvider: provider })}
+                  >
+                    {provider === "anthropic" ? "Claude (Anthropic)" : "OpenAI"}
+                  </button>
+                ))}
+              </div>
+              {settings.aiProvider === "openai" && (
+                <label className="api-field" style={{ marginTop: 8 }}>
+                  <span>OpenAI model</span>
+                  <input
+                    className="input"
+                    value={settings.openaiModel}
+                    onChange={(event) => onChange({ ...settings, openaiModel: event.target.value })}
+                    placeholder="gpt-5-mini"
+                  />
+                </label>
+              )}
+              <p className="field-note">
+                {apiKeys[settings.aiProvider]
+                  ? `Using your ${settings.aiProvider === "openai" ? "OpenAI" : "Anthropic"} key.`
+                  : `Add your ${settings.aiProvider === "openai" ? "OpenAI" : "Anthropic"} key under API keys below.`}
+              </p>
+            </div>
+          )}
+
+          <p className="field-label reading-label">Sources</p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className="btn ghost small" onClick={onOpenStatus}>
+              Source status
+            </button>
+            <button className="btn ghost small" onClick={onOpenSpend}>
+              AI spending
+            </button>
+          </div>
+          <p className="field-note">
+            How many stories each source is delivering and which look broken or
+            are losing access; and what the AI insights have cost on this device.
           </p>
 
           <p className="field-label reading-label">Team feeds</p>
