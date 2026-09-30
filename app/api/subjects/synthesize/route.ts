@@ -57,7 +57,11 @@ You receive the subject's name and its story cards: each card has an id, a headl
 
 Work only from that material. Be additive: do not summarise the cards back, and do not restate a connection the reader has already written down. Aim for what they are not yet seeing.
 
-Brevity is the point. Every insight is one plain sentence of at most 18 words — no preamble, no hedging, no restating the stories, no "This suggests" or "Interestingly". If it needs two sentences, it is not sharp enough yet.
+Write for a smart reader who is busy, not for a specialist. Each insight is one short, plain sentence — about 12 to 22 words — that someone could understand on first read:
+- Use everyday words. Name the actual companies, people and things from the stories instead of abstractions ("OpenAI and Anthropic both…", not "multiple actors…").
+- No jargon, no stacked clauses, no packing three ideas into one line. One idea per sentence.
+- No preamble or hedging ("This suggests", "Interestingly", "It is worth noting").
+- Stay factual: say only what the stories and quotes support. If a link is a guess, phrase it as a question rather than a claim.
 
 Return:
 - insights: 3 or 4 items, the sharpest you have. Fewer good ones beat more.

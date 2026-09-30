@@ -49,6 +49,9 @@ type Props = {
   subjects?: {
     onAdd: (noteId: string) => void;
     onCreate: (name: string) => string;
+    /** Subjects this story is already in: choosing one goes there. */
+    containing: ReadonlySet<string>;
+    onOpen: (noteId: string) => void;
   };
   onClose: () => void;
 };
@@ -390,7 +393,13 @@ export default function ArticleReader({
               onClick={() => setSubjectMenu((open) => !open)}
             >
               {Icon.note}
-              <span className="btn-label">{addedTo ? `In ${addedTo}` : "Subject"}</span>
+              <span className="btn-label">
+                {addedTo
+                  ? `In ${addedTo}`
+                  : subjects.containing.size > 0
+                    ? `In ${subjects.containing.size} subject${subjects.containing.size === 1 ? "" : "s"}`
+                    : "Subject"}
+              </span>
             </button>
             {subjectMenu && (
               <div className="subject-menu" role="menu">
@@ -398,13 +407,20 @@ export default function ArticleReader({
                   <button
                     key={note.id}
                     role="menuitem"
+                    className={subjects.containing.has(note.id) ? "in" : ""}
                     onClick={() => {
+                      setSubjectMenu(false);
+                      if (subjects.containing.has(note.id)) {
+                        subjects.onOpen(note.id);
+                        return;
+                      }
                       subjects.onAdd(note.id);
                       setAddedTo(note.name);
-                      setSubjectMenu(false);
                     }}
+                    title={subjects.containing.has(note.id) ? `Open ${note.name}` : `Add to ${note.name}`}
                   >
-                    {note.name}
+                    <span>{note.name}</span>
+                    {subjects.containing.has(note.id) && <span className="subject-menu-in">{Icon.check} Open</span>}
                   </button>
                 ))}
                 <button
