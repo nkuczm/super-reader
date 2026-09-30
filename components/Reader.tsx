@@ -67,6 +67,7 @@ import Attachments from "./Attachments";
 import { useSourceDrag } from "./useSourceDrag";
 import SubjectPage from "./SubjectPage";
 import StatusPage from "./StatusPage";
+import SpendPage from "./SpendPage";
 import {
   addStory,
   loadBoards,
@@ -192,6 +193,8 @@ type Selection =
   | { type: "note"; id: string }
   /** How every source is delivering — reached from Settings. */
   | { type: "status" }
+  /** What the AI features have cost — reached from Settings. */
+  | { type: "spend" }
   | { type: "feed" | "source"; id: string };
 
 export default function Reader() {
@@ -1749,7 +1752,7 @@ export default function Reader() {
     if (selection.type === "saved") return savedAsArticles;
     if (selection.type === "downloaded") return downloadedAsArticles;
     // Notifications is its own view, not a list of articles.
-    if (selection.type === "alerts" || selection.type === "status") return [];
+    if (selection.type === "alerts" || selection.type === "status" || selection.type === "spend") return [];
     if (selection.type === "team") return teamAsArticles(selection.id);
     if (selection.type === "source") {
       return articles.filter((a) => a.sourceId === selection.id);
@@ -2298,6 +2301,7 @@ export default function Reader() {
           selection.type === "downloaded" ||
           selection.type === "alerts" ||
           selection.type === "status" ||
+          selection.type === "spend" ||
           selection.type === "team"
         ? 0
         : selection.type === "source"
@@ -2315,8 +2319,8 @@ export default function Reader() {
           ? "Notifications"
           : selection.type === "team"
             ? (teams.find((team) => team.code === selection.id)?.name ?? "Team")
-            : selection.type === "status"
-              ? "Source status"
+            : selection.type === "status" || selection.type === "spend"
+              ? selection.type === "status" ? "Source status" : "AI spending"
               : selection.type === "feed"
           ? (feeds.find((f) => f.id === selection.id)?.name ?? "Feed")
           : (sourceById.get(selection.id)?.title ?? "Source");
@@ -2737,6 +2741,8 @@ export default function Reader() {
             }}
             onClose={() => setReading(null)}
           />
+        ) : selection.type === "spend" ? (
+          <SpendPage onOpenMenu={() => setMenuOpen(true)} />
         ) : selection.type === "status" ? (
           <StatusPage
             sources={feeds.flatMap((feed) =>
@@ -2759,7 +2765,11 @@ export default function Reader() {
             board={boards[openNote.id]}
             onBoard={(update) => commitBoard(openNote.id, update)}
             keyHeaders={() => keyHeaders}
-            hasAiKey={Boolean(apiKeys.anthropic)}
+            hasAiKey={Boolean(apiKeys[settings.aiProvider])}
+            ai={{
+              provider: settings.aiProvider,
+              model: settings.aiProvider === "openai" ? settings.openaiModel : undefined,
+            }}
             onOpenMenu={() => setMenuOpen(true)}
             onOpenArticle={(link, title, quote) => setReading({ url: link, title, quote })}
             onCommitEntries={(entries) =>
@@ -3362,6 +3372,10 @@ export default function Reader() {
           settings={settings}
           onChange={updateSettings}
           onClose={() => setSettingsOpen(false)}
+          onOpenSpend={() => {
+            setSettingsOpen(false);
+            choose({ type: "spend" });
+          }}
           onOpenStatus={() => {
             setSettingsOpen(false);
             choose({ type: "status" });

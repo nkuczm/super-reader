@@ -5,13 +5,13 @@ import { fetchText, parseFeed, looksLikeFeed } from "@/lib/feed";
 import { topicFeedUrl } from "@/lib/discover";
 import { canonicalUrl } from "@/lib/url";
 import type { InsightKind, SynthesisInput, SynthesisResult } from "@/lib/subjects";
+import { DEFAULT_OPENAI_MODEL, PROVIDER_NAME, type AiProvider } from "@/lib/spend";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-/** The vault id the reader's own Anthropic key is stored under. */
-const KEY_ID = "anthropic";
+const ANTHROPIC_MODEL = "claude-opus-5-5";
 const MAX_CARDS = 40;
 
 /**
@@ -67,16 +67,15 @@ Return:
 
 type Reading = { query: string; why: string };
 
-export async function POST(request: Request) {
-  const keys = decodeKeysHeader(request.headers.get(KEYS_HEADER));
-  const apiKey = keys[KEY_ID];
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: "Add your Anthropic key under Settings → API keys to turn on insights.", needsKey: true },
-      { status: 400 },
-    );
+type Parsed = { insights: SynthesisResult["insights"]; reading: Reading[] };
+type Usage = { provider: AiProvider; model: string; input: number; output: number };
+class RunError extends Error {
+  constructor(message: string, readonly status: number, readonly needsKey = false) {
+    super(message);
   }
+}
 
+export async function POST(request: Request) {
   let input: SynthesisInput;
   try {
     input = (await request.json()) as SynthesisInput;
@@ -84,6 +83,19 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "Expected a subject" }, { status: 400 });
   }
+  const provider: AiProvider = input.provider === "openai" ? "openai" : "anthropic";
+  const keys = decodeKeysHeader(request.headers.get(KEYS_HEADER));
+  const apiKey = keys[provider];
+  if (!apiKey) {
+    return NextResponse.json(
+      {
+        error: `Add your ${PROVIDER_NAME[provider]} key under Settings → API keys to turn on insights.`,
+        needsKey: true,
+      },
+      { status: 400 },
+    );
+  }
+
   const cards = input.cards.slice(0, MAX_CARDS);
   const ids = new Set(cards.map((card) => card.id));
 
@@ -104,41 +116,16 @@ export async function POST(request: Request) {
     "</subject>",
   ].join("\n\n");
 
-  const client = new Anthropic({ apiKey });
-  let parsed: { insights: SynthesisResult["insights"]; reading: Reading[] };
+  let parsed: Parsed;
+  let usage: Usage;
   try {
-    const response = await client.beta.messages.create({
-      model: "claude-opus-5-5",
-      max_tokens: 16000,
-      // Lightweight by design: these run in the background as a subject
-      // grows, so depth is kept low rather than the model changed.
-      output_config: {
-        effort: "low",
-        format: { type: "json_schema", schema: SCHEMA as unknown as Record<string, unknown> },
-      },
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
-      system: SYSTEM,
-      messages: [{ role: "user", content: material }],
-    });
-
-    if (response.stop_reason === "refusal") {
-      return NextResponse.json({ error: "The model declined to analyse this subject." }, { status: 422 });
-    }
-    const text = response.content
-      .filter((block): block is Anthropic.Beta.BetaTextBlock => block.type === "text")
-      .map((block) => block.text)
-      .join("");
-    parsed = JSON.parse(text);
+    ({ parsed, usage } =
+      provider === "openai"
+        ? await runOpenAI(apiKey, cleanModel(input.model) ?? DEFAULT_OPENAI_MODEL, material)
+        : await runAnthropic(apiKey, material));
   } catch (error) {
-    if (error instanceof Anthropic.AuthenticationError) {
-      return NextResponse.json({ error: "That Anthropic key was not accepted.", needsKey: true }, { status: 401 });
-    }
-    if (error instanceof Anthropic.RateLimitError) {
-      return NextResponse.json({ error: "Rate limited by Anthropic — try again shortly." }, { status: 429 });
-    }
-    if (error instanceof Anthropic.APIError) {
-      return NextResponse.json({ error: `Anthropic API error ${error.status ?? ""}`.trim() }, { status: 502 });
+    if (error instanceof RunError) {
+      return NextResponse.json({ error: error.message, needsKey: error.needsKey }, { status: error.status });
     }
     return NextResponse.json({ error: "Could not read the model's answer." }, { status: 502 });
   }
@@ -153,8 +140,106 @@ export async function POST(request: Request) {
     }));
 
   const suggestions = await findReading((parsed.reading ?? []).slice(0, 3), new Set(input.known ?? []));
-  const result: SynthesisResult = { insights, suggestions };
+  const result: SynthesisResult = { insights, suggestions, usage };
   return NextResponse.json(result, { headers: { "cache-control": "private, no-store" } });
+}
+
+/** A model name as typed in Settings: letters, digits, dots and dashes only. */
+function cleanModel(model: unknown): string | null {
+  return typeof model === "string" && /^[a-zA-Z0-9._:-]{2,64}$/.test(model.trim()) ? model.trim() : null;
+}
+
+async function runAnthropic(apiKey: string, material: string): Promise<{ parsed: Parsed; usage: Usage }> {
+  const client = new Anthropic({ apiKey });
+  try {
+    const response = await client.beta.messages.create({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 16000,
+      // Lightweight by design: these run in the background as a subject
+      // grows, so depth is kept low rather than the model changed.
+      output_config: {
+        effort: "low",
+        format: { type: "json_schema", schema: SCHEMA as unknown as Record<string, unknown> },
+      },
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      system: SYSTEM,
+      messages: [{ role: "user", content: material }],
+    });
+    if (response.stop_reason === "refusal") {
+      throw new RunError("The model declined to analyse this subject.", 422);
+    }
+    const text = response.content
+      .filter((block): block is Anthropic.Beta.BetaTextBlock => block.type === "text")
+      .map((block) => block.text)
+      .join("");
+    return {
+      parsed: JSON.parse(text),
+      usage: {
+        provider: "anthropic",
+        model: response.model || ANTHROPIC_MODEL,
+        input:
+          (response.usage.input_tokens ?? 0) +
+          (response.usage.cache_creation_input_tokens ?? 0) +
+          (response.usage.cache_read_input_tokens ?? 0),
+        output: response.usage.output_tokens ?? 0,
+      },
+    };
+  } catch (error) {
+    if (error instanceof RunError) throw error;
+    if (error instanceof Anthropic.AuthenticationError) {
+      throw new RunError("That Anthropic key was not accepted.", 401, true);
+    }
+    if (error instanceof Anthropic.RateLimitError) {
+      throw new RunError("Rate limited by Anthropic — try again shortly.", 429);
+    }
+    if (error instanceof Anthropic.APIError) {
+      throw new RunError(`Anthropic API error ${error.status ?? ""}`.trim(), 502);
+    }
+    throw error;
+  }
+}
+
+/**
+ * OpenAI's Chat Completions, asked for the same JSON shape through its
+ * structured-output mode. Called over plain HTTP: one endpoint, and no
+ * second SDK to carry for it.
+ */
+async function runOpenAI(apiKey: string, model: string, material: string): Promise<{ parsed: Parsed; usage: Usage }> {
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: SYSTEM },
+        { role: "user", content: material },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: { name: "subject_synthesis", strict: true, schema: SCHEMA },
+      },
+    }),
+    signal: AbortSignal.timeout(55_000),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) throw new RunError("That OpenAI key was not accepted.", 401, true);
+  if (res.status === 429) throw new RunError("Rate limited by OpenAI, or the account is out of credit.", 429);
+  if (res.status === 404 || (res.status === 400 && /model/i.test(data?.error?.message ?? ""))) {
+    throw new RunError(`OpenAI does not offer the model “${model}” to this key. Change it in Settings.`, 400);
+  }
+  if (!res.ok) throw new RunError(`OpenAI API error ${res.status}`, 502);
+  const message = data?.choices?.[0]?.message;
+  if (message?.refusal) throw new RunError("The model declined to analyse this subject.", 422);
+  return {
+    parsed: JSON.parse(message?.content ?? "{}"),
+    usage: {
+      provider: "openai",
+      model: data?.model || model,
+      input: data?.usage?.prompt_tokens ?? 0,
+      output: data?.usage?.completion_tokens ?? 0,
+    },
+  };
 }
 
 /**

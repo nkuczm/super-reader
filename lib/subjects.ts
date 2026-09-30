@@ -351,6 +351,9 @@ export function textOf(html: string): string {
 /* ------------------------------------------------------------------------ */
 
 export type SynthesisInput = {
+  /** Which AI to ask, and (for OpenAI) which model. */
+  provider?: "anthropic" | "openai";
+  model?: string;
   subject: string;
   cards: { id: string; title: string; source?: string; quotes: string[]; note: string }[];
   boxes: string[];
@@ -410,6 +413,8 @@ export function shouldAutoRun(
 export type SynthesisResult = {
   insights: { type: InsightKind; text: string; refs: string[] }[];
   suggestions: { link: string; title: string; source?: string; why: string }[];
+  /** Tokens the provider reported, for the spending page. */
+  usage?: { provider: "anthropic" | "openai"; model: string; input: number; output: number };
 };
 
 /**

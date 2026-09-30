@@ -27,6 +27,7 @@ import {
   type SynthesisResult,
 } from "@/lib/subjects";
 import { canonicalUrl } from "@/lib/url";
+import { PROVIDER_NAME, recordSpend, type AiProvider } from "@/lib/spend";
 
 type Props = {
   note: Note;
@@ -39,6 +40,8 @@ type Props = {
   /** Headers carrying the reader's keys, or undefined when there are none. */
   keyHeaders: () => HeadersInit | undefined;
   hasAiKey: boolean;
+  /** Which AI to ask, from Settings. */
+  ai: { provider: AiProvider; model?: string };
 };
 
 type RunState = { state: "idle" | "running" | "error"; message?: string };
@@ -59,7 +62,7 @@ const INSIGHT_LABEL: Record<InsightItem["type"], string> = {
  * where they can be moved and joined with lines.
  */
 export default function SubjectPage(props: Props) {
-  const { note, board, onBoard, keyHeaders, hasAiKey } = props;
+  const { note, board, onBoard, keyHeaders, hasAiKey, ai } = props;
   const meta = metaOf(board);
   const cards = useMemo(() => cardsOf(note, board), [note, board]);
   const items = useMemo(() => live(board), [board]);
@@ -135,10 +138,11 @@ export default function SubjectPage(props: Props) {
       const res = await fetch("/api/subjects/synthesize", {
         method: "POST",
         headers,
-        body: JSON.stringify(given),
+        body: JSON.stringify({ ...given, provider: ai.provider, model: ai.model }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "The run failed.");
+      if ((data as SynthesisResult).usage) recordSpend((data as SynthesisResult).usage!, note.name);
       onBoard((current) => applySynthesis(current, given, data as SynthesisResult));
       setRun({ state: "idle" });
     } catch (error) {
@@ -148,7 +152,7 @@ export default function SubjectPage(props: Props) {
     } finally {
       running.current = false;
     }
-  }, [input, keyHeaders, onBoard]);
+  }, [input, keyHeaders, onBoard, ai.provider, ai.model, note.name]);
 
   // Lightweight and automatic: a while after the material changes, and not
   // more often than every quarter of an hour.
@@ -159,7 +163,9 @@ export default function SubjectPage(props: Props) {
   }, [hasAiKey, input, meta, synthesize]);
 
   const aiStatus = !hasAiKey ? (
-    <span className="subject-ai-hint">Add an Anthropic key in Settings → API keys for insights.</span>
+    <span className="subject-ai-hint">
+      Add your {PROVIDER_NAME[ai.provider]} key in Settings → API keys for insights.
+    </span>
   ) : run.state === "running" ? (
     <span className="subject-ai-hint">Thinking across {cards.length} stories…</span>
   ) : run.state === "error" ? (

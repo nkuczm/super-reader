@@ -178,6 +178,10 @@ export type Settings = {
    * and behave exactly as they did before.
    */
   subjects: boolean;
+  /** Which AI the Subjects insights use, with the reader's own key for it. */
+  aiProvider: "anthropic" | "openai";
+  /** The OpenAI model, when that is the provider. */
+  openaiModel: string;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -189,6 +193,8 @@ export const DEFAULT_SETTINGS: Settings = {
   quoteToNote: true,
   openOnSite: [],
   subjects: false,
+  aiProvider: "anthropic",
+  openaiModel: "gpt-5-mini",
 };
 
 const SETTINGS_KEY = "super-reader:settings:v1";
@@ -214,6 +220,11 @@ export function loadSettings(): Settings {
           : DEFAULT_SETTINGS.bigStoryMetric,
       hideRead: Boolean(parsed.hideRead),
       subjects: parsed.subjects === true,
+      aiProvider: parsed.aiProvider === "openai" ? "openai" : "anthropic",
+      openaiModel:
+        typeof parsed.openaiModel === "string" && parsed.openaiModel.trim()
+          ? parsed.openaiModel.trim()
+          : DEFAULT_SETTINGS.openaiModel,
       showDownloadBar: Boolean(parsed.showDownloadBar),
       quoteToNote: parsed.quoteToNote !== false,
       openOnSite: Array.isArray(parsed.openOnSite)

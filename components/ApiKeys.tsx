@@ -189,26 +189,31 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
         </label>
       ))}
 
-      <label className="api-field" style={{ marginTop: 10 }}>
-        <span>
-          Anthropic (Subjects insights)
-          {keys.anthropic && <em className="badge">set</em>}
-        </span>
-        <input
-          className="input"
-          type="password"
-          autoComplete="off"
-          placeholder="Paste your key"
-          value={draft.anthropic ?? ""}
-          onChange={(event) =>
-            setDraft((current) => ({ ...current, anthropic: event.target.value }))
-          }
-        />
-        <small>
-          Used only when Subjects is on, to find connections and suggest reading across a
-          subject&apos;s stories. Sent with those requests alone; your account is billed.
-        </small>
-      </label>
+      {([
+        ["anthropic", "Anthropic (Subjects insights)"],
+        ["openai", "OpenAI (Subjects insights)"],
+      ] as const).map(([id, label]) => (
+        <label key={id} className="api-field" style={{ marginTop: 10 }}>
+          <span>
+            {label}
+            {keys[id] && <em className="badge">set</em>}
+          </span>
+          <input
+            className="input"
+            type="password"
+            autoComplete="off"
+            placeholder="Paste your key"
+            value={draft[id] ?? ""}
+            onChange={(event) =>
+              setDraft((current) => ({ ...current, [id]: event.target.value }))
+            }
+          />
+        </label>
+      ))}
+      <small className="field-note">
+        Used only when Subjects is on, by whichever AI you choose under Subjects in
+        Settings. Sent with those requests alone; your account with that provider is billed.
+      </small>
 
       <p className="field-label reading-label">Subscriptions</p>
       <div className="offline-status">
