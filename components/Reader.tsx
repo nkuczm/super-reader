@@ -3026,6 +3026,7 @@ export default function Reader() {
             note={openNote}
             board={boards[openNote.id]}
             onBack={() => choose({ type: "subjects" })}
+            onRename={(name) => commitNotes((current) => renameNote(current, openNote.id, name))}
             onBoard={(update) => commitBoard(openNote.id, update)}
             keyHeaders={() => keyHeaders}
             hasAiKey={Boolean(apiKeys[settings.aiProvider])}

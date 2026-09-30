@@ -1528,3 +1528,17 @@
   .decide.accept:hover { color: #4ade80; border-color: #4ade80; background: #0f2a1a; }
   .decide.dismiss:hover { background: #2a1111; }
 }
+
+/* Renaming and deleting a subject happen on its tile, not in a browser prompt. */
+.subject-tile-edit {
+  display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px;
+  border-top: 1px solid var(--border); background: var(--bg);
+}
+.subject-tile-edit p { margin: 0; font-size: 13px; line-height: 1.4; }
+.subject-tile-edit-row { display: flex; gap: 6px; }
+.danger-btn { background: var(--danger); border-color: var(--danger); }
+.subject-menu-form { display: flex; gap: 6px; padding: 5px; }
+.subject-menu-form .input { padding: 6px 8px; font-size: 13px; }
+.subject-title-editable { cursor: text; border-radius: 6px; }
+.subject-title-editable:hover { background: var(--bg-hover); }
+.subject-rename-input { font-size: 22px; font-weight: 700; padding: 2px 6px; min-width: 280px; }

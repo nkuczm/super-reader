@@ -77,6 +77,8 @@ export default function ArticleReader({
 }: Props) {
   const [subjectMenu, setSubjectMenu] = useState(false);
   const [addedTo, setAddedTo] = useState<string | null>(null);
+  /** The name being typed for a new subject, or null when not naming one. */
+  const [newSubject, setNewSubject] = useState<string | null>(null);
   const [article, setArticle] = useState<ReadableArticle | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fromCache, setFromCache] = useState(false);
@@ -423,20 +425,36 @@ export default function ArticleReader({
                     {subjects.containing.has(note.id) && <span className="subject-menu-in">{Icon.check} Open</span>}
                   </button>
                 ))}
-                <button
-                  role="menuitem"
-                  className="subject-menu-new"
-                  onClick={() => {
-                    const name = window.prompt("Name the new subject");
-                    if (!name?.trim()) return;
-                    const id = subjects.onCreate(name);
-                    subjects.onAdd(id);
-                    setAddedTo(name.trim());
-                    setSubjectMenu(false);
-                  }}
-                >
-                  + New subject
-                </button>
+                {newSubject === null ? (
+                  <button role="menuitem" className="subject-menu-new" onClick={() => setNewSubject("")}>
+                    + New subject
+                  </button>
+                ) : (
+                  <form
+                    className="subject-menu-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const name = newSubject.trim();
+                      if (!name) return;
+                      const id = subjects.onCreate(name);
+                      subjects.onAdd(id);
+                      setAddedTo(name);
+                      setNewSubject(null);
+                      setSubjectMenu(false);
+                    }}
+                  >
+                    <input
+                      className="input"
+                      autoFocus
+                      placeholder="Name the subject"
+                      aria-label="New subject name"
+                      value={newSubject}
+                      onChange={(event) => setNewSubject(event.target.value)}
+                      onKeyDown={(event) => event.key === "Escape" && setNewSubject(null)}
+                    />
+                    <button className="btn small" type="submit" disabled={!newSubject.trim()}>Add</button>
+                  </form>
+                )}
               </div>
             )}
           </div>

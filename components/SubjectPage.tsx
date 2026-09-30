@@ -42,6 +42,8 @@ type Props = {
   onOpenMenu?: () => void;
   /** Back to every subject. */
   onBack?: () => void;
+  /** Rename the subject, from its title. */
+  onRename?: (name: string) => void;
   /** Headers carrying the reader's keys, or undefined when there are none. */
   keyHeaders: () => HeadersInit | undefined;
   hasAiKey: boolean;
@@ -78,6 +80,7 @@ export default function SubjectPage(props: Props) {
   );
   const [run, setRun] = useState<RunState>({ state: "idle" });
   const [focusBox, setFocusBox] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
 
   // A note that has writing of its own brings it onto the board, once.
   useEffect(() => {
@@ -212,7 +215,35 @@ export default function SubjectPage(props: Props) {
           </button>
         )}
         <div>
-          <h1>{note.name}</h1>
+          {renaming !== null ? (
+            <form
+              className="subject-rename"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (renaming.trim()) props.onRename?.(renaming.trim());
+                setRenaming(null);
+              }}
+            >
+              <input
+                className="input subject-rename-input"
+                autoFocus
+                aria-label="Subject name"
+                value={renaming}
+                onFocus={(event) => event.currentTarget.select()}
+                onChange={(event) => setRenaming(event.target.value)}
+                onKeyDown={(event) => event.key === "Escape" && setRenaming(null)}
+                onBlur={(event) => event.currentTarget.form?.requestSubmit()}
+              />
+            </form>
+          ) : (
+            <h1
+              className={props.onRename ? "subject-title-editable" : undefined}
+              title={props.onRename ? "Click to rename" : undefined}
+              onClick={() => props.onRename && setRenaming(note.name)}
+            >
+              {note.name}
+            </h1>
+          )}
           <p className="sub">
             {cards.length} {cards.length === 1 ? "story" : "stories"}
             {insights.length > 0 && ` · ${insights.length} insights`}

@@ -28,6 +28,9 @@ export default function SubjectsHome({
   onOpenMenu?: () => void;
 }) {
   const [naming, setNaming] = useState(false);
+  /** The tile being renamed, and the tile asking whether to delete. */
+  const [renaming, setRenaming] = useState<{ id: string; draft: string } | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
   const [name, setName] = useState("");
 
   const tiles = notes
@@ -125,27 +128,63 @@ export default function SubjectsHome({
                 <span className="subject-tile-sub">Edited {timeAgo(new Date(lastChange).toISOString())}</span>
               </div>
             </button>
-            <div className="subject-tile-actions">
-              <button
-                className="icon-btn"
-                aria-label={`Rename ${note.name}`}
-                onClick={() => {
-                  const next = window.prompt("Rename subject", note.name);
-                  if (next?.trim()) onRename(note.id, next.trim());
+            {renaming?.id === note.id ? (
+              <form
+                className="subject-tile-edit"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (renaming.draft.trim()) onRename(note.id, renaming.draft.trim());
+                  setRenaming(null);
                 }}
               >
-                {Icon.pencil}
-              </button>
-              <button
-                className="icon-btn danger"
-                aria-label={`Delete ${note.name}`}
-                onClick={() => {
-                  if (window.confirm(`Delete “${note.name}”? Its quotes and board go with it.`)) onDelete(note.id);
-                }}
-              >
-                {Icon.trash}
-              </button>
-            </div>
+                <input
+                  className="input"
+                  autoFocus
+                  aria-label="Subject name"
+                  value={renaming.draft}
+                  onFocus={(event) => event.currentTarget.select()}
+                  onChange={(event) => setRenaming({ id: note.id, draft: event.target.value })}
+                  onKeyDown={(event) => event.key === "Escape" && setRenaming(null)}
+                />
+                <div className="subject-tile-edit-row">
+                  <button className="btn small" type="submit">Save</button>
+                  <button className="btn ghost small" type="button" onClick={() => setRenaming(null)}>Cancel</button>
+                </div>
+              </form>
+            ) : confirming === note.id ? (
+              <div className="subject-tile-edit" role="alertdialog" aria-label={`Delete ${note.name}?`}>
+                <p>Delete “{note.name}”? Its quotes and board go with it.</p>
+                <div className="subject-tile-edit-row">
+                  <button className="btn small danger-btn" autoFocus onClick={() => { setConfirming(null); onDelete(note.id); }}>
+                    Delete
+                  </button>
+                  <button className="btn ghost small" onClick={() => setConfirming(null)}>Keep</button>
+                </div>
+              </div>
+            ) : (
+              <div className="subject-tile-actions">
+                <button
+                  className="icon-btn"
+                  aria-label={`Rename ${note.name}`}
+                  onClick={() => {
+                    setConfirming(null);
+                    setRenaming({ id: note.id, draft: note.name });
+                  }}
+                >
+                  {Icon.pencil}
+                </button>
+                <button
+                  className="icon-btn danger"
+                  aria-label={`Delete ${note.name}`}
+                  onClick={() => {
+                    setRenaming(null);
+                    setConfirming(note.id);
+                  }}
+                >
+                  {Icon.trash}
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>
