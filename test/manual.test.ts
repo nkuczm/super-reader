@@ -1,0 +1,29 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { linkIn, mergeManual, sourceFor } from "../lib/manual";
+
+test("the link is found in whatever was copied", () => {
+  assert.equal(linkIn("https://www.nytimes.com/2026/09/30/us/story.html"), "https://www.nytimes.com/2026/09/30/us/story.html");
+  assert.equal(linkIn("Read this: https://a.com/x/y?z=1."), "https://a.com/x/y?z=1");
+  assert.equal(linkIn("Big news — (https://a.com/story)"), "https://a.com/story");
+  assert.equal(linkIn("no link here"), null);
+});
+
+test("a story is filed under the followed source for its site, sections first", () => {
+  const sources = [
+    { id: "nyt", feedUrl: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml", siteUrl: "https://www.nytimes.com" },
+    { id: "nyt-tech", feedUrl: "https://rss.nytimes.com/x.xml", siteUrl: "https://www.nytimes.com/section/technology" },
+    { id: "topic", kind: "topic", feedUrl: "https://www.bing.com/news/search?q=x", siteUrl: "https://www.bing.com/news" },
+  ];
+  assert.equal(sourceFor("https://www.nytimes.com/2026/09/30/us/a.html", sources)?.id, "nyt");
+  assert.equal(sourceFor("https://www.nytimes.com/section/technology/b", sources)?.id, "nyt-tech");
+  assert.equal(sourceFor("https://cooking.nytimes.com/recipes/1", sources)?.id, "nyt");
+  assert.equal(sourceFor("https://notnytimes.com/a", sources), null);
+  assert.equal(sourceFor("https://www.bing.com/news/a", sources), null, "a topic search is not a source to file under");
+});
+
+test("pasted stories merge per link, a deletion outranking an older copy", () => {
+  const story = { link: "https://a.com/x", title: "X", at: 100 };
+  const merged = mergeManual({ k: story }, { k: { ...story, deleted: true, at: 200 } }, 300);
+  assert.equal(merged.k.deleted, true);
+});

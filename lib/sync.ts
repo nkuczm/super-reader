@@ -8,6 +8,7 @@ import type { WatchMarks } from "./alerts";
 import { mergeNotes } from "./notes";
 import type { Note, NoteRemoval } from "./notes";
 import { mergeBoards, slimBoardsForSync, type Boards } from "./subjects";
+import { mergeManual, type ManualStories } from "./manual";
 
 export type SyncPayload = {
   feeds: unknown[];
@@ -44,6 +45,8 @@ export type SyncPayload = {
    * it on another both survive.
    */
   boards?: Boards;
+  /** Stories pasted in by hand (lib/manual.ts), merged per link. */
+  manual?: ManualStories;
   /**
    * Which team feeds this person has joined — the name and connect code, not
    * the shared articles. Those live on the server because several people write
@@ -152,6 +155,7 @@ export async function writeSync(
     notes: notes.notes,
     noteRemovals: notes.removals,
     boards: slimBoardsForSync(mergeBoards(payload.boards ?? {}, stored.boards ?? {})),
+    manual: mergeManual(payload.manual ?? {}, stored.manual ?? {}),
   };
 
   await ensureSchema();
