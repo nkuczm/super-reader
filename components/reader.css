@@ -1500,3 +1500,7 @@
 .paste-btn:disabled { opacity: 0.6; cursor: progress; }
 .paste-notice { margin: -2px 2px 10px; font-size: 12px; line-height: 1.4; color: var(--text-dim); }
 .paste-notice.error { color: var(--danger); }
+.subject-menu button { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.subject-menu button.in { font-weight: 600; }
+.subject-menu-in { display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; color: var(--accent); }
+.subject-menu-in svg { width: 12px; height: 12px; }

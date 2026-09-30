@@ -83,6 +83,7 @@ import {
 } from "@/lib/manual";
 import {
   addStory,
+  cardsOf,
   loadBoards,
   mergeBoards,
   pruneBoards,
@@ -1550,6 +1551,19 @@ export default function Reader() {
     [reading, articles, commitBoard],
   );
 
+  /** The subjects a story is in — quoted there, or added to it whole. */
+  const subjectsContaining = useCallback(
+    (link: string) => {
+      const key = canonicalUrl(link);
+      return new Set(
+        notes
+          .filter((note) => cardsOf(note, boards[note.id]).some((card) => card.id === key))
+          .map((note) => note.id),
+      );
+    },
+    [notes, boards],
+  );
+
   const createNote = useCallback(
     (name: string) => {
       const note: Note = {
@@ -2961,7 +2975,12 @@ export default function Reader() {
             onMoveQuote={moveQuote}
             subjects={
               settings.subjects
-                ? { onAdd: addReadingToSubject, onCreate: createNote }
+                ? {
+                    onAdd: addReadingToSubject,
+                    onCreate: createNote,
+                    containing: subjectsContaining(reading.url),
+                    onOpen: (id) => choose({ type: "note", id }),
+                  }
                 : undefined
             }
             saved={isSaved(reading.url)}
