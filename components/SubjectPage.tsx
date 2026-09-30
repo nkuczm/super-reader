@@ -625,15 +625,51 @@ function Whiteboard(
     window.addEventListener("pointerup", up);
   };
 
-  const zoomBy = (factor: number) => setView((v) => ({ ...v, zoom: Math.min(2, Math.max(0.3, v.zoom * factor)) }));
-
-  const onWheel = (event: React.WheelEvent) => {
-    if (event.ctrlKey || event.metaKey) {
-      zoomBy(event.deltaY < 0 ? 1.1 : 0.9);
-    } else {
-      setView((v) => ({ ...v, x: v.x - event.deltaX, y: v.y - event.deltaY }));
-    }
+  const MIN_ZOOM = 0.3;
+  const MAX_ZOOM = 2;
+  /** Zoom by a factor, keeping the board point under (x, y) where it is. */
+  const zoomAround = (factor: number, x?: number, y?: number) =>
+    setView((v) => {
+      const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v.zoom * factor));
+      if (x === undefined || y === undefined) return { ...v, zoom };
+      const k = zoom / v.zoom;
+      return { zoom, x: x - (x - v.x) * k, y: y - (y - v.y) * k };
+    });
+  const zoomBy = (factor: number) => {
+    const rect = canvas.current?.getBoundingClientRect();
+    zoomAround(factor, rect ? rect.width / 2 : undefined, rect ? rect.height / 2 : undefined);
   };
+
+  /*
+   * Wheel and pinch. Zoom follows how far the wheel actually moved rather
+   * than stepping per event: a trackpad pinch sends dozens of small events a
+   * second, and a fixed step per event raced to the limit. Registered by hand
+   * because React's wheel listener is passive, and ⌘/Ctrl-scroll or a pinch
+   * would otherwise zoom the whole page as well as the board.
+   */
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  useEffect(() => {
+    const el = canvas.current;
+    if (!el) return;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+      if (event.ctrlKey || event.metaKey) {
+        const rect = el.getBoundingClientRect();
+        // About a third of a percent per pixel scrolled — a full trackpad
+        // pinch is a gentle change — and one mouse-wheel notch at most ~15%.
+        const step = Math.max(-0.15, Math.min(0.15, -delta * 0.0035));
+        zoomAround(Math.exp(step), event.clientX - rect.left, event.clientY - rect.top);
+      } else {
+        const dx = event.deltaMode === 1 ? event.deltaX * 16 : event.deltaX;
+        setView((v) => ({ ...v, x: v.x - dx, y: v.y - delta }));
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const toBoard = (clientX: number, clientY: number) => {
     const rect = canvas.current?.getBoundingClientRect();
@@ -669,8 +705,8 @@ function Whiteboard(
           onClick={() => setConnecting((c) => (c === false ? null : false))}>
           {connecting === false ? "Connect" : connecting === null ? "Pick the first…" : "Now the second…"}
         </button>
-        <button className="btn ghost small" onClick={() => zoomBy(1.2)} aria-label="Zoom in">+</button>
-        <button className="btn ghost small" onClick={() => zoomBy(1 / 1.2)} aria-label="Zoom out">−</button>
+        <button className="btn ghost small" onClick={() => zoomBy(1.1)} aria-label="Zoom in">+</button>
+        <button className="btn ghost small" onClick={() => zoomBy(1 / 1.1)} aria-label="Zoom out">−</button>
         <button className="btn ghost small" onClick={() => setView({ x: 40, y: 40, zoom: 1 })}>Reset view</button>
         <button className={`btn ghost small${showAiLinks ? " on" : ""}`} onClick={() => setShowAiLinks((v) => !v)}
           title="Show every line from the AI's insights to the stories they draw on">
@@ -692,7 +728,6 @@ function Whiteboard(
         ref={canvas}
         className={`wb-canvas${connecting !== false ? " connecting" : ""}`}
         onPointerDown={startPan}
-        onWheel={onWheel}
         onDoubleClick={(event) => {
           if (event.target === event.currentTarget) shared.addBox(toBoard(event.clientX, event.clientY));
         }}
