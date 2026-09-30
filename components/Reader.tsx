@@ -65,6 +65,21 @@ import SettingsDialog from "./SettingsDialog";
 import DownloadBar from "./DownloadBar";
 import Attachments from "./Attachments";
 import { useSourceDrag } from "./useSourceDrag";
+import SubjectPage from "./SubjectPage";
+import StatusPage from "./StatusPage";
+import {
+  addStory,
+  loadBoards,
+  mergeBoards,
+  pruneBoards,
+  put as putItem,
+  sameBoards,
+  saveBoards,
+  slimBoardsForSync,
+  type Board,
+  type Boards,
+} from "@/lib/subjects";
+import { loadHealth, recordRuns, saveHealth, type HealthLog } from "@/lib/health";
 import { encodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import {
   downloadForOffline,
@@ -175,6 +190,8 @@ type Selection =
   /** A shared list: its id is the team's connect code. */
   | { type: "team"; id: string }
   | { type: "note"; id: string }
+  /** How every source is delivering — reached from Settings. */
+  | { type: "status" }
   | { type: "feed" | "source"; id: string };
 
 export default function Reader() {
@@ -245,6 +262,11 @@ export default function Reader() {
   const positionsRef = useRef<Positions>({});
   /** Notes, and the quotes pulled into them. Per device, like Settings. */
   const [notes, setNotes] = useState<Note[]>([]);
+  /** Subject boards, one per note, when Subjects is on (lib/subjects.ts). */
+  const [boards, setBoards] = useState<Boards>({});
+  const boardsRef = useRef<Boards>({});
+  /** Per-source delivery history for the status page (lib/health.ts). */
+  const [health, setHealth] = useState<HealthLog>({});
   const [addingNote, setAddingNote] = useState(false);
   const [noteRemovals, setNoteRemovals] = useState<NoteRemoval[]>([]);
   const [editingNote, setEditingNote] = useState<string | null>(null);
@@ -347,6 +369,10 @@ export default function Reader() {
     const storedNoteRemovals = loadNoteRemovals();
     noteRemovalsRef.current = storedNoteRemovals;
     setNoteRemovals(storedNoteRemovals);
+    const storedBoards = loadBoards();
+    boardsRef.current = storedBoards;
+    setBoards(storedBoards);
+    setHealth(loadHealth());
     setVault(loadVault());
     setApiKeys(loadUnlockedKeys());
     updatedAtRef.current = loadUpdatedAt();
@@ -371,6 +397,7 @@ export default function Reader() {
     positions?: Positions;
     notes?: Note[];
     noteRemovals?: NoteRemoval[];
+    boards?: Boards;
     teams?: unknown;
     vault?: unknown;
     updatedAt?: number;
@@ -446,6 +473,13 @@ export default function Reader() {
       setPositions(places);
       savePositions(places);
     }
+    // Subject boards merge item by item, most recent change winning.
+    const mergedBoards = mergeBoards(boardsRef.current, payload.boards ?? {});
+    if (!sameBoards(mergedBoards, boardsRef.current)) {
+      boardsRef.current = mergedBoards;
+      setBoards(mergedBoards);
+      saveBoards(mergedBoards);
+    }
     const marks = mergeMarks(marksRef.current, payload.watchMarks ?? {});
     if (!unchanged(marks, marksRef.current)) {
       marksRef.current = marks;
@@ -508,6 +542,8 @@ export default function Reader() {
       // as sent — the wire copy is the newest 200 — for the same reason as
       // notes below: comparing the full set would push forever.
       !samePositions(slimPositionsForSync(places), slimPositionsForSync(payload.positions ?? {})) ||
+      // The same for subject boards: compared as they would be sent.
+      !sameBoards(slimBoardsForSync(mergedBoards), payload.boards ?? {}) ||
       // Compared as it would be *sent*, not as it is held: the wire copy is
       // cut to a budget, and comparing the full set against the server's copy
       // would report news this device can never deliver — and push forever
@@ -633,6 +669,7 @@ export default function Reader() {
     positions,
     notes,
     noteRemovals,
+    boards,
     vault,
     teams,
     ready,
@@ -686,6 +723,7 @@ export default function Reader() {
             positions: slimPositionsForSync(positions),
             notes: slimNotesForSync(notes),
             noteRemovals,
+            boards: slimBoardsForSync(boards),
             teams,
             vault,
             updatedAt,
@@ -715,6 +753,7 @@ export default function Reader() {
     positions,
     notes,
     noteRemovals,
+    boards,
     teams,
     ready,
     syncCode,
@@ -750,6 +789,7 @@ export default function Reader() {
         positions: slimPositionsForSync(positions),
         notes: slimNotesForSync(notes),
         noteRemovals,
+        boards: slimBoardsForSync(boards),
         teams,
         vault,
         updatedAt: Math.max(Date.now(), updatedAtRef.current + 1),
@@ -772,6 +812,7 @@ export default function Reader() {
     positions,
     notes,
     noteRemovals,
+    boards,
     teams,
     vault,
   ]);
@@ -1031,6 +1072,33 @@ export default function Reader() {
       );
       refreshed.current = true;
       setArticles(ordered);
+
+      // What each source delivered, for the status page.
+      const heldBySource = new Map<string, number>();
+      for (const article of ordered) {
+        heldBySource.set(article.sourceId, (heldBySource.get(article.sourceId) ?? 0) + 1);
+      }
+      const runs: Parameters<typeof recordRuns>[1] = {};
+      const at = Date.now();
+      for (const result of data.results ?? []) {
+        const sourceId = byUrl.get(result.feedUrl);
+        if (!sourceId) continue;
+        const list = (result.articles ?? []) as Article[];
+        const newest = list.reduce((best, a) => Math.max(best, timeOf(a) || 0), 0);
+        runs[sourceId] = {
+          at,
+          ok: result.ok !== false,
+          fetched: list.length,
+          held: heldBySource.get(sourceId) ?? 0,
+          newest: newest || undefined,
+          error: result.ok === false ? String(result.error ?? "Fetch failed") : undefined,
+        };
+      }
+      setHealth((current) => {
+        const next = recordRuns(current, runs, new Set(sources.map((source) => source.id)));
+        saveHealth(next);
+        return next;
+      });
       // Also what the list falls back to with no connection.
       void saveListSnapshot(ordered);
     } catch {
@@ -1380,6 +1448,40 @@ export default function Reader() {
     [noteRemoval],
   );
 
+  /** Write one subject's board through, and let go of boards whose note is gone. */
+  const commitBoard = useCallback(
+    (noteId: string, update: (board: Board | undefined) => Board) => {
+      const current = boardsRef.current;
+      const next = pruneBoards(
+        { ...current, [noteId]: update(current[noteId]) },
+        new Set(notesRef.current.map((note) => note.id)),
+      );
+      boardsRef.current = next;
+      setBoards(next);
+      saveBoards(next);
+    },
+    [],
+  );
+
+  /** The article being read, added to a subject whole — no quote needed. */
+  const addReadingToSubject = useCallback(
+    (noteId: string) => {
+      const link = reading?.url;
+      if (!link) return;
+      const known =
+        articles.find((a) => a.link === link) ??
+        savedRef.current.find((a) => a.link === link);
+      const source = known?.sourceId
+        ? allSources.find((entry) => entry.id === known.sourceId)
+        : undefined;
+      commitBoard(noteId, (board) =>
+        addStory(board, { link, title: known?.title ?? reading?.title ?? link, source: source?.title }),
+      );
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [reading, articles, commitBoard],
+  );
+
   const createNote = useCallback(
     (name: string) => {
       const note: Note = {
@@ -1647,7 +1749,7 @@ export default function Reader() {
     if (selection.type === "saved") return savedAsArticles;
     if (selection.type === "downloaded") return downloadedAsArticles;
     // Notifications is its own view, not a list of articles.
-    if (selection.type === "alerts") return [];
+    if (selection.type === "alerts" || selection.type === "status") return [];
     if (selection.type === "team") return teamAsArticles(selection.id);
     if (selection.type === "source") {
       return articles.filter((a) => a.sourceId === selection.id);
@@ -2195,6 +2297,7 @@ export default function Reader() {
       : selection.type === "saved" ||
           selection.type === "downloaded" ||
           selection.type === "alerts" ||
+          selection.type === "status" ||
           selection.type === "team"
         ? 0
         : selection.type === "source"
@@ -2212,7 +2315,9 @@ export default function Reader() {
           ? "Notifications"
           : selection.type === "team"
             ? (teams.find((team) => team.code === selection.id)?.name ?? "Team")
-            : selection.type === "feed"
+            : selection.type === "status"
+              ? "Source status"
+              : selection.type === "feed"
           ? (feeds.find((f) => f.id === selection.id)?.name ?? "Feed")
           : (sourceById.get(selection.id)?.title ?? "Source");
 
@@ -2550,7 +2655,7 @@ export default function Reader() {
                     setMenuOpen(true);
                   }}
                 >
-                  {Icon.plus} New note
+                  {Icon.plus} {settings.subjects ? "New subject" : "New note"}
                 </button>
               )}
             </div>
@@ -2618,6 +2723,11 @@ export default function Reader() {
             onCreateNote={settings.quoteToNote ? createNote : undefined}
             onOpenNote={(id) => choose({ type: "note", id })}
             onMoveQuote={moveQuote}
+            subjects={
+              settings.subjects
+                ? { onAdd: addReadingToSubject, onCreate: createNote }
+                : undefined
+            }
             saved={isSaved(reading.url)}
             onToggleSave={() => {
               const article =
@@ -2626,6 +2736,37 @@ export default function Reader() {
               if (article) toggleSaved(article, sourceById.get(article.sourceId));
             }}
             onClose={() => setReading(null)}
+          />
+        ) : selection.type === "status" ? (
+          <StatusPage
+            sources={feeds.flatMap((feed) =>
+              feed.sources.map((source) => ({
+                id: source.id,
+                title: source.title,
+                feedUrl: source.feedUrl,
+                feed: feed.name,
+              })),
+            )}
+            health={health}
+            refreshing={refreshing}
+            onRefresh={() => void refresh(allSources)}
+            onOpenMenu={() => setMenuOpen(true)}
+          />
+        ) : openNote && settings.subjects ? (
+          <SubjectPage
+            key={openNote.id}
+            note={openNote}
+            board={boards[openNote.id]}
+            onBoard={(update) => commitBoard(openNote.id, update)}
+            keyHeaders={() => keyHeaders}
+            hasAiKey={Boolean(apiKeys.anthropic)}
+            onOpenMenu={() => setMenuOpen(true)}
+            onOpenArticle={(link, title, quote) => setReading({ url: link, title, quote })}
+            onCommitEntries={(entries) =>
+              commitNotes((current) =>
+                current.map((note) => (note.id === openNote.id ? { ...note, entries } : note)),
+              )
+            }
           />
         ) : openNote ? (
           <NotePage
@@ -3221,6 +3362,10 @@ export default function Reader() {
           settings={settings}
           onChange={updateSettings}
           onClose={() => setSettingsOpen(false)}
+          onOpenStatus={() => {
+            setSettingsOpen(false);
+            choose({ type: "status" });
+          }}
           offline={offline}
           storedCount={savedOffline.size}
           targetCount={offlineTargets().length}

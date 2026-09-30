@@ -45,6 +45,11 @@ type Props = {
    * came from. It is found in the text, scrolled to and flashed.
    */
   highlight?: string;
+  /** With Subjects on: add this whole story to a subject, or to a new one. */
+  subjects?: {
+    onAdd: (noteId: string) => void;
+    onCreate: (name: string) => string;
+  };
   onClose: () => void;
 };
 
@@ -64,8 +69,11 @@ export default function ArticleReader({
   onOpenNote,
   onMoveQuote,
   highlight,
+  subjects,
   onClose,
 }: Props) {
+  const [subjectMenu, setSubjectMenu] = useState(false);
+  const [addedTo, setAddedTo] = useState<string | null>(null);
   const [article, setArticle] = useState<ReadableArticle | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fromCache, setFromCache] = useState(false);
@@ -374,6 +382,49 @@ export default function ArticleReader({
             <span className="btn-label">Download</span>
           </a>
         )}
+        {subjects && (
+          <div className="subject-menu-wrap">
+            <button
+              className={`btn ghost small${addedTo ? " on" : ""}`}
+              aria-expanded={subjectMenu}
+              onClick={() => setSubjectMenu((open) => !open)}
+            >
+              {Icon.note}
+              <span className="btn-label">{addedTo ? `In ${addedTo}` : "Subject"}</span>
+            </button>
+            {subjectMenu && (
+              <div className="subject-menu" role="menu">
+                {(notes ?? []).map((note) => (
+                  <button
+                    key={note.id}
+                    role="menuitem"
+                    onClick={() => {
+                      subjects.onAdd(note.id);
+                      setAddedTo(note.name);
+                      setSubjectMenu(false);
+                    }}
+                  >
+                    {note.name}
+                  </button>
+                ))}
+                <button
+                  role="menuitem"
+                  className="subject-menu-new"
+                  onClick={() => {
+                    const name = window.prompt("Name the new subject");
+                    if (!name?.trim()) return;
+                    const id = subjects.onCreate(name);
+                    subjects.onAdd(id);
+                    setAddedTo(name.trim());
+                    setSubjectMenu(false);
+                  }}
+                >
+                  + New subject
+                </button>
+              </div>
+            )}
+          </div>
+        )}
         <a
           className="btn ghost small"
           href={url}
@@ -551,6 +602,7 @@ export default function ArticleReader({
             />
             {onQuote && onCreateNote && (
               <QuoteToNote
+                noun={subjects ? "subject" : "note"}
                 container={prose}
                 notes={notes ?? []}
                 onQuote={onQuote}

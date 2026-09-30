@@ -78,6 +78,7 @@ export default function SettingsDialog({
   onCreateTeam,
   onJoinTeam,
   onLeaveTeam,
+  onOpenStatus,
 }: {
   settings: Settings;
   onChange: (next: Settings) => void;
@@ -106,6 +107,7 @@ export default function SettingsDialog({
   onCreateTeam: (name: string) => Promise<void>;
   onJoinTeam: (code: string) => Promise<void>;
   onLeaveTeam: (code: string) => void;
+  onOpenStatus: () => void;
 }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -248,6 +250,34 @@ export default function SettingsDialog({
             {noteCount === 0
               ? "Notes live in the sidebar, beside your feeds. Make one with New note, or straight from your first highlight."
               : `${noteCount} note${noteCount === 1 ? "" : "s"} in the sidebar. Turning this off leaves them there; it only stops highlighting from offering to quote.`}
+          </p>
+
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={settings.subjects}
+              onChange={(event) =>
+                onChange({ ...settings, subjects: event.target.checked })
+              }
+            />
+            <span>
+              Subjects
+              <em>
+                Turns each note into a subject: a board of story cards with your
+                quotes and notes, free text boxes, a whiteboard view, and AI
+                insights and suggested reading (with your Anthropic key under
+                API keys). Turning it off shows your notes exactly as before.
+              </em>
+            </span>
+          </label>
+
+          <p className="field-label reading-label">Sources</p>
+          <button className="btn ghost small" onClick={onOpenStatus}>
+            Source status
+          </button>
+          <p className="field-note">
+            How many stories each source is delivering, how that compares with
+            before, and which ones look broken or are losing access.
           </p>
 
           <p className="field-label reading-label">Team feeds</p>

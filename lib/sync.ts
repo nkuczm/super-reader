@@ -7,6 +7,7 @@ import { mergePositions, type Positions } from "./position";
 import type { WatchMarks } from "./alerts";
 import { mergeNotes } from "./notes";
 import type { Note, NoteRemoval } from "./notes";
+import { mergeBoards, slimBoardsForSync, type Boards } from "./subjects";
 
 export type SyncPayload = {
   feeds: unknown[];
@@ -37,6 +38,12 @@ export type SyncPayload = {
    */
   notes?: Note[];
   noteRemovals?: NoteRemoval[];
+  /**
+   * Subject boards (lib/subjects.ts), merged item by item with the most
+   * recent change winning, so moving a card on one device and writing under
+   * it on another both survive.
+   */
+  boards?: Boards;
   /**
    * Which team feeds this person has joined — the name and connect code, not
    * the shared articles. Those live on the server because several people write
@@ -144,6 +151,7 @@ export async function writeSync(
     positions: mergePositions(payload.positions ?? {}, stored.positions ?? {}),
     notes: notes.notes,
     noteRemovals: notes.removals,
+    boards: slimBoardsForSync(mergeBoards(payload.boards ?? {}, stored.boards ?? {})),
   };
 
   await ensureSchema();

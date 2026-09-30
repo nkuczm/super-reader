@@ -189,6 +189,27 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
         </label>
       ))}
 
+      <label className="api-field" style={{ marginTop: 10 }}>
+        <span>
+          Anthropic (Subjects insights)
+          {keys.anthropic && <em className="badge">set</em>}
+        </span>
+        <input
+          className="input"
+          type="password"
+          autoComplete="off"
+          placeholder="Paste your key"
+          value={draft.anthropic ?? ""}
+          onChange={(event) =>
+            setDraft((current) => ({ ...current, anthropic: event.target.value }))
+          }
+        />
+        <small>
+          Used only when Subjects is on, to find connections and suggest reading across a
+          subject&apos;s stories. Sent with those requests alone; your account is billed.
+        </small>
+      </label>
+
       <p className="field-label reading-label">Subscriptions</p>
       <div className="offline-status">
         <span>

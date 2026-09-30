@@ -133,7 +133,7 @@ function normalizeUrl(input: string) {
  * app at all. Bing's wrapper carries the publisher's URL in a query parameter,
  * which unwrapRedirect turns back into a direct link.
  */
-function topicFeedUrl(topic: string) {
+export function topicFeedUrl(topic: string) {
   const query = encodeURIComponent(topic.trim());
   return `https://www.bing.com/news/search?q=${query}&format=RSS`;
 }

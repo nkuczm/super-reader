@@ -330,7 +330,7 @@ Four layers, each answering a question the others cannot:
 | Fixtures | `npm test` | does the parsing still work |
 | Live coverage | `npm run coverage <deployment>` | does the internet still behave |
 | Browser | Playwright on `next start` | does the interaction work |
-| Telemetry | *not built* | is coverage drifting over time |
+| Telemetry | Settings → Source status (per device) | is a source drifting, dying or losing access |
 
 To measure a real site from here, go through the deployment — add a temporary
 `/api/lab`-style probe (robots.txt sitemaps, news-sitemap candidates and their
@@ -343,6 +343,18 @@ not something a reader app should carry.
 `test/watchlist.json` is the accumulating record: whenever a source misbehaves
 in real use, add an entry with what you expect of it. The entry becomes the
 thing that notices the regression.
+
+**Source status** (`lib/health.ts`, `components/StatusPage.tsx`) is the
+per-device half of telemetry. Every refresh records, per source, what came
+back — count, newest date, error and its HTTP status — and keeps the last 40
+refreshes plus a 30-day daily roll-up. Verdicts, most serious first: *broken*
+(nothing arriving, nothing cached), *losing access* (401/403/404/410 on
+repeated refreshes while the cache hides it — the §6 "source that died after
+it was added"), *degraded*, *declining* (under half the previous week's
+typical count, or a newest story frozen across a week of refreshes — the §6
+"fresh-looking stale feed"), and *quiet*, which is deliberately not called
+broken. It stays on the device because the server never learns what a reader
+follows.
 
 The gap worth closing: the server sweep across 162 outlets already computes
 per-source counts and freshness every run and throws them away. Retaining a
