@@ -42,6 +42,8 @@ type Props = {
   onOpenMenu?: () => void;
   /** Back to every subject. */
   onBack?: () => void;
+  /** Rename the subject, from its title. */
+  onRename?: (name: string) => void;
   /** Headers carrying the reader's keys, or undefined when there are none. */
   keyHeaders: () => HeadersInit | undefined;
   hasAiKey: boolean;
@@ -78,6 +80,7 @@ export default function SubjectPage(props: Props) {
   );
   const [run, setRun] = useState<RunState>({ state: "idle" });
   const [focusBox, setFocusBox] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
 
   // A note that has writing of its own brings it onto the board, once.
   useEffect(() => {
@@ -212,7 +215,35 @@ export default function SubjectPage(props: Props) {
           </button>
         )}
         <div>
-          <h1>{note.name}</h1>
+          {renaming !== null ? (
+            <form
+              className="subject-rename"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (renaming.trim()) props.onRename?.(renaming.trim());
+                setRenaming(null);
+              }}
+            >
+              <input
+                className="input subject-rename-input"
+                autoFocus
+                aria-label="Subject name"
+                value={renaming}
+                onFocus={(event) => event.currentTarget.select()}
+                onChange={(event) => setRenaming(event.target.value)}
+                onKeyDown={(event) => event.key === "Escape" && setRenaming(null)}
+                onBlur={(event) => event.currentTarget.form?.requestSubmit()}
+              />
+            </form>
+          ) : (
+            <h1
+              className={props.onRename ? "subject-title-editable" : undefined}
+              title={props.onRename ? "Click to rename" : undefined}
+              onClick={() => props.onRename && setRenaming(note.name)}
+            >
+              {note.name}
+            </h1>
+          )}
           <p className="sub">
             {cards.length} {cards.length === 1 ? "story" : "stories"}
             {insights.length > 0 && ` · ${insights.length} insights`}
@@ -346,23 +377,33 @@ function InsightCard({ insight, cards, dragHandle }: { insight: InsightItem; car
   );
 }
 
+/**
+ * A story the AI suggests: warm-coloured until decided. The tick makes it an
+ * ordinary story card; the cross dismisses it for good. The headline opens it
+ * to read first.
+ */
 function SuggestionCard({ suggestion, shared, dragHandle }: { suggestion: SuggestItem; shared: Shared; dragHandle?: (e: React.PointerEvent) => void }) {
-  const [open, setOpen] = useState(false);
   return (
-    <div className={`subject-suggest${open ? " open" : ""}`} onPointerDown={dragHandle}>
-      <span className="ai-tag">✦ Suggested reading</span>
-      <button className="subject-card-title" onClick={() => setOpen((v) => !v)}>
+    <div className="subject-suggest" onPointerDown={dragHandle}>
+      <div className="subject-suggest-head">
+        <span className="ai-tag">✦ Suggested reading</span>
+        <div className="subject-suggest-decide" onPointerDown={(e) => e.stopPropagation()}>
+          <button className="decide accept" aria-label="Add to subject" title="Add to subject"
+            onClick={() => shared.decide(suggestion, "accepted")}>
+            {Icon.check}
+          </button>
+          <button className="decide dismiss" aria-label="Not relevant" title="Not relevant"
+            onClick={() => shared.decide(suggestion, "dismissed")}>
+            {Icon.close}
+          </button>
+        </div>
+      </div>
+      <button className="subject-card-title" title="Read it"
+        onClick={() => shared.onOpenArticle(suggestion.link, suggestion.title, "")}>
         {suggestion.title}
       </button>
       {suggestion.source && <div className="subject-card-source">{suggestion.source}</div>}
       <p className="subject-suggest-why">{suggestion.why}</p>
-      {open && (
-        <div className="subject-suggest-actions" onPointerDown={(e) => e.stopPropagation()}>
-          <button className="btn small" onClick={() => shared.decide(suggestion, "accepted")}>Add to subject</button>
-          <button className="btn ghost small" onClick={() => shared.onOpenArticle(suggestion.link, suggestion.title, "")}>Read</button>
-          <button className="btn ghost small" onClick={() => shared.decide(suggestion, "dismissed")}>Not relevant</button>
-        </div>
-      )}
     </div>
   );
 }
