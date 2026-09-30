@@ -1221,7 +1221,15 @@
   padding: 0 6px; min-width: 18px; text-align: center;
   font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
 }
+/* Scoped to .nav-item so it outranks the grey of an ordinary count, which
+   left grey numbers on the blue pill. */
+.nav-item .alert-count,
 .nav-item.active .alert-count { background: var(--accent); color: #fff; }
+.alert-count:empty { display: none; }
+@media (prefers-color-scheme: dark) {
+  /* The dark accent is light enough that white on it is faint. */
+  .nav-item .alert-count, .nav-item.active .alert-count { color: #0d0d0f; }
+}
 
 /* The bell is a per-source switch; off is quiet, on is unmistakable. */
 .bell-btn { opacity: 0.45; }
