@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { sanitizeRichText } from "@/lib/subjects";
+import { cleanPastedHtml } from "@/lib/paste";
 
 /**
  * A small formatted-text field: bold, italic, highlight, bullets, heading.
@@ -154,9 +155,21 @@ export default function RichText({
           }
         }}
         onPaste={(event) => {
-          // Pasted pages bring their styles with them; take the words only.
+          // Formatting comes with a paste — bullets, nesting, bold, italic,
+          // highlight — translated from Google Docs' clipboard shape and
+          // cleaned (lib/paste.ts). Plain text when that is all there is.
           event.preventDefault();
+          const html = event.clipboardData.getData("text/html");
+          if (html) {
+            const clean = cleanPastedHtml(html);
+            if (clean.trim()) {
+              document.execCommand("insertHTML", false, clean);
+              changed();
+              return;
+            }
+          }
           document.execCommand("insertText", false, event.clipboardData.getData("text/plain"));
+          changed();
         }}
         onKeyDown={(event) => {
           // Tab indents, Shift+Tab outdents: in a list that nests the bullet a

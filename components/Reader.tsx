@@ -90,6 +90,7 @@ import {
 } from "@/lib/manual";
 import {
   addStory,
+  placeNew,
   cardsOf,
   loadBoards,
   mergeBoards,
@@ -1621,7 +1622,8 @@ export default function Reader() {
         ? allSources.find((entry) => entry.id === known.sourceId)
         : undefined;
       commitBoard(noteId, (board) =>
-        addStory(board, { link, title: known?.title ?? reading?.title ?? link, source: source?.title }),
+        // Onto the tab that is open in that subject.
+        placeNew(addStory(board, { link, title: known?.title ?? reading?.title ?? link, source: source?.title }), canonicalUrl(link)),
       );
       touchSubject(noteId);
     },
@@ -1687,6 +1689,8 @@ export default function Reader() {
           at: Date.now(),
         }),
       );
+      // A new story quoted into a subject lands on the tab open there.
+      commitBoard(noteId, (board) => placeNew(board, canonicalUrl(link)));
 
       if (savedRef.current.some((a) => a.link === link)) return entryId;
       setSaved((current) => {

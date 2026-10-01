@@ -1558,3 +1558,41 @@
 .rich-body ol ol ol { list-style: lower-roman; }
 .rich-body ul ul, .rich-body ol ol, .rich-body ul ol, .rich-body ol ul { margin: 2px 0; }
 .rich-body blockquote { margin: 0 0 0 24px; padding: 0; border: 0; }
+
+/* Resizing a whiteboard card from its right edge. */
+.wb-resize {
+  position: absolute; top: 12px; bottom: 12px; right: -5px; width: 10px;
+  cursor: ew-resize; touch-action: none; border-radius: 6px;
+}
+.wb-resize::after {
+  content: ""; position: absolute; top: 50%; left: 3px; width: 4px; height: 36px; margin-top: -18px;
+  border-radius: 2px; background: var(--border); opacity: 0; transition: opacity 0.12s;
+}
+.wb-node:hover .wb-resize::after, .wb-resize:active::after { opacity: 1; }
+@media (hover: none) { .wb-resize::after { opacity: 0.8; } .wb-resize { width: 18px; right: -9px; } }
+
+/* ---------- tabs within a subject ---------- */
+.subject-tabs {
+  display: flex; align-items: center; gap: 4px; padding: 4px 20px 8px; overflow-x: auto;
+  border-bottom: 1px solid var(--border); scrollbar-width: none;
+}
+.subject-tab { display: inline-flex; align-items: center; gap: 2px; border-radius: 8px; flex-shrink: 0; }
+.subject-tab-name {
+  border: 0; background: transparent; color: var(--text-dim); font-size: 13.5px; font-weight: 600;
+  padding: 6px 10px; border-radius: 8px; cursor: pointer; white-space: nowrap;
+}
+.subject-tab-name:hover { background: var(--bg-hover); color: var(--text); }
+.subject-tab.on .subject-tab-name { background: var(--accent-soft); color: var(--accent); }
+.subject-tab-close { border: 0; background: none; color: var(--text-dim); font-size: 16px; padding: 0 6px; cursor: pointer; }
+.subject-tab-close:hover { color: var(--danger); }
+.subject-tab-add {
+  border: 1px dashed var(--border); background: none; color: var(--text-dim); width: 28px; height: 28px;
+  border-radius: 8px; font-size: 16px; cursor: pointer; flex-shrink: 0;
+}
+.subject-tab-add:hover { color: var(--accent); border-color: var(--accent); }
+.subject-tab-input { padding: 4px 8px; font-size: 13.5px; width: 150px; }
+.subject-tab.confirming { font-size: 12.5px; gap: 8px; padding: 4px 8px; background: var(--bg-sub); white-space: nowrap; }
+.subject-card-tab {
+  border: 1px solid var(--border); background: var(--bg); color: var(--text-dim);
+  border-radius: 6px; font-size: 12px; padding: 2px 4px; max-width: 110px; flex-shrink: 0;
+}

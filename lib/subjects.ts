@@ -82,7 +82,19 @@ export type MetaItem = Base & {
   ranAt?: number;
   /** Whether old notes' own writing has been brought onto the board. */
   migrated?: boolean;
+  /** The tab last open, where new stories and boxes land. */
+  activeTab?: string;
 };
+
+/**
+ * A tab within a subject, like a Google Docs tab: its own page of stories and
+ * boxes. The first tab, MAIN_TAB, exists without an item; this item only
+ * records its name once it has been renamed.
+ */
+export type TabItem = Base & { kind: "tab"; name: string; order: number };
+
+/** Which tab a story card or a box is on. Absent means the first tab. */
+export type PlaceItem = Base & { kind: "place"; target: string; tab: string };
 
 export type BoardItem =
   | StoryItem
@@ -92,7 +104,9 @@ export type BoardItem =
   | LinkItem
   | InsightItem
   | SuggestItem
-  | MetaItem;
+  | MetaItem
+  | TabItem
+  | PlaceItem;
 
 export type Board = Record<string, BoardItem>;
 /** Every subject's board, keyed by the note it belongs to. */
@@ -590,4 +604,88 @@ export function composeCardDoc(html: string, quotes: { id: string; text: string 
 /** A card's writing without its quotes — the AI is given those separately. */
 export function withoutQuotes(html: string): string {
   return html.replace(/<li>\s*<a data-quote="[^"]+">[\s\S]*?<\/a>\s*<\/li>/g, "").replace(/<a data-quote="[^"]+">[\s\S]*?<\/a>/g, "");
+}
+
+/* ------------------------------------------------------------------------ */
+/* Tabs                                                                      */
+/* ------------------------------------------------------------------------ */
+
+export const MAIN_TAB = "main";
+
+export type Tab = { id: string; name: string; order: number };
+
+/** The subject's tabs in order; the first one is always there. */
+export function tabsOf(board: Board | undefined): Tab[] {
+  const items = live(board).filter((item): item is TabItem => item.kind === "tab");
+  const main = items.find((item) => item.id === tabItemId(MAIN_TAB));
+  const tabs: Tab[] = [{ id: MAIN_TAB, name: main?.name || "Main", order: 0 }];
+  for (const item of items) {
+    if (item.id === tabItemId(MAIN_TAB)) continue;
+    tabs.push({ id: item.id.slice("tab:".length), name: item.name, order: item.order });
+  }
+  return tabs.sort((a, b) => a.order - b.order);
+}
+
+export function tabItemId(tab: string) {
+  return `tab:${tab}`;
+}
+
+export function placeId(target: string) {
+  return `place:${target}`;
+}
+
+/** The tab something is on — the first tab when unplaced or its tab is gone. */
+export function tabOf(board: Board | undefined, target: string, tabs = tabsOf(board)): string {
+  const place = board?.[placeId(target)];
+  if (!place || place.deleted || place.kind !== "place") return MAIN_TAB;
+  return tabs.some((tab) => tab.id === place.tab) ? place.tab : MAIN_TAB;
+}
+
+/** The tab new things land in. */
+export function activeTabOf(board: Board | undefined): string {
+  const wanted = metaOf(board).activeTab;
+  return wanted && tabsOf(board).some((tab) => tab.id === wanted) ? wanted : MAIN_TAB;
+}
+
+export function placeOn(board: Board | undefined, target: string, tab: string, now = Date.now()): Board {
+  if (tab === MAIN_TAB) {
+    const held = board?.[placeId(target)];
+    return held && !held.deleted ? remove(board, placeId(target), now) : (board ?? {});
+  }
+  return put(board, { id: placeId(target), kind: "place", target, tab, at: now }, now);
+}
+
+/** Something new arriving lands on the tab that is open, unless already placed. */
+export function placeNew(board: Board | undefined, target: string, now = Date.now()): Board {
+  const held = board?.[placeId(target)];
+  if (held && !held.deleted) return board ?? {};
+  return placeOn(board, target, activeTabOf(board), now);
+}
+
+export function addTab(board: Board | undefined, name: string, now = Date.now()): { board: Board; id: string } {
+  const id = newItemId("t");
+  const order = Math.max(0, ...tabsOf(board).map((tab) => tab.order)) + 1;
+  let next = put(board, { id: tabItemId(id), kind: "tab", name: name.trim() || "Untitled tab", order, at: now }, now);
+  next = put(next, { ...metaOf(next), activeTab: id }, now);
+  return { board: next, id };
+}
+
+export function renameTab(board: Board | undefined, tab: string, name: string, now = Date.now()): Board {
+  const existing = tabsOf(board).find((t) => t.id === tab);
+  return put(board, { id: tabItemId(tab), kind: "tab", name: name.trim() || existing?.name || "Untitled tab", order: existing?.order ?? 0, at: now }, now);
+}
+
+/**
+ * Close a tab. Its stories and boxes move to the first tab rather than
+ * vanishing with it — a tab is a way of arranging things, not a bin.
+ */
+export function deleteTab(board: Board | undefined, tab: string, now = Date.now()): Board {
+  if (tab === MAIN_TAB) return board ?? {};
+  let next = board ?? {};
+  for (const item of live(next)) {
+    if (item.kind === "place" && item.tab === tab) next = remove(next, item.id, now);
+  }
+  next = remove(next, tabItemId(tab), now);
+  if (metaOf(next).activeTab === tab) next = put(next, { ...metaOf(next), activeTab: MAIN_TAB }, now);
+  return next;
 }
