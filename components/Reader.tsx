@@ -93,6 +93,7 @@ import {
   placeNew,
   cardsOf,
   metaOf,
+  addQuoteNote,
   loadBoards,
   mergeBoards,
   pruneBoards,
@@ -232,6 +233,7 @@ function withPastedStories(list: Loaded[], manual: ManualStories, following: Rea
   return extra.length === 0 ? list : sortNewestFirst([...list, ...extra]);
 }
 
+const VIEW_KEY = "super-reader:view";
 const GRANDFATHER_KEY = "super-reader:subjects-before-signin";
 const SIGNIN_ERA_KEY = "super-reader:signin-era";
 const SUBJECT_USED_KEY = "super-reader:subject-used:v1";
@@ -466,6 +468,14 @@ export default function Reader() {
     }
     notesRef.current = storedNotes;
     setNotes(storedNotes);
+    // A refresh on a subject comes back to that subject, not the feed.
+    try {
+      const view = JSON.parse(sessionStorage.getItem(VIEW_KEY) ?? "null");
+      if (view?.type === "subjects") setSelection({ type: "subjects" });
+      if (view?.type === "note" && storedNotes.some((n) => n.id === view.id)) setSelection({ type: "note", id: view.id });
+    } catch {
+      /* nothing remembered */
+    }
     const storedNoteRemovals = loadNoteRemovals();
     noteRemovalsRef.current = storedNoteRemovals;
     setNoteRemovals(storedNoteRemovals);
@@ -1031,7 +1041,7 @@ export default function Reader() {
   /** Subjects need a Google sign-in, wherever sign-in is set up — except here before it was. */
   const subjectsLocked = auth.enabled && auth.checked && !auth.account && !grandfathered;
 
-  const accountStrip = (
+  const accountStrip = auth.enabled && (
     <AccountStrip
       account={auth.account}
       enabled={auth.enabled}
@@ -2602,6 +2612,17 @@ export default function Reader() {
     listRef.current?.scrollTo({ top: 0, behavior: "auto" });
   }, []);
 
+  // Remember an open subject for this tab, so a refresh lands back on it.
+  useEffect(() => {
+    if (!ready) return;
+    try {
+      if (selection.type === "note" || selection.type === "subjects") sessionStorage.setItem(VIEW_KEY, JSON.stringify(selection));
+      else sessionStorage.removeItem(VIEW_KEY);
+    } catch {
+      /* storage unavailable */
+    }
+  }, [selection, ready]);
+
   const choose = useCallback(
     (next: Selection) => {
       setSelection(next);
@@ -3166,6 +3187,10 @@ export default function Reader() {
             notes={notesByUse}
             highlight={reading.quote}
             onQuote={settings.quoteToNote && !subjectsLocked ? quoteIntoNote : undefined}
+            onQuoteNote={(noteId, entryId, html) => {
+              const target = notesRef.current.find((n) => n.id === noteId);
+              if (target) commitBoard(noteId, (board) => addQuoteNote(target, board, entryId, html));
+            }}
             onCreateNote={settings.quoteToNote && !subjectsLocked ? createNote : undefined}
             onOpenNote={(id) => choose({ type: "note", id })}
             onMoveQuote={moveQuote}

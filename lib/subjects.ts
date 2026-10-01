@@ -691,3 +691,73 @@ export function deleteTab(board: Board | undefined, tab: string, now = Date.now(
   if (metaOf(next).activeTab === tab) next = put(next, { ...metaOf(next), activeTab: MAIN_TAB }, now);
   return next;
 }
+
+/* ------------------------------------------------------------------------ */
+/* A note jotted under a quote as it is filed                                */
+/* ------------------------------------------------------------------------ */
+
+/** The bullets of some HTML, or nothing when every bullet is empty. */
+function noteBullets(html: string): string {
+  const clean = sanitizeRichText(html);
+  const text = clean.replace(/<[^>]+>/g, "").replace(/&nbsp;|\s/g, "");
+  if (!text) return "";
+  const body = clean.trim();
+  // Already a list: use its items. Plain lines each become a bullet.
+  const listed = body.match(/^<ul>([\s\S]*)<\/ul>$/);
+  if (listed) return listed[1];
+  return body
+    .split(/<br\s*\/?>|<\/?p>|<\/?div>/)
+    .map((line) => line.trim())
+    .filter((line) => line.replace(/<[^>]+>/g, "").trim())
+    .map((line) => `<li>${line}</li>`)
+    .join("");
+}
+
+/**
+ * Put a note under one quote on its story's card, as bullets one level below
+ * the quote — the second-level bullets of the card. Further nesting the
+ * writer made is kept. Returns the board unchanged when there is nothing to
+ * add or the quote is not on any card.
+ */
+export function addQuoteNote(
+  note: Note,
+  board: Board | undefined,
+  quoteId: string,
+  html: string,
+  now = Date.now(),
+): Board {
+  const bullets = noteBullets(html);
+  if (!bullets) return board ?? {};
+  const card = cardsOf(note, board).find((c) => c.quotes.some((q) => q.id === quoteId));
+  if (!card) return board ?? {};
+  const doc = composeCardDoc(card.note, card.quotes);
+  const anchor = doc.indexOf(`data-quote="${quoteId}"`);
+  const open = anchor >= 0 ? doc.lastIndexOf("<li", anchor) : -1;
+  let next: string;
+  if (open < 0) {
+    next = `${doc}<ul>${bullets}</ul>`;
+  } else {
+    // The quote's own </li>, past any list already nested inside it.
+    const tag = /<li\b|<\/li>/g;
+    tag.lastIndex = open;
+    let depth = 0;
+    let close = -1;
+    for (let m = tag.exec(doc); m; m = tag.exec(doc)) {
+      depth += m[0] === "</li>" ? -1 : 1;
+      if (depth === 0) {
+        close = m.index;
+        break;
+      }
+    }
+    if (close < 0) {
+      next = `${doc}<ul>${bullets}</ul>`;
+    } else {
+      const before = doc.slice(0, close);
+      // A note already under this quote: the new bullets join that list.
+      next = /<\/ul>\s*$/.test(before)
+        ? before.replace(/<\/ul>\s*$/, `${bullets}</ul>`) + doc.slice(close)
+        : `${before}<ul>${bullets}</ul>${doc.slice(close)}`;
+    }
+  }
+  return put(board, { id: cardNoteId(card.id), kind: "cardnote", card: card.id, html: next, at: now }, now);
+}

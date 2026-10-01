@@ -134,3 +134,19 @@ test("synced HTML keeps a quote link by id and drops any real href", () => {
     '<a data-quote="q1">“hi”</a>x',
   );
 });
+
+test("addQuoteNote nests the note under its quote, and joins a second note to it", async () => {
+  const { addQuoteNote, cardsOf, composeCardDoc } = await import("../lib/subjects");
+  const q = (id: string, text: string) =>
+    ({ id, kind: "quote", text, link: "https://a.example/s", articleTitle: "S", at: 1 }) as never;
+  const note = { id: "n", name: "N", at: 1, entries: [q("q1", "First"), q("q2", "Second")] };
+  let board = addQuoteNote(note, {}, "q1", "<ul><li>why it matters<ul><li>deeper</li></ul></li></ul>", 5);
+  board = addQuoteNote(note, board, "q1", "<ul><li>another</li></ul>", 6);
+  board = addQuoteNote(note, board, "q2", "<ul><li><br></li></ul>", 7);
+  const card = cardsOf(note, board)[0];
+  const doc = composeCardDoc(card.note, card.quotes);
+  assert.equal(
+    doc,
+    '<ul><li><a data-quote="q1">“First”</a><ul><li>why it matters<ul><li>deeper</li></ul></li><li>another</li></ul></li><li><a data-quote="q2">“Second”</a></li></ul>',
+  );
+});
