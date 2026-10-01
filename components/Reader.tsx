@@ -227,6 +227,8 @@ function withPastedStories(list: Loaded[], manual: ManualStories, following: Rea
   return extra.length === 0 ? list : sortNewestFirst([...list, ...extra]);
 }
 
+const SUBJECT_USED_KEY = "super-reader:subject-used:v1";
+
 type Selection =
   | { type: "all" }
   | { type: "saved" }
@@ -318,6 +320,11 @@ export default function Reader() {
   const [notes, setNotes] = useState<Note[]>([]);
   /** Subject boards, one per note, when Subjects is on (lib/subjects.ts). */
   const [boards, setBoards] = useState<Boards>({});
+  /**
+   * When each subject was last opened or added to, on this device — so the
+   * Subject menu in an article lists the ones in use first.
+   */
+  const [subjectUsed, setSubjectUsed] = useState<Record<string, number>>({});
   /** Settings that follow the person between devices, with when they changed. */
   const [prefs, setPrefs] = useState<SharedPrefs>({ subjects: false, aiProvider: "anthropic", openaiModel: "gpt-5-mini", at: 0 });
   const prefsRef = useRef<SharedPrefs>(prefs);
@@ -442,6 +449,12 @@ export default function Reader() {
     boardsRef.current = storedBoards;
     setBoards(storedBoards);
     setHealth(loadHealth());
+    try {
+      const used = JSON.parse(localStorage.getItem(SUBJECT_USED_KEY) ?? "{}");
+      if (used && typeof used === "object") setSubjectUsed(used);
+    } catch {
+      /* no history yet */
+    }
     const storedManual = loadManual();
     manualRef.current = storedManual;
     setManual(storedManual);
@@ -1577,6 +1590,24 @@ export default function Reader() {
     [],
   );
 
+  const touchSubject = useCallback((id: string) => {
+    setSubjectUsed((current) => {
+      const next = { ...current, [id]: Date.now() };
+      try {
+        localStorage.setItem(SUBJECT_USED_KEY, JSON.stringify(next));
+      } catch {
+        /* order just won't persist */
+      }
+      return next;
+    });
+  }, []);
+
+  /** Subjects, most recently opened or added to first; never used ones by creation. */
+  const notesByUse = useMemo(
+    () => [...notes].sort((a, b) => (subjectUsed[b.id] ?? 0) - (subjectUsed[a.id] ?? 0) || b.at - a.at),
+    [notes, subjectUsed],
+  );
+
   /** The article being read, added to a subject whole — no quote needed. */
   const addReadingToSubject = useCallback(
     (noteId: string) => {
@@ -1591,9 +1622,10 @@ export default function Reader() {
       commitBoard(noteId, (board) =>
         addStory(board, { link, title: known?.title ?? reading?.title ?? link, source: source?.title }),
       );
+      touchSubject(noteId);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [reading, articles, commitBoard],
+    [reading, articles, commitBoard, touchSubject],
   );
 
   /** The subjects a story is in — quoted there, or added to it whole. */
@@ -2462,6 +2494,7 @@ export default function Reader() {
   const choose = useCallback(
     (next: Selection) => {
       setSelection(next);
+      if (next.type === "note") touchSubject(next.id);
       setMenuOpen(false);
       setTeamMenu(null);
       // Navigating to a source — or to the feed holding it — counts as having
@@ -2481,7 +2514,7 @@ export default function Reader() {
       // middle of a feed you had just opened.
       scrollToTop();
     },
-    [scrollToTop, clearAlerts],
+    [touchSubject, scrollToTop, clearAlerts],
   );
   /** Back from a page opened in Settings: to Settings, over what was showing before. */
   const backToSettings = useCallback(() => {
@@ -3019,7 +3052,7 @@ export default function Reader() {
             keyHeaders={keyHeaders}
             onOpenMenu={() => setMenuOpen(true)}
             onAlwaysOpenOnSite={alwaysOpenOnSite}
-            notes={notes}
+            notes={notesByUse}
             highlight={reading.quote}
             onQuote={settings.quoteToNote ? quoteIntoNote : undefined}
             onCreateNote={settings.quoteToNote ? createNote : undefined}

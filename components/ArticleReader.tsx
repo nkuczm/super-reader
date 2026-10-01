@@ -56,6 +56,8 @@ type Props = {
   onClose: () => void;
 };
 
+const SUBJECTS_SHOWN = 5;
+
 export default function ArticleReader({
   url,
   fallbackTitle,
@@ -79,6 +81,8 @@ export default function ArticleReader({
   const [addedTo, setAddedTo] = useState<string | null>(null);
   /** The name being typed for a new subject, or null when not naming one. */
   const [newSubject, setNewSubject] = useState<string | null>(null);
+  /** The menu lists the most recently used subjects first, five at a time. */
+  const [showAllSubjects, setShowAllSubjects] = useState(false);
   const [article, setArticle] = useState<ReadableArticle | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fromCache, setFromCache] = useState(false);
@@ -392,7 +396,10 @@ export default function ArticleReader({
             <button
               className={`btn ghost small${addedTo ? " on" : ""}`}
               aria-expanded={subjectMenu}
-              onClick={() => setSubjectMenu((open) => !open)}
+              onClick={() => {
+                setSubjectMenu((open) => !open);
+                setShowAllSubjects(false);
+              }}
             >
               {Icon.note}
               <span className="btn-label">
@@ -405,7 +412,7 @@ export default function ArticleReader({
             </button>
             {subjectMenu && (
               <div className="subject-menu" role="menu">
-                {(notes ?? []).map((note) => (
+                {(showAllSubjects ? (notes ?? []) : (notes ?? []).slice(0, SUBJECTS_SHOWN)).map((note) => (
                   <button
                     key={note.id}
                     role="menuitem"
@@ -425,6 +432,11 @@ export default function ArticleReader({
                     {subjects.containing.has(note.id) && <span className="subject-menu-in">{Icon.check} Open</span>}
                   </button>
                 ))}
+                {!showAllSubjects && (notes ?? []).length > SUBJECTS_SHOWN && (
+                  <button role="menuitem" className="subject-menu-more" onClick={() => setShowAllSubjects(true)}>
+                    Show {(notes ?? []).length - SUBJECTS_SHOWN} more
+                  </button>
+                )}
                 {newSubject === null ? (
                   <button role="menuitem" className="subject-menu-new" onClick={() => setNewSubject("")}>
                     + New subject
