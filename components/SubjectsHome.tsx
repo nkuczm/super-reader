@@ -18,6 +18,7 @@ export default function SubjectsHome({
   onRename,
   onDelete,
   onOpenMenu,
+  accountStrip,
 }: {
   notes: Note[];
   boards: Boards;
@@ -26,6 +27,7 @@ export default function SubjectsHome({
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
   onOpenMenu?: () => void;
+  accountStrip?: React.ReactNode;
 }) {
   const [naming, setNaming] = useState(false);
   /** The tile being renamed, and the tile asking whether to delete. */
@@ -75,6 +77,7 @@ export default function SubjectsHome({
           <p className="sub">{notes.length} subject{notes.length === 1 ? "" : "s"}</p>
         </div>
       </div>
+      {accountStrip}
 
       <div className="subjects-grid">
         <div className="subject-tile new">

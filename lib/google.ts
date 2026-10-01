@@ -1,0 +1,184 @@
+/**
+ * Google: signing in, and writing backups to the person's own Drive.
+ *
+ * Sign-in is the standard OAuth authorization-code flow with PKCE, done on the
+ * server so the client secret never reaches a browser. The scopes are the
+ * smallest that do the job: who you are (openid, email, profile) and
+ * drive.file — which lets this app create Google Docs and touch only the
+ * files it created, never anything else in the Drive.
+ *
+ * Plain fetch against Google's documented endpoints; no SDK to carry.
+ */
+
+export const GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth";
+export const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
+export const SCOPES = ["openid", "email", "profile", "https://www.googleapis.com/auth/drive.file"];
+
+export function googleConfig() {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  return clientId && clientSecret ? { clientId, clientSecret } : null;
+}
+
+/** Where Google sends the person back — this deployment's own callback. */
+export function redirectUri(request: Request) {
+  const url = new URL(request.url);
+  const host = request.headers.get("x-forwarded-host") ?? url.host;
+  const proto = request.headers.get("x-forwarded-proto") ?? url.protocol.replace(":", "");
+  return `${proto}://${host}/api/auth/callback`;
+}
+
+export function authUrl(params: { clientId: string; redirectUri: string; state: string; challenge: string }) {
+  const url = new URL(GOOGLE_AUTH);
+  url.searchParams.set("client_id", params.clientId);
+  url.searchParams.set("redirect_uri", params.redirectUri);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("scope", SCOPES.join(" "));
+  url.searchParams.set("state", params.state);
+  url.searchParams.set("code_challenge", params.challenge);
+  url.searchParams.set("code_challenge_method", "S256");
+  // A refresh token, so backups can be written after the tab is closed.
+  url.searchParams.set("access_type", "offline");
+  url.searchParams.set("prompt", "consent select_account");
+  url.searchParams.set("include_granted_scopes", "true");
+  return url.toString();
+}
+
+export type GoogleIdentity = { sub: string; email: string; name?: string; picture?: string };
+
+/**
+ * The identity in an ID token received directly from Google's token
+ * endpoint, over TLS, in exchange for our client secret. Its signature need
+ * not be re-checked for that reason (Google's guidance for this flow), but
+ * who it was issued to, by whom, and whether it is current still are.
+ */
+export function identityFromIdToken(idToken: string, clientId: string, now = Date.now()): GoogleIdentity {
+  const [, payload] = idToken.split(".");
+  if (!payload) throw new Error("Malformed ID token");
+  const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  if (claims.aud !== clientId) throw new Error("ID token was issued to another app");
+  if (claims.iss !== "https://accounts.google.com" && claims.iss !== "accounts.google.com") {
+    throw new Error("ID token is not from Google");
+  }
+  if (typeof claims.exp !== "number" || claims.exp * 1000 < now) throw new Error("ID token has expired");
+  if (!claims.sub || !claims.email) throw new Error("ID token has no identity");
+  if (claims.email_verified === false) throw new Error("That Google account's email is not verified");
+  return { sub: String(claims.sub), email: String(claims.email), name: claims.name, picture: claims.picture };
+}
+
+export async function exchangeCode(params: {
+  code: string;
+  verifier: string;
+  redirectUri: string;
+  clientId: string;
+  clientSecret: string;
+}): Promise<{ identity: GoogleIdentity; refreshToken?: string; accessToken: string }> {
+  const res = await fetch(GOOGLE_TOKEN, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      code: params.code,
+      code_verifier: params.verifier,
+      client_id: params.clientId,
+      client_secret: params.clientSecret,
+      redirect_uri: params.redirectUri,
+      grant_type: "authorization_code",
+    }),
+    signal: AbortSignal.timeout(15000),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.id_token) throw new Error(`Google sign-in failed (${res.status})`);
+  return {
+    identity: identityFromIdToken(data.id_token, params.clientId),
+    refreshToken: data.refresh_token,
+    accessToken: data.access_token,
+  };
+}
+
+export async function accessTokenFrom(refreshToken: string): Promise<string> {
+  const config = googleConfig();
+  if (!config) throw new Error("Google is not configured");
+  const res = await fetch(GOOGLE_TOKEN, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
+    signal: AbortSignal.timeout(15000),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.access_token) throw new Error(`Google refused the stored sign-in (${res.status})`);
+  return data.access_token;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Drive                                                                     */
+/* ------------------------------------------------------------------------ */
+
+const DRIVE = "https://www.googleapis.com/drive/v3/files";
+const UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
+const DOC = "application/vnd.google-apps.document";
+const FOLDER = "application/vnd.google-apps.folder";
+
+async function drive(accessToken: string, url: string, init: RequestInit = {}) {
+  const res = await fetch(url, {
+    ...init,
+    headers: { authorization: `Bearer ${accessToken}`, ...(init.headers ?? {}) },
+    signal: AbortSignal.timeout(20000),
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
+
+export async function createFolder(accessToken: string, name: string): Promise<string> {
+  const { ok, status, data } = await drive(accessToken, `${DRIVE}?fields=id`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name, mimeType: FOLDER }),
+  });
+  if (!ok || !data.id) throw new Error(`Could not create the backup folder (${status})`);
+  return data.id;
+}
+
+/** Whether a file this app made is still there (not deleted or trashed). */
+export async function fileAlive(accessToken: string, fileId: string): Promise<boolean> {
+  const { ok, data } = await drive(accessToken, `${DRIVE}/${encodeURIComponent(fileId)}?fields=id,trashed`);
+  return ok && !data.trashed;
+}
+
+function multipart(metadata: object, html: string) {
+  const boundary = `sr${Math.random().toString(36).slice(2)}`;
+  const body =
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
+    `--${boundary}\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n${html}\r\n--${boundary}--`;
+  return { body, contentType: `multipart/related; boundary=${boundary}` };
+}
+
+/** A new Google Doc from HTML; Drive converts it. */
+export async function createDoc(accessToken: string, params: { name: string; html: string; folder?: string }) {
+  const { body, contentType } = multipart(
+    { name: params.name, mimeType: DOC, ...(params.folder ? { parents: [params.folder] } : {}) },
+    params.html,
+  );
+  const { ok, status, data } = await drive(accessToken, `${UPLOAD}?uploadType=multipart&fields=id,webViewLink`, {
+    method: "POST",
+    headers: { "content-type": contentType },
+    body,
+  });
+  if (!ok || !data.id) throw new Error(`Could not create the Google Doc (${status})`);
+  return { id: data.id as string, url: (data.webViewLink as string) ?? `https://docs.google.com/document/d/${data.id}/edit` };
+}
+
+/** Replace a Doc's contents (and title) with new HTML. */
+export async function updateDoc(accessToken: string, fileId: string, params: { name: string; html: string }) {
+  const { body, contentType } = multipart({ name: params.name }, params.html);
+  const { ok, status } = await drive(
+    accessToken,
+    `${UPLOAD}/${encodeURIComponent(fileId)}?uploadType=multipart&fields=id`,
+    { method: "PATCH", headers: { "content-type": contentType }, body },
+  );
+  if (!ok) throw new Error(`Could not update the Google Doc (${status})`);
+}

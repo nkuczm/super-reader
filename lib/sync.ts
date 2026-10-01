@@ -9,6 +9,7 @@ import { mergeNotes } from "./notes";
 import type { Note, NoteRemoval } from "./notes";
 import { mergeBoards, slimBoardsForSync, type Boards } from "./subjects";
 import { mergeManual, type ManualStories } from "./manual";
+import { isLinkedCode, type SubjectsDoc } from "./accounts";
 
 export type SyncPayload = {
   feeds: unknown[];
@@ -100,8 +101,12 @@ export async function readSync(code: string): Promise<SyncRecord | null> {
     WHERE code_hash = ${hashCode(code)}
   `;
   if (rows.length === 0) return null;
+  const payload = rows[0].payload as SyncPayload;
+  if (payload.notes?.length || payload.boards) {
+    if (await isLinkedCode(code)) withoutWriting(payload);
+  }
   return {
-    payload: rows[0].payload as SyncPayload,
+    payload,
     updatedAt: new Date(rows[0].updated_at).toISOString(),
   };
 }
@@ -161,6 +166,10 @@ export async function writeSync(
     prefs:
       (stored.prefs?.at ?? 0) > (payload.prefs?.at ?? 0) ? stored.prefs : (payload.prefs ?? stored.prefs),
   };
+  // A code tied to a Google account carries no writing: subjects and notes
+  // live with the account (lib/accounts.ts), where a code alone cannot reach
+  // them. Anything an older device still sends is dropped, not stored.
+  if (await isLinkedCode(code)) withoutWriting(merged);
 
   await ensureSchema();
   const sql = getSql();
@@ -175,4 +184,35 @@ export async function writeSync(
     payload: merged,
     updatedAt: new Date(rows[0].updated_at).toISOString(),
   };
+}
+
+function withoutWriting(payload: SyncPayload) {
+  delete payload.notes;
+  delete payload.noteRemovals;
+  delete payload.boards;
+}
+
+/**
+ * Move the writing out of a sync document, for an account that has just been
+ * linked to its code. Returns what was there so it can be merged into the
+ * account; the sync document keeps everything else.
+ */
+export async function detachWriting(code: string): Promise<SubjectsDoc> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql`SELECT payload FROM feed_syncs WHERE code_hash = ${hashCode(code)}`;
+  const payload = (rows[0]?.payload ?? {}) as SyncPayload;
+  const writing: SubjectsDoc = {
+    notes: payload.notes ?? [],
+    noteRemovals: payload.noteRemovals ?? [],
+    boards: payload.boards ?? {},
+  };
+  if (rows[0]) {
+    withoutWriting(payload);
+    await sql`
+      UPDATE feed_syncs SET payload = ${JSON.stringify(payload)}::jsonb
+      WHERE code_hash = ${hashCode(code)}
+    `;
+  }
+  return writing;
 }

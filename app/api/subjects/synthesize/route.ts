@@ -1,3 +1,4 @@
+import { sameOrigin } from "@/lib/secure";
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { decodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
@@ -82,6 +83,8 @@ class RunError extends Error {
 }
 
 export async function POST(request: Request) {
+  // Only this site's own pages may spend the reader's key through it.
+  if (!sameOrigin(request)) return NextResponse.json({ error: "Cross-site request refused." }, { status: 403 });
   let input: SynthesisInput;
   try {
     input = (await request.json()) as SynthesisInput;

@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons";
 import RichText from "./RichText";
+import SubjectHistory from "./SubjectHistory";
+import type { Writing } from "./useAccount";
 import type { Note, NoteEntry } from "@/lib/notes";
 import {
   applySynthesis,
@@ -63,6 +65,11 @@ type Props = {
   hasAiKey: boolean;
   /** Which AI to ask, from Settings. */
   ai: { provider: AiProvider; model?: string };
+  /** Who is signed in and whether the work is saved (useAccount). */
+  accountStrip?: React.ReactNode;
+  /** History and export live with the Google account. */
+  signedIn?: boolean;
+  onRestored?: (doc: Writing) => void;
 };
 
 type RunState = { state: "idle" | "running" | "error"; message?: string };
@@ -85,6 +92,24 @@ const INSIGHT_LABEL: Record<InsightItem["type"], string> = {
 export default function SubjectPage(props: Props) {
   const { note, board, onBoard, keyHeaders, hasAiKey, ai } = props;
   const meta = metaOf(board);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [exporting, setExporting] = useState<null | "working" | { url: string } | { error: string }>(null);
+  const exportDoc = async () => {
+    setExporting("working");
+    try {
+      const res = await fetch("/api/subjects/export", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ subjectId: note.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Export failed");
+      setExporting({ url: data.url });
+      window.open(data.url, "_blank", "noopener");
+    } catch (error) {
+      setExporting({ error: error instanceof Error ? error.message : "Export failed" });
+    }
+  };
   const allCards = useMemo(() => cardsOf(note, board), [note, board]);
   const items = useMemo(() => live(board), [board]);
   // Tabs: each is its own page of stories and boxes. The AI still reads the
@@ -346,12 +371,52 @@ export default function SubjectPage(props: Props) {
           <button className="btn ghost small" onClick={() => void copyTab()} title="Copy this tab as formatted text, for Google Docs and the like">
             {copied ? "Copied" : "Copy"}
           </button>
+          <button
+            className={`btn ghost small ${meta.offline ? "on" : ""}`}
+            aria-pressed={Boolean(meta.offline)}
+            onClick={() => onBoard((current) => put(current, { ...metaOf(current), offline: !metaOf(current).offline }))}
+            title="Keep every story in this subject downloaded for reading without a connection"
+          >
+            {meta.offline ? "✓ Available offline" : "Make available offline"}
+          </button>
+          {props.signedIn && (
+            <>
+              <button className="btn ghost small" onClick={() => setHistoryOpen(true)}>
+                History
+              </button>
+              <button className="btn ghost small" disabled={exporting === "working"} onClick={() => void exportDoc()}>
+                {exporting === "working" ? "Exporting…" : "Export to Google Doc"}
+              </button>
+            </>
+          )}
           <button className="btn ghost small" disabled={!hasAiKey || allCards.length < 2 || run.state === "running"}
             onClick={() => void synthesize()} title="Find connections and suggest reading now">
             ✦ Insights
           </button>
         </div>
       </div>
+      {props.accountStrip}
+      {typeof exporting === "object" && exporting && (
+        <div className="subject-ai-bar">
+          {"url" in exporting ? (
+            <>
+              Exported.{" "}
+              <a href={exporting.url} target="_blank" rel="noopener noreferrer">
+                Open the Google Doc
+              </a>
+            </>
+          ) : (
+            exporting.error
+          )}
+        </div>
+      )}
+      {historyOpen && (
+        <SubjectHistory
+          subjectId={note.id}
+          onClose={() => setHistoryOpen(false)}
+          onRestored={(doc) => props.onRestored?.(doc)}
+        />
+      )}
       {aiStatus && <div className="subject-ai-bar">{aiStatus}</div>}
       <TabBar
         tabs={tabs}

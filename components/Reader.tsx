@@ -92,6 +92,7 @@ import {
   addStory,
   placeNew,
   cardsOf,
+  metaOf,
   loadBoards,
   mergeBoards,
   pruneBoards,
@@ -159,6 +160,8 @@ import {
 } from "@/lib/alerts";
 import type { WatchMarks } from "@/lib/alerts";
 import type { SavedRemoval } from "@/lib/saved";
+import { useAccount, type Writing } from "./useAccount";
+import SignInCard, { AccountStrip } from "./SignInCard";
 import "./reader.css";
 
 type Loaded = Article & { sourceId: string };
@@ -229,6 +232,8 @@ function withPastedStories(list: Loaded[], manual: ManualStories, following: Rea
   return extra.length === 0 ? list : sortNewestFirst([...list, ...extra]);
 }
 
+const GRANDFATHER_KEY = "super-reader:subjects-before-signin";
+const SIGNIN_ERA_KEY = "super-reader:signin-era";
 const SUBJECT_USED_KEY = "super-reader:subject-used:v1";
 
 type Selection =
@@ -322,6 +327,10 @@ export default function Reader() {
   const [notes, setNotes] = useState<Note[]>([]);
   /** Subject boards, one per note, when Subjects is on (lib/subjects.ts). */
   const [boards, setBoards] = useState<Boards>({});
+  /** This device had subjects before sign-in was required (see useAccount). */
+  const [grandfathered, setGrandfathered] = useState(false);
+  /** Signed in: writing then syncs with the account, not the sync code. */
+  const signedInRef = useRef(false);
   /**
    * When each subject was last opened or added to, on this device — so the
    * Subject menu in an article lists the ones in use first.
@@ -442,6 +451,19 @@ export default function Reader() {
     setWatchMarks(loadWatchMarks());
     setTeams(loadTeams());
     const storedNotes = loadNotes();
+    // Whoever already had writing here before sign-in existed keeps using it
+    // without signing in: it was theirs before the lock was.
+    try {
+      // Decided once, on the first load of the version with sign-in: writing
+      // made after that does not earn the exemption.
+      if (!localStorage.getItem(SIGNIN_ERA_KEY)) {
+        if (storedNotes.length > 0) localStorage.setItem(GRANDFATHER_KEY, String(Date.now()));
+        localStorage.setItem(SIGNIN_ERA_KEY, String(Date.now()));
+      }
+      setGrandfathered(Boolean(localStorage.getItem(GRANDFATHER_KEY)));
+    } catch {
+      /* storage unavailable */
+    }
     notesRef.current = storedNotes;
     setNotes(storedNotes);
     const storedNoteRemovals = loadNoteRemovals();
@@ -565,7 +587,8 @@ export default function Reader() {
       savePositions(places);
     }
     // Subject boards merge item by item, most recent change winning.
-    const mergedBoards = mergeBoards(boardsRef.current, payload.boards ?? {});
+    const writingHere = !signedInRef.current;
+    const mergedBoards = writingHere ? mergeBoards(boardsRef.current, payload.boards ?? {}) : boardsRef.current;
     if (!sameBoards(mergedBoards, boardsRef.current)) {
       boardsRef.current = mergedBoards;
       setBoards(mergedBoards);
@@ -610,10 +633,12 @@ export default function Reader() {
     }
     // Notes merge for the same reason, and with the same shape of tombstone:
     // a quote taken on the phone must survive the desktop pushing over it.
-    const merged = mergeNotes(
-      { notes: notesRef.current, removals: noteRemovalsRef.current },
-      { notes: payload.notes ?? [], removals: payload.noteRemovals ?? [] },
-    );
+    const merged = writingHere
+      ? mergeNotes(
+          { notes: notesRef.current, removals: noteRemovalsRef.current },
+          { notes: payload.notes ?? [], removals: payload.noteRemovals ?? [] },
+        )
+      : { notes: notesRef.current, removals: noteRemovalsRef.current };
     if (!unchanged(merged.notes, notesRef.current)) {
       notesRef.current = merged.notes;
       setNotes(merged.notes);
@@ -657,17 +682,18 @@ export default function Reader() {
       // notes below: comparing the full set would push forever.
       !samePositions(slimPositionsForSync(places), slimPositionsForSync(payload.positions ?? {})) ||
       // The same for subject boards: compared as they would be sent.
-      !sameBoards(slimBoardsForSync(mergedBoards), payload.boards ?? {}) ||
+      (writingHere && !sameBoards(slimBoardsForSync(mergedBoards), payload.boards ?? {})) ||
       !sameManual(mergedManual, payload.manual ?? {}) ||
       prefsRef.current.at > (cleanSharedPrefs(payload.prefs)?.at ?? 0) ||
       // Compared as it would be *sent*, not as it is held: the wire copy is
       // cut to a budget, and comparing the full set against the server's copy
       // would report news this device can never deliver — and push forever
       // trying.
-      notesDifferFrom(
-        { notes: slimNotesForSync(merged.notes), removals: merged.removals },
-        { notes: payload.notes ?? [], removals: payload.noteRemovals ?? [] },
-      );
+      (writingHere &&
+        notesDifferFrom(
+          { notes: slimNotesForSync(merged.notes), removals: merged.removals },
+          { notes: payload.notes ?? [], removals: payload.noteRemovals ?? [] },
+        ));
 
     // Never taken from a document this device has already moved past: the
     // stamp only ever goes forward, or the next push looks like the stale one.
@@ -839,9 +865,10 @@ export default function Reader() {
             savedRemovals,
             watchMarks,
             positions: slimPositionsForSync(positions),
-            notes: slimNotesForSync(notes),
-            noteRemovals,
-            boards: slimBoardsForSync(boards),
+            // Signed in, writing goes to the account instead (useAccount).
+            ...(signedInRef.current
+              ? {}
+              : { notes: slimNotesForSync(notes), noteRemovals, boards: slimBoardsForSync(boards) }),
             manual,
             prefs,
             teams,
@@ -909,9 +936,9 @@ export default function Reader() {
         savedRemovals,
         watchMarks,
         positions: slimPositionsForSync(positions),
-        notes: slimNotesForSync(notes),
-        noteRemovals,
-        boards: slimBoardsForSync(boards),
+        ...(signedInRef.current
+          ? {}
+          : { notes: slimNotesForSync(notes), noteRemovals, boards: slimBoardsForSync(boards) }),
         manual,
         prefs,
         teams,
@@ -958,6 +985,75 @@ export default function Reader() {
     },
     [pull],
   );
+
+  /** Merge the account's copy of the writing into this device's. */
+  const applyWriting = useCallback((doc: Writing) => {
+    const mergedBoards = mergeBoards(boardsRef.current, doc.boards ?? {});
+    if (!sameBoards(mergedBoards, boardsRef.current)) {
+      boardsRef.current = mergedBoards;
+      setBoards(mergedBoards);
+      saveBoards(mergedBoards);
+    }
+    const merged = mergeNotes(
+      { notes: notesRef.current, removals: noteRemovalsRef.current },
+      { notes: doc.notes ?? [], removals: doc.noteRemovals ?? [] },
+    );
+    if (!unchanged(merged.notes, notesRef.current)) {
+      notesRef.current = merged.notes;
+      setNotes(merged.notes);
+      saveNotes(merged.notes);
+    }
+    if (!unchanged(merged.removals, noteRemovalsRef.current)) {
+      noteRemovalsRef.current = merged.removals;
+      setNoteRemovals(merged.removals);
+      saveNoteRemovals(merged.removals);
+    }
+  }, []);
+
+  const startSyncRef = useRef(startSync);
+  startSyncRef.current = startSync;
+  /** The account's sync code becomes this device's; with none, one is made. */
+  const adoptCode = useCallback(
+    async (code: string | null) => {
+      if (code) {
+        await connectSync(code);
+        return code;
+      }
+      await startSyncRef.current();
+      return loadSyncCode();
+    },
+    [connectSync],
+  );
+
+  const writing = useMemo<Writing>(() => ({ notes, noteRemovals, boards }), [notes, noteRemovals, boards]);
+  const auth = useAccount({ ready, syncCode, writing, applyWriting, adoptCode });
+  signedInRef.current = Boolean(auth.account);
+  /** Subjects need a Google sign-in, wherever sign-in is set up — except here before it was. */
+  const subjectsLocked = auth.enabled && auth.checked && !auth.account && !grandfathered;
+
+  const accountStrip = (
+    <AccountStrip
+      account={auth.account}
+      enabled={auth.enabled}
+      status={auth.status}
+      savedAt={auth.savedAt}
+      backedUpAt={auth.backedUpAt}
+      onSignOut={() => void auth.signOut()}
+    />
+  );
+
+  // Back from Google: tidy the address bar, and say so if it went wrong.
+  const [signInFailed, setSignInFailed] = useState(false);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("signin") && !url.searchParams.has("signedin")) return;
+    if (url.searchParams.get("signin") === "failed") setSignInFailed(true);
+    if (url.searchParams.has("signedin")) setSelection({ type: "subjects" });
+    url.searchParams.delete("signin");
+    url.searchParams.delete("signedin");
+    url.searchParams.delete("reason");
+    window.history.replaceState(null, "", url.toString());
+  }, []);
 
   const stopSync = useCallback(() => {
     saveSyncCode(null);
@@ -1974,7 +2070,16 @@ export default function Reader() {
      * one is a function invocation that fetches, fails, and falls back twice
      * before answering 502 — fifteen articles a source, on every visit.
      */
-    return [...bookmarks, ...[...perSource.values()].flat()].filter(
+    // Subjects marked "available offline" keep every story they cite.
+    const subjectStories: OfflineTarget[] = [];
+    for (const note of notes) {
+      if (!metaOf(boards[note.id]).offline) continue;
+      for (const card of cardsOf(note, boards[note.id])) {
+        subjectStories.push({ url: card.link, title: card.title });
+      }
+    }
+
+    return [...subjectStories, ...bookmarks, ...[...perSource.values()].flat()].filter(
       (target) => {
         try {
           return !knownRefusal(new URL(target.url).hostname);
@@ -1983,7 +2088,7 @@ export default function Reader() {
         }
       },
     );
-  }, [articles, sourceById, saved]);
+  }, [articles, sourceById, saved, notes, boards]);
 
   const runDownload = useCallback(async () => {
     if (downloading.current) return;
@@ -3059,12 +3164,12 @@ export default function Reader() {
             onAlwaysOpenOnSite={alwaysOpenOnSite}
             notes={notesByUse}
             highlight={reading.quote}
-            onQuote={settings.quoteToNote ? quoteIntoNote : undefined}
-            onCreateNote={settings.quoteToNote ? createNote : undefined}
+            onQuote={settings.quoteToNote && !subjectsLocked ? quoteIntoNote : undefined}
+            onCreateNote={settings.quoteToNote && !subjectsLocked ? createNote : undefined}
             onOpenNote={(id) => choose({ type: "note", id })}
             onMoveQuote={moveQuote}
             subjects={
-              settings.subjects
+              settings.subjects && !subjectsLocked
                 ? {
                     onAdd: addReadingToSubject,
                     onCreate: createNote,
@@ -3082,8 +3187,11 @@ export default function Reader() {
             }}
             onClose={() => setReading(null)}
           />
+        ) : subjectsLocked && (selection.type === "subjects" || (openNote && settings.subjects)) ? (
+          <SignInCard onOpenMenu={() => setMenuOpen(true)} failed={signInFailed} />
         ) : selection.type === "subjects" ? (
           <SubjectsHome
+            accountStrip={accountStrip}
             notes={notes}
             boards={boards}
             onOpenMenu={() => setMenuOpen(true)}
@@ -3113,6 +3221,9 @@ export default function Reader() {
         ) : openNote && settings.subjects ? (
           <SubjectPage
             key={openNote.id}
+            accountStrip={accountStrip}
+            signedIn={Boolean(auth.account)}
+            onRestored={applyWriting}
             note={openNote}
             board={boards[openNote.id]}
             onBack={() => choose({ type: "subjects" })}
