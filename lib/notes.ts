@@ -25,6 +25,9 @@ export type NoteQuote = {
   link: string;
   articleTitle: string;
   sourceTitle?: string;
+  /** When the article was published, and by whom, where known. */
+  publishedAt?: string;
+  author?: string;
   at: number;
 };
 

@@ -5,7 +5,7 @@ import { decodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import { fetchText, parseFeed, looksLikeFeed } from "@/lib/feed";
 import { topicFeedUrl } from "@/lib/discover";
 import { canonicalUrl } from "@/lib/url";
-import type { InsightKind, SynthesisInput, SynthesisResult } from "@/lib/subjects";
+import { emailsIn, type InsightKind, type SynthesisInput, type SynthesisResult } from "@/lib/subjects";
 import { DEFAULT_OPENAI_MODEL, PROVIDER_NAME, type AiProvider } from "@/lib/spend";
 
 export const runtime = "nodejs";
@@ -22,8 +22,24 @@ const MAX_CARDS = 40;
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["insights", "reading"],
+  required: ["insights", "reading", "contacts"],
   properties: {
+    contacts: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["name", "role", "why", "refs", "origin", "email"],
+        properties: {
+          name: { type: "string" },
+          role: { type: "string" },
+          why: { type: "string" },
+          refs: { type: "array", items: { type: "string" } },
+          origin: { type: "string", enum: ["story", "suggested"] },
+          email: { type: "string" },
+        },
+      },
+    },
     insights: {
       type: "array",
       items: {
@@ -70,11 +86,20 @@ Return:
   - "question": a question that spans several stories and would pull the subject further.
   - "deeper": at most one — the assumption underneath the topic, or what would have to be true.
   refs lists the ids of the cards each insight draws on, copied exactly. Every connection names at least two.
+- contacts: up to 8 people worth interviewing for a piece on this subject.
+  - origin "story": people named in the headlines, quotes or the reader's notes — sources, subjects, officials, experts, authors. Use their name exactly as written.
+  - origin "suggested": people connected to the stories but not quoted in them — e.g. the head of an organisation a story names, or a counterpart on the other side of a dispute. Only real, specific people you are confident hold that position; never invent a name. Name the role and organisation in "role" so the reader can verify it.
+  role: their title and organisation, a few words. why: what they could tell the reader, at most 15 words. refs: the ids of the cards they connect to.
+  email: only an email address that appears word for word in the material; otherwise an empty string. Never guess or construct one.
 - reading: 2 news search queries (a few words each, as typed into a news search) for coverage that would fill a gap in what is here, each with a reason of at most 12 words. Never invent URLs.`;
 
 type Reading = { query: string; why: string };
 
-type Parsed = { insights: SynthesisResult["insights"]; reading: Reading[] };
+type Parsed = {
+  insights: SynthesisResult["insights"];
+  reading: Reading[];
+  contacts?: { name: string; role: string; why: string; refs: string[]; origin: string; email: string }[];
+};
 type Usage = { provider: AiProvider; model: string; input: number; output: number };
 class RunError extends Error {
   constructor(message: string, readonly status: number, readonly needsKey = false) {
@@ -148,8 +173,22 @@ export async function POST(request: Request) {
       refs: (insight.refs ?? []).filter((ref) => ids.has(ref)),
     }));
 
+  // An email is kept only if it really is in what the reader collected: a
+  // model's guess at someone's address is worse than none.
+  const written = emailsIn(material);
+  const contacts = (parsed.contacts ?? [])
+    .filter((c) => c && typeof c.name === "string" && c.name.trim())
+    .slice(0, 10)
+    .map((c) => ({
+      name: c.name.trim(),
+      role: String(c.role ?? "").trim(),
+      why: String(c.why ?? "").trim(),
+      refs: (c.refs ?? []).filter((ref) => ids.has(ref)),
+      origin: c.origin === "story" ? ("story" as const) : ("suggested" as const),
+      email: written.has(String(c.email ?? "").trim().toLowerCase()) ? String(c.email).trim() : undefined,
+    }));
   const suggestions = await findReading((parsed.reading ?? []).slice(0, 3), new Set(input.known ?? []));
-  const result: SynthesisResult = { insights, suggestions, usage };
+  const result: SynthesisResult = { insights, suggestions, contacts, usage };
   return NextResponse.json(result, { headers: { "cache-control": "private, no-store" } });
 }
 

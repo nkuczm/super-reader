@@ -9,7 +9,9 @@
 
 import type { Note } from "./notes";
 import {
+  bylineOf,
   cardsOf,
+  contactsOf,
   composeCardDoc,
   escapeHtml,
   live,
@@ -47,10 +49,19 @@ export function subjectHtml(note: Note, board: Board | undefined, now = new Date
     if (tabCards.length === 0 && tabBoxes.length === 0) parts.push("<p><i>Empty</i></p>");
     for (const card of tabCards) {
       parts.push(`<h3><a href="${escapeHtml(card.link)}">${escapeHtml(card.title)}</a></h3>`);
-      if (card.source) parts.push(`<p><i>${escapeHtml(card.source)}</i></p>`);
+      if (bylineOf(card)) parts.push(`<p><i>${escapeHtml(bylineOf(card))}</i></p>`);
       parts.push(unlinkQuotes(composeCardDoc(card.note, card.quotes)));
     }
     for (const box of tabBoxes) parts.push(unlinkQuotes(box.html));
+  }
+  const contacts = contactsOf(board);
+  if (contacts.length > 0) {
+    parts.push("<h2>Contacts</h2><ul>");
+    for (const c of contacts) {
+      const details = [c.role, c.email, c.phone].filter(Boolean).map((d) => escapeHtml(d!)).join(" · ");
+      parts.push(`<li><b>${escapeHtml(c.name)}</b>${details ? ` — ${details}` : ""}${c.why ? `<br><i>${escapeHtml(c.why)}</i>` : ""}</li>`);
+    }
+    parts.push("</ul>");
   }
   if (insights.length > 0) {
     parts.push("<h2>Insights</h2><ul>");
