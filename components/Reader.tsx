@@ -105,6 +105,7 @@ import { loadHealth, recordRuns, saveHealth, type HealthLog } from "@/lib/health
 import { listenForClientErrors } from "@/lib/client-errors";
 import { encodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import {
+  EXTRACT_VERSION,
   downloadForOffline,
   isDownloadDue,
   currentSlot,
@@ -2430,7 +2431,7 @@ export default function Reader() {
     setPasteNotice({ kind: "busy", text: "Reading the story…" });
     let data: { title?: string; url?: string; excerpt?: string; html?: string; publishedAt?: string; siteName?: string; via?: string } | null = null;
     try {
-      const res = await fetch(`/api/article?url=${encodeURIComponent(link)}`, { headers: keyHeaders });
+      const res = await fetch(`/api/article?url=${encodeURIComponent(link)}&x=${EXTRACT_VERSION}`, { headers: keyHeaders });
       data = res.ok ? await res.json() : null;
     } catch {
       data = null;

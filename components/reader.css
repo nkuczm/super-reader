@@ -1548,3 +1548,13 @@
 }
 .subject-menu .subject-menu-more { color: var(--text-dim); font-size: 12.5px; }
 .subject-menu { max-height: min(70vh, 460px); overflow-y: auto; }
+
+/* Nested bullets change style by level, the way a document does. */
+.rich-body ul { list-style: disc; }
+.rich-body ul ul { list-style: circle; }
+.rich-body ul ul ul { list-style: square; }
+.rich-body ul ul ul ul { list-style: disc; }
+.rich-body ol ol { list-style: lower-alpha; }
+.rich-body ol ol ol { list-style: lower-roman; }
+.rich-body ul ul, .rich-body ol ol, .rich-body ul ol, .rich-body ol ul { margin: 2px 0; }
+.rich-body blockquote { margin: 0 0 0 24px; padding: 0; border: 0; }

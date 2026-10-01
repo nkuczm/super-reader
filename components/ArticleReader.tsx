@@ -5,7 +5,7 @@ import { forgetPosition, positionFor, rememberPosition } from "@/lib/position";
 import type { ReadableArticle } from "@/lib/article";
 import { Icon } from "./icons";
 import { downloadUrlFor } from "@/lib/download";
-import { readCached, writeCached } from "@/lib/offline";
+import { EXTRACT_VERSION, readCached, writeCached } from "@/lib/offline";
 import { timeAgo, hostOf } from "./format";
 import QuoteToNote from "./QuoteToNote";
 import { findQuoteRange } from "@/lib/highlight";
@@ -295,7 +295,7 @@ export default function ArticleReader({
 
       try {
         const res = await fetch(
-          `/api/article?url=${encodeURIComponent(url)}` +
+          `/api/article?url=${encodeURIComponent(url)}&x=${EXTRACT_VERSION}` +
             (feedUrl ? `&feed=${encodeURIComponent(feedUrl)}` : "") +
             `&title=${encodeURIComponent(fallbackTitle)}`,
           {
