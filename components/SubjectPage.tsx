@@ -617,6 +617,7 @@ function Whiteboard(
   };
 
   const startPan = (event: React.PointerEvent) => {
+    if (event.pointerType === "touch") return; // touch pans in the gesture handler
     if (event.button !== 0 || event.target !== event.currentTarget) return;
     const origin = { px: event.clientX, py: event.clientY, x: view.x, y: view.y };
     const move = (e: PointerEvent) => setView((v) => ({ ...v, x: origin.x + e.clientX - origin.px, y: origin.y + e.clientY - origin.py }));
@@ -671,40 +672,84 @@ function Whiteboard(
     };
     el.addEventListener("wheel", onWheel, { passive: false });
 
-    // Two fingers on a touchscreen: pinch to zoom around their midpoint.
+    /*
+     * Touch, handled in one place. One finger on the board pans it; two
+     * fingers zoom and pan together, keeping the point of the board that was
+     * between them pinned under them — measured from where the gesture
+     * started, never accumulated step by step, so it cannot drift or jump.
+     * (The mouse's pan is in startPan; it stands aside for touch.)
+     */
+    type Gesture =
+      | { kind: "pan"; startX: number; startY: number; view: typeof viewRef.current }
+      | { kind: "pinch"; distance: number; midX: number; midY: number; view: typeof viewRef.current };
     const touches = new Map<number, { x: number; y: number }>();
-    let pinch: { distance: number } | null = null;
-    const spread = () => {
-      const [a, b] = [...touches.values()];
-      return { distance: Math.hypot(a.x - b.x, a.y - b.y), mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
+    let gesture: Gesture | null = null;
+    const isBoard = (target: EventTarget | null) =>
+      target === el || (target instanceof Element && (target.classList.contains("wb-layer") || !!target.closest(".wb-lines")));
+    const startPinch = () => {
+      const [p, q] = [...touches.values()];
+      gesture = {
+        kind: "pinch",
+        distance: Math.hypot(p.x - q.x, p.y - q.y) || 1,
+        midX: (p.x + q.x) / 2,
+        midY: (p.y + q.y) / 2,
+        view: viewRef.current,
+      };
     };
     const onDown = (event: PointerEvent) => {
       if (event.pointerType !== "touch") return;
       touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      if (touches.size === 2) pinch = { distance: spread().distance };
+      if (touches.size === 2) startPinch();
+      else if (touches.size === 1 && isBoard(event.target)) {
+        gesture = { kind: "pan", startX: event.clientX, startY: event.clientY, view: viewRef.current };
+      }
     };
     const onMove = (event: PointerEvent) => {
       if (!touches.has(event.pointerId)) return;
       touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      if (!pinch || touches.size !== 2) return;
-      const { distance, mid } = spread();
-      if (pinch.distance > 0 && distance > 0) {
-        const rect = el.getBoundingClientRect();
-        zoomAround(distance / pinch.distance, mid.x - rect.left, mid.y - rect.top);
+      if (!gesture) return;
+      if (gesture.kind === "pan") {
+        const g = gesture;
+        setView({ ...g.view, x: g.view.x + event.clientX - g.startX, y: g.view.y + event.clientY - g.startY });
+        return;
       }
-      pinch = { distance };
+      if (touches.size !== 2) return;
+      const [p, q] = [...touches.values()];
+      const rect = el.getBoundingClientRect();
+      const g = gesture;
+      const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, g.view.zoom * (Math.hypot(p.x - q.x, p.y - q.y) / g.distance)));
+      // The board point that was under the fingers' midpoint at the start…
+      const boardX = (g.midX - rect.left - g.view.x) / g.view.zoom;
+      const boardY = (g.midY - rect.top - g.view.y) / g.view.zoom;
+      // …stays under wherever their midpoint is now.
+      const midX = (p.x + q.x) / 2 - rect.left;
+      const midY = (p.y + q.y) / 2 - rect.top;
+      setView({ zoom, x: midX - boardX * zoom, y: midY - boardY * zoom });
     };
     const onUp = (event: PointerEvent) => {
-      touches.delete(event.pointerId);
-      if (touches.size < 2) pinch = null;
+      if (!touches.delete(event.pointerId)) return;
+      if (touches.size === 1 && gesture?.kind === "pinch") {
+        // Lifting one finger of a pinch carries on as a pan from here, with
+        // no jump to where that finger first went down.
+        const [p] = [...touches.values()];
+        gesture = { kind: "pan", startX: p.x, startY: p.y, view: viewRef.current };
+      } else if (touches.size === 0) {
+        gesture = null;
+      }
     };
+    // Safari's own page zoom must not join in.
+    const stopGesture = (event: Event) => event.preventDefault();
     el.addEventListener("pointerdown", onDown, true);
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
+    el.addEventListener("gesturestart", stopGesture);
+    el.addEventListener("gesturechange", stopGesture);
     return () => {
       el.removeEventListener("wheel", onWheel);
       el.removeEventListener("pointerdown", onDown, true);
+      el.removeEventListener("gesturestart", stopGesture);
+      el.removeEventListener("gesturechange", stopGesture);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
