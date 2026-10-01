@@ -1794,3 +1794,11 @@
   .subject-head .subject-actions { gap: 3px; }
   .subject-head .subject-actions .btn { padding-left: 7px; padding-right: 7px; }
 }
+
+/* A highlight just made is an inline-styled span until it is saved and
+   re-read as a <mark>; in dark mode it takes the same muted amber at once. */
+@media (prefers-color-scheme: dark) {
+  .rich-body span[style*="background"], .rich-body font[style*="background"] {
+    background-color: #7c5e10 !important; color: inherit !important;
+  }
+}
