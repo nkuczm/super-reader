@@ -1596,3 +1596,38 @@
   border: 1px solid var(--border); background: var(--bg); color: var(--text-dim);
   border-radius: 6px; font-size: 12px; padding: 2px 4px; max-width: 110px; flex-shrink: 0;
 }
+
+/* ---------- Google sign-in, saving and history ---------- */
+.signin-page { position: relative; min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
+.signin-menu { position: absolute; top: calc(12px + var(--safe-top, 0px)); left: 12px; }
+.signin-card { max-width: 440px; background: var(--bg-sub); border: 1px solid var(--border); border-radius: 12px; padding: 28px 24px; }
+.signin-card h1 { font-size: 22px; margin: 0 0 12px; }
+.signin-card p { color: var(--text); line-height: 1.5; margin: 0 0 12px; }
+.signin-card .signin-small { color: var(--text-dim); font-size: 13px; }
+.signin-error { color: var(--danger); font-size: 14px; }
+.signin-btn { display: inline-flex; align-items: center; gap: 10px; padding: 10px 16px; margin: 6px 0 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-weight: 600; text-decoration: none; }
+.signin-btn:hover { background: var(--bg-hover); }
+.signin-btn.small { padding: 5px 10px; margin: 0; font-size: 13px; }
+.account-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 4px 20px 8px; font-size: 12px; color: var(--text-dim); }
+.account-strip.nudge { background: var(--accent-soft); color: var(--text); margin: 0 20px 8px; padding: 8px 12px; border-radius: 8px; justify-content: space-between; }
+.account-strip.error, .account-strip.offline { color: var(--danger); }
+.account-who { font-weight: 600; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-strip .link-btn { font-size: 12px; margin-left: auto; }
+.subject-actions .btn.on { color: var(--accent); border-color: var(--accent); }
+.history-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.history-panel { background: var(--bg); color: var(--text); border-radius: 12px; width: min(960px, 100%); height: min(720px, 100%); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); }
+.history-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.history-head h2 { margin: 0; font-size: 17px; }
+.history-panel > .signin-error { padding: 0 16px; }
+.history-body { flex: 1; display: flex; min-height: 0; }
+.history-list { list-style: none; margin: 0; padding: 8px; width: 200px; overflow-y: auto; border-right: 1px solid var(--border); flex-shrink: 0; }
+.history-list button { width: 100%; text-align: left; background: none; border: 0; padding: 8px 10px; border-radius: 6px; color: var(--text); font: inherit; font-size: 14px; cursor: pointer; }
+.history-list button:hover { background: var(--bg-hover); }
+.history-list button.on { background: var(--accent-soft); font-weight: 600; }
+.history-preview { flex: 1; display: flex; flex-direction: column; gap: 10px; padding: 12px; min-width: 0; }
+.history-preview .btn { align-self: flex-start; }
+.history-frame { flex: 1; width: 100%; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+@media (max-width: 640px) {
+  .history-body { flex-direction: column; }
+  .history-list { width: auto; max-height: 30%; border-right: 0; border-bottom: 1px solid var(--border); }
+}

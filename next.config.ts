@@ -15,6 +15,25 @@ const nextConfig: NextConfig = {
    * tracing leaves it out: PDFs then fail in the deployed app while working
    * under `next start`, which has the whole of node_modules on disk.
    */
+  /**
+   * Basic hardening for every page: never framed by another site (no
+   * clickjacking a sign-in or a restore), no MIME sniffing, no full URLs
+   * leaked as referrers, and no device features this app never uses.
+   */
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
+          { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
+        ],
+      },
+    ];
+  },
   outputFileTracingIncludes: {
     "/api/article": ["./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"],
   },

@@ -84,6 +84,8 @@ export type MetaItem = Base & {
   migrated?: boolean;
   /** The tab last open, where new stories and boxes land. */
   activeTab?: string;
+  /** Keep every story in this subject downloaded for reading offline. */
+  offline?: boolean;
 };
 
 /**
