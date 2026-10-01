@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Icon } from "./icons";
 import RichText from "./RichText";
 import SubjectHistory from "./SubjectHistory";
+import SubjectContacts from "./SubjectContacts";
 import type { Writing } from "./useAccount";
 import type { Note, NoteEntry } from "@/lib/notes";
 import {
@@ -15,6 +16,9 @@ import {
   sanitizeRichText,
   quoteIdsIn,
   live,
+  bylineOf,
+  contactsOf,
+  contactId,
   metaOf,
   migrateNoteWriting,
   newItemId,
@@ -72,6 +76,8 @@ type Props = {
   onRestored?: (doc: Writing) => void;
   /** "Saved 5:27 PM" and the like, beside the title. */
   saveLabel?: string;
+  /** Date, author and outlet of a story still on the device, by link. */
+  articleMeta?: (link: string) => { publishedAt?: string; author?: string; source?: string } | undefined;
 };
 
 type RunState = { state: "idle" | "running" | "error"; message?: string };
@@ -95,6 +101,9 @@ export default function SubjectPage(props: Props) {
   const { note, board, onBoard, keyHeaders, hasAiKey, ai } = props;
   const meta = metaOf(board);
   const [historyOpen, setHistoryOpen] = useState(false);
+  /** The Contacts side tab, in place of the current tab's page. */
+  const [contactsOpen, setContactsOpen] = useState(false);
+  const contacts = useMemo(() => contactsOf(board), [board]);
   const [exporting, setExporting] = useState<null | "working" | { url: string } | { error: string }>(null);
   const exportDoc = async () => {
     setExporting("working");
@@ -112,7 +121,20 @@ export default function SubjectPage(props: Props) {
       setExporting({ error: error instanceof Error ? error.message : "Export failed" });
     }
   };
-  const allCards = useMemo(() => cardsOf(note, board), [note, board]);
+  const { articleMeta } = props;
+  // Stories filed before dates and authors were kept borrow them from the
+  // copy still on the device, where there is one.
+  const allCards = useMemo(
+    () =>
+      cardsOf(note, board).map((card) => {
+        if (card.publishedAt && card.author && card.source) return card;
+        const known = articleMeta?.(card.link);
+        return known
+          ? { ...card, publishedAt: card.publishedAt ?? known.publishedAt, author: card.author ?? known.author, source: card.source ?? known.source }
+          : card;
+      }),
+    [note, board, articleMeta],
+  );
   const items = useMemo(() => live(board), [board]);
   // Tabs: each is its own page of stories and boxes. The AI still reads the
   // whole subject, so insights can connect stories across tabs.
@@ -204,7 +226,7 @@ export default function SubjectPage(props: Props) {
     const parts: string[] = [`<h2>${escapeHtml(note.name)}${tabs.length > 1 && tabName ? ` — ${escapeHtml(tabName)}` : ""}</h2>`];
     for (const card of cards) {
       parts.push(`<h3><a href="${escapeHtml(card.link)}">${escapeHtml(card.title)}</a></h3>`);
-      if (card.source) parts.push(`<p><i>${escapeHtml(card.source)}</i></p>`);
+      if (bylineOf(card)) parts.push(`<p><i>${escapeHtml(bylineOf(card))}</i></p>`);
       parts.push(unlinkQuotes(composeCardDoc(card.note, card.quotes)));
     }
     for (const box of boxes) parts.push(unlinkQuotes(box.html));
@@ -421,16 +443,62 @@ export default function SubjectPage(props: Props) {
         tabs={tabs}
         current={currentTab}
         onSwitch={switchTab}
+        contacts={{ count: contacts.length, open: contactsOpen, onOpen: () => setContactsOpen((o) => !o) }}
         onAdd={(name) => onBoard((current) => addTab(current, name).board)}
         onRename={(tab, name) => onBoard((current) => renameTab(current, tab, name))}
         onDelete={(tab) => onBoard((current) => deleteTab(current, tab))}
       />
 
+      <div className={`subject-body${contactsOpen ? " with-contacts" : ""}`}>
+      <div className="subject-main">
       {meta.view === "board" ? (
         <Whiteboard {...shared} board={board} onBoard={onBoard} addBox={addBox} />
       ) : (
         <DocumentView {...shared} />
       )}
+      </div>
+      {contactsOpen && (
+        <aside className="contacts-panel" aria-label="Contacts">
+        <div className="contacts-panel-head">
+          <h2>Contacts</h2>
+          <button className="link-btn" aria-label="Close contacts" onClick={() => setContactsOpen(false)}>✕</button>
+        </div>
+        <SubjectContacts
+          contacts={contacts}
+          cards={allCards}
+          running={run.state === "running"}
+          canRun={hasAiKey && allCards.length >= 1}
+          onRun={() => void synthesize()}
+          onSave={(contact) => onBoard((current) => put(current, { ...contact, at: Date.now() }))}
+          onRemove={(contact) =>
+            onBoard((current) =>
+              // Removed from the stories' people stays removed, so a later run
+              // does not bring them back; your own are simply deleted.
+              contact.origin === "you"
+                ? remove(current, contact.id)
+                : put(current, { ...contact, state: "dismissed", at: Date.now() }),
+            )
+          }
+          onAdd={(name, role) =>
+            onBoard((current) =>
+              put(current, {
+                id: contactId(name),
+                kind: "contact",
+                name,
+                role,
+                why: "",
+                refs: [],
+                origin: "you",
+                state: "kept",
+                at: Date.now(),
+              }),
+            )
+          }
+          onOpenCard={(card) => props.onOpenArticle(card.link, card.title, "")}
+        />
+        </aside>
+      )}
+      </div>
     </div>
   );
 }
@@ -495,7 +563,7 @@ function StoryCard({
           {Icon.close}
         </button>
       </div>
-      {card.source && <div className="subject-card-source">{card.source}</div>}
+      {bylineOf(card) && <div className="subject-card-source">{bylineOf(card)}</div>}
       <div className="subject-card-body">
         {/* One document per story: the quotes are bullets in it, as links to
             their passages, and everything around them is yours to write. */}
@@ -1089,6 +1157,7 @@ function TabBar({
   onAdd,
   onRename,
   onDelete,
+  contacts,
 }: {
   tabs: Tab[];
   current: string;
@@ -1096,6 +1165,7 @@ function TabBar({
   onAdd: (name: string) => void;
   onRename: (tab: string, name: string) => void;
   onDelete: (tab: string) => void;
+  contacts?: { count: number; open: boolean; onOpen: () => void };
 }) {
   const [editing, setEditing] = useState<{ id: string | null; draft: string } | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -1162,6 +1232,17 @@ function TabBar({
       ) : (
         <button className="subject-tab-add" aria-label="Add a tab" title="Add a tab" onClick={() => setEditing({ id: null, draft: "" })}>
           +
+        </button>
+      )}
+      {contacts && (
+        <button
+          role="tab"
+          aria-selected={contacts.open}
+          className={`subject-tab-contacts${contacts.open ? " on" : ""}`}
+          onClick={contacts.onOpen}
+          title="People to interview for this subject"
+        >
+          Contacts{contacts.count > 0 && <span className="count">{contacts.count}</span>}
         </button>
       )}
     </div>

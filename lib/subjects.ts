@@ -33,6 +33,8 @@ export type StoryItem = Base & {
   link: string;
   title: string;
   source?: string;
+  publishedAt?: string;
+  author?: string;
 };
 
 /** What you wrote on a story's card, under its quotes. Sanitised HTML. */
@@ -98,7 +100,29 @@ export type TabItem = Base & { kind: "tab"; name: string; order: number };
 /** Which tab a story card or a box is on. Absent means the first tab. */
 export type PlaceItem = Base & { kind: "place"; target: string; tab: string };
 
+/**
+ * Someone worth talking to for this subject: named in the stories, or
+ * suggested as connected to them. Contact details are only ever copied from
+ * the material or typed by the reader — never guessed.
+ */
+export type ContactItem = Base & {
+  kind: "contact";
+  name: string;
+  role: string;
+  why: string;
+  /** Card ids the person comes from. */
+  refs: string[];
+  /** In the stories themselves, or suggested as connected to them. */
+  origin: "story" | "suggested" | "you";
+  email?: string;
+  phone?: string;
+  /** Where the email came from: the stories, or typed in. */
+  emailFrom?: "story" | "you";
+  state: "pending" | "kept" | "dismissed";
+};
+
 export type BoardItem =
+  | ContactItem
   | StoryItem
   | CardNoteItem
   | BoxItem
@@ -250,6 +274,8 @@ export type Card = {
   link: string;
   title: string;
   source?: string;
+  publishedAt?: string;
+  author?: string;
   quotes: { id: string; text: string }[];
   note: string;
   /** When the story first arrived in the subject; the feed view's order. */
@@ -262,7 +288,13 @@ export type Card = {
  */
 export function cardsOf(note: Note, board: Board | undefined): Card[] {
   const cards = new Map<string, Card>();
-  const ensure = (link: string, title: string, source: string | undefined, at: number) => {
+  const ensure = (
+    link: string,
+    title: string,
+    source: string | undefined,
+    at: number,
+    extra: { publishedAt?: string; author?: string } = {},
+  ) => {
     const id = canonicalUrl(link);
     let card = cards.get(id);
     if (!card) {
@@ -272,18 +304,20 @@ export function cardsOf(note: Note, board: Board | undefined): Card[] {
       card.at = Math.min(card.at, at);
       if (!card.source && source) card.source = source;
     }
+    if (!card.publishedAt && extra.publishedAt) card.publishedAt = extra.publishedAt;
+    if (!card.author && extra.author) card.author = extra.author;
     return card;
   };
 
   for (const entry of note.entries) {
     if (!isQuote(entry)) continue;
-    ensure(entry.link, entry.articleTitle, entry.sourceTitle, entry.at).quotes.push({
+    ensure(entry.link, entry.articleTitle, entry.sourceTitle, entry.at, entry).quotes.push({
       id: entry.id,
       text: entry.text,
     });
   }
   for (const item of live(board)) {
-    if (item.kind === "story") ensure(item.link, item.title, item.source, item.at);
+    if (item.kind === "story") ensure(item.link, item.title, item.source, item.at, item);
     if (item.kind === "suggest" && item.state === "accepted") {
       ensure(item.link, item.title, item.source, item.at);
     }
@@ -308,13 +342,17 @@ export function posId(target: string) {
 /** Add a story to a subject without a quote. Adding it twice is a no-op. */
 export function addStory(
   board: Board | undefined,
-  story: { link: string; title: string; source?: string },
+  story: { link: string; title: string; source?: string; publishedAt?: string; author?: string },
   now = Date.now(),
 ): Board {
   const id = `story:${canonicalUrl(story.link)}`;
   const held = board?.[id];
   if (held && !held.deleted) return board ?? {};
-  return put(board, { id, kind: "story", link: story.link, title: story.title, source: story.source, at: now }, now);
+  return put(
+    board,
+    { id, kind: "story", link: story.link, title: story.title, source: story.source, publishedAt: story.publishedAt, author: story.author, at: now },
+    now,
+  );
 }
 
 /**
@@ -426,7 +464,10 @@ export function shouldAutoRun(
   return !meta.ranAt || now - meta.ranAt >= AUTO_RUN_GAP_MS;
 }
 
+export type FoundContact = { name: string; role: string; why: string; refs: string[]; origin: "story" | "suggested"; email?: string };
+
 export type SynthesisResult = {
+  contacts?: FoundContact[];
   insights: { type: InsightKind; text: string; refs: string[] }[];
   suggestions: { link: string; title: string; source?: string; why: string }[];
   /** Tokens the provider reported, for the spending page. */
@@ -488,7 +529,58 @@ export function applySynthesis(
     );
   }
 
+  for (const found of result.contacts ?? []) next = putContact(next, found, cardIds, now);
+
   return put(next, { ...metaOf(next), sig: signatureOf(input), ranAt: now }, now);
+}
+
+/** One id per person, so a later run updates them rather than adding a twin. */
+export function contactId(name: string) {
+  const slug = name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+  return `contact:${slug || "someone"}`;
+}
+
+/**
+ * A person from a run. What the reader did with them stays: a dismissed
+ * person is not brought back, and details typed in are never overwritten.
+ */
+function putContact(board: Board, found: FoundContact, cardIds: Set<string>, now: number): Board {
+  const name = found.name.trim().slice(0, 120);
+  if (!name) return board;
+  const id = contactId(name);
+  const held = board[id];
+  const existing = held && held.kind === "contact" && !held.deleted ? held : undefined;
+  if (existing?.state === "dismissed") return board;
+  const email = existing?.email || found.email || undefined;
+  return put(
+    board,
+    {
+      id,
+      kind: "contact",
+      name: existing?.origin === "you" ? existing.name : name,
+      role: found.role.trim().slice(0, 200) || existing?.role || "",
+      why: found.why.trim().slice(0, 400) || existing?.why || "",
+      refs: [...new Set([...(existing?.refs ?? []), ...found.refs.filter((ref) => cardIds.has(ref))])],
+      origin: existing?.origin === "you" ? "you" : existing?.origin === "story" ? "story" : found.origin,
+      email,
+      phone: existing?.phone,
+      emailFrom: existing?.email ? existing.emailFrom : found.email ? "story" : undefined,
+      state: existing?.state ?? "pending",
+      at: now,
+    },
+    now,
+  );
+}
+
+export function contactsOf(board: Board | undefined): ContactItem[] {
+  return live(board)
+    .filter((item): item is ContactItem => item.kind === "contact" && item.state !== "dismissed")
+    .sort((a, b) => (a.origin === b.origin ? a.name.localeCompare(b.name) : a.origin === "story" ? -1 : b.origin === "story" ? 1 : 0));
+}
+
+/** Emails written out in some text, lower-cased. */
+export function emailsIn(text: string): Set<string> {
+  return new Set((text.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) ?? []).map((e) => e.toLowerCase()));
 }
 
 /* ------------------------------------------------------------------------ */
@@ -760,4 +852,18 @@ export function addQuoteNote(
     }
   }
   return put(board, { id: cardNoteId(card.id), kind: "cardnote", card: card.id, html: next, at: now }, now);
+}
+
+/** "Oct 1, 2026 · Jane Doe · The Outlet" — what is known of a story, in that order. */
+export function bylineOf(card: { publishedAt?: string; author?: string; source?: string }): string {
+  const parts: string[] = [];
+  const when = card.publishedAt ? new Date(card.publishedAt) : null;
+  if (when && !Number.isNaN(when.getTime())) {
+    parts.push(when.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }));
+  }
+  const author = card.author?.trim();
+  // A feed's author is sometimes just the outlet again.
+  if (author && author.toLowerCase() !== card.source?.trim().toLowerCase()) parts.push(author.slice(0, 80));
+  if (card.source?.trim()) parts.push(card.source.trim());
+  return parts.join(" · ");
 }

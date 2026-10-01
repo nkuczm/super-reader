@@ -150,3 +150,25 @@ test("addQuoteNote nests the note under its quote, and joins a second note to it
     '<ul><li><a data-quote="q1">“First”</a><ul><li>why it matters<ul><li>deeper</li></ul></li><li>another</li></ul></li><li><a data-quote="q2">“Second”</a></li></ul>',
   );
 });
+
+test("contacts from a run keep what the reader did with them", async () => {
+  const { applySynthesis, contactsOf, contactId, put, bylineOf } = await import("../lib/subjects");
+  const input = { subject: "S", cards: [{ id: "https://a.example/s", title: "S", quotes: [], note: "" }], boxes: [], known: [] };
+  const found = (name: string, extra = {}) => ({ name, role: "Mayor", why: "Signed it", refs: ["https://a.example/s", "bogus"], origin: "story" as const, ...extra });
+  let board = applySynthesis({}, input, { insights: [], suggestions: [], contacts: [found("Jane Doe"), found("Sam Roe", { origin: "suggested" })] }, 1);
+  const jane = board[contactId("Jane Doe")];
+  assert.ok(jane && jane.kind === "contact");
+  assert.deepEqual(jane.refs, ["https://a.example/s"]);
+  board = put(board, { ...jane, phone: "555 0100", state: "kept" }, 2);
+  const sam = board[contactId("Sam Roe")];
+  assert.ok(sam && sam.kind === "contact");
+  board = put(board, { ...sam, state: "dismissed" }, 2);
+  board = applySynthesis(board, input, { insights: [], suggestions: [], contacts: [found("Jane Doe", { email: "jane@city.gov" }), found("Sam Roe")] }, 3);
+  const after = contactsOf(board);
+  assert.deepEqual(after.map((c) => c.name), ["Jane Doe"]);
+  assert.equal(after[0].phone, "555 0100");
+  assert.equal(after[0].email, "jane@city.gov");
+  assert.equal(after[0].emailFrom, "story");
+  assert.equal(bylineOf({ publishedAt: "2026-09-30T12:00:00Z", author: "Ann Lee", source: "Wire" }), "Sep 30, 2026 · Ann Lee · Wire");
+  assert.equal(bylineOf({ author: "Wire", source: "Wire" }), "Wire");
+});

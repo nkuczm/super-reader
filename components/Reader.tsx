@@ -1730,7 +1730,13 @@ export default function Reader() {
         : undefined;
       commitBoard(noteId, (board) =>
         // Onto the tab that is open in that subject.
-        placeNew(addStory(board, { link, title: known?.title ?? reading?.title ?? link, source: source?.title }), canonicalUrl(link)),
+        placeNew(addStory(board, {
+            link,
+            title: known?.title ?? reading?.title ?? link,
+            source: source?.title,
+            publishedAt: known?.publishedAt,
+            author: known?.author,
+          }), canonicalUrl(link)),
       );
       touchSubject(noteId);
     },
@@ -1793,6 +1799,8 @@ export default function Reader() {
           link,
           articleTitle: title,
           sourceTitle: source?.title ?? (known as SavedArticle | undefined)?.sourceTitle,
+          publishedAt: known?.publishedAt,
+          author: known?.author,
           at: Date.now(),
         }),
       );
@@ -2045,6 +2053,22 @@ export default function Reader() {
     const ids = new Set(feed?.sources.map((s) => s.id));
     return articles.filter((a) => ids.has(a.sourceId));
   }, [articles, feeds, selection, savedAsArticles, downloadedAsArticles, teamAsArticles, manualAsArticles]);
+
+  /** What the device knows of a story — for the byline on a subject's card. */
+  const articleMetaMap = useMemo(() => {
+    const map = new Map<string, { publishedAt?: string; author?: string; source?: string }>();
+    for (const article of [...manualAsArticles, ...downloadedAsArticles, ...savedAsArticles, ...articles]) {
+      const key = canonicalUrl(article.link);
+      const held = map.get(key) ?? {};
+      map.set(key, {
+        publishedAt: held.publishedAt ?? article.publishedAt,
+        author: held.author ?? article.author,
+        source: held.source ?? (article as { sourceTitle?: string }).sourceTitle,
+      });
+    }
+    return map;
+  }, [articles, savedAsArticles, downloadedAsArticles, manualAsArticles]);
+  const articleMeta = useCallback((link: string) => articleMetaMap.get(canonicalUrl(link)), [articleMetaMap]);
 
   const sourceById = useMemo(
     () => new Map(allSources.map((s) => [s.id, s])),
@@ -3250,6 +3274,7 @@ export default function Reader() {
             accountStrip={accountStrip}
             signedIn={Boolean(auth.account)}
             onRestored={applyWriting}
+            articleMeta={articleMeta}
             saveLabel={
               auth.account ? (auth.backupProblem ? "Not backed up to Drive — see ⋯" : describeSave(auth.status, auth.savedAt)) : undefined
             }
