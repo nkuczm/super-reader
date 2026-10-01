@@ -80,6 +80,8 @@ type Props = {
   articleMeta?: (link: string) => { publishedAt?: string; author?: string; source?: string } | undefined;
 };
 
+const RAIL_KEY = "super-reader:tab-rail";
+
 type RunState = { state: "idle" | "running" | "error"; message?: string };
 
 const INSIGHT_LABEL: Record<InsightItem["type"], string> = {
@@ -103,6 +105,24 @@ export default function SubjectPage(props: Props) {
   const [historyOpen, setHistoryOpen] = useState(false);
   /** The Contacts side tab, in place of the current tab's page. */
   const [contactsOpen, setContactsOpen] = useState(false);
+  /** The tab outline over the document's left edge; remembered, shut on phones. */
+  const [railOpen, setRailOpen] = useState(false);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(RAIL_KEY);
+      setRailOpen(saved === null ? window.innerWidth > 900 : saved === "1");
+    } catch {
+      setRailOpen(window.innerWidth > 900);
+    }
+  }, []);
+  const setRail = (open: boolean) => {
+    setRailOpen(open);
+    try {
+      localStorage.setItem(RAIL_KEY, open ? "1" : "0");
+    } catch {
+      /* not remembered */
+    }
+  };
   const contacts = useMemo(() => contactsOf(board), [board]);
   const [exporting, setExporting] = useState<null | "working" | { url: string } | { error: string }>(null);
   const exportDoc = async () => {
@@ -393,6 +413,17 @@ export default function SubjectPage(props: Props) {
             onClick={() => void synthesize()} title="Find connections and suggest reading now">
             ✦ Insights
           </button>
+          <button
+            className={`btn ghost small subject-contacts-btn${contactsOpen ? " on" : ""}`}
+            aria-pressed={contactsOpen}
+            aria-label="Contacts"
+            onClick={() => setContactsOpen((o) => !o)}
+            title="People to interview for this subject"
+          >
+            <span className="contacts-icon" aria-hidden="true">👥</span>
+            <span className="contacts-label">Contacts</span>
+            {contacts.length > 0 && <span className="count">{contacts.length}</span>}
+          </button>
           <MoreMenu>
             {(close) => (
               <>
@@ -439,18 +470,36 @@ export default function SubjectPage(props: Props) {
         />
       )}
       {aiStatus && <div className="subject-ai-bar">{aiStatus}</div>}
-      <TabBar
-        tabs={tabs}
-        current={currentTab}
-        onSwitch={switchTab}
-        contacts={{ count: contacts.length, open: contactsOpen, onOpen: () => setContactsOpen((o) => !o) }}
-        onAdd={(name) => onBoard((current) => addTab(current, name).board)}
-        onRename={(tab, name) => onBoard((current) => renameTab(current, tab, name))}
-        onDelete={(tab) => onBoard((current) => deleteTab(current, tab))}
-      />
-
       <div className={`subject-body${contactsOpen ? " with-contacts" : ""}`}>
-      <div className="subject-main">
+      <div className={`subject-main${railOpen ? " rail-open" : " rail-closed"}`}>
+      <div className={`tab-rail${railOpen ? " open" : ""}`}>
+        {railOpen ? (
+          <>
+            <div className="tab-rail-head">
+              <span>Tabs</span>
+              <button className="icon-btn subtle" aria-label="Hide tabs" title="Hide tabs" onClick={() => setRail(false)}>
+                ‹
+              </button>
+            </div>
+            <TabBar
+              tabs={tabs}
+              current={currentTab}
+              onSwitch={(tab) => {
+                switchTab(tab);
+                // On a phone the outline covers the page; it gets out of the way.
+                if (window.innerWidth <= 900) setRailOpen(false);
+              }}
+              onAdd={(name) => onBoard((current) => addTab(current, name).board)}
+              onRename={(tab, name) => onBoard((current) => renameTab(current, tab, name))}
+              onDelete={(tab) => onBoard((current) => deleteTab(current, tab))}
+            />
+          </>
+        ) : (
+          <button className="tab-rail-show" aria-label="Show tabs" title="Show tabs" onClick={() => setRail(true)}>
+            ☰ <span>{tabs.find((tab) => tab.id === currentTab)?.name ?? "Tabs"}</span>
+          </button>
+        )}
+      </div>
       {meta.view === "board" ? (
         <Whiteboard {...shared} board={board} onBoard={onBoard} addBox={addBox} />
       ) : (
