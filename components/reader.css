@@ -1654,7 +1654,7 @@
 }
 .more-menu > button:hover:not(:disabled) { background: var(--bg-hover); }
 .more-menu > button:disabled { color: var(--text-dim); }
-.more-check { width: 18px; color: var(--accent); }
+.more-check { margin-left: auto; padding-left: 12px; color: var(--accent); font-weight: 700; }
 .more-account { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 4px; }
 .more-account .account-strip { padding: 6px 10px; flex-direction: column; align-items: flex-start; }
 .more-account .account-strip.nudge { margin: 4px 0 0; }
@@ -1669,3 +1669,21 @@
   .subject-head .subject-title-wrap { flex: 1 1 calc(100% - 100px); }
   .subject-head .subject-actions { margin-left: auto; }
 }
+
+/* ---------- a note under a quote, written as it is filed ---------- */
+.quote-note-box {
+  width: min(340px, calc(100vw - 24px)); align-self: center;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); padding: 4px 8px 6px;
+  opacity: 0.92; display: flex; flex-direction: column; gap: 6px;
+}
+.quote-note-box.writing { opacity: 1; border-color: var(--accent); }
+.quote-note-box .rich-tools { display: none; }
+.quote-note-box .rich-body { min-height: 0; max-height: 30vh; overflow-y: auto; font-size: 14px; padding: 2px 0; }
+.quote-note-box .rich-body ul { margin: 2px 0; padding-left: 20px; }
+.quote-note-box .btn { align-self: flex-end; }
+.quote-note-box:not(.writing) .rich-body li:only-child:has(> br:only-child)::after {
+  content: "Add a note about this quote…"; color: var(--text-dim);
+}
+.quote-note-box .rich-body li { position: relative; }
+.quote-note-box:not(.writing) .rich-body li:only-child:has(> br:only-child)::after { position: absolute; left: 0; top: 0; white-space: nowrap; }

@@ -379,7 +379,7 @@ export default function SubjectPage(props: Props) {
                   onClick={() => { close(); void copyTab(); }}>Copy this tab</button>
                 <button role="menuitemcheckbox" aria-checked={Boolean(meta.offline)}
                   onClick={() => onBoard((current) => put(current, { ...metaOf(current), offline: !metaOf(current).offline }))}>
-                  <span className="more-check">{meta.offline ? "✓" : ""}</span>Available offline
+                  Available offline{meta.offline && <span className="more-check">✓</span>}
                 </button>
                 {props.signedIn && (
                   <>

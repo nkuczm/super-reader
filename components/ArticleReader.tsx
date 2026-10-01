@@ -36,6 +36,8 @@ type Props = {
    */
   notes?: Note[];
   onQuote?: (noteId: string, text: string) => string | void;
+  /** A note written under a quote as it is filed (Subjects only). */
+  onQuoteNote?: (noteId: string, entryId: string, html: string) => void;
   onCreateNote?: (name: string) => string;
   /** Where the "Added to…" bubble leads, and how it re-files a quote. */
   onOpenNote?: (noteId: string) => void;
@@ -70,6 +72,7 @@ export default function ArticleReader({
   onToggleSave,
   notes,
   onQuote,
+  onQuoteNote,
   onCreateNote,
   onOpenNote,
   onMoveQuote,
@@ -655,6 +658,7 @@ export default function ArticleReader({
                 onCreateNote={onCreateNote}
                 onOpenNote={onOpenNote}
                 onMoveQuote={onMoveQuote}
+                onQuoteNote={subjects ? onQuoteNote : undefined}
               />
             )}
             {article.via === "preview" && (

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "./icons";
+import RichText from "./RichText";
 import { cleanQuoteText, type Note } from "@/lib/notes";
 
 type Placed = { text: string; top: number; left: number };
@@ -22,8 +23,11 @@ export default function QuoteToNote({
   onCreateNote,
   onOpenNote,
   onMoveQuote,
+  onQuoteNote,
   noun = "note",
 }: {
+  /** Jot a note under the quote just filed; it lands as bullets beneath it. */
+  onQuoteNote?: (noteId: string, entryId: string, html: string) => void;
   /** "note", or "subject" with Subjects switched on. */
   noun?: string;
   container: React.RefObject<HTMLElement | null>;
@@ -48,6 +52,10 @@ export default function QuoteToNote({
     { noteId: string; noteName: string; entryId?: string } | null
   >(null);
   const [changing, setChanging] = useState(false);
+  /** The note under the quote: started once the box is clicked into. */
+  const [writing, setWriting] = useState(false);
+  const draft = useRef("");
+  const toast = useRef<HTMLDivElement | null>(null);
   const [renaming, setRenaming] = useState("");
   const hide = useRef<ReturnType<typeof setTimeout> | null>(null);
   const root = useRef<HTMLDivElement | null>(null);
@@ -161,8 +169,34 @@ export default function QuoteToNote({
     hide.current = setTimeout(() => {
       setAdded(null);
       setChanging(false);
+      setWriting(false);
     }, ms);
   }, []);
+
+  /** File what was written under the quote, and let the bubble go. */
+  const saveNote = useCallback(() => {
+    const html = draft.current;
+    draft.current = "";
+    setWriting(false);
+    if (added?.entryId && onQuoteNote && html) onQuoteNote(added.noteId, added.entryId, html);
+    linger(800);
+  }, [added, onQuoteNote, linger]);
+
+  // Clicking away from a note in progress keeps it.
+  useEffect(() => {
+    if (!writing) return;
+    const away = (event: PointerEvent) => {
+      if (!toast.current?.contains(event.target as globalThis.Node)) saveNote();
+    };
+    document.addEventListener("pointerdown", away);
+    return () => document.removeEventListener("pointerdown", away);
+  }, [writing, saveNote]);
+
+  /** Clicked into: the bubble stays for as long as the note takes. */
+  const startWriting = () => {
+    if (hide.current) clearTimeout(hide.current);
+    setWriting(true);
+  };
 
   function finish(noteId: string, name: string, text: string) {
     const entryId = onQuote(noteId, text) || undefined;
@@ -175,7 +209,9 @@ export default function QuoteToNote({
     // note, or sends the quote to a different one.
     setAdded({ noteId, noteName: name, entryId });
     setChanging(false);
-    linger(6000);
+    setWriting(false);
+    draft.current = "";
+    linger(onQuoteNote && entryId ? 8000 : 6000);
   }
 
   /** Send the quote that was just filed somewhere else instead. */
@@ -256,7 +292,7 @@ export default function QuoteToNote({
         </div>
       )}
       {added && (
-        <div className="quote-toast" role="status">
+        <div className="quote-toast" role="status" ref={toast}>
           {changing && (
             <div className="quote-menu toast-menu" role="menu">
               {notes
@@ -291,6 +327,33 @@ export default function QuoteToNote({
                   Add
                 </button>
               </div>
+            </div>
+          )}
+          {onQuoteNote && added.entryId && !changing && (
+            <div
+              className={`quote-note-box${writing ? " writing" : ""}`}
+              onPointerDownCapture={() => startWriting()}
+              onFocusCapture={() => startWriting()}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" || (event.key === "Enter" && (event.metaKey || event.ctrlKey))) {
+                  event.preventDefault();
+                  saveNote();
+                }
+              }}
+            >
+              <RichText
+                className="quote-note-field"
+                html="<ul><li><br></li></ul>"
+                placeholder="Add a note about this quote…"
+                onChange={(html) => {
+                  draft.current = html;
+                }}
+              />
+              {writing && (
+                <button className="btn small" onMouseDown={(event) => event.preventDefault()} onClick={saveNote}>
+                  Done
+                </button>
+              )}
             </div>
           )}
           <div className="quote-toast-row">
