@@ -1777,3 +1777,20 @@
   .subject-head .subject-actions { gap: 4px; }
   .subject-head .subject-actions .btn { padding-left: 8px; padding-right: 8px; }
 }
+.subject-head .tab-rail-show { box-shadow: none; border-radius: 8px; padding: 4px 10px; max-width: 160px; }
+.tab-rail-show.on { border-color: var(--accent); color: var(--accent); }
+.subject-main .subject-doc { padding-top: 8px; }
+.tab-rail.open.on-board { top: 56px; }
+@media (max-width: 640px) { .subject-head .tab-rail-show { max-width: 90px; } }
+@media (max-width: 640px) {
+  .subject-head .tab-rail-show span { display: none; }
+  .subject-head .tab-rail-show { padding: 4px 9px; }
+  .subject-head .subject-actions { flex-wrap: wrap; justify-content: flex-end; row-gap: 4px; }
+}
+/* On the whiteboard the toolbar runs along the top; the outline sits below it. */
+.tab-rail.open.on-board { top: auto; bottom: 16px; }
+@media (max-width: 420px) {
+  .subject-head .seg button { padding: 4px 6px; }
+  .subject-head .subject-actions { gap: 3px; }
+  .subject-head .subject-actions .btn { padding-left: 7px; padding-right: 7px; }
+}

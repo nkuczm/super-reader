@@ -403,6 +403,15 @@ export default function SubjectPage(props: Props) {
           )}
         </div>
         <div className="subject-actions">
+          <button
+            className={`tab-rail-show${railOpen ? " on" : ""}`}
+            aria-label={railOpen ? "Hide tabs" : "Show tabs"}
+            aria-pressed={railOpen}
+            title={railOpen ? "Hide tabs" : "Show tabs"}
+            onClick={() => setRail(!railOpen)}
+          >
+            ☰ <span>{tabs.find((tab) => tab.id === currentTab)?.name ?? "Tabs"}</span>
+          </button>
           <div className="seg" role="tablist" aria-label="View">
             <button role="tab" aria-selected={meta.view !== "board"} className={meta.view !== "board" ? "on" : ""}
               onClick={() => setView("doc")}>Document</button>
@@ -472,8 +481,8 @@ export default function SubjectPage(props: Props) {
       {aiStatus && <div className="subject-ai-bar">{aiStatus}</div>}
       <div className={`subject-body${contactsOpen ? " with-contacts" : ""}`}>
       <div className={`subject-main${railOpen ? " rail-open" : " rail-closed"}`}>
-      <div className={`tab-rail${railOpen ? " open" : ""}`}>
-        {railOpen ? (
+      {railOpen && (
+      <div className={`tab-rail open${meta.view === "board" ? " on-board" : ""}`}>
           <>
             <div className="tab-rail-head">
               <span>Tabs</span>
@@ -494,12 +503,8 @@ export default function SubjectPage(props: Props) {
               onDelete={(tab) => onBoard((current) => deleteTab(current, tab))}
             />
           </>
-        ) : (
-          <button className="tab-rail-show" aria-label="Show tabs" title="Show tabs" onClick={() => setRail(true)}>
-            ☰ <span>{tabs.find((tab) => tab.id === currentTab)?.name ?? "Tabs"}</span>
-          </button>
-        )}
       </div>
+      )}
       {meta.view === "board" ? (
         <Whiteboard {...shared} board={board} onBoard={onBoard} addBox={addBox} />
       ) : (
