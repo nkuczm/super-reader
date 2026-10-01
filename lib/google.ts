@@ -130,7 +130,28 @@ async function drive(accessToken: string, url: string, init: RequestInit = {}) {
     signal: AbortSignal.timeout(20000),
   });
   const data = await res.json().catch(() => ({}));
+  if (!res.ok) console.error("drive request failed", res.status, JSON.stringify(data?.error ?? data).slice(0, 500));
   return { ok: res.ok, status: res.status, data };
+}
+
+/**
+ * What a refusal from Drive means, in words that say what to do. The two
+ * 403s that matter are both setup, not bugs: the Drive API switched off in
+ * the Cloud project, or the Drive box left unticked when signing in.
+ */
+export function driveProblem(status: number, data: { error?: { message?: string; errors?: { reason?: string }[]; details?: { reason?: string }[] } }, doing: string) {
+  const reasons = [
+    ...(data?.error?.errors ?? []).map((e) => e.reason),
+    ...(data?.error?.details ?? []).map((e) => e.reason),
+  ].join(" ");
+  const message = data?.error?.message ?? "";
+  if (/accessNotConfigured|SERVICE_DISABLED/i.test(reasons) || /has not been used|is disabled/i.test(message)) {
+    return `Could not ${doing}: the Google Drive API is not enabled for this app's Google Cloud project. Enable it under APIs & Services → Library → Google Drive API, wait a minute, and try again.`;
+  }
+  if (/insufficientPermissions|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(reasons) || /insufficient/i.test(message)) {
+    return `Could not ${doing}: Google Drive access was not granted. Sign out, sign in again, and tick the box that lets Super Reader create files in your Drive.`;
+  }
+  return `Could not ${doing} (${status}${message ? `: ${message}` : ""})`;
 }
 
 export async function createFolder(accessToken: string, name: string): Promise<string> {
@@ -139,7 +160,7 @@ export async function createFolder(accessToken: string, name: string): Promise<s
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ name, mimeType: FOLDER }),
   });
-  if (!ok || !data.id) throw new Error(`Could not create the backup folder (${status})`);
+  if (!ok || !data.id) throw new Error(driveProblem(status, data, "create the backup folder"));
   return data.id;
 }
 
@@ -168,17 +189,17 @@ export async function createDoc(accessToken: string, params: { name: string; htm
     headers: { "content-type": contentType },
     body,
   });
-  if (!ok || !data.id) throw new Error(`Could not create the Google Doc (${status})`);
+  if (!ok || !data.id) throw new Error(driveProblem(status, data, "create the Google Doc"));
   return { id: data.id as string, url: (data.webViewLink as string) ?? `https://docs.google.com/document/d/${data.id}/edit` };
 }
 
 /** Replace a Doc's contents (and title) with new HTML. */
 export async function updateDoc(accessToken: string, fileId: string, params: { name: string; html: string }) {
   const { body, contentType } = multipart({ name: params.name }, params.html);
-  const { ok, status } = await drive(
+  const { ok, status, data } = await drive(
     accessToken,
     `${UPLOAD}/${encodeURIComponent(fileId)}?uploadType=multipart&fields=id`,
     { method: "PATCH", headers: { "content-type": contentType }, body },
   );
-  if (!ok) throw new Error(`Could not update the Google Doc (${status})`);
+  if (!ok) throw new Error(driveProblem(status, data, "update the Google Doc"));
 }

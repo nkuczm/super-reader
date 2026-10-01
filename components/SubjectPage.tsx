@@ -70,6 +70,8 @@ type Props = {
   /** History and export live with the Google account. */
   signedIn?: boolean;
   onRestored?: (doc: Writing) => void;
+  /** "Saved 5:27 PM" and the like, beside the title. */
+  saveLabel?: string;
 };
 
 type RunState = { state: "idle" | "running" | "error"; message?: string };
@@ -321,10 +323,10 @@ export default function SubjectPage(props: Props) {
         )}
         {props.onBack && (
           <button className="btn ghost small" onClick={props.onBack} aria-label="All subjects">
-            {Icon.back} Subjects
+            {Icon.back}
           </button>
         )}
-        <div>
+        <div className="subject-title-wrap">
           {renaming !== null ? (
             <form
               className="subject-rename"
@@ -354,11 +356,9 @@ export default function SubjectPage(props: Props) {
               {note.name}
             </h1>
           )}
-          <p className="sub">
-            {cards.length} {cards.length === 1 ? "story" : "stories"}
-            {insights.length > 0 && ` · ${insights.length} insights`}
-            {suggestions.length > 0 && ` · ${suggestions.length} suggested`}
-          </p>
+          {(copied || props.saveLabel) && (
+            <span className="subject-save" role="status">{copied ? "Copied" : props.saveLabel}</span>
+          )}
         </div>
         <div className="subject-actions">
           <div className="seg" role="tablist" aria-label="View">
@@ -367,35 +367,34 @@ export default function SubjectPage(props: Props) {
             <button role="tab" aria-selected={meta.view === "board"} className={meta.view === "board" ? "on" : ""}
               onClick={() => setView("board")}>Whiteboard</button>
           </div>
-          <button className="btn ghost small" onClick={() => addBox()}>+ Text box</button>
-          <button className="btn ghost small" onClick={() => void copyTab()} title="Copy this tab as formatted text, for Google Docs and the like">
-            {copied ? "Copied" : "Copy"}
-          </button>
-          <button
-            className={`btn ghost small ${meta.offline ? "on" : ""}`}
-            aria-pressed={Boolean(meta.offline)}
-            onClick={() => onBoard((current) => put(current, { ...metaOf(current), offline: !metaOf(current).offline }))}
-            title="Keep every story in this subject downloaded for reading without a connection"
-          >
-            {meta.offline ? "✓ Available offline" : "Make available offline"}
-          </button>
-          {props.signedIn && (
-            <>
-              <button className="btn ghost small" onClick={() => setHistoryOpen(true)}>
-                History
-              </button>
-              <button className="btn ghost small" disabled={exporting === "working"} onClick={() => void exportDoc()}>
-                {exporting === "working" ? "Exporting…" : "Export to Google Doc"}
-              </button>
-            </>
-          )}
           <button className="btn ghost small" disabled={!hasAiKey || allCards.length < 2 || run.state === "running"}
             onClick={() => void synthesize()} title="Find connections and suggest reading now">
             ✦ Insights
           </button>
+          <MoreMenu>
+            {(close) => (
+              <>
+                <button role="menuitem" onClick={() => { close(); addBox(); }}>Add text box</button>
+                <button role="menuitem" title="Copy this tab as formatted text, for Google Docs and the like"
+                  onClick={() => { close(); void copyTab(); }}>Copy this tab</button>
+                <button role="menuitemcheckbox" aria-checked={Boolean(meta.offline)}
+                  onClick={() => onBoard((current) => put(current, { ...metaOf(current), offline: !metaOf(current).offline }))}>
+                  <span className="more-check">{meta.offline ? "✓" : ""}</span>Available offline
+                </button>
+                {props.signedIn && (
+                  <>
+                    <button role="menuitem" onClick={() => { close(); setHistoryOpen(true); }}>Version history</button>
+                    <button role="menuitem" disabled={exporting === "working"} onClick={() => { close(); void exportDoc(); }}>
+                      {exporting === "working" ? "Exporting…" : "Export to Google Doc"}
+                    </button>
+                  </>
+                )}
+                {props.accountStrip && <div className="more-account">{props.accountStrip}</div>}
+              </>
+            )}
+          </MoreMenu>
         </div>
       </div>
-      {props.accountStrip}
       {typeof exporting === "object" && exporting && (
         <div className="subject-ai-bar">
           {"url" in exporting ? (
@@ -1164,6 +1163,38 @@ function TabBar({
         <button className="subject-tab-add" aria-label="Add a tab" title="Add a tab" onClick={() => setEditing({ id: null, draft: "" })}>
           +
         </button>
+      )}
+    </div>
+  );
+}
+
+/** The ⋯ menu that holds everything the header does not need to show. */
+function MoreMenu({ children }: { children: (close: () => void) => React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as globalThis.Node)) setOpen(false);
+    };
+    const esc = (event: KeyboardEvent) => event.key === "Escape" && setOpen(false);
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("pointerdown", away);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+  return (
+    <div className="more-wrap" ref={ref}>
+      <button className="btn ghost small more-btn" aria-label="More" aria-haspopup="menu" aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}>
+        ⋯
+      </button>
+      {open && (
+        <div className="more-menu" role="menu">
+          {children(() => setOpen(false))}
+        </div>
       )}
     </div>
   );

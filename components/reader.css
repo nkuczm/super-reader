@@ -1631,3 +1631,41 @@
   .history-body { flex-direction: column; }
   .history-list { width: auto; max-height: 30%; border-right: 0; border-bottom: 1px solid var(--border); }
 }
+
+/* ---------- compact subject header ---------- */
+.main-head.subject-head { padding: calc(8px + var(--safe-top)) 16px 6px; align-items: center; gap: 8px; flex-wrap: nowrap; border-bottom: 0; }
+.subject-head .menu-btn, .subject-head > .btn { flex-shrink: 0; }
+.subject-title-wrap { display: flex; align-items: baseline; gap: 10px; min-width: 0; flex: 1; }
+.subject-head h1 { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.subject-save { font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+.subject-head .subject-actions { flex-wrap: nowrap; flex-shrink: 0; }
+.subject-head .seg button { padding: 4px 10px; }
+.subject-tabs { padding: 0 16px 6px; }
+.more-wrap { position: relative; }
+.more-btn { font-size: 18px; line-height: 1; padding: 2px 10px; }
+.more-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 50; min-width: 230px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 6px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18); display: flex; flex-direction: column;
+}
+.more-menu > button {
+  text-align: left; background: none; border: 0; color: var(--text); font: inherit; font-size: 14px;
+  padding: 8px 10px; border-radius: 6px; cursor: pointer; display: flex; align-items: center;
+}
+.more-menu > button:hover:not(:disabled) { background: var(--bg-hover); }
+.more-menu > button:disabled { color: var(--text-dim); }
+.more-check { width: 18px; color: var(--accent); }
+.more-account { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 4px; }
+.more-account .account-strip { padding: 6px 10px; flex-direction: column; align-items: flex-start; }
+.more-account .account-strip.nudge { margin: 4px 0 0; }
+.more-account .account-strip .link-btn { margin-left: 0; padding-left: 0; }
+@media (max-width: 640px) {
+  .subject-head .seg button { padding: 4px 7px; font-size: 12px; }
+  .subject-save { display: none; }
+}
+.account-problem { color: var(--danger); font-size: 12px; line-height: 1.4; white-space: normal; max-width: 260px; }
+@media (max-width: 640px) {
+  .main-head.subject-head { flex-wrap: wrap; row-gap: 6px; }
+  .subject-head .subject-title-wrap { flex: 1 1 calc(100% - 100px); }
+  .subject-head .subject-actions { margin-left: auto; }
+}

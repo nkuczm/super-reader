@@ -24,7 +24,7 @@ import { subjectHtml, subjectSignature } from "./subject-doc";
 
 export const FOLDER_NAME = "Super Reader backups";
 
-export type BackupResult = { backedUp: number; unchanged: number; failed: string[]; connected: boolean };
+export type BackupResult = { backedUp: number; unchanged: number; failed: string[]; connected: boolean; problem?: string };
 
 async function folderFor(accountId: string, accessToken: string) {
   const known = await driveFolderFor(accountId);
@@ -61,8 +61,9 @@ export async function backupSubjects(accountId: string): Promise<BackupResult> {
         await recordBackup(accountId, note.id, created.id, signature);
       }
       result.backedUp += 1;
-    } catch {
+    } catch (error) {
       result.failed.push(note.name);
+      result.problem ??= error instanceof Error ? error.message : "Backup failed";
     }
   }
   return result;

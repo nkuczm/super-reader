@@ -38,6 +38,7 @@ export function useAccount(params: {
   const [status, setStatus] = useState<SaveStatus>("idle");
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [backedUpAt, setBackedUpAt] = useState<number | null>(null);
+  const [backupProblem, setBackupProblem] = useState<string | null>(null);
   /** The account's copy has been read this session; saving may begin. */
   const loaded = useRef(false);
   /** Bumped to make the autosave look again without a new edit. */
@@ -98,6 +99,12 @@ export function useAccount(params: {
           linked.current = true;
         }
         if (!cancelled) await load();
+        // Once per visit, bring Drive up to date even if nothing is edited:
+        // only subjects that differ from their last backup are uploaded.
+        if (!cancelled) {
+          backupDue.current = true;
+          setTimeout(() => void backupRef.current(), 15_000);
+        }
         if (!cancelled) setStatus("saved");
       } catch {
         if (!cancelled) setStatus(navigator.onLine ? "error" : "offline");
@@ -123,12 +130,19 @@ export function useAccount(params: {
     backupDue.current = false;
     try {
       const res = await fetch("/api/subjects/backup", { method: "POST" });
-      if (!res.ok) throw new Error("backup failed");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Backup to Google Docs failed");
+      if (data.problem) throw new Error(data.problem);
+      setBackupProblem(null);
       setBackedUpAt(Date.now());
-    } catch {
+    } catch (error) {
       backupDue.current = true;
+      setBackupProblem(error instanceof Error ? error.message : "Backup to Google Docs failed");
     }
   }, []);
+
+  const backupRef = useRef(backup);
+  backupRef.current = backup;
 
   // Autosave: a burst of typing is one request, and only real changes go.
   useEffect(() => {
@@ -199,5 +213,5 @@ export function useAccount(params: {
     await backup();
   }, [backup]);
 
-  return { enabled, account, checked, status, savedAt, backedUpAt, signOut, backupNow };
+  return { enabled, account, checked, status, savedAt, backedUpAt, backupProblem, signOut, backupNow };
 }

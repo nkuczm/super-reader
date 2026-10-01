@@ -161,7 +161,7 @@ import {
 import type { WatchMarks } from "@/lib/alerts";
 import type { SavedRemoval } from "@/lib/saved";
 import { useAccount, type Writing } from "./useAccount";
-import SignInCard, { AccountStrip } from "./SignInCard";
+import SignInCard, { AccountStrip, describe as describeSave } from "./SignInCard";
 import "./reader.css";
 
 type Loaded = Article & { sourceId: string };
@@ -1038,6 +1038,7 @@ export default function Reader() {
       status={auth.status}
       savedAt={auth.savedAt}
       backedUpAt={auth.backedUpAt}
+      backupProblem={auth.backupProblem}
       onSignOut={() => void auth.signOut()}
     />
   );
@@ -3224,6 +3225,9 @@ export default function Reader() {
             accountStrip={accountStrip}
             signedIn={Boolean(auth.account)}
             onRestored={applyWriting}
+            saveLabel={
+              auth.account ? (auth.backupProblem ? "Not backed up to Drive — see ⋯" : describeSave(auth.status, auth.savedAt)) : undefined
+            }
             note={openNote}
             board={boards[openNote.id]}
             onBack={() => choose({ type: "subjects" })}
