@@ -1542,3 +1542,7 @@
 .subject-title-editable { cursor: text; border-radius: 6px; }
 .subject-title-editable:hover { background: var(--bg-hover); }
 .subject-rename-input { font-size: 22px; font-weight: 700; padding: 2px 6px; min-width: 280px; }
+@media (max-width: 760px) {
+  /* The menu opens leftwards on a phone, where the button sits near the right edge. */
+  .subject-menu { left: auto; right: 0; max-width: calc(100vw - 24px); }
+}

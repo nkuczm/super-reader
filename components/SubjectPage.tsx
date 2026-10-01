@@ -478,7 +478,10 @@ function Whiteboard(
   },
 ) {
   const { board, onBoard } = shared;
-  const [view, setView] = useState({ x: 40, y: 40, zoom: 1 });
+  // A phone starts zoomed out, so more than one card fits across.
+  const startView = () =>
+    typeof window !== "undefined" && window.innerWidth < 760 ? { x: 12, y: 12, zoom: 0.55 } : { x: 40, y: 40, zoom: 1 };
+  const [view, setView] = useState(startView);
   const [drag, setDrag] = useState<{ id: string; x: number; y: number } | null>(null);
   const [connecting, setConnecting] = useState<string | null | false>(false);
   const [focus, setFocus] = useState<string | null>(null);
@@ -667,7 +670,45 @@ function Whiteboard(
       }
     };
     el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
+
+    // Two fingers on a touchscreen: pinch to zoom around their midpoint.
+    const touches = new Map<number, { x: number; y: number }>();
+    let pinch: { distance: number } | null = null;
+    const spread = () => {
+      const [a, b] = [...touches.values()];
+      return { distance: Math.hypot(a.x - b.x, a.y - b.y), mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
+    };
+    const onDown = (event: PointerEvent) => {
+      if (event.pointerType !== "touch") return;
+      touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (touches.size === 2) pinch = { distance: spread().distance };
+    };
+    const onMove = (event: PointerEvent) => {
+      if (!touches.has(event.pointerId)) return;
+      touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (!pinch || touches.size !== 2) return;
+      const { distance, mid } = spread();
+      if (pinch.distance > 0 && distance > 0) {
+        const rect = el.getBoundingClientRect();
+        zoomAround(distance / pinch.distance, mid.x - rect.left, mid.y - rect.top);
+      }
+      pinch = { distance };
+    };
+    const onUp = (event: PointerEvent) => {
+      touches.delete(event.pointerId);
+      if (touches.size < 2) pinch = null;
+    };
+    el.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -707,7 +748,7 @@ function Whiteboard(
         </button>
         <button className="btn ghost small" onClick={() => zoomBy(1.1)} aria-label="Zoom in">+</button>
         <button className="btn ghost small" onClick={() => zoomBy(1 / 1.1)} aria-label="Zoom out">−</button>
-        <button className="btn ghost small" onClick={() => setView({ x: 40, y: 40, zoom: 1 })}>Reset view</button>
+        <button className="btn ghost small" onClick={() => setView(startView())}>Reset view</button>
         <button className={`btn ghost small${showAiLinks ? " on" : ""}`} onClick={() => setShowAiLinks((v) => !v)}
           title="Show every line from the AI's insights to the stories they draw on">
           AI links

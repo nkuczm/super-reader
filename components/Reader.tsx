@@ -3,6 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Article, Attachment, DiscoverResult } from "@/lib/types";
 import {
+  cleanSharedPrefs,
+  loadSharedPrefs,
+  sameSharedPrefs,
+  saveSharedPrefs,
+  sharedPrefsOf,
+  type SharedPrefs,
+  cleanFeeds,
   loadFeeds,
   saveFeeds,
   loadRead,
@@ -95,6 +102,7 @@ import {
   type Boards,
 } from "@/lib/subjects";
 import { loadHealth, recordRuns, saveHealth, type HealthLog } from "@/lib/health";
+import { listenForClientErrors } from "@/lib/client-errors";
 import { encodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import {
   downloadForOffline,
@@ -310,6 +318,9 @@ export default function Reader() {
   const [notes, setNotes] = useState<Note[]>([]);
   /** Subject boards, one per note, when Subjects is on (lib/subjects.ts). */
   const [boards, setBoards] = useState<Boards>({});
+  /** Settings that follow the person between devices, with when they changed. */
+  const [prefs, setPrefs] = useState<SharedPrefs>({ subjects: false, aiProvider: "anthropic", openaiModel: "gpt-5-mini", at: 0 });
+  const prefsRef = useRef<SharedPrefs>(prefs);
   /** Stories pasted in by hand (lib/manual.ts). */
   const [manual, setManual] = useState<ManualStories>({});
   const manualRef = useRef<ManualStories>({});
@@ -392,6 +403,9 @@ export default function Reader() {
   /** Deletions, dated, so syncing does not put them back. */
   const noteRemovalsRef = useRef<NoteRemoval[]>([]);
 
+  // Crashes on a phone are otherwise invisible; see lib/client-errors.ts.
+  useEffect(() => listenForClientErrors(), []);
+
   useEffect(() => {
     /**
      * Repair on load: a source whose feed has died since it was added points
@@ -407,7 +421,12 @@ export default function Reader() {
     );
     setRead(loadRead());
     setSyncCode(loadSyncCode());
-    setSettings(loadSettings());
+    const storedSettings = loadSettings();
+    setSettings(storedSettings);
+    const storedPrefs = loadSharedPrefs(storedSettings);
+    prefsRef.current = storedPrefs;
+    setPrefs(storedPrefs);
+    saveSharedPrefs(storedPrefs);
     setCollapsed(loadCollapsed());
     setSaved(loadSaved());
     setSavedRemovals(loadSavedRemovals());
@@ -452,6 +471,7 @@ export default function Reader() {
     noteRemovals?: NoteRemoval[];
     boards?: Boards;
     manual?: ManualStories;
+    prefs?: unknown;
     teams?: unknown;
     vault?: unknown;
     updatedAt?: number;
@@ -471,9 +491,11 @@ export default function Reader() {
     if (
       !stale &&
       Array.isArray(payload.feeds) &&
-      !unchanged(payload.feeds, feedsRef.current)
+      !unchanged(cleanFeeds(payload.feeds), feedsRef.current)
     ) {
-      setFeeds(payload.feeds);
+      // Checked like stored feeds: another device's malformed list must not
+      // blank this one.
+      setFeeds(cleanFeeds(payload.feeds));
     }
     // Which team feeds this person is on travels between their own devices;
     // what is *in* those feeds does not, and never touches local storage.
@@ -533,6 +555,23 @@ export default function Reader() {
       boardsRef.current = mergedBoards;
       setBoards(mergedBoards);
       saveBoards(mergedBoards);
+    }
+    // Shared settings: the more recent choice wins, whichever device made it.
+    const remotePrefs = cleanSharedPrefs(payload.prefs);
+    if (remotePrefs && remotePrefs.at > prefsRef.current.at) {
+      prefsRef.current = remotePrefs;
+      setPrefs(remotePrefs);
+      saveSharedPrefs(remotePrefs);
+      setSettings((current) => {
+        const next = {
+          ...current,
+          subjects: remotePrefs.subjects,
+          aiProvider: remotePrefs.aiProvider,
+          openaiModel: remotePrefs.openaiModel,
+        };
+        saveSettings(next);
+        return next;
+      });
     }
     const mergedManual = mergeManual(manualRef.current, payload.manual ?? {});
     if (!sameManual(mergedManual, manualRef.current)) {
@@ -605,6 +644,7 @@ export default function Reader() {
       // The same for subject boards: compared as they would be sent.
       !sameBoards(slimBoardsForSync(mergedBoards), payload.boards ?? {}) ||
       !sameManual(mergedManual, payload.manual ?? {}) ||
+      prefsRef.current.at > (cleanSharedPrefs(payload.prefs)?.at ?? 0) ||
       // Compared as it would be *sent*, not as it is held: the wire copy is
       // cut to a budget, and comparing the full set against the server's copy
       // would report news this device can never deliver — and push forever
@@ -732,6 +772,7 @@ export default function Reader() {
     noteRemovals,
     boards,
     manual,
+    prefs,
     vault,
     teams,
     ready,
@@ -787,6 +828,7 @@ export default function Reader() {
             noteRemovals,
             boards: slimBoardsForSync(boards),
             manual,
+            prefs,
             teams,
             vault,
             updatedAt,
@@ -818,6 +860,7 @@ export default function Reader() {
     noteRemovals,
     boards,
     manual,
+    prefs,
     teams,
     ready,
     syncCode,
@@ -855,6 +898,7 @@ export default function Reader() {
         noteRemovals,
         boards: slimBoardsForSync(boards),
         manual,
+        prefs,
         teams,
         vault,
         updatedAt: Math.max(Date.now(), updatedAtRef.current + 1),
@@ -879,6 +923,7 @@ export default function Reader() {
     noteRemovals,
     boards,
     manual,
+    prefs,
     teams,
     vault,
   ]);
@@ -1760,6 +1805,13 @@ export default function Reader() {
   function updateSettings(next: Settings) {
     setSettings(next);
     saveSettings(next);
+    // Turning Subjects on, or choosing an AI, is a choice for every device.
+    if (!sameSharedPrefs(prefsRef.current, next)) {
+      const stamped = sharedPrefsOf(next, Math.max(Date.now(), prefsRef.current.at + 1));
+      prefsRef.current = stamped;
+      setPrefs(stamped);
+      saveSharedPrefs(stamped);
+    }
   }
 
   function markRead(id: string) {
