@@ -204,6 +204,18 @@ Titles and dates come from each page's `og:title` and
 already carry both and list hundreds. `lib/enrich.ts` now reads unquoted meta
 attributes; minified pages ship them.
 
+### An article folded behind "Read more" (1 Oct 2026)
+
+`finance.yahoo.com/news/mark-zuckerberg-expands-300m-hawaii-191500262.html`
+read as 478 words of a "4 min read". The page carries the whole story, but
+everything after the first few paragraphs sits in `<div class="read-more-wrapper"
+style="display: none">` behind a "Story Continues" button, and Readability skips
+hidden elements. `unfoldReadMore()` in `lib/article.ts` now unhides a hidden
+block only when its class, id or test id names it as the continuation and it
+holds real paragraphs — other hidden content, modals included, stays hidden.
+The same story then reads as 771 words. `EXTRACT_VERSION` went to 3 so the
+truncated copies on devices and at the edge are fetched again.
+
 ### What those numbers mean
 
 **No ordering of routes wins everywhere.** Sitemaps-first loses stories at the

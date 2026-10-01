@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { sanitizeRichText } from "@/lib/subjects";
+import { cleanPastedHtml } from "@/lib/paste";
 
 /**
  * A small formatted-text field: bold, italic, highlight, bullets, heading.
@@ -133,7 +134,6 @@ export default function RichText({
         </button>
         <button type="button" title="Bulleted list" onClick={() => format("insertUnorderedList")}>• List</button>
         <button type="button" title="Heading" onClick={() => format("formatBlock", "h3")}>H3</button>
-        <button type="button" title="Plain text" onClick={() => format("formatBlock", "p")}>¶</button>
       </div>
       <div
         ref={el}
@@ -155,12 +155,32 @@ export default function RichText({
           }
         }}
         onPaste={(event) => {
-          // Pasted pages bring their styles with them; take the words only.
+          // Formatting comes with a paste — bullets, nesting, bold, italic,
+          // highlight — translated from Google Docs' clipboard shape and
+          // cleaned (lib/paste.ts). Plain text when that is all there is.
           event.preventDefault();
+          const html = event.clipboardData.getData("text/html");
+          if (html) {
+            const clean = cleanPastedHtml(html);
+            if (clean.trim()) {
+              document.execCommand("insertHTML", false, clean);
+              changed();
+              return;
+            }
+          }
           document.execCommand("insertText", false, event.clipboardData.getData("text/plain"));
+          changed();
         }}
         onKeyDown={(event) => {
-          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
+          // Tab indents, Shift+Tab outdents: in a list that nests the bullet a
+          // level (and changes its style); elsewhere it indents the line.
+          if (event.key === "Tab" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+            event.preventDefault();
+            format(event.shiftKey ? "outdent" : "indent");
+            event.stopPropagation();
+            return;
+          }
+                    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
             event.preventDefault();
             format("bold");
           }

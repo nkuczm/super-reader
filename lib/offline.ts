@@ -21,7 +21,9 @@ const META = "meta";
  * the download skips anything already cached, so it would never be re-fetched.
  * 2: comment threads are no longer mistaken for short posts.
  */
-export const EXTRACT_VERSION = 2;
+// 3: articles folded behind "Read more" are read whole (lib/article.ts
+// unfoldReadMore). Copies from before were cut off at the button.
+export const EXTRACT_VERSION = 3;
 
 export type CachedArticle = ReadableArticle & {
   cachedAt: number;
@@ -475,6 +477,9 @@ export type OfflineTarget = { url: string; feedUrl?: string; title?: string };
 
 export function articleEndpoint(url: string, feedUrl?: string, title?: string) {
   const params = new URLSearchParams({ url });
+  // Part of the address so the edge cache, too, misses copies from an older
+  // extraction.
+  params.set("x", String(EXTRACT_VERSION));
   if (feedUrl) params.set("feed", feedUrl);
   if (title) params.set("title", title);
   return `/api/article?${params}`;

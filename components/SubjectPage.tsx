@@ -9,6 +9,8 @@ import {
   cardNoteId,
   cardsOf,
   composeCardDoc,
+  escapeHtml,
+  sanitizeRichText,
   quoteIdsIn,
   live,
   metaOf,
@@ -29,6 +31,18 @@ import {
   type SynthesisResult,
 } from "@/lib/subjects";
 import { canonicalUrl } from "@/lib/url";
+import {
+  activeTabOf,
+  addTab,
+  deleteTab,
+  MAIN_TAB,
+  placeNew,
+  placeOn,
+  renameTab,
+  tabOf,
+  tabsOf,
+  type Tab,
+} from "@/lib/subjects";
 import { edgePath, layoutBoard, settle, GAP } from "@/lib/board-layout";
 import { PROVIDER_NAME, recordSpend, type AiProvider } from "@/lib/spend";
 
@@ -71,10 +85,24 @@ const INSIGHT_LABEL: Record<InsightItem["type"], string> = {
 export default function SubjectPage(props: Props) {
   const { note, board, onBoard, keyHeaders, hasAiKey, ai } = props;
   const meta = metaOf(board);
-  const cards = useMemo(() => cardsOf(note, board), [note, board]);
+  const allCards = useMemo(() => cardsOf(note, board), [note, board]);
   const items = useMemo(() => live(board), [board]);
-  const boxes = items.filter((item): item is BoxItem => item.kind === "box");
-  const insights = items.filter((item): item is InsightItem => item.kind === "insight");
+  // Tabs: each is its own page of stories and boxes. The AI still reads the
+  // whole subject, so insights can connect stories across tabs.
+  const tabs = useMemo(() => tabsOf(board), [board]);
+  const currentTab = activeTabOf(board);
+  const cards = allCards.filter((card) => tabOf(board, card.id, tabs) === currentTab);
+  const tabCardIds = new Set(cards.map((card) => card.id));
+  const boxes = items.filter(
+    (item): item is BoxItem => item.kind === "box" && tabOf(board, item.id, tabs) === currentTab,
+  );
+  // An insight shows on each tab whose stories it draws on; one about no
+  // story in particular shows on the first tab.
+  const insights = items.filter(
+    (item): item is InsightItem =>
+      item.kind === "insight" &&
+      (item.refs.some((ref) => tabCardIds.has(ref)) || (item.refs.length === 0 && currentTab === MAIN_TAB)),
+  );
   const suggestions = items.filter(
     (item): item is SuggestItem => item.kind === "suggest" && item.state === "pending",
   );
@@ -93,7 +121,7 @@ export default function SubjectPage(props: Props) {
   const addBox = (at?: { x: number; y: number }) => {
     const id = newItemId("box");
     onBoard((current) => {
-      let next = put(current, { id, kind: "box", html: "", at: Date.now() });
+      let next = placeNew(put(current, { id, kind: "box", html: "", at: Date.now() }), id);
       if (at) next = put(next, { id: posId(id), kind: "pos", target: id, x: at.x, y: at.y, w: 280, at: Date.now() });
       return next;
     });
@@ -130,7 +158,61 @@ export default function SubjectPage(props: Props) {
     onBoard((current) => put(current, { id: cardNoteId(card.id), kind: "cardnote", card: card.id, html, at: Date.now() }));
 
   const decide = (suggestion: SuggestItem, state: "accepted" | "dismissed") =>
-    onBoard((current) => put(current, { ...suggestion, state, at: Date.now() }));
+    onBoard((current) => {
+      const next = put(current, { ...suggestion, state, at: Date.now() });
+      // An accepted story joins the tab that is open.
+      return state === "accepted" ? placeNew(next, canonicalUrl(suggestion.link)) : next;
+    });
+
+  /**
+   * The tab open, copied as formatted text — headlines linked to their
+   * stories, quotes as bullets, your notes and boxes as written, insights
+   * last — with a plain-text copy beside it for anywhere that takes no
+   * formatting. Quote links are an id of this app's, so only their words go.
+   */
+  const [copied, setCopied] = useState(false);
+  const copyTab = async () => {
+    const tabName = tabs.find((tab) => tab.id === currentTab)?.name;
+    const unlinkQuotes = (html: string) => sanitizeRichText(html).replace(/<a data-quote="[^"]+">([\s\S]*?)<\/a>/g, "$1");
+    const parts: string[] = [`<h2>${escapeHtml(note.name)}${tabs.length > 1 && tabName ? ` — ${escapeHtml(tabName)}` : ""}</h2>`];
+    for (const card of cards) {
+      parts.push(`<h3><a href="${escapeHtml(card.link)}">${escapeHtml(card.title)}</a></h3>`);
+      if (card.source) parts.push(`<p><i>${escapeHtml(card.source)}</i></p>`);
+      parts.push(unlinkQuotes(composeCardDoc(card.note, card.quotes)));
+    }
+    for (const box of boxes) parts.push(unlinkQuotes(box.html));
+    if (insights.length > 0) {
+      parts.push("<h3>Insights</h3><ul>");
+      for (const insight of insights) parts.push(`<li><b>${INSIGHT_LABEL[insight.type]}:</b> ${escapeHtml(insight.text)}</li>`);
+      parts.push("</ul>");
+    }
+    const html = parts.join("");
+    const holder = document.createElement("div");
+    holder.innerHTML = html;
+    // A nested list starts on its own line, indented under its parent.
+    holder.querySelectorAll("li ul, li ol").forEach((list) => list.prepend(document.createTextNode("\n")));
+    holder.querySelectorAll("li").forEach((li) => {
+      const depth = Math.max(0, li.parentElement ? countAncestors(li.parentElement, "ul, ol") : 0);
+      li.prepend(document.createTextNode(`${"  ".repeat(depth)}• `));
+    });
+    holder.querySelectorAll("h2, h3, p, li, ul, ol").forEach((el) => el.append(document.createTextNode("\n")));
+    const text = (holder.textContent ?? "").replace(/\n{3,}/g, "\n\n").trim();
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([text], { type: "text/plain" }),
+        }),
+      ]);
+    } catch {
+      await navigator.clipboard.writeText(text).catch(() => {});
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
+  };
+
+  const switchTab = (tab: string) => onBoard((current) => put(current, { ...metaOf(current), activeTab: tab }));
+  const moveCard = (target: string, tab: string) => onBoard((current) => placeOn(current, target, tab));
 
   /* -------------------------------------------------------------------- */
   /* The AI run                                                            */
@@ -179,14 +261,17 @@ export default function SubjectPage(props: Props) {
       Add your {PROVIDER_NAME[ai.provider]} key in Settings → API keys for insights.
     </span>
   ) : run.state === "running" ? (
-    <span className="subject-ai-hint">Thinking across {cards.length} stories…</span>
+    <span className="subject-ai-hint">Thinking across {allCards.length} stories…</span>
   ) : run.state === "error" ? (
     <span className="subject-ai-hint error">{run.message}</span>
-  ) : cards.length < 2 ? (
+  ) : allCards.length < 2 ? (
     <span className="subject-ai-hint">Insights start once there are two stories.</span>
   ) : null;
 
   const shared = {
+    tabs,
+    currentTab,
+    moveCard,
     cards,
     boxes,
     insights,
@@ -258,13 +343,24 @@ export default function SubjectPage(props: Props) {
               onClick={() => setView("board")}>Whiteboard</button>
           </div>
           <button className="btn ghost small" onClick={() => addBox()}>+ Text box</button>
-          <button className="btn ghost small" disabled={!hasAiKey || cards.length < 2 || run.state === "running"}
+          <button className="btn ghost small" onClick={() => void copyTab()} title="Copy this tab as formatted text, for Google Docs and the like">
+            {copied ? "Copied" : "Copy"}
+          </button>
+          <button className="btn ghost small" disabled={!hasAiKey || allCards.length < 2 || run.state === "running"}
             onClick={() => void synthesize()} title="Find connections and suggest reading now">
             ✦ Insights
           </button>
         </div>
       </div>
       {aiStatus && <div className="subject-ai-bar">{aiStatus}</div>}
+      <TabBar
+        tabs={tabs}
+        current={currentTab}
+        onSwitch={switchTab}
+        onAdd={(name) => onBoard((current) => addTab(current, name).board)}
+        onRename={(tab, name) => onBoard((current) => renameTab(current, tab, name))}
+        onDelete={(tab) => onBoard((current) => deleteTab(current, tab))}
+      />
 
       {meta.view === "board" ? (
         <Whiteboard {...shared} board={board} onBoard={onBoard} addBox={addBox} />
@@ -276,6 +372,9 @@ export default function SubjectPage(props: Props) {
 }
 
 type Shared = {
+  tabs: Tab[];
+  currentTab: string;
+  moveCard: (target: string, tab: string) => void;
   cards: Card[];
   boxes: BoxItem[];
   insights: InsightItem[];
@@ -313,6 +412,20 @@ function StoryCard({
           onClick={() => shared.onOpenArticle(card.link, card.title, "")}>
           {card.title}
         </button>
+        {shared.tabs.length > 1 && (
+          <select
+            className="subject-card-tab"
+            aria-label="Move to tab"
+            title="Move to another tab"
+            value={shared.currentTab}
+            onPointerDown={(e) => e.stopPropagation()}
+            onChange={(event) => shared.moveCard(card.id, event.target.value)}
+          >
+            {shared.tabs.map((tab) => (
+              <option key={tab.id} value={tab.id}>{tab.name}</option>
+            ))}
+          </select>
+        )}
         <button className="icon-btn subtle" aria-label="Remove story from subject" title="Remove from subject"
           onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.removeCard(card)}>
           {Icon.close}
@@ -483,6 +596,8 @@ function Whiteboard(
     typeof window !== "undefined" && window.innerWidth < 760 ? { x: 12, y: 12, zoom: 0.55 } : { x: 40, y: 40, zoom: 1 };
   const [view, setView] = useState(startView);
   const [drag, setDrag] = useState<{ id: string; x: number; y: number } | null>(null);
+  /** A card being widened or narrowed, by its right-hand edge. */
+  const [resize, setResize] = useState<{ id: string; w: number } | null>(null);
   const [connecting, setConnecting] = useState<string | null | false>(false);
   const [focus, setFocus] = useState<string | null>(null);
   const [showAiLinks, setShowAiLinks] = useState(false);
@@ -529,12 +644,13 @@ function Whiteboard(
         .map((node) => {
           const h = sizes[node.id]?.h ?? 160;
           const saved = placed.get(node.id);
-          if (saved) return { id: node.id, placed: true, x: saved.x, y: saved.y, w: saved.w, h };
+          const width = resize?.id === node.id ? resize.w : (saved?.w ?? CARD_W);
+          if (saved) return { id: node.id, placed: true, x: saved.x, y: saved.y, w: width, h };
           const n = counters[node.kind]++;
           const x =
             node.kind === "card" || node.kind === "suggest" ? (n % 2) * (CARD_W + GAP) : 2 * (CARD_W + GAP) + 40;
           const y = node.kind === "suggest" ? cardsBottom : 0;
-          return { id: node.id, placed: false, x, y, w: CARD_W, h };
+          return { id: node.id, placed: false, x, y, w: width, h };
         }),
     );
     if (drag) {
@@ -542,7 +658,39 @@ function Whiteboard(
     }
     return laid;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [board, shared.cards, shared.boxes, shared.insights, shared.suggestions, drag, sizes]);
+  }, [board, shared.cards, shared.boxes, shared.insights, shared.suggestions, drag, sizes, resize]);
+
+  /**
+   * Widen or narrow a card by dragging its right edge. Saved as the card's
+   * width with its place; anything it now overlaps moves down out of the way.
+   */
+  const MIN_W = 200;
+  const MAX_W = 900;
+  const startResize = (id: string) => (event: React.PointerEvent) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const start = positions.get(id);
+    if (!start) return;
+    const origin = { px: event.clientX, w: start.w };
+    let w = start.w;
+    const move = (e: PointerEvent) => {
+      w = Math.round(Math.min(MAX_W, Math.max(MIN_W, origin.w + (e.clientX - origin.px) / view.zoom)));
+      setResize({ id, w });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setResize(null);
+      if (w !== start.w) {
+        onBoard((current) =>
+          put(current, { id: posId(id), kind: "pos", target: id, x: Math.round(start.x), y: Math.round(start.y), w, at: Date.now() }),
+        );
+      }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
 
   // Heights are whatever the content makes them; the layout and the lines
   // both need to know them.
@@ -844,6 +992,14 @@ function Whiteboard(
                 }}
               >
                 {node.render(startDrag(node.id))}
+                <div
+                  className="wb-resize"
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="Drag to make this card wider or narrower"
+                  title="Drag to resize"
+                  onPointerDown={startResize(node.id)}
+                />
               </div>
             );
           })}
@@ -851,4 +1007,106 @@ function Whiteboard(
       </div>
     </div>
   );
+}
+
+/* ---------------------------------------------------------------------- */
+/* Tabs                                                                    */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * The subject's tabs, like a Google Docs document's: click to switch,
+ * double-click to rename, + to add one, × to close one (its contents move to
+ * the first tab).
+ */
+function TabBar({
+  tabs,
+  current,
+  onSwitch,
+  onAdd,
+  onRename,
+  onDelete,
+}: {
+  tabs: Tab[];
+  current: string;
+  onSwitch: (tab: string) => void;
+  onAdd: (name: string) => void;
+  onRename: (tab: string, name: string) => void;
+  onDelete: (tab: string) => void;
+}) {
+  const [editing, setEditing] = useState<{ id: string | null; draft: string } | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
+
+  const finish = () => {
+    if (!editing) return;
+    const name = editing.draft.trim();
+    if (name) {
+      if (editing.id === null) onAdd(name);
+      else onRename(editing.id, name);
+    }
+    setEditing(null);
+  };
+
+  const field = (
+    <input
+      className="input subject-tab-input"
+      autoFocus
+      aria-label="Tab name"
+      value={editing?.draft ?? ""}
+      onFocus={(event) => event.currentTarget.select()}
+      onChange={(event) => setEditing((e) => (e ? { ...e, draft: event.target.value } : e))}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") finish();
+        if (event.key === "Escape") setEditing(null);
+      }}
+      onBlur={finish}
+    />
+  );
+
+  return (
+    <div className="subject-tabs" role="tablist" aria-label="Tabs">
+      {tabs.map((tab) =>
+        editing?.id === tab.id ? (
+          <span key={tab.id} className="subject-tab editing">{field}</span>
+        ) : confirming === tab.id ? (
+          <span key={tab.id} className="subject-tab confirming">
+            Close “{tab.name}”? Its stories move to “{tabs[0].name}”.
+            <button className="link-btn danger" onClick={() => { setConfirming(null); onDelete(tab.id); }}>Close</button>
+            <button className="link-btn" onClick={() => setConfirming(null)}>Keep</button>
+          </span>
+        ) : (
+          <span key={tab.id} className={`subject-tab${tab.id === current ? " on" : ""}`}>
+            <button
+              role="tab"
+              aria-selected={tab.id === current}
+              className="subject-tab-name"
+              title="Double-click to rename"
+              onClick={() => onSwitch(tab.id)}
+              onDoubleClick={() => setEditing({ id: tab.id, draft: tab.name })}
+            >
+              {tab.name}
+            </button>
+            {tab.id !== MAIN_TAB && tab.id === current && (
+              <button className="subject-tab-close" aria-label={`Close tab ${tab.name}`} onClick={() => setConfirming(tab.id)}>
+                ×
+              </button>
+            )}
+          </span>
+        ),
+      )}
+      {editing?.id === null ? (
+        <span className="subject-tab editing">{field}</span>
+      ) : (
+        <button className="subject-tab-add" aria-label="Add a tab" title="Add a tab" onClick={() => setEditing({ id: null, draft: "" })}>
+          +
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** How many ancestors of an element match a selector, itself excluded. */
+function countAncestors(el: Element, selector: string) {
+  let count = 0;
+  for (let node = el.parentElement; node; node = node.parentElement) if (node.matches(selector)) count += 1;
+  return count;
 }
