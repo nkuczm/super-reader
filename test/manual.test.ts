@@ -41,3 +41,13 @@ test("malformed stored feeds are dropped rather than crashing the sidebar", asyn
   assert.equal(cleaned[1].sources.length, 1);
   assert.deepEqual(cleanFeeds("nope"), []);
 });
+
+test("shared settings from another device are checked before they are applied", async () => {
+  const { cleanSharedPrefs } = await import("../lib/store");
+  assert.deepEqual(cleanSharedPrefs({ subjects: true, aiProvider: "openai", openaiModel: " gpt-5 ", at: 5 }), {
+    subjects: true, aiProvider: "openai", openaiModel: "gpt-5", at: 5,
+  });
+  assert.equal(cleanSharedPrefs({ subjects: "yes", at: 5 }), null);
+  assert.equal(cleanSharedPrefs(null), null);
+  assert.equal(cleanSharedPrefs({ subjects: true, aiProvider: "evil", at: 1 })?.aiProvider, "anthropic");
+});

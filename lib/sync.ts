@@ -45,6 +45,8 @@ export type SyncPayload = {
    * it on another both survive.
    */
   boards?: Boards;
+  /** Settings that follow the person (lib/store.ts SharedPrefs); newest wins. */
+  prefs?: { subjects: boolean; aiProvider: string; openaiModel: string; at: number };
   /** Stories pasted in by hand (lib/manual.ts), merged per link. */
   manual?: ManualStories;
   /**
@@ -156,6 +158,8 @@ export async function writeSync(
     noteRemovals: notes.removals,
     boards: slimBoardsForSync(mergeBoards(payload.boards ?? {}, stored.boards ?? {})),
     manual: mergeManual(payload.manual ?? {}, stored.manual ?? {}),
+    prefs:
+      (stored.prefs?.at ?? 0) > (payload.prefs?.at ?? 0) ? stored.prefs : (payload.prefs ?? stored.prefs),
   };
 
   await ensureSchema();
