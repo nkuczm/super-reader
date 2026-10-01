@@ -32,13 +32,35 @@ export function newId() {
   return Math.random().toString(36).slice(2, 10);
 }
 
+/**
+ * Feeds as they can safely be drawn. Stored and synced data outlives the code
+ * that wrote it: one feed whose sources are not a list, or a source with no
+ * feed URL, and rendering the sidebar throws — which takes the whole app down
+ * to a blank page. Anything malformed is dropped rather than trusted.
+ */
+export function cleanFeeds(input: unknown): Feed[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .filter((feed): feed is Feed => !!feed && typeof feed === "object" && typeof (feed as Feed).id === "string")
+    .map((feed) => ({
+      ...feed,
+      name: typeof feed.name === "string" ? feed.name : "Feed",
+      sources: (Array.isArray(feed.sources) ? feed.sources : []).filter(
+        (source) =>
+          !!source &&
+          typeof source === "object" &&
+          typeof source.id === "string" &&
+          typeof source.feedUrl === "string",
+      ),
+    }));
+}
+
 export function loadFeeds(): Feed[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = window.localStorage.getItem(KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as Feed[]) : [];
+    return cleanFeeds(JSON.parse(raw));
   } catch {
     return [];
   }
@@ -61,7 +83,9 @@ export function loadSaved(): SavedArticle[] {
   try {
     const raw = window.localStorage.getItem(SAVED_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? (parsed as SavedArticle[]) : [];
+    return Array.isArray(parsed)
+      ? (parsed as SavedArticle[]).filter((article) => article && typeof article.link === "string")
+      : [];
   } catch {
     return [];
   }

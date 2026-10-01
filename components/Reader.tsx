@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Article, Attachment, DiscoverResult } from "@/lib/types";
 import {
+  cleanFeeds,
   loadFeeds,
   saveFeeds,
   loadRead,
@@ -95,6 +96,7 @@ import {
   type Boards,
 } from "@/lib/subjects";
 import { loadHealth, recordRuns, saveHealth, type HealthLog } from "@/lib/health";
+import { listenForClientErrors } from "@/lib/client-errors";
 import { encodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import {
   downloadForOffline,
@@ -392,6 +394,9 @@ export default function Reader() {
   /** Deletions, dated, so syncing does not put them back. */
   const noteRemovalsRef = useRef<NoteRemoval[]>([]);
 
+  // Crashes on a phone are otherwise invisible; see lib/client-errors.ts.
+  useEffect(() => listenForClientErrors(), []);
+
   useEffect(() => {
     /**
      * Repair on load: a source whose feed has died since it was added points
@@ -471,9 +476,11 @@ export default function Reader() {
     if (
       !stale &&
       Array.isArray(payload.feeds) &&
-      !unchanged(payload.feeds, feedsRef.current)
+      !unchanged(cleanFeeds(payload.feeds), feedsRef.current)
     ) {
-      setFeeds(payload.feeds);
+      // Checked like stored feeds: another device's malformed list must not
+      // blank this one.
+      setFeeds(cleanFeeds(payload.feeds));
     }
     // Which team feeds this person is on travels between their own devices;
     // what is *in* those feeds does not, and never touches local storage.

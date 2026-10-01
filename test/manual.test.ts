@@ -27,3 +27,17 @@ test("pasted stories merge per link, a deletion outranking an older copy", () =>
   const merged = mergeManual({ k: story }, { k: { ...story, deleted: true, at: 200 } }, 300);
   assert.equal(merged.k.deleted, true);
 });
+
+test("malformed stored feeds are dropped rather than crashing the sidebar", async () => {
+  const { cleanFeeds } = await import("../lib/store");
+  const cleaned = cleanFeeds([
+    { id: "f1", name: "Tech", sources: null },
+    { id: "f2", name: "News", sources: [{ id: "s1", feedUrl: "https://a.com/feed" }, null, { id: 5 }] },
+    "junk",
+    null,
+  ]);
+  assert.equal(cleaned.length, 2);
+  assert.deepEqual(cleaned[0].sources, []);
+  assert.equal(cleaned[1].sources.length, 1);
+  assert.deepEqual(cleanFeeds("nope"), []);
+});

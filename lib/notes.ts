@@ -111,7 +111,10 @@ export function cleanQuoteText(input: string) {
     .replace(/\r/g, "")
     .replace(/[ \t]+/g, " ")
     .replace(/ *\n *\n *(\n *)*/g, "\n\n")
-    .replace(/(?<!\n)\n(?!\n)/g, " ")
+    // A lone line break becomes a space. Written without a lookbehind, which
+    // Safari before 16.4 cannot parse — one such regex and the whole app
+    // fails to load there.
+    .replace(/(^|[^\n])\n(?!\n)/g, "$1 ")
     .trim()
     .slice(0, MAX_QUOTE_CHARS);
 }
