@@ -205,6 +205,47 @@ function hoistLazyImages(doc: Document) {
 }
 
 /**
+ * The rest of an article that the page folds away behind "Read more".
+ *
+ * Yahoo Finance ships the whole story in the HTML but puts everything after
+ * the first few paragraphs in `<div class="read-more-wrapper" style="display:
+ * none">`, opened by a "Story Continues" button. Readability rightly ignores
+ * hidden elements — they are usually modals and ads — so the reader stopped
+ * where the button sat (measured 1 Oct 2026: 478 words of a four-minute read).
+ *
+ * So a hidden block is unfolded only when it is plainly the article's
+ * continuation: its class, id or test id names a read-more / collapsed /
+ * truncated body, and it holds real paragraphs. Other hidden content stays
+ * hidden, and the button that opened it goes, since it does nothing here.
+ */
+const FOLDED = /read-?more|readmore|story-?continues|continue-?reading|collapsed|truncat|expandable|show-?more|article-?rest|rest-of/i;
+
+export function unfoldReadMore(doc: Document) {
+  for (const el of Array.from(doc.querySelectorAll<HTMLElement>("[style], [hidden], [aria-hidden]"))) {
+    const style = el.getAttribute("style") ?? "";
+    const hidden =
+      /display\s*:\s*none|visibility\s*:\s*hidden|max-height\s*:\s*0/i.test(style) ||
+      el.hasAttribute("hidden") ||
+      el.getAttribute("aria-hidden") === "true";
+    if (!hidden) continue;
+    const names = [el.className, el.id, el.getAttribute("data-testid") ?? ""].join(" ");
+    if (!FOLDED.test(names)) continue;
+    const prose = Array.from(el.querySelectorAll("p")).reduce((sum, p) => sum + (p.textContent ?? "").trim().length, 0);
+    if (prose < 200) continue;
+    el.removeAttribute("hidden");
+    el.removeAttribute("aria-hidden");
+    el.setAttribute("style", style.replace(/display\s*:\s*none;?|visibility\s*:\s*hidden;?|max-height\s*:\s*0[^;]*;?/gi, ""));
+  }
+  // The buttons that opened them.
+  for (const button of Array.from(doc.querySelectorAll("button, a"))) {
+    const label = `${button.textContent ?? ""} ${button.getAttribute("aria-label") ?? ""} ${button.className}`;
+    if (/\b(story continues|read more|continue reading|show more)\b|readmore-button/i.test(label) && (button.textContent ?? "").trim().length < 40) {
+      button.remove();
+    }
+  }
+}
+
+/**
  * Comment threads, which are not the article.
  *
  * Readability scores containers by how much text they hold, so on a short post
@@ -441,6 +482,7 @@ export async function extractArticle(
   const siteName = metaOf(dom, ["og:site_name"]);
 
   hoistLazyImages(dom.window.document);
+  unfoldReadMore(dom.window.document);
   stripDiscussion(dom.window.document);
 
   // charThreshold defaults to 500, which makes Readability discard a genuinely
