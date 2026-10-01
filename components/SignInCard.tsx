@@ -44,7 +44,7 @@ export default function SignInCard({ onOpenMenu, failed }: { onOpenMenu: () => v
   );
 }
 
-function describe(status: SaveStatus, savedAt: number | null) {
+export function describe(status: SaveStatus, savedAt: number | null) {
   if (status === "saving") return "Saving…";
   if (status === "offline") return "Offline — saved on this device";
   if (status === "error") return "Not saved to your account yet — kept on this device, retrying";
@@ -60,6 +60,7 @@ export function AccountStrip({
   status,
   savedAt,
   backedUpAt,
+  backupProblem,
   onSignOut,
 }: {
   account: AccountInfo | null;
@@ -67,6 +68,7 @@ export function AccountStrip({
   status: SaveStatus;
   savedAt: number | null;
   backedUpAt: number | null;
+  backupProblem?: string | null;
   onSignOut: () => void;
 }) {
   if (!enabled) return null;
@@ -89,6 +91,7 @@ export function AccountStrip({
         {describe(status, savedAt)}
         {backedUpAt ? ` · Backed up to Drive ${new Date(backedUpAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}
       </span>
+      {backupProblem && <span className="account-problem">{backupProblem}</span>}
       <button className="link-btn" onClick={onSignOut}>
         Sign out
       </button>
