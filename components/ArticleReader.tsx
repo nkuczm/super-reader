@@ -6,6 +6,7 @@ import type { ReadableArticle } from "@/lib/article";
 import { Icon } from "./icons";
 import { downloadUrlFor } from "@/lib/download";
 import { EXTRACT_VERSION, readCached, writeCached } from "@/lib/offline";
+import { loadSyncCode } from "@/lib/store";
 import { timeAgo, hostOf } from "./format";
 import QuoteToNote from "./QuoteToNote";
 import { findQuoteRange } from "@/lib/highlight";
@@ -366,6 +367,38 @@ export default function ArticleReader({
       // A downloaded article renders immediately, and is the only copy
       // available with no connection.
       const cached = await readCached(url);
+      // A thin copy — a page's own summary, or a few lines — gives way to the
+      // full text the reader saved from their browser, if there is one.
+      const thin = !!cached && (cached.via === "preview" || (cached.wordCount ?? 0) < 150);
+      if (cached && !thin && !cancelled) {
+        setArticle(cached);
+        setFromCache(true);
+        return;
+      }
+
+      // Saved from the browser with the Chrome extension: the copy the
+      // reader's own browser was given, kept with their sync code so any of
+      // their devices can show it. It beats fetching the page again.
+      const code = loadSyncCode();
+      if (code) {
+        try {
+          const res = await fetch(`/api/inbox?code=${encodeURIComponent(code)}&page=${encodeURIComponent(url)}`, {
+            cache: "no-store",
+            signal: AbortSignal.timeout(8000),
+          });
+          if (res.ok) {
+            const { article: saved } = (await res.json()) as { article?: ReadableArticle };
+            if (saved?.html && !cancelled) {
+              setArticle(saved);
+              setFromCache(false);
+              void writeCached(saved, url);
+              return;
+            }
+          }
+        } catch {
+          /* no saved copy reachable; carry on */
+        }
+      }
       if (cached && !cancelled) {
         setArticle(cached);
         setFromCache(true);

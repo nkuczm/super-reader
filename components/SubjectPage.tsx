@@ -86,6 +86,9 @@ type Props = {
   /** Borders around stories and boxes only on hover or while editing (Settings). */
   hideBoxes?: boolean;
   onToggleHideBoxes?: () => void;
+  /** Tuck the app's sidebar away for room to work (desktop). */
+  sidebarHidden?: boolean;
+  onToggleSidebar?: () => void;
 };
 
 const RAIL_KEY = "super-reader:tab-rail";
@@ -458,6 +461,16 @@ export default function SubjectPage(props: Props) {
         {props.onOpenMenu && (
           <button className="menu-btn" onClick={props.onOpenMenu} aria-label="Open feeds">
             {Icon.menu}
+          </button>
+        )}
+        {props.onToggleSidebar && (
+          <button className="btn ghost small sidebar-toggle" onClick={props.onToggleSidebar}
+            aria-label={props.sidebarHidden ? "Show sidebar" : "Hide sidebar"} title={props.sidebarHidden ? "Show sidebar" : "Hide sidebar"}>
+            <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+              <rect x="2.5" y="3.5" width="15" height="13" rx="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M7.5 3.5v13" stroke="currentColor" strokeWidth="1.5" />
+              {props.sidebarHidden ? <path d="M10.5 8l2 2-2 2" fill="none" stroke="currentColor" strokeWidth="1.5" /> : <path d="M12.5 8l-2 2 2 2" fill="none" stroke="currentColor" strokeWidth="1.5" />}
+            </svg>
           </button>
         )}
         {props.onBack && (

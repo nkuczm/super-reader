@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
 import { setSqlForTesting, type Sql } from "../lib/db";
-import { addInboxItem, clearInboxItems, readInbox, setSubjectIndex, MAX_ITEMS } from "../lib/inbox";
+import { addInboxItem, clearInboxItems, readInbox, readPage, setSubjectIndex, MAX_ITEMS } from "../lib/inbox";
 
 let db: PGlite;
 
@@ -44,4 +44,13 @@ test("the inbox keeps only the newest items, and drops week-old ones", async () 
   assert.equal(items[items.length - 1].id, `c${MAX_ITEMS + 4}`);
   await addInboxItem("code-d", { id: "old", savedAt: Date.now() - 8 * 24 * 3600 * 1000, article: article(0) });
   assert.deepEqual((await readInbox("code-d")).items, []);
+});
+
+test("a page saved from the browser stays readable by its address, tracking tags or not", async () => {
+  const page = { url: "https://news.example/story?utm_source=x", title: "Story", html: "<p>Full text here.</p>", excerpt: "", wordCount: 3 } as never;
+  await addInboxItem("code-e", { id: "e1", savedAt: Date.now(), article: page });
+  await clearInboxItems("code-e", ["e1"]);
+  // Filed and cleared from the inbox, yet any device can still read it.
+  assert.equal((await readPage("code-e", "https://news.example/story"))?.title, "Story");
+  assert.equal(await readPage("code-f", "https://news.example/story"), null);
 });

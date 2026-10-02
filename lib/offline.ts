@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReadableArticle } from "./article";
+import { canonicalUrl } from "./url";
 
 /**
  * Articles saved for reading without a connection. IndexedDB rather than
@@ -76,7 +77,10 @@ export async function readCached(url: string): Promise<CachedArticle | null> {
     // that was asked for — a topic source's links go through a redirector.
     // Without this the copy on the device was invisible to the reader that
     // asked for it and to the download that was trying to keep it.
-    const storedAs = await filedUnder(url);
+    // Then by the address the link and the stored copy share once tracking
+    // tags and the like are stripped: the same story reached from a feed and
+    // saved from the page itself is still one story.
+    const storedAs = (await filedUnder(url)) ?? (await filedUnder(`canonical:${canonicalUrl(url)}`));
     if (!storedAs || storedAs === url) return null;
     const hit = await run<CachedArticle>(ARTICLES, "readonly", (s) => s.get(storedAs));
     if (!hit) return null;
@@ -96,6 +100,7 @@ export async function writeCached(article: ReadableArticle, requestedUrl?: strin
       s.put({ ...article, cachedAt: Date.now(), v: EXTRACT_VERSION }),
     );
     await rememberLink(requestedUrl ?? article.url, article.url);
+    await rememberLink(`canonical:${canonicalUrl(requestedUrl ?? article.url)}`, article.url);
   } catch {
     /* storage full or unavailable — reading online still works */
   }
