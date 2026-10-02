@@ -56,7 +56,8 @@ import {
   type Tab,
 } from "@/lib/subjects";
 import { edgePath, layoutBoard, settle, GAP } from "@/lib/board-layout";
-import { PROVIDER_NAME, recordSpend, type AiProvider } from "@/lib/spend";
+import { PROVIDER_NAME, recordSpend, shareSpend, type AiProvider } from "@/lib/spend";
+import { loadSyncCode } from "@/lib/store";
 
 type Props = {
   note: Note;
@@ -417,7 +418,11 @@ export default function SubjectPage(props: Props) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "The run failed.");
-      if ((data as SynthesisResult).usage) recordSpend((data as SynthesisResult).usage!, note.name);
+      if ((data as SynthesisResult).usage) {
+        // Counted here, and in the account's shared ledger so every device's
+        // spending page includes it.
+        shareSpend(loadSyncCode(), recordSpend((data as SynthesisResult).usage!, note.name));
+      }
       onBoard((current) => applySynthesis(current, given, data as SynthesisResult));
       setRun({ state: "idle" });
     } catch (error) {

@@ -32,6 +32,10 @@ export const PRICES: Record<string, { input: number; output: number }> = {
 };
 
 export type SpendRecord = {
+  /** One id per run, so the same run counted from two devices counts once. */
+  id?: string;
+  /** Which kind of device ran it — "Mac", "iPhone" — for the breakdown. */
+  device?: string;
   at: number;
   provider: AiProvider;
   model: string;
@@ -76,6 +80,8 @@ export function recordSpend(
   now = Date.now(),
 ) {
   const record: SpendRecord = {
+    id: `${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    device: deviceName(),
     at: now,
     provider: usage.provider,
     model: usage.model,
@@ -140,4 +146,62 @@ export function formatDollars(value: number) {
   if (value === 0) return "$0.00";
   if (value < 0.01) return `$${value.toFixed(4)}`;
   return `$${value.toFixed(2)}`;
+}
+
+/** A plain name for this kind of device, from the browser's own description. */
+export function deviceName(): string {
+  if (typeof navigator === "undefined") return "This device";
+  const ua = navigator.userAgent;
+  if (/iPhone/.test(ua)) return "iPhone";
+  if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return "iPad";
+  if (/Android/.test(ua)) return /Mobile/.test(ua) ? "Android phone" : "Android tablet";
+  if (/Macintosh|Mac OS X/.test(ua)) return "Mac";
+  if (/Windows/.test(ua)) return "Windows PC";
+  if (/CrOS/.test(ua)) return "Chromebook";
+  if (/Linux/.test(ua)) return "Linux";
+  return "Other device";
+}
+
+/** An id for a record from before ids existed: the same run gives the same id on every look. */
+export function idOf(record: SpendRecord): string {
+  return record.id ?? `old-${record.at}-${record.model}-${record.input}-${record.output}`;
+}
+
+/**
+ * Every device's runs, through the server under the sync code — so the page
+ * shows what the account spent, not what one device did. Local runs not yet
+ * there are sent first (the first visit after this existed sends a device's
+ * whole history). Falls back to this device's own records when offline or
+ * not syncing.
+ */
+export async function loadSharedSpend(code: string | null): Promise<{ records: SpendRecord[]; shared: boolean }> {
+  const local = loadSpend();
+  if (!code) return { records: local, shared: false };
+  try {
+    const records = local.map((r) => ({ ...r, id: idOf(r), device: r.device ?? deviceName() }));
+    if (records.length) {
+      await fetch("/api/spend", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code, records: records.slice(-MAX_RECORDS) }),
+      });
+    }
+    const res = await fetch(`/api/spend?code=${encodeURIComponent(code)}`, { cache: "no-store" });
+    if (!res.ok) throw new Error();
+    const data = (await res.json()) as { records?: SpendRecord[] };
+    return { records: data.records ?? local, shared: true };
+  } catch {
+    return { records: local, shared: false };
+  }
+}
+
+/** Send one run to the shared ledger as it happens; the page sends any it missed. */
+export function shareSpend(code: string | null, record: SpendRecord) {
+  if (!code) return;
+  void fetch("/api/spend", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code, records: [record] }),
+    keepalive: true,
+  }).catch(() => {});
 }
