@@ -17,6 +17,7 @@
 import { getSql, ensureSchema } from "./db";
 import { hashCode } from "./sync-code";
 import type { ReadableArticle } from "./article";
+import { canonicalUrl } from "./url";
 
 export type InboxItem = {
   id: string;
@@ -48,6 +49,17 @@ async function ensureInbox() {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
       `;
+      // The text each saved page had in the reader's browser, kept so every
+      // device on the code can read it — not only the one that filed it.
+      await getSql()`
+        CREATE TABLE IF NOT EXISTS extension_pages (
+          code_hash TEXT NOT NULL,
+          url_key   TEXT NOT NULL,
+          article   JSONB NOT NULL,
+          saved_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (code_hash, url_key)
+        )
+      `;
     })().catch((error) => {
       ready = null;
       throw error;
@@ -66,7 +78,35 @@ export async function readInbox(code: string): Promise<{ subjects: SubjectIndex;
   };
 }
 
+/** Pages kept per code; the oldest go first past this. */
+const MAX_PAGES = 500;
+
+export async function savePage(code: string, article: ReadableArticle) {
+  await ensureInbox();
+  const sql = getSql();
+  const key = hashCode(code);
+  await sql`
+    INSERT INTO extension_pages (code_hash, url_key, article) VALUES (${key}, ${canonicalUrl(article.url)}, ${JSON.stringify(article)}::jsonb)
+    ON CONFLICT (code_hash, url_key) DO UPDATE SET article = EXCLUDED.article, saved_at = now()
+  `;
+  await sql`
+    DELETE FROM extension_pages WHERE code_hash = ${key} AND url_key NOT IN (
+      SELECT url_key FROM extension_pages WHERE code_hash = ${key} ORDER BY saved_at DESC LIMIT ${MAX_PAGES}
+    )
+  `;
+}
+
+/** The copy of a page the reader saved from their browser, if there is one. */
+export async function readPage(code: string, url: string): Promise<ReadableArticle | null> {
+  await ensureInbox();
+  const rows = await getSql()`
+    SELECT article FROM extension_pages WHERE code_hash = ${hashCode(code)} AND url_key = ${canonicalUrl(url)}
+  `;
+  return (rows[0]?.article as ReadableArticle) ?? null;
+}
+
 export async function addInboxItem(code: string, item: InboxItem) {
+  if (item.article.html) await savePage(code, item.article);
   const { items } = await readInbox(code);
   const next = [...items.filter((i) => i.id !== item.id), item].slice(-MAX_ITEMS);
   await getSql()`

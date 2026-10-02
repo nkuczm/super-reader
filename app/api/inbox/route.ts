@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { sanitizeArticleHtml } from "@/lib/article";
-import { addInboxItem, clearInboxItems, readInbox, setSubjectIndex, type InboxItem } from "@/lib/inbox";
+import { addInboxItem, clearInboxItems, readInbox, readPage, setSubjectIndex, type InboxItem } from "@/lib/inbox";
 import { readSync } from "@/lib/sync";
 import { isConfigured } from "@/lib/db";
 
@@ -24,8 +24,15 @@ async function codeFrom(value: unknown): Promise<string | null> {
 
 /** The waiting items, and the subjects the extension may file into. */
 export async function GET(request: Request) {
-  const code = await codeFrom(new URL(request.url).searchParams.get("code"));
+  const params = new URL(request.url).searchParams;
+  const code = await codeFrom(params.get("code"));
   if (!code) return reply({ error: "That sync code was not found." }, 404);
+  // One page's saved text, for a device that did not file it itself.
+  const page = params.get("page");
+  if (page) {
+    const article = await readPage(code, page);
+    return article ? reply({ article }) : reply({ error: "Not saved from the browser" }, 404);
+  }
   return reply(await readInbox(code));
 }
 

@@ -249,6 +249,7 @@ function withPastedStories(list: Loaded[], manual: ManualStories, following: Rea
 }
 
 const VIEW_KEY = "super-reader:view";
+const SIDEBAR_KEY = "super-reader:subject-sidebar-hidden";
 const READING_KEY = "super-reader:reading";
 const GRANDFATHER_KEY = "super-reader:subjects-before-signin";
 const SIGNIN_ERA_KEY = "super-reader:signin-era";
@@ -347,6 +348,8 @@ export default function Reader() {
   const [boards, setBoards] = useState<Boards>({});
   /** This device had subjects before sign-in was required (see useAccount). */
   const [grandfathered, setGrandfathered] = useState(false);
+  /** The sidebar tucked away while working in a subject (desktop; remembered). */
+  const [sidebarHidden, setSidebarHidden] = useState(false);
   /** Signed in: writing then syncs with the account, not the sync code. */
   const signedInRef = useRef(false);
   /**
@@ -487,6 +490,11 @@ export default function Reader() {
     }
     notesRef.current = storedNotes;
     setNotes(storedNotes);
+    try {
+      setSidebarHidden(localStorage.getItem(SIDEBAR_KEY) === "1");
+    } catch {
+      /* shown */
+    }
     // A refresh on a subject comes back to that subject, not the feed.
     try {
       // And an article open over it comes back open, where it was left.
@@ -1822,9 +1830,16 @@ export default function Reader() {
   const fileFromExtension = useCallback(
     (item: InboxItem) => {
       const article = item.article;
-      const link = article.url;
-      if (!link) return;
-      void writeCached(article, link);
+      if (!article.url) return;
+      // Filed under the link the story already has here, if it has one —
+      // from a feed, or saved before — so the reader finds this copy when it
+      // opens that link, and the offline tidy-up, which keeps only the links
+      // in the lists, does not take it for a stray and delete it.
+      const key = canonicalUrl(article.url);
+      const existing =
+        savedRef.current.find((a) => canonicalUrl(a.link) === key) ?? articles.find((a) => canonicalUrl(a.link) === key);
+      const link = existing?.link ?? article.url;
+      void writeCached({ ...article, url: link }, link);
       if (!savedRef.current.some((a) => canonicalUrl(a.link) === canonicalUrl(link))) {
         const entry: SavedArticle = {
           id: `ext:${link}`,
@@ -1882,7 +1897,7 @@ export default function Reader() {
       touchSubject(target);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [createNote, commitNotes, commitBoard, touchSubject],
+    [createNote, commitNotes, commitBoard, touchSubject, articles],
   );
 
   const checkInbox = useCallback(async () => {
@@ -3010,8 +3025,11 @@ export default function Reader() {
   const unread = (items: Loaded[]) =>
     items.filter((a) => !read.has(a.id)).length;
 
+  /** A subject open and its page on screen: the only place the sidebar tucks away. */
+  const focusSubject = sidebarHidden && !!openNote && settings.subjects && !reading && !subjectsLocked;
+
   return (
-    <div className="app">
+    <div className={`app${focusSubject ? " sidebar-collapsed" : ""}`}>
       <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
         <div className="brand">
           {Icon.logo} Super Reader
@@ -3507,6 +3525,17 @@ export default function Reader() {
             signedIn={Boolean(auth.account)}
             onRestored={applyWriting}
             articleMeta={articleMeta}
+            sidebarHidden={sidebarHidden}
+            onToggleSidebar={() =>
+              setSidebarHidden((hidden) => {
+                try {
+                  localStorage.setItem(SIDEBAR_KEY, hidden ? "0" : "1");
+                } catch {
+                  /* not remembered */
+                }
+                return !hidden;
+              })
+            }
             hideBoxes={settings.hideSubjectBoxes}
             onToggleHideBoxes={() =>
               setSettings((current) => {
