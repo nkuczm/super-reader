@@ -62,6 +62,8 @@ export type BoxItem = Base & {
   embedded?: boolean;
   /** A section label: one line of big header text, which stories gather under. */
   label?: boolean;
+  /** A little spreadsheet: what was typed in each cell, formulas included. */
+  table?: string[][];
 };
 
 export const DRAWING_WIDTH = 600;

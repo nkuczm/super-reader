@@ -7,6 +7,7 @@
  * tomorrow, this document alone would hold the work.
  */
 
+import { display, evaluate, safeGrid } from "./sheet";
 import type { Note } from "./notes";
 import {
   bylineOf,
@@ -63,6 +64,7 @@ export function subjectHtml(note: Note, board: Board | undefined, now = new Date
     for (const box of tabBoxes) {
       const image = safeImage(box.image);
       if (image) parts.push(`<p><img src="${image}" alt="" style="max-width:100%"></p>${box.caption ? `<p><i>${escapeHtml(box.caption)}</i></p>` : ""}`);
+      else if (box.table) parts.push(tableHtml(box.table));
       else if (box.drawing) parts.push("<p><i>[A drawing — open the subject in Super Reader to see it]</i></p>");
       else parts.push(unlinkQuotes(box.html, board));
     }
@@ -97,4 +99,12 @@ export function subjectSignature(note: Note, board: Board | undefined): string {
   let hash = 5381;
   for (let i = 0; i < content.length; i += 1) hash = ((hash << 5) + hash + content.charCodeAt(i)) | 0;
   return `${content.length}:${(hash >>> 0).toString(36)}`;
+}
+
+/** A table as its worked-out values, for the exported copy. */
+export function tableHtml(table: unknown): string {
+  const grid = safeGrid(table);
+  const values = evaluate(grid);
+  const rows = values.map((row) => `<tr>${row.map((v) => `<td style="border:1px solid #ccc;padding:2px 6px">${escapeHtml(display(v))}</td>`).join("")}</tr>`);
+  return `<table style="border-collapse:collapse">${rows.join("")}</table>`;
 }
