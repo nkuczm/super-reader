@@ -2156,3 +2156,6 @@
 .hl-comment-subject:hover { background: var(--bg-hover); color: var(--accent); }
 .hl-pop-subject { display: inline-flex; align-items: center; gap: 5px; }
 .hl-pop-subject svg { width: 13px; height: 13px; }
+.contact-photo-edit { display: flex; align-items: center; gap: 10px; width: 100%; margin-bottom: 2px; }
+.contact-photo-edit .link-btn { cursor: pointer; }
+.contact-field textarea.input { resize: vertical; font: inherit; font-size: 13px; }
