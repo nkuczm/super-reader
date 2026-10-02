@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { DEFAULT_DRAWING_HEIGHT, DRAWING_WIDTH, safeImage, safeStrokes, type BoxItem, type Stroke } from "@/lib/subjects";
 import { EMBED_TYPE } from "./RichText";
+import { colName, display, evaluate, isError, MAX_COLS, MAX_ROWS, safeGrid, type Grid } from "@/lib/sheet";
 
 const COLORS = ["#111111", "#2563eb", "#dc2626", "#16a34a", "#f59e0b"];
 const PEN_SIZES = [2, 5];
@@ -266,3 +267,85 @@ export async function shrinkImage(file: File, max = 1400): Promise<string> {
 }
 
 export type { Stroke };
+
+/**
+ * A little spreadsheet. Cells keep what was typed; a cell starting with "="
+ * is a formula (SUM, AVERAGE/AVG, MEDIAN, MIN, MAX, COUNT, ROUND, IF…) over
+ * other cells by their letters and numbers, worked out as it is shown.
+ */
+export function TableBox({ box, onChange }: { box: BoxItem; onChange: (next: Partial<BoxItem>) => void }) {
+  const grid = safeGrid(box.table);
+  const values = evaluate(grid);
+  const [editing, setEditing] = useState<{ r: number; c: number; text: string } | null>(null);
+  const rows = grid.length;
+  const cols = grid[0].length;
+
+  const save = (next: Grid) => onChange({ table: next });
+  const commit = (move?: [number, number]) => {
+    if (!editing) return;
+    const { r, c, text } = editing;
+    if (text !== grid[r][c]) save(grid.map((row, i) => (i === r ? row.map((v, j) => (j === c ? text.slice(0, 1000) : v)) : row)));
+    if (!move) return setEditing(null);
+    const nr = Math.min(rows - 1, Math.max(0, r + move[0]));
+    const nc = Math.min(cols - 1, Math.max(0, c + move[1]));
+    setEditing({ r: nr, c: nc, text: grid[nr][nc] === undefined ? "" : nr === r && nc === c ? text : grid[nr][nc] });
+  };
+
+  return (
+    <div className="sheet" onPointerDown={(e) => e.stopPropagation()}>
+      <div className="sheet-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th className="sheet-corner" />
+              {grid[0].map((_, c) => <th key={c}>{colName(c)}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {grid.map((row, r) => (
+              <tr key={r}>
+                <th>{r + 1}</th>
+                {row.map((raw, c) => {
+                  const on = editing?.r === r && editing.c === c;
+                  const v = values[r][c];
+                  return (
+                    <td
+                      key={c}
+                      className={`${typeof v === "number" ? "num" : ""}${isError(v) ? " err" : ""}${raw.trim().startsWith("=") ? " formula" : ""}`}
+                      title={raw.trim().startsWith("=") ? raw : undefined}
+                      onClick={() => !on && (editing ? commit() : null, setEditing({ r, c, text: raw }))}
+                    >
+                      {on ? (
+                        <input
+                          autoFocus
+                          aria-label={`Cell ${colName(c)}${r + 1}`}
+                          value={editing.text}
+                          onChange={(e) => setEditing({ ...editing, text: e.target.value })}
+                          onBlur={() => commit()}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") { e.preventDefault(); commit([e.shiftKey ? -1 : 1, 0]); }
+                            else if (e.key === "Tab") { e.preventDefault(); e.stopPropagation(); commit([0, e.shiftKey ? -1 : 1]); }
+                            else if (e.key === "Escape") setEditing(null);
+                          }}
+                        />
+                      ) : (
+                        display(v)
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="sheet-tools">
+        <button disabled={rows >= MAX_ROWS} onClick={() => save([...grid, Array(cols).fill("")])}>+ Row</button>
+        <button disabled={cols >= MAX_COLS} onClick={() => save(grid.map((row) => [...row, ""]))}>+ Column</button>
+        <button disabled={rows <= 1} onClick={() => { setEditing(null); save(grid.slice(0, -1)); }}>− Row</button>
+        <button disabled={cols <= 1} onClick={() => { setEditing(null); save(grid.map((row) => row.slice(0, -1))); }}>− Column</button>
+        <span className="sheet-hint">Type = for a formula: =SUM(A1:A5), =AVG(B:B), =MEDIAN(…)</span>
+      </div>
+    </div>
+  );
+}

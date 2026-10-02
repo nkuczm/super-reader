@@ -6,7 +6,8 @@ import RichText from "./RichText";
 import SubjectHistory from "./SubjectHistory";
 import { EXTRACT_VERSION } from "@/lib/offline";
 import SubjectContacts from "./SubjectContacts";
-import { DrawingPad, ImageView, shrinkImage, DRAWING_HEIGHT } from "./SubjectMedia";
+import { DrawingPad, ImageView, TableBox, shrinkImage, DRAWING_HEIGHT } from "./SubjectMedia";
+import { tableHtml } from "@/lib/subject-doc";
 import type { Writing } from "./useAccount";
 import type { Note, NoteEntry } from "@/lib/notes";
 import {
@@ -115,6 +116,8 @@ const INSIGHT_LABEL: Record<InsightItem["type"], string> = {
  * suggested reading last. The whiteboard lays the same cards out on a canvas
  * where they can be moved and joined with lines.
  */
+const NEW_TABLE = () => [["", "", ""], ["", "", ""], ["", "", ""]];
+
 export default function SubjectPage(props: Props) {
   const { note, board, onBoard, keyHeaders, hasAiKey, ai } = props;
   const meta = metaOf(board);
@@ -362,7 +365,7 @@ export default function SubjectPage(props: Props) {
       if (bylineOf(card)) parts.push(`<p><i>${escapeHtml(bylineOf(card))}</i></p>`);
       parts.push(unlinkQuotes(composeCardDoc(card.note, card.quotes)));
     }
-    for (const box of boxes) parts.push(unlinkQuotes(box.html));
+    for (const box of boxes) parts.push(box.table ? tableHtml(box.table) : unlinkQuotes(box.html));
     if (insights.length > 0) {
       parts.push("<h3>Insights</h3><ul>");
       for (const insight of insights) parts.push(`<li><b>${INSIGHT_LABEL[insight.type]}:</b> ${escapeHtml(insight.text)}</li>`);
@@ -575,6 +578,7 @@ export default function SubjectPage(props: Props) {
                 <button role="menuitem" onClick={() => { close(); addBox(); }}>Add text box</button>
                 <button role="menuitem" onClick={() => { close(); addBox(undefined, { drawing: [], height: DRAWING_HEIGHT }); }}>Add drawing</button>
                 <button role="menuitem" onClick={() => { close(); imageInput.current?.click(); }}>Add image…</button>
+                <button role="menuitem" onClick={() => { close(); addBox(undefined, { table: NEW_TABLE() }); }}>Add table</button>
                 <button role="menuitem" title="Copy this tab as formatted text, for Google Docs and the like"
                   onClick={() => { close(); void copyTab(); }}>Copy this tab</button>
                 {props.onToggleHideBoxes && (
@@ -657,7 +661,7 @@ export default function SubjectPage(props: Props) {
       {meta.view === "board" ? (
         <Whiteboard {...shared} board={board} onBoard={onBoard} addBox={addBox} pickImage={pickImage} />
       ) : (
-        <DocumentView {...shared} />
+        <DocumentView {...shared} addBox={addBox} pickImage={pickImage} />
       )}
       </div>
       {contactsOpen && (
@@ -828,6 +832,8 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
           }}
           onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
         />
+      ) : box.table ? (
+        <TableBox box={box} onChange={(change) => shared.updateBox(box, change)} />
       ) : box.drawing ? (
         <DrawingPad box={box} onChange={(change) => shared.updateBox(box, change)} />
       ) : box.image !== undefined || box.caption !== undefined ? (
@@ -903,15 +909,56 @@ function splitInsights(insights: InsightItem[]) {
 /* Document view                                                           */
 /* ---------------------------------------------------------------------- */
 
-function DocumentView(shared: Shared) {
+function DocumentView(
+  shared: Shared & {
+    addBox: (at?: { x: number; y: number }, extra?: Partial<BoxItem>) => void;
+    pickImage: (at?: { x: number; y: number }) => void;
+  },
+) {
   const { inside, apart } = splitInsights(shared.insights);
+  // Right-click (or double-click) the page's empty space for something new.
+  const [menu, setMenu] = useState<{ left: number; top: number } | null>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setMenu(null);
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", esc);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", esc);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [menu]);
+  const open = (event: React.MouseEvent) => {
+    if (event.target !== event.currentTarget) return;
+    event.preventDefault();
+    setMenu({ left: Math.min(event.clientX, window.innerWidth - 200), top: Math.min(event.clientY, window.innerHeight - 200) });
+  };
+  const pick = (run: () => void) => () => {
+    run();
+    setMenu(null);
+  };
   const stack = [
     ...shared.cards.map((card) => ({ at: card.at, key: card.id, node: <StoryCard card={card} own={inside.get(card.id) ?? []} shared={shared} /> })),
     ...shared.boxes.map((box) => ({ at: box.at, key: box.id, node: <TextBox box={box} shared={shared} /> })),
   ].sort((a, b) => a.at - b.at);
 
   return (
-    <div className="subject-doc">
+    <div className="subject-doc" onContextMenu={open} onDoubleClick={open}>
+      {menu && (
+        <div className="wb-menu doc-menu" role="menu" style={{ left: menu.left, top: menu.top }} onPointerDown={(e) => e.stopPropagation()}>
+          <button role="menuitem" onClick={pick(() => shared.addBox())}><span className="wb-menu-icon">¶</span> Text box</button>
+          <button role="menuitem" onClick={pick(() => shared.addBox(undefined, { drawing: [], height: DRAWING_HEIGHT }))}>
+            <span className="wb-menu-icon">✎</span> Drawing
+          </button>
+          <button role="menuitem" onClick={pick(() => shared.pickImage())}><span className="wb-menu-icon">▣</span> Image…</button>
+          <button role="menuitem" onClick={pick(() => shared.addBox(undefined, { table: NEW_TABLE() }))}>
+            <span className="wb-menu-icon">▦</span> Table
+          </button>
+        </div>
+      )}
       {stack.length === 0 && (
         <p className="hint">
           Nothing here yet. Highlight a passage in an article and add it to this subject, use <strong>Subject</strong> in
@@ -1415,6 +1462,9 @@ function Whiteboard(
           </button>
           <button role="menuitem" onClick={() => { shared.pickImage(menu.at); setMenu(null); }}>
             <span className="wb-menu-icon">▣</span> Image…
+          </button>
+          <button role="menuitem" onClick={() => { shared.addBox(menu.at, { table: NEW_TABLE() }); setMenu(null); }}>
+            <span className="wb-menu-icon">▦</span> Table
           </button>
         </div>
       )}
