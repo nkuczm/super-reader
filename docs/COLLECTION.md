@@ -515,6 +515,19 @@ them rather than re-discovering them:
   the stories, so NYT belongs in a reader's lists; the article opens on
   nytimes.com, where their subscription works.
 
+- **SFGate (and bot checks generally)** — measured 2 Oct 2026 from the
+  deployment: an article URL answers **200** with a page titled "Client
+  Challenge" ("A required part of this site couldn't load…"), 35 words of
+  it. Being a 200, it was read as the article, saved under that title by
+  Paste story, and cached at the edge for a day. `isChallengePage()` in
+  `lib/article.ts` now recognises these interstitials by title (Client
+  Challenge, Just a moment…, Attention Required, Access Denied, Vercel
+  Security Checkpoint, …) or by their wording on a short page, and treats
+  them as the refusal they are; `EXTRACT_VERSION` went to 4 to drop the
+  cached copies. A pasted link to such a site is still kept, titled from its
+  address, and opens on the site. Passing the check means running the
+  site's JavaScript challenge as a browser would — see below; we don't.
+
 When adding a publisher that walls us, put it in the known-publisher table with
 a route that works, or leave it out. Do not ship an entry that 403s.
 

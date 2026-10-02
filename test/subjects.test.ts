@@ -189,3 +189,17 @@ test("quotes stay top-level bullets, even when added after a note under the last
     '<ul><li><a data-quote="a">“a”</a><ul><li>BUNKER</li></ul></li><li><a data-quote="b">“b”</a></li><li><a data-quote="c">“c”</a><ul><li>tf?</li></ul></li></ul>',
   );
 });
+
+test("a bot-check page is not an article, and a story's address gives a fallback title", async () => {
+  const { isChallengePage } = await import("../lib/article");
+  const { titleFromUrl } = await import("../lib/manual");
+  assert.ok(isChallengePage("Client Challenge", "A required part of this site couldn’t load."));
+  assert.ok(isChallengePage("Just a moment...", ""));
+  assert.ok(isChallengePage("", "Please verify you are a human to continue."));
+  assert.ok(!isChallengePage("Will Zuckerberg redeem himself?", "x".repeat(4000) + " verify you are human"));
+  assert.equal(
+    titleFromUrl("https://www.sfgate.com/hawaii/article/Will-Facebook-Mark-Zuckerberg-Kauai-redeem-himself-16841643.php"),
+    "Will Facebook Mark Zuckerberg Kauai redeem himself",
+  );
+  assert.equal(titleFromUrl("https://example.com/"), null);
+});

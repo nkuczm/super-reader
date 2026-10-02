@@ -81,6 +81,7 @@ import {
   liveManual,
   loadManual,
   manualKey,
+  titleFromUrl,
   mergeManual,
   sameManual,
   saveManual,
@@ -2574,15 +2575,33 @@ export default function Reader() {
 
     setPasteNotice({ kind: "busy", text: "Reading the story…" });
     let data: { title?: string; url?: string; excerpt?: string; html?: string; publishedAt?: string; siteName?: string; via?: string } | null = null;
+    let refusal: string | null = null;
     try {
       const res = await fetch(`/api/article?url=${encodeURIComponent(link)}&x=${EXTRACT_VERSION}`, { headers: keyHeaders });
-      data = res.ok ? await res.json() : null;
+      const body = await res.json().catch(() => null);
+      if (res.ok) data = body;
+      else refusal = body?.error ?? null;
     } catch {
       data = null;
     }
+    // A site that will not hand its page to an app still has a story at that
+    // address: keep it under the title its address spells out, to be read on
+    // the site, rather than refusing the paste.
+    let unreadable = false;
     if (!data?.title) {
-      setPasteNotice({ kind: "error", text: "Couldn’t read that page as a story." });
-      return;
+      const guessed = titleFromUrl(link);
+      if (!guessed) {
+        setPasteNotice({ kind: "error", text: refusal ?? "Couldn’t read that page as a story." });
+        return;
+      }
+      let host = "";
+      try {
+        host = new URL(link).hostname.replace(/^www\./, "");
+      } catch {
+        /* no host to name */
+      }
+      data = { title: guessed, url: link, siteName: host || undefined };
+      unreadable = true;
     }
     // A site's front page is a source to follow, not a story to read.
     let path = "/";
@@ -2600,7 +2619,7 @@ export default function Reader() {
     const image = data.html?.match(/<img[^>]+src="(https?:[^"]+)"/i)?.[1];
     const story: ManualStory = {
       link,
-      title: data.title,
+      title: data.title ?? link,
       summary: data.excerpt,
       image,
       publishedAt: data.publishedAt,
@@ -2622,7 +2641,11 @@ export default function Reader() {
     setReading({ url: link, title: story.title, feedUrl: source?.feedUrl, summary: story.summary });
     setPasteNotice({
       kind: "done",
-      text: source ? `Filed under ${source.title}.` : "Added to “Added by you”.",
+      text: unreadable
+        ? `Saved — ${data.siteName ?? "this site"} doesn’t let apps read its articles, so it opens on the site.`
+        : source
+          ? `Filed under ${source.title}.`
+          : "Added to “Added by you”.",
     });
   }, [articles, sourceById, openArticle, keyHeaders, allSources, commitManual]);
 

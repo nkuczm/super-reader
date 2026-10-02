@@ -152,3 +152,30 @@ export function sourceFor<S extends { id: string; siteUrl?: string; feedUrl: str
 export function manualKey(link: string) {
   return canonicalUrl(link);
 }
+
+/**
+ * A readable title from a story's address, for when its page cannot be read:
+ * ".../Will-Facebook-Mark-Zuckerberg-Kauai-redeem-himself-16841643.php" →
+ * "Will Facebook Mark Zuckerberg Kauai redeem himself".
+ */
+export function titleFromUrl(link: string): string | null {
+  let path: string;
+  try {
+    path = new URL(link).pathname;
+  } catch {
+    return null;
+  }
+  const slug = path
+    .split("/")
+    .filter(Boolean)
+    .reverse()
+    .map((part) => decodeURIComponent(part).replace(/\.(php|html?|aspx?)$/i, ""))
+    .find((part) => /[a-z].*[-_].*[a-z]/i.test(part));
+  if (!slug) return null;
+  const words = slug
+    .split(/[-_]+/)
+    .filter((word) => word && !/^\d{4,}$/.test(word) && !/^[a-f0-9]{8,}$/i.test(word));
+  if (words.length < 2) return null;
+  const title = words.join(" ");
+  return title.charAt(0).toUpperCase() + title.slice(1);
+}

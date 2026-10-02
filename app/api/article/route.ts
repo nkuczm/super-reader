@@ -295,6 +295,9 @@ export async function GET(request: Request) {
             // sends the reader off to re-paste a cookie that was never the
             // problem, so a measured refusal is named as what it is.
             (knownRefusal(target.hostname) ??
+            (/bot check/.test(message)
+              ? "This site shows a browser check to apps instead of the article. Open it on the site to read it."
+              : null) ??
             (credential
               ? `${credential.host} refused the request even with your saved subscription. The sign-in may have expired — open it on the site, then save a fresh one.`
               : "This site doesn't allow reader view, and its feed doesn't carry the full text."))
