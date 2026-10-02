@@ -292,6 +292,43 @@ export default function SettingsDialog({
           )}
 
           {settings.subjects && (
+            <div className="box-width-setting">
+              <p className="field-note" style={{ marginTop: 0 }}>
+                Text box width
+                <span className="box-width-value">{settings.textBoxWidth ? `${settings.textBoxWidth}px` : "Default"}</span>
+              </p>
+              <div className="box-width-controls">
+                <input
+                  type="range"
+                  min={160}
+                  max={760}
+                  step={20}
+                  aria-label="Text box width"
+                  value={settings.textBoxWidth || 280}
+                  onChange={(event) => onChange({ ...settings, textBoxWidth: Number(event.target.value) })}
+                />
+                <button type="button" className="link-btn" disabled={!settings.textBoxWidth}
+                  onClick={() => onChange({ ...settings, textBoxWidth: 0 })}>
+                  Reset
+                </button>
+              </div>
+              <div className="box-width-preview" aria-hidden="true">
+                <div className="box-width-sample" style={{ width: settings.textBoxWidth ? `min(${settings.textBoxWidth}px, 100%)` : "100%" }}>
+                  <b>Interview notes</b>
+                  <p>
+                    She said the plant would close by spring. Two suppliers have already stopped deliveries, and
+                    the union meets on Thursday.
+                  </p>
+                </div>
+              </div>
+              <p className="field-note">
+                New boxes on the whiteboard start this wide, and in the document view text boxes are no wider than this.
+                Default is the full column in the document and 280px on the whiteboard.
+              </p>
+            </div>
+          )}
+
+          {settings.subjects && (
             <div className="ai-choice">
               <p className="field-note" style={{ marginTop: 0 }}>AI for insights and suggested reading</p>
               <div className="seg" role="radiogroup" aria-label="AI provider">

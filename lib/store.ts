@@ -204,6 +204,8 @@ export type Settings = {
   subjects: boolean;
   /** In a subject's document view, draw a story's or text box's border only on hover or while editing it. */
   hideSubjectBoxes: boolean;
+  /** A new text box's width in pixels; 0 is the default (full column in the document, 280 on the whiteboard). */
+  textBoxWidth: number;
   /** Which AI the Subjects insights use, with the reader's own key for it. */
   aiProvider: "anthropic" | "openai";
   /** The OpenAI model, when that is the provider. */
@@ -220,6 +222,7 @@ export const DEFAULT_SETTINGS: Settings = {
   openOnSite: [],
   subjects: false,
   hideSubjectBoxes: false,
+  textBoxWidth: 0,
   aiProvider: "anthropic",
   openaiModel: "gpt-5-mini",
 };
@@ -248,6 +251,10 @@ export function loadSettings(): Settings {
       hideRead: Boolean(parsed.hideRead),
       subjects: parsed.subjects === true,
       hideSubjectBoxes: parsed.hideSubjectBoxes === true,
+      textBoxWidth:
+        typeof parsed.textBoxWidth === "number" && parsed.textBoxWidth >= 160 && parsed.textBoxWidth <= 1000
+          ? Math.round(parsed.textBoxWidth)
+          : 0,
       aiProvider: parsed.aiProvider === "openai" ? "openai" : "anthropic",
       openaiModel:
         typeof parsed.openaiModel === "string" && parsed.openaiModel.trim()
