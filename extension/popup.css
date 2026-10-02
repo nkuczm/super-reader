@@ -19,3 +19,10 @@ blockquote { margin: 0 0 10px; padding: 4px 0 4px 10px; border-left: 3px solid v
 .status.done { color: #16a34a; }
 details { margin: 0 0 8px; font-size: 12px; color: var(--dim); }
 footer { margin-top: 10px; text-align: right; }
+.person { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+.person img { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.person-text { flex: 1; min-width: 0; }
+.person-text input { margin-bottom: 4px; }
+#person-name { font-weight: 650; }
+.check { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--dim); margin: 0 0 10px; }
+.check input { width: auto; margin: 0; }

@@ -29,6 +29,8 @@ export type InboxItem = {
   /** Text selected on the page, filed as a quote; and a note under it. */
   quote?: string;
   note?: string;
+  /** A person captured from a profile page, to add to the subject's contacts. */
+  contact?: { name: string; role?: string; linkedin?: string; photo?: string };
 };
 
 export type SubjectIndex = { id: string; name: string }[];

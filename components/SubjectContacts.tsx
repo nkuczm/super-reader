@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { authorsOf, cleanLinkedIn, contactId, type Card, type ContactItem } from "@/lib/subjects";
+import { authorsOf, cleanLinkedIn, contactId, safeImage, type Card, type ContactItem } from "@/lib/subjects";
 
 const HIDE_SUGGESTED_KEY = "super-reader:hide-suggested-contacts";
 
@@ -186,6 +186,14 @@ function ContactRow({
     <li className={`contact${contact.state === "pending" && contact.origin === "suggested" ? " pending" : ""}`}>
       <div className="contact-main">
         <div className="contact-name">
+          <span className="contact-avatar" aria-hidden="true">
+            {safeImage(contact.photo) ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={safeImage(contact.photo)} alt="" />
+            ) : (
+              contact.name.split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase()
+            )}
+          </span>
           {contact.name}
           {contact.role && <span className="contact-role">{contact.role}</span>}
         </div>
