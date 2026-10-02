@@ -174,6 +174,8 @@ export type ContactItem = Base & {
   phone?: string;
   /** Their LinkedIn profile, as typed in. */
   linkedin?: string;
+  /** The reader's own notes on them: when they called, what they said. */
+  notes?: string;
   /** Where the email came from: the stories, or typed in. */
   emailFrom?: "story" | "you";
   state: "pending" | "kept" | "dismissed";
@@ -653,6 +655,7 @@ function putContact(board: Board, found: FoundContact, cardIds: Set<string>, now
       email,
       phone: existing?.phone,
       linkedin: existing?.linkedin,
+      notes: existing?.notes,
       emailFrom: existing?.email ? existing.emailFrom : found.email ? "story" : undefined,
       state: existing?.state ?? "pending",
       at: now,

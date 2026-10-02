@@ -1946,3 +1946,11 @@
 .contact-refs-toggle { font-size: 12px; padding: 0; color: var(--text-dim); }
 .contact-refs ul { list-style: none; margin: 4px 0 0; padding: 0 0 0 8px; border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
 .contact-refs li .link-btn { font-size: 12.5px; text-align: left; padding: 1px 0; }
+.contact-notes {
+  width: 100%; margin-top: 6px; border: 1px solid transparent; border-radius: 6px; background: var(--bg-sub);
+  color: var(--text); font: inherit; font-size: 13px; line-height: 1.45; padding: 5px 8px; resize: none; overflow: hidden;
+}
+.contact-notes:focus { outline: none; border-color: var(--accent); background: var(--bg); }
+.contacts-suggested-head { display: flex; align-items: baseline; justify-content: space-between; margin: 14px 0 4px; }
+.contacts-suggested-head h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); margin: 0; }
+.contacts-suggested-head .link-btn { font-size: 12px; }
