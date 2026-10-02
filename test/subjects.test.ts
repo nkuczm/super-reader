@@ -128,10 +128,12 @@ test("a card's quotes are bullets in its document, linked by id, never re-added 
   assert.equal(withoutQuotes(next), "<ul></ul><p>my thought</p>");
 });
 
-test("synced HTML keeps a quote link by id and drops any real href", () => {
+test("synced HTML keeps a quote link by id, a web link as a plain link, and nothing else", () => {
+  // A quote never takes an href; a writer's own link is kept only as a web
+  // address that opens apart from the app.
   assert.equal(
-    sanitizeRichText('<a data-quote="q1" href="javascript:x">“hi”</a><a href="https://evil">x</a>'),
-    '<a data-quote="q1">“hi”</a>x',
+    sanitizeRichText('<a data-quote="q1" href="javascript:x">“hi”</a><a href="https://evil">x</a><a href="data:text/html,1">y</a>'),
+    '<a data-quote="q1">“hi”</a><a href="https://evil/" target="_blank" rel="noopener noreferrer">x</a>y',
   );
 });
 
@@ -232,4 +234,14 @@ test("a LinkedIn link is tidied, and anything else refused", async () => {
   assert.equal(cleanLinkedIn("https://uk.linkedin.com/in/ann"), "https://www.linkedin.com/in/ann");
   assert.equal(cleanLinkedIn("https://evil.example/linkedin.com/in/x"), null);
   assert.equal(cleanLinkedIn("javascript:alert(1)"), null);
+});
+
+test("a writer's links survive sanitising, script addresses do not", async () => {
+  const { sanitizeRichText } = await import("../lib/subjects");
+  assert.equal(
+    sanitizeRichText('<p><a href="https://example.com/a?b=1&amp;c=2" onclick="x()">site</a></p>'),
+    '<p><a href="https://example.com/a?b=1&amp;c=2" target="_blank" rel="noopener noreferrer">site</a></p>',
+  );
+  assert.equal(sanitizeRichText('<a href="javascript:alert(1)">x</a>'), "x");
+  assert.equal(sanitizeRichText('<a data-quote="q1" href="https://e.com">q</a>'), '<a data-quote="q1">q</a>');
 });
