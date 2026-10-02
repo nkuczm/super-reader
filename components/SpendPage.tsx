@@ -1,11 +1,13 @@
 "use client";
 
+import { loadSyncCode } from "@/lib/store";
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "./icons";
 import {
   daily,
   formatDollars,
   loadSpend,
+  loadSharedSpend,
   PROVIDER_NAME,
   SPEND_EVENT,
   summarise,
@@ -53,13 +55,35 @@ function DailyBars({ days }: { days: { day: string; cost: number; runs: number }
 
 export default function SpendPage({ onOpenMenu, onBack }: { onOpenMenu?: () => void; onBack?: () => void }) {
   const [records, setRecords] = useState<SpendRecord[]>([]);
+  /** Whether these are every device's runs (through the sync code) or this one's. */
+  const [shared, setShared] = useState(false);
 
   useEffect(() => {
-    const load = () => setRecords(loadSpend());
+    let cancelled = false;
+    const load = () => {
+      // This device's at once, then everyone's as soon as the server answers.
+      setRecords(loadSpend());
+      void loadSharedSpend(loadSyncCode()).then((result) => {
+        if (cancelled) return;
+        setRecords(result.records);
+        setShared(result.shared);
+      });
+    };
     load();
     window.addEventListener(SPEND_EVENT, load);
-    return () => window.removeEventListener(SPEND_EVENT, load);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(SPEND_EVENT, load);
+    };
   }, []);
+
+  const byDevice = useMemo(() => {
+    const map = new Map<string, SpendRecord[]>();
+    for (const r of records) map.set(r.device ?? "Earlier runs", [...(map.get(r.device ?? "Earlier runs") ?? []), r]);
+    return [...map.entries()]
+      .map(([device, list]) => ({ device, ...summarise(list) }))
+      .sort((a, b) => b.cost - a.cost);
+  }, [records]);
 
   const now = Date.now();
   const monthStart = new Date(now);
@@ -107,7 +131,12 @@ export default function SpendPage({ onOpenMenu, onBack }: { onOpenMenu?: () => v
         )}
         <div>
           <h1>AI spending</h1>
-          <p className="sub">Estimated from the tokens each run reported · this device only</p>
+          <p className="sub">
+            Estimated from the tokens each run reported ·{" "}
+            {shared
+              ? `every device on your account${byDevice.length > 1 ? ` (${byDevice.length})` : ""}`
+              : "this device only — turn on Sync across devices to count them all"}
+          </p>
         </div>
       </div>
 
@@ -151,6 +180,25 @@ export default function SpendPage({ onOpenMenu, onBack }: { onOpenMenu?: () => v
               </tbody>
             </table>
           </div>
+
+          {byDevice.length > 1 && (
+            <div className="status-table-wrap">
+              <table className="status-table">
+                <thead>
+                  <tr><th>Device</th><th className="num">Runs</th><th className="num">Est. cost</th></tr>
+                </thead>
+                <tbody>
+                  {byDevice.map((row) => (
+                    <tr key={row.device}>
+                      <td className="status-name">{row.device}</td>
+                      <td className="num">{row.runs}</td>
+                      <td className="num">{formatDollars(row.cost)}{floor(row)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <div className="status-table-wrap">
             <table className="status-table">

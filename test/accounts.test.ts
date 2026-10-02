@@ -82,7 +82,9 @@ test("past thirty days, one version per day is kept", async () => {
   await db.query("DELETE FROM subject_versions");
   for (const [day, hour] of [[40, 9], [40, 15], [40, 20], [35, 10], [2, 9], [2, 12]] as const) {
     await db.query(
-      `INSERT INTO subject_versions (account_id, saved_at, payload) VALUES ('g-1', now() - interval '${day} days' + interval '${hour} hours', 'x')`,
+      // From the start of a day, not from now: "now + 20 hours" crosses
+      // midnight late in the day and splits one day's saves across two.
+      `INSERT INTO subject_versions (account_id, saved_at, payload) VALUES ('g-1', date_trunc('day', now()) - interval '${day} days' + interval '${hour} hours', 'x')`,
     );
   }
   await thinVersions("g-1");
