@@ -47,6 +47,11 @@ type Props = {
    * came from. It is found in the text, scrolled to and flashed.
    */
   highlight?: string;
+  /** What to paint over the text, and the comments beside it. */
+  marks?: ArticleMark[];
+  /** Mark the selected passage without filing it anywhere. */
+  onHighlight?: (text: string) => void;
+  onRemoveHighlight?: (id: string) => void;
   /** With Subjects on: add this whole story to a subject, or to a new one. */
   subjects?: {
     onAdd: (noteId: string) => void;
@@ -59,6 +64,22 @@ type Props = {
 };
 
 const SUBJECTS_SHOWN = 5;
+
+/**
+ * Something marked in the article: a plain highlight, or a quote a subject
+ * took from it — with what was written under that quote, shown as a comment
+ * in the margin.
+ */
+export type ArticleMark = {
+  id: string;
+  text: string;
+  kind: "highlight" | "quote";
+  noteId?: string;
+  noteName?: string;
+  comments?: string[];
+};
+
+type Rect = { top: number; left: number; width: number; height: number };
 
 export default function ArticleReader({
   url,
@@ -78,6 +99,9 @@ export default function ArticleReader({
   onMoveQuote,
   highlight,
   subjects,
+  marks,
+  onHighlight,
+  onRemoveHighlight,
   onClose,
 }: Props) {
   const [subjectMenu, setSubjectMenu] = useState(false);
@@ -217,6 +241,58 @@ export default function ArticleReader({
     return () => container.removeEventListener("error", onError, true);
   }, [article?.html]);
   /** Where the quote being returned to sits, in boxes to paint over it. */
+  /** Where each mark sits over the text, measured from the laid-out page. */
+  const [painted, setPainted] = useState<{ mark: ArticleMark; rects: Rect[] }[]>([]);
+  /** Room beside the article for comments, as in a document's margin. */
+  const [wide, setWide] = useState(false);
+  /** A mark that was clicked: what can be done with it, and where. */
+  const [picked, setPicked] = useState<{ mark: ArticleMark; top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    const host = prose.current;
+    if (!host || !article || !marks || marks.length === 0) {
+      setPainted([]);
+      return;
+    }
+    const measure = () => {
+      const body = host.closest(".reader-body") as HTMLElement | null;
+      const base = body?.getBoundingClientRect();
+      if (!base) return;
+      const main = host.closest(".main") as HTMLElement | null;
+      setWide(!!main && main.clientWidth >= 1100);
+      const next: { mark: ArticleMark; rects: Rect[] }[] = [];
+      for (const mark of marks) {
+        const range = findQuoteRange(host, mark.text);
+        if (!range) continue;
+        const rects = [...range.getClientRects()]
+          .filter((r) => r.width > 1)
+          .map((r) => ({ top: r.top - base.top, left: r.left - base.left, width: r.width, height: r.height }));
+        if (rects.length) next.push({ mark, rects });
+      }
+      setPainted(next);
+    };
+    const timer = setTimeout(measure, 150);
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(host);
+    return () => {
+      clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [article, marks]);
+
+  /** Margin comments, top to bottom, nudged down so none overlaps the last. */
+  const comments = (() => {
+    let floor = -Infinity;
+    return painted
+      .filter((p) => p.mark.comments && p.mark.comments.length > 0)
+      .sort((a, b) => a.rects[0].top - b.rects[0].top)
+      .map((p) => {
+        const top = Math.max(p.rects[0].top - 4, floor);
+        floor = top + 34 + p.mark.comments!.length * 19;
+        return { ...p, top };
+      });
+  })();
+
   const [flash, setFlash] = useState<
     { top: number; left: number; width: number; height: number }[]
   >([]);
@@ -485,7 +561,20 @@ export default function ArticleReader({
         </a>
       </div>
 
-      <article className="reader-body">
+      <article
+        className={`reader-body${wide && comments.length > 0 ? " with-margin" : ""}`}
+        onClick={(event) => {
+          // A click on marked text, not a selection: what can be done with it.
+          if (window.getSelection()?.toString()) return;
+          const body = event.currentTarget.getBoundingClientRect();
+          const x = event.clientX - body.left;
+          const y = event.clientY - body.top;
+          const hit = painted.find((p) =>
+            p.rects.some((r) => x >= r.left && x <= r.left + r.width && y >= r.top && y <= r.top + r.height),
+          );
+          setPicked(hit ? { mark: hit.mark, top: y + 14, left: Math.min(x, body.width - 220) } : null);
+        }}
+      >
         <h1>{article?.title ?? fallbackTitle}</h1>
         <p className="reader-meta">
           {[
@@ -613,6 +702,64 @@ export default function ArticleReader({
           <>
             {/* Sanitized server-side: scripts, styles, iframes and event
                 handlers are stripped before this ever reaches the DOM. */}
+            {painted.length > 0 && (
+              <div className="hl-layer" aria-hidden="true">
+                {painted.flatMap((p) =>
+                  p.rects.map((r, i) => <span key={`${p.mark.id}-${i}`} className={`hl hl-${p.mark.kind}`} style={r} />),
+                )}
+              </div>
+            )}
+            {comments.length > 0 && (
+              <div className={`hl-comments${wide ? " side" : " inline"}`}>
+                {comments.map((c) =>
+                  wide ? (
+                    <button key={c.mark.id} className="hl-comment" style={{ top: c.top }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (c.mark.noteId) onOpenNote?.(c.mark.noteId);
+                      }}
+                      title={c.mark.noteName ? `In ${c.mark.noteName} — open the subject` : undefined}>
+                      {c.mark.comments!.map((line, i) => (
+                        <span key={i} className="hl-comment-line" style={{ paddingLeft: (line.length - line.trimStart().length) * 6 }}>
+                          {line.trim()}
+                        </span>
+                      ))}
+                      {c.mark.noteName && <span className="hl-comment-from">{c.mark.noteName}</span>}
+                    </button>
+                  ) : (
+                    // No margin on a narrow screen: a marker at the end of the
+                    // passage, opening the comment when tapped.
+                    <button key={c.mark.id} className="hl-badge" aria-label="Show comment"
+                      style={{ top: c.rects[c.rects.length - 1].top, left: Math.min(c.rects[c.rects.length - 1].left + c.rects[c.rects.length - 1].width + 2, 9999) }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const r = c.rects[c.rects.length - 1];
+                        setPicked({ mark: c.mark, top: r.top + r.height + 6, left: Math.max(0, r.left - 120) });
+                      }}>
+                      💬
+                    </button>
+                  ),
+                )}
+              </div>
+            )}
+            {picked && (
+              <div className="hl-pop" style={{ top: picked.top, left: Math.max(0, picked.left) }} onClick={(e) => e.stopPropagation()}>
+                {picked.mark.comments && picked.mark.comments.length > 0 && (
+                  <div className="hl-pop-comment">
+                    {picked.mark.comments.map((line, i) => <div key={i}>{line.trim()}</div>)}
+                  </div>
+                )}
+                {picked.mark.kind === "highlight" ? (
+                  <button className="link-btn danger" onClick={() => { onRemoveHighlight?.(picked.mark.id); setPicked(null); }}>
+                    Remove highlight
+                  </button>
+                ) : (
+                  <button className="link-btn" onClick={() => { if (picked.mark.noteId) onOpenNote?.(picked.mark.noteId); setPicked(null); }}>
+                    In {picked.mark.noteName ?? "a subject"} →
+                  </button>
+                )}
+              </div>
+            )}
             {flash.length > 0 && (
               <div className="quote-flash" aria-hidden="true">
                 {flash.map((box, i) => (
@@ -659,6 +806,7 @@ export default function ArticleReader({
                 onOpenNote={onOpenNote}
                 onMoveQuote={onMoveQuote}
                 onQuoteNote={subjects ? onQuoteNote : undefined}
+                onHighlight={onHighlight}
               />
             )}
             {article.via === "preview" && (

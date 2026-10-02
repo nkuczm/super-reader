@@ -1904,3 +1904,42 @@
 .rich-body img.rt-embed {
   display: block; max-width: 100%; height: auto; margin: 6px 0; border-radius: 8px; border: 1px solid var(--border);
 }
+
+/* ---------- highlights and margin comments in the article ---------- */
+.quote-pop-row { display: flex; gap: 6px; align-items: center; }
+.quote-highlight-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: #fde68a; border: 1px solid #f59e0b; }
+.hl-layer { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.hl { position: absolute; border-radius: 2px; mix-blend-mode: multiply; }
+.hl-highlight { background: rgba(253, 230, 138, 0.75); }
+.hl-quote { background: rgba(147, 197, 253, 0.45); }
+@media (prefers-color-scheme: dark) {
+  .hl { mix-blend-mode: screen; }
+  .hl-highlight { background: rgba(124, 94, 16, 0.75); }
+  .hl-quote { background: rgba(37, 99, 235, 0.35); }
+}
+/* The page makes room on the right for comments, as a document's margin does. */
+.reader:has(.reader-body.with-margin) { margin-left: max(28px, calc(50% - 560px)); }
+.hl-comments.side { position: absolute; top: 0; left: calc(100% + 28px); width: 230px; }
+.hl-comment {
+  position: absolute; left: 0; width: 100%; text-align: left; display: flex; flex-direction: column; gap: 2px;
+  background: var(--bg); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px;
+  padding: 7px 10px; font: inherit; font-size: 13px; line-height: 1.4; color: var(--text); cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+.hl-comment:hover { border-color: var(--accent); }
+.hl-comment-from { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.hl-comments.inline { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+.hl-badge {
+  position: absolute; pointer-events: auto; border: 0; background: none; padding: 0 2px; font-size: 13px; cursor: pointer;
+  line-height: 1; transform: translateY(-4px);
+}
+.hl-pop {
+  position: absolute; z-index: 20; min-width: 160px; max-width: 280px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;
+}
+.hl-pop-comment { font-size: 13px; line-height: 1.45; color: var(--text); border-left: 3px solid var(--accent); padding-left: 8px; }
+.hl-pop .link-btn { align-self: flex-start; font-size: 13px; padding: 2px 0; }
+/* Painted behind the words, so the text keeps its own colour. */
+.hl-layer { z-index: 0; }
+.hl { mix-blend-mode: normal !important; }
+.reader-body .prose { position: relative; z-index: 1; }

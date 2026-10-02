@@ -9,6 +9,7 @@ import { mergeNotes } from "./notes";
 import type { Note, NoteRemoval } from "./notes";
 import { mergeBoards, slimBoardsForSync, type Boards } from "./subjects";
 import { mergeManual, type ManualStories } from "./manual";
+import { mergeHighlights, type Highlights } from "./highlights";
 import { isLinkedCode, type SubjectsDoc } from "./accounts";
 
 export type SyncPayload = {
@@ -50,6 +51,8 @@ export type SyncPayload = {
   prefs?: { subjects: boolean; aiProvider: string; openaiModel: string; at: number };
   /** Stories pasted in by hand (lib/manual.ts), merged per link. */
   manual?: ManualStories;
+  /** Passages marked in articles (lib/highlights.ts), merged per highlight. */
+  highlights?: Highlights;
   /**
    * Which team feeds this person has joined — the name and connect code, not
    * the shared articles. Those live on the server because several people write
@@ -163,6 +166,7 @@ export async function writeSync(
     noteRemovals: notes.removals,
     boards: slimBoardsForSync(mergeBoards(payload.boards ?? {}, stored.boards ?? {})),
     manual: mergeManual(payload.manual ?? {}, stored.manual ?? {}),
+    highlights: mergeHighlights(payload.highlights ?? {}, stored.highlights ?? {}),
     prefs:
       (stored.prefs?.at ?? 0) > (payload.prefs?.at ?? 0) ? stored.prefs : (payload.prefs ?? stored.prefs),
   };

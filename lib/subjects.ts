@@ -1062,3 +1062,37 @@ export function bylineOf(card: { publishedAt?: string; author?: string; source?:
   }
   return parts.join(" · ");
 }
+
+/**
+ * What was written under one quote on its card — the bullets nested beneath
+ * it — as plain lines, for showing beside the passage in the article.
+ */
+export function quoteNotesFor(note: Note, board: Board | undefined, quoteId: string): string[] {
+  const card = cardsOf(note, board).find((c) => c.quotes.some((q) => q.id === quoteId));
+  if (!card || !card.note) return [];
+  const nodes = parseHtml(composeCardDoc(card.note, card.quotes));
+  const text = (n: HtmlNode | string): string =>
+    typeof n === "string" ? n : n.tag === "ul" || n.tag === "ol" ? "" : n.children.map(text).join("");
+  const lines: string[] = [];
+  const collect = (list: HtmlNode, depth: number) => {
+    for (const li of list.children) {
+      if (typeof li === "string" || li.tag !== "li") continue;
+      const own = decodeEntities(li.children.map(text).join("")).replace(/\s+/g, " ").trim();
+      if (own) lines.push(`${"  ".repeat(depth)}${own}`);
+      for (const child of li.children) if (typeof child !== "string" && (child.tag === "ul" || child.tag === "ol")) collect(child, depth + 1);
+    }
+  };
+  for (const top of nodes) {
+    if (typeof top === "string" || top.tag !== "ul") continue;
+    for (const li of top.children) {
+      if (typeof li === "string" || !isQuoteItem(li)) continue;
+      if (!li.children.some((c) => typeof c !== "string" && c.tag === "a" && c.open.includes(`data-quote="${quoteId}"`))) continue;
+      for (const child of li.children) if (typeof child !== "string" && (child.tag === "ul" || child.tag === "ol")) collect(child, 0);
+    }
+  }
+  return lines;
+}
+
+function decodeEntities(text: string) {
+  return text.replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
+}
