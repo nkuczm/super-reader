@@ -1,0 +1,90 @@
+import { NextResponse } from "next/server";
+import { sanitizeArticleHtml } from "@/lib/article";
+import { addInboxItem, clearInboxItems, readInbox, setSubjectIndex, type InboxItem } from "@/lib/inbox";
+import { readSync } from "@/lib/sync";
+import { isConfigured } from "@/lib/db";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+/** One saved page, text included, is far below this; a runaway page is not. */
+const MAX_BODY = 2_000_000;
+const PRIVATE = { "cache-control": "private, no-store" };
+
+function reply(data: unknown, status = 200) {
+  return NextResponse.json(data, { status, headers: PRIVATE });
+}
+
+/** The sync code is the key: only a code that exists has an inbox. */
+async function codeFrom(value: unknown): Promise<string | null> {
+  if (typeof value !== "string" || !value.trim() || value.length > 200) return null;
+  if (!isConfigured()) return null;
+  return (await readSync(value.trim())) ? value.trim() : null;
+}
+
+/** The waiting items, and the subjects the extension may file into. */
+export async function GET(request: Request) {
+  const code = await codeFrom(new URL(request.url).searchParams.get("code"));
+  if (!code) return reply({ error: "That sync code was not found." }, 404);
+  return reply(await readInbox(code));
+}
+
+/** From the extension: one article read in the reader's own browser. */
+export async function POST(request: Request) {
+  const text = await request.text();
+  if (text.length > MAX_BODY) return reply({ error: "That page is too large to save." }, 413);
+  let body: Record<string, unknown>;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return reply({ error: "Expected JSON" }, 400);
+  }
+  const code = await codeFrom(body.code);
+  if (!code) return reply({ error: "That sync code was not found. Check it in Super Reader → Sync." }, 404);
+  const page = (body.article ?? {}) as Record<string, unknown>;
+  let url: URL;
+  try {
+    url = new URL(String(page.url ?? ""));
+    if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error();
+  } catch {
+    return reply({ error: "That page has no web address to save." }, 400);
+  }
+  const str = (v: unknown, max: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : undefined);
+  // Cleaned here exactly as a fetched article is: whatever a page held, only
+  // text, links and pictures reach the app.
+  const article = sanitizeArticleHtml(String(page.html ?? ""), url.toString(), {
+    title: str(page.title, 400) ?? url.hostname,
+    byline: str(page.byline, 200),
+    siteName: str(page.siteName, 200),
+    publishedAt: str(page.publishedAt, 60),
+  });
+  const item: InboxItem = {
+    id: `x${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`,
+    savedAt: Date.now(),
+    article,
+    subjectId: str(body.subjectId, 80),
+    newSubject: str(body.newSubject, 120),
+    quote: str(body.quote, 4000),
+    note: str(body.note, 4000),
+  };
+  await addInboxItem(code, item);
+  return reply({ ok: true, title: article.title });
+}
+
+/** From the app: the subjects to offer, by name. */
+export async function PUT(request: Request) {
+  const body = await request.json().catch(() => ({}));
+  const code = await codeFrom(body.code);
+  if (!code) return reply({ error: "That sync code was not found." }, 404);
+  await setSubjectIndex(code, Array.isArray(body.subjects) ? body.subjects : []);
+  return reply({ ok: true });
+}
+
+/** From the app: items it has filed. */
+export async function DELETE(request: Request) {
+  const body = await request.json().catch(() => ({}));
+  const code = await codeFrom(body.code);
+  if (!code) return reply({ error: "That sync code was not found." }, 404);
+  await clearInboxItems(code, Array.isArray(body.ids) ? body.ids.filter((id: unknown) => typeof id === "string") : []);
+  return reply({ ok: true });
+}

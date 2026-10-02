@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main id="app">
+      <section id="setup" hidden>
+        <h1>Connect to Super Reader</h1>
+        <p>Paste your sync code from Super Reader → <b>Sync across devices</b>. Saved stories arrive on every device using that code.</p>
+        <input id="code" placeholder="Sync code" autocomplete="off" spellcheck="false" />
+        <details>
+          <summary>Server</summary>
+          <input id="server" placeholder="https://super-reader-wine.vercel.app" />
+        </details>
+        <button id="connect" class="primary">Connect</button>
+        <p id="setup-error" class="error" hidden></p>
+      </section>
+
+      <section id="save" hidden>
+        <div class="page">
+          <div id="title" class="title">Reading the page…</div>
+          <div id="meta" class="meta"></div>
+        </div>
+        <div id="quote-wrap" hidden>
+          <div class="label">Selected text — filed as a quote</div>
+          <blockquote id="quote"></blockquote>
+        </div>
+        <label class="label" for="subject">Subject</label>
+        <select id="subject">
+          <option value="">Just save it</option>
+        </select>
+        <input id="new-subject" placeholder="New subject name" hidden />
+        <textarea id="note" rows="2" placeholder="Note (optional)"></textarea>
+        <button id="save-btn" class="primary" disabled>Save</button>
+        <p id="status" class="status" hidden></p>
+        <footer><button id="disconnect" class="link">Disconnect</button></footer>
+      </section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

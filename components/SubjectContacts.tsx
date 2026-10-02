@@ -5,8 +5,6 @@ import { authorsOf, cleanLinkedIn, contactId, type Card, type ContactItem } from
 
 const HIDE_SUGGESTED_KEY = "super-reader:hide-suggested-contacts";
 
-type Detail = "email" | "phone" | "linkedin";
-
 /**
  * The subject's contacts: people to interview, from the stories and
  * suggested beside them. Details come from the stories or from the reader —
@@ -157,37 +155,29 @@ function ContactRow({
   onRemove: (contact: ContactItem) => void;
   onOpenCard: (card: Card) => void;
 }) {
-  const [editing, setEditing] = useState<{ kind: Detail; value: string } | null>(null);
+  /** All three details at once — any, all or none of them filled in. */
+  const [editing, setEditing] = useState<{ email: string; phone: string; linkedin: string } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [showRefs, setShowRefs] = useState(false);
 
   const save = () => {
     if (!editing) return;
-    const value = editing.value.trim();
-    if (editing.kind === "email" && value && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value)) {
-      setProblem("That doesn't look like an email address.");
-      return;
-    }
-    if (editing.kind === "linkedin") {
-      const link = value ? cleanLinkedIn(value) : null;
-      if (value && !link) {
-        setProblem("That doesn't look like a LinkedIn profile link.");
-        return;
-      }
-      onSave({ ...contact, linkedin: link ?? undefined, state: "kept" });
-      setEditing(null);
-      setProblem(null);
-      return;
-    }
-    if (editing.kind === "phone" && value && value.replace(/\D/g, "").length < 6) {
-      setProblem("That doesn't look like a phone number.");
-      return;
-    }
-    onSave(
-      editing.kind === "email"
-        ? { ...contact, email: value || undefined, emailFrom: value ? "you" : undefined, state: "kept" }
-        : { ...contact, phone: value || undefined, state: "kept" },
-    );
+    const email = editing.email.trim();
+    const phone = editing.phone.trim();
+    const linkedinRaw = editing.linkedin.trim();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return setProblem("That email doesn't look right.");
+    if (phone && phone.replace(/\D/g, "").length < 6) return setProblem("That phone number doesn't look right.");
+    const linkedin = linkedinRaw ? cleanLinkedIn(linkedinRaw) : null;
+    if (linkedinRaw && !linkedin) return setProblem("That doesn't look like a LinkedIn profile link.");
+    onSave({
+      ...contact,
+      email: email || undefined,
+      // Still "from the story" if it is the address the story gave.
+      emailFrom: email ? (email === contact.email ? contact.emailFrom : "you") : undefined,
+      phone: phone || undefined,
+      linkedin: linkedin ?? undefined,
+      state: "kept",
+    });
     setEditing(null);
     setProblem(null);
   };
@@ -254,43 +244,47 @@ function ContactRow({
         />
         {editing ? (
           <form
+            noValidate
             className="contact-edit"
             onSubmit={(event) => {
               event.preventDefault();
               save();
             }}
+            onKeyDown={(e) => e.key === "Escape" && setEditing(null)}
           >
-            <select
-              className="input"
-              value={editing.kind}
-              aria-label="Detail"
-              onChange={(e) => {
-                const kind = e.target.value as Detail;
-                setEditing({ kind, value: (kind === "email" ? contact.email : kind === "phone" ? contact.phone : contact.linkedin) ?? "" });
-              }}
-            >
-              <option value="email">Email</option>
-              <option value="phone">Phone</option>
-              <option value="linkedin">LinkedIn</option>
-            </select>
-            <input
-              className="input"
-              autoFocus
-              type={editing.kind === "email" ? "email" : editing.kind === "phone" ? "tel" : "url"}
-              placeholder={
-                editing.kind === "email" ? "name@example.com" : editing.kind === "phone" ? "+1 555 010 0000" : "linkedin.com/in/name"
-              }
-              value={editing.value}
-              onChange={(e) => setEditing({ ...editing, value: e.target.value })}
-              onKeyDown={(e) => e.key === "Escape" && setEditing(null)}
-            />
-            <button className="btn small">Save</button>
-            <button type="button" className="link-btn" onClick={() => setEditing(null)}>Cancel</button>
+            {(
+              [
+                ["email", "Email", "email", "name@example.com"],
+                ["phone", "Phone", "tel", "+1 555 010 0000"],
+                // Plain text, checked by cleanLinkedIn: a "url" field would
+                // silently refuse "linkedin.com/in/…" for lacking https://.
+                ["linkedin", "LinkedIn", "text", "linkedin.com/in/name"],
+              ] as const
+            ).map(([key, label, type, placeholder], i) => (
+              <label key={key} className="contact-field">
+                <span>{label}</span>
+                <input
+                  className="input"
+                  autoFocus={i === 0}
+                  type={type}
+                  placeholder={placeholder}
+                  value={editing[key]}
+                  onChange={(e) => setEditing({ ...editing, [key]: e.target.value })}
+                />
+              </label>
+            ))}
             {problem && <span className="signin-error">{problem}</span>}
+            <div className="contact-edit-actions">
+              <button className="btn small">Save</button>
+              <button type="button" className="link-btn" onClick={() => { setEditing(null); setProblem(null); }}>Cancel</button>
+            </div>
           </form>
         ) : (
-          <button className="link-btn contact-add-detail" onClick={() => setEditing({ kind: "email", value: contact.email ?? "" })}>
-            {contact.email || contact.phone || contact.linkedin ? "Edit email, phone or LinkedIn ▾" : "Add email, phone or LinkedIn ▾"}
+          <button
+            className="link-btn contact-add-detail"
+            onClick={() => setEditing({ email: contact.email ?? "", phone: contact.phone ?? "", linkedin: contact.linkedin ?? "" })}
+          >
+            {contact.email || contact.phone || contact.linkedin ? "Edit email, phone, LinkedIn" : "Add email, phone, LinkedIn"}
           </button>
         )}
       </div>
