@@ -271,6 +271,25 @@ export default function RichText({
     changed();
   }
 
+  /**
+   * The highlight button as a toggle: over highlighted text it takes the
+   * highlight off; anywhere else it puts one on.
+   */
+  function toggleHighlight() {
+    const root = el.current;
+    const sel = window.getSelection();
+    if (!root || !sel || sel.rangeCount === 0) return format("hiliteColor", "#fde68a");
+    const range = sel.getRangeAt(0);
+    const lit = [...root.querySelectorAll<HTMLElement>("mark, span[style*='background']")].filter((node) => {
+      if (range.intersectsNode(node)) return true;
+      return node.contains(range.startContainer);
+    });
+    if (lit.length === 0) return format("hiliteColor", "#fde68a");
+    for (const node of lit) node.replaceWith(...node.childNodes);
+    root.normalize();
+    changed();
+  }
+
   function format(command: string, value?: string) {
     el.current?.focus();
     document.execCommand(command, false, value);
@@ -304,7 +323,7 @@ export default function RichText({
       <div className="rich-tools" onMouseDown={(event) => event.preventDefault()}>
         <button type="button" title="Bold (⌘B)" onClick={() => format("bold")}><b>B</b></button>
         <button type="button" title="Italic (⌘I)" onClick={() => format("italic")}><i>I</i></button>
-        <button type="button" title="Highlight" onClick={() => format("hiliteColor", "#fde68a")}>
+        <button type="button" title="Highlight (again to remove)" onClick={toggleHighlight}>
           <mark>H</mark>
         </button>
         <button type="button" title="Bulleted list (⌘⇧8)" onClick={() => format("insertUnorderedList")}>• List</button>
