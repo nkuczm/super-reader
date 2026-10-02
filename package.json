@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "next lint",
     "test": "tsx --test test/*.test.ts",
-    "coverage": "node scripts/coverage.mjs"
+    "coverage": "node scripts/coverage.mjs",
+    "prebuild": "node scripts/pack-extension.mjs",
+    "pack:extension": "node scripts/pack-extension.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.130.0",
