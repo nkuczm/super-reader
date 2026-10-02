@@ -248,6 +248,8 @@ export default function RichText({
     }, 400);
   }
 
+  const swipe = useRef<{ x: number; y: number } | null>(null);
+
   function format(command: string, value?: string) {
     el.current?.focus();
     document.execCommand(command, false, value);
@@ -331,6 +333,29 @@ export default function RichText({
         suppressContentEditableWarning
         data-placeholder={placeholder}
         onInput={changed}
+        onTouchStart={(event) => {
+          const t = event.touches[0];
+          swipe.current = event.touches.length === 1 ? { x: t.clientX, y: t.clientY } : null;
+        }}
+        onTouchEnd={(event) => {
+          // On a phone, swipe right across a line to indent it, left to
+          // outdent — Tab and Shift+Tab without a keyboard.
+          const start = swipe.current;
+          swipe.current = null;
+          const t = event.changedTouches[0];
+          if (!start || !t) return;
+          const dx = t.clientX - start.x;
+          const dy = t.clientY - start.y;
+          if (Math.abs(dx) < 50 || Math.abs(dy) > 30 || Math.abs(dx) < 2 * Math.abs(dy)) return;
+          const range = caretRangeAt(start.x, start.y);
+          if (range && el.current?.contains(range.startContainer)) {
+            const sel = window.getSelection();
+            sel?.removeAllRanges();
+            sel?.addRange(range);
+          }
+          event.preventDefault();
+          format(dx > 0 ? "indent" : "outdent");
+        }}
         onBlur={() => {
           if (timer.current) clearTimeout(timer.current);
           timer.current = null;
