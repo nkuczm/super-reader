@@ -123,6 +123,9 @@ const INSIGHT_LABEL: Record<InsightItem["type"], string> = {
 const NEW_TABLE = () => [["", "", ""], ["", "", ""], ["", "", ""]];
 
 /** Blocks copied on the whiteboard, as the clipboard carries them between subjects. */
+/** A card's width, within what the board allows. */
+const clampW = (w: number) => Math.round(Math.min(900, Math.max(200, w)));
+
 const BLOCKS_TYPE = "web application/x-super-reader-blocks";
 /** The last blocks copied, for a browser that will not carry a custom clipboard type. */
 let blockClipboard: string | null = null;
@@ -1176,7 +1179,8 @@ function Whiteboard(
   /** The box being dragged out over empty board, in board coordinates. */
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   /** A card being widened or narrowed, by its right-hand edge. */
-  const [resize, setResize] = useState<{ id: string; w: number } | null>(null);
+  /** A card being resized, and any others selected with it — each by the same amount. */
+  const [resize, setResize] = useState<{ id: string; w: number; dw: number; others: Map<string, { x: number; y: number; w: number }> } | null>(null);
   const [connecting, setConnecting] = useState<string | null | false>(false);
   const [focus, setFocus] = useState<string | null>(null);
   const [showAiLinks, setShowAiLinks] = useState(false);
@@ -1223,7 +1227,7 @@ function Whiteboard(
         .map((node) => {
           const h = sizes[node.id]?.h ?? 160;
           const saved = placed.get(node.id);
-          const width = resize?.id === node.id ? resize.w : (saved?.w ?? (node.kind === "box" && shared.boxWidth ? shared.boxWidth : CARD_W));
+          const width = resize?.id === node.id ? resize.w : resize?.others.has(node.id) ? clampW(resize.others.get(node.id)!.w + resize.dw) : (saved?.w ?? (node.kind === "box" && shared.boxWidth ? shared.boxWidth : CARD_W));
           if (saved) return { id: node.id, placed: true, x: saved.x, y: saved.y, w: width, h };
           const n = counters[node.kind]++;
           const x =
@@ -1246,8 +1250,6 @@ function Whiteboard(
    * Widen or narrow a card by dragging its right edge. Saved as the card's
    * width with its place; anything it now overlaps moves down out of the way.
    */
-  const MIN_W = 200;
-  const MAX_W = 900;
   const startResize = (id: string) => (event: React.PointerEvent) => {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -1256,16 +1258,28 @@ function Whiteboard(
     if (!start) return;
     const origin = { px: event.clientX, w: start.w };
     let w = start.w;
+    // Resizing one of a selection resizes them all, by as much.
+    const others = new Map<string, { x: number; y: number; w: number }>();
+    if (selected.has(id)) {
+      for (const other of selected) {
+        const rect = positions.get(other);
+        if (other !== id && rect) others.set(other, { x: rect.x, y: rect.y, w: rect.w });
+      }
+    }
     const move = (e: PointerEvent) => {
-      w = Math.round(Math.min(MAX_W, Math.max(MIN_W, origin.w + (e.clientX - origin.px) / view.zoom)));
-      setResize({ id, w });
+      w = clampW(origin.w + (e.clientX - origin.px) / view.zoom);
+      setResize({ id, w, dw: w - origin.w, others });
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       setResize(null);
       if (w !== start.w) {
-        place([{ id, x: start.x, y: start.y, w }]);
+        const dw = w - origin.w;
+        place([
+          { id, x: start.x, y: start.y, w },
+          ...[...others].map(([other, r]) => ({ id: other, x: r.x, y: r.y, w: clampW(r.w + dw) })),
+        ]);
       }
     };
     window.addEventListener("pointermove", move);
