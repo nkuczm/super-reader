@@ -8,6 +8,7 @@
  */
 
 import { display, evaluate, safeGrid } from "./sheet";
+import { safeTranscript } from "./transcript";
 import type { Note } from "./notes";
 import {
   bylineOf,
@@ -64,6 +65,7 @@ export function subjectHtml(note: Note, board: Board | undefined, now = new Date
     for (const box of tabBoxes) {
       const image = safeImage(box.image);
       if (image) parts.push(`<p><img src="${image}" alt="" style="max-width:100%"></p>${box.caption ? `<p><i>${escapeHtml(box.caption)}</i></p>` : ""}`);
+      else if (box.transcript) parts.push(transcriptHtml(box.transcript));
       else if (box.table) parts.push(tableHtml(box.table));
       else if (box.drawing) parts.push("<p><i>[A drawing — open the subject in Super Reader to see it]</i></p>");
       else parts.push(unlinkQuotes(box.html, board));
@@ -107,4 +109,16 @@ export function tableHtml(table: unknown): string {
   const values = evaluate(grid);
   const rows = values.map((row) => `<tr>${row.map((v) => `<td style="border:1px solid #ccc;padding:2px 6px">${escapeHtml(display(v))}</td>`).join("")}</tr>`);
   return `<table style="border-collapse:collapse">${rows.join("")}</table>`;
+}
+
+/** A transcript as who-said-what paragraphs, for the exported copy. */
+export function transcriptHtml(input: unknown): string {
+  const { title, turns } = safeTranscript(input);
+  const head = `<p><b>Transcript${title ? ` — ${escapeHtml(title)}` : ""}</b></p>`;
+  return head + turns
+    .map((t) => {
+      const who = t.s ? `<b>${escapeHtml(t.s)}</b>${t.t ? ` <i>(${escapeHtml(t.t)})</i>` : ""}: ` : "";
+      return t.x.split("\n\n").map((p, i) => `<p>${i === 0 ? who : ""}${escapeHtml(p)}</p>`).join("");
+    })
+    .join("");
 }

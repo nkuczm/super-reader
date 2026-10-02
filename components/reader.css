@@ -2018,7 +2018,7 @@
 
 /* ---------- subject tables ---------- */
 .doc-menu { position: fixed; z-index: 90; }
-.subject-doc { padding-bottom: 120px; }
+.subject-doc { padding-bottom: 120px; min-height: calc(100dvh - 120px); }
 .sheet { font-size: 13px; }
 .sheet-scroll { overflow-x: auto; }
 .sheet table { border-collapse: collapse; min-width: 100%; }
@@ -2036,3 +2036,34 @@
 .sheet-tools button { font: inherit; font-size: 12px; background: none; border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; color: var(--text-dim); cursor: pointer; }
 .sheet-tools button:disabled { opacity: 0.4; cursor: default; }
 .sheet-hint { font-size: 11px; color: var(--text-dim); margin-left: 4px; }
+
+/* ---------- subject transcripts ---------- */
+.transcript { display: flex; flex-direction: column; gap: 6px; border-radius: 8px; }
+.transcript.dragging { outline: 2px dashed var(--accent, #2563eb); outline-offset: 4px; }
+.transcript-head { display: flex; align-items: center; gap: 8px; }
+.transcript-kind { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-dim); }
+.transcript-title { flex: 1; min-width: 0; border: 0; background: none; font: inherit; font-weight: 600; font-size: 15px; color: var(--text); padding: 2px 0; outline: none; }
+.transcript-search-btn { border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); border-radius: 6px; width: 28px; height: 26px; display: grid; place-items: center; cursor: pointer; }
+.transcript-search-btn.on, .transcript-search-btn:hover { color: var(--text); background: var(--bg-hover); }
+.transcript-find { display: flex; align-items: center; gap: 6px; }
+.transcript-find input { flex: 1; min-width: 0; font: inherit; font-size: 13px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+.transcript-find button { border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 6px; width: 26px; height: 26px; cursor: pointer; }
+.transcript-find button:disabled { opacity: 0.4; cursor: default; }
+.transcript-count { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
+.transcript-body { max-height: 420px; min-height: 120px; overflow-y: auto; resize: vertical; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 14px; line-height: 1.5; overscroll-behavior: contain; }
+.transcript-turn { margin-top: 12px; }
+.transcript-turn:first-child { margin-top: 0; }
+.transcript-turn.cont { margin-top: 4px; }
+.transcript-who { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.transcript-time { font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.transcript-turn p { margin: 2px 0 6px; color: var(--text); }
+.transcript mark { background: #fde68a; color: inherit; border-radius: 2px; }
+.transcript mark.on { background: #f59e0b; }
+@media (prefers-color-scheme: dark) { .transcript mark { background: rgba(250, 204, 21, 0.35); } .transcript mark.on { background: rgba(245, 158, 11, 0.75); } }
+.transcript-empty { border: 1px dashed var(--border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--text-dim); }
+.transcript-empty p { margin: 0; }
+.transcript-empty textarea { font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); resize: vertical; }
+.transcript-pick { align-self: flex-start; cursor: pointer; }
+.transcript-foot { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-dim); }
+.transcript-foot .link-btn { cursor: pointer; }
+.transcript-problem { margin: 0; font-size: 12px; color: #dc2626; }
