@@ -302,6 +302,30 @@ export default function Reader() {
     /** A passage to go to on arrival, when a note's quote sent us here. */
     quote?: string;
   } | null>(null);
+  // An open article is a step in the browser's history, so Back — the
+  // button, a swipe, a mouse's back key — closes it and returns to the
+  // subject or list beneath, where it was left, rather than leaving the app.
+  // The router's own state rides along, or Next would reload the page.
+  const pushedRead = useRef(false);
+  useEffect(() => {
+    if (reading && !pushedRead.current) {
+      window.history.pushState({ ...(window.history.state ?? {}), srReading: true }, "");
+      pushedRead.current = true;
+    } else if (!reading && pushedRead.current) {
+      pushedRead.current = false;
+      if (window.history.state?.srReading) window.history.back();
+    }
+  }, [reading]);
+  useEffect(() => {
+    const pop = () => {
+      if (!pushedRead.current) return;
+      pushedRead.current = false;
+      setReading(null);
+    };
+    window.addEventListener("popstate", pop);
+    return () => window.removeEventListener("popstate", pop);
+  }, []);
+
   const [syncCode, setSyncCode] = useState<string | null>(null);
   const [syncOpen, setSyncOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
