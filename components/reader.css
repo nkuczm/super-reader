@@ -1954,3 +1954,9 @@
 .contacts-suggested-head { display: flex; align-items: baseline; justify-content: space-between; margin: 14px 0 4px; }
 .contacts-suggested-head h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); margin: 0; }
 .contacts-suggested-head .link-btn { font-size: 12px; }
+
+/* ---------- links in text boxes ---------- */
+.rich-body a[href] { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.rich-link-field { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
+.rich-link-field .input { flex: 1; padding: 4px 8px; font-size: 13px; }
+.link-chip { text-decoration: none; }

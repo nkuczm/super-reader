@@ -735,9 +735,16 @@ export function sanitizeRichText(html: string): string {
     // nothing synced can smuggle a destination in.
     if (tag === "a" && !closing) {
       const id = match[2].match(/data-quote=["']?([A-Za-z0-9_-]{1,40})/)?.[1];
-      if (!id) continue;
+      if (id) {
+        stack.push("a");
+        out.push(`<a data-quote="${id}">`);
+        continue;
+      }
+      // A link the writer made: web addresses only, opened apart from the app.
+      const href = safeHref(match[2].match(/href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i)?.slice(1).find(Boolean));
+      if (!href) continue;
       stack.push("a");
-      out.push(`<a data-quote="${id}">`);
+      out.push(`<a href="${href}" target="_blank" rel="noopener noreferrer">`);
       continue;
     }
     if (tag === "br") {
@@ -1143,6 +1150,19 @@ export function cleanLinkedIn(value: string): string | null {
     const url = new URL(text);
     if (!/(^|\.)linkedin\.com$/i.test(url.hostname) || url.pathname.length < 2) return null;
     return `https://www.linkedin.com${url.pathname.replace(/\/+$/, "")}`;
+  } catch {
+    return null;
+  }
+}
+
+/** A link's address if it is an ordinary web address, escaped for an attribute. */
+export function safeHref(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const text = raw.replace(/&amp;/g, "&").trim();
+  try {
+    const url = new URL(text);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    return url.toString().replace(/&/g, "&amp;").replace(/"/g, "%22").replace(/</g, "%3C").replace(/>/g, "%3E");
   } catch {
     return null;
   }

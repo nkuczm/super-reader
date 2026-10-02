@@ -63,6 +63,68 @@ export default function RichText({
   handler.current = onChange;
   /** The quote the caret is in, and where to show its chip. */
   const [inQuote, setInQuote] = useState<{ id: string; top: number; left: number } | null>(null);
+  /** The caret is in a link of the writer's own: where to offer opening it. */
+  const [inLink, setInLink] = useState<{ href: string; top: number; left: number } | null>(null);
+  /** Making a link: the text it goes on, and the address being typed. */
+  const [linking, setLinking] = useState<{ range: Range; value: string } | null>(null);
+
+  useEffect(() => {
+    const checkLink = () => {
+      const node = el.current;
+      const anchor = window.getSelection()?.anchorNode;
+      const link =
+        node && anchor && node.contains(anchor)
+          ? (anchor instanceof Element ? anchor : anchor.parentElement)?.closest<HTMLAnchorElement>("a[href]")
+          : null;
+      if (!link || !node) return setInLink(null);
+      const box = node.parentElement!.getBoundingClientRect();
+      const rect = link.getBoundingClientRect();
+      setInLink({ href: link.href, top: rect.bottom - box.top + 4, left: Math.max(0, rect.left - box.left) });
+    };
+    document.addEventListener("selectionchange", checkLink);
+    return () => document.removeEventListener("selectionchange", checkLink);
+  }, []);
+
+  /** Open the address field for the selected text (or the link the caret is in). */
+  function startLink() {
+    const node = el.current;
+    const selection = window.getSelection();
+    if (!node || !selection || selection.rangeCount === 0 || !node.contains(selection.anchorNode)) return;
+    const range = selection.getRangeAt(0).cloneRange();
+    const anchor = selection.anchorNode;
+    const existing = (anchor instanceof Element ? anchor : anchor?.parentElement)?.closest<HTMLAnchorElement>("a[href]");
+    if (existing && range.collapsed) range.selectNodeContents(existing);
+    setLinking({ range, value: existing?.getAttribute("href") ?? "" });
+  }
+
+  /** Put the link on the text — or take it off, given an empty address. */
+  function applyLink(raw: string) {
+    const target = linking;
+    setLinking(null);
+    const node = el.current;
+    if (!target || !node) return;
+    node.focus();
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(target.range);
+    const value = raw.trim();
+    if (!value) {
+      document.execCommand("unlink");
+      changed();
+      return;
+    }
+    const href = /^[a-z][a-z0-9+.-]*:/i.test(value) ? value : `https://${value}`;
+    if (!/^https?:\/\//i.test(href)) return;
+    if (target.range.collapsed) {
+      const a = document.createElement("a");
+      a.href = href;
+      a.textContent = value;
+      document.execCommand("insertHTML", false, a.outerHTML);
+    } else {
+      document.execCommand("createLink", false, href);
+    }
+    changed();
+  }
 
   useEffect(() => {
     if (!onOpenQuote) return;
@@ -171,7 +233,44 @@ export default function RichText({
         </button>
         <button type="button" title="Bulleted list (⌘⇧8)" onClick={() => format("insertUnorderedList")}>• List</button>
         <button type="button" title="Heading" onClick={() => format("formatBlock", "h3")}>H3</button>
+        <button type="button" title="Link (⌘K)" onClick={startLink}>Link</button>
       </div>
+      {linking && (
+        <form
+          className="rich-link-field"
+          onSubmit={(event) => {
+            event.preventDefault();
+            applyLink(linking.value);
+          }}
+        >
+          <input
+            className="input"
+            autoFocus
+            type="text"
+            inputMode="url"
+            placeholder="Paste or type a link"
+            value={linking.value}
+            onChange={(event) => setLinking({ ...linking, value: event.target.value })}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setLinking(null);
+                el.current?.focus();
+              }
+            }}
+          />
+          <button className="btn small">Apply</button>
+          {linking.value && (
+            <button type="button" className="link-btn" onClick={() => applyLink("")}>Remove</button>
+          )}
+        </form>
+      )}
+      {inLink && !linking && (
+        <a className="quote-chip link-chip" style={{ top: inLink.top, left: inLink.left }} href={inLink.href}
+          target="_blank" rel="noopener noreferrer" onMouseDown={(event) => event.preventDefault()}>
+          ↗ Open link
+        </a>
+      )}
       <div
         ref={el}
         className="rich-body"
@@ -185,6 +284,12 @@ export default function RichText({
           flush();
         }}
         onClick={(event) => {
+          const web = (event.target as HTMLElement).closest<HTMLAnchorElement>("a[href]");
+          if (web && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault();
+            window.open(web.href, "_blank", "noopener,noreferrer");
+            return;
+          }
           const link = (event.target as HTMLElement).closest<HTMLElement>("a[data-quote]");
           if (link && onOpenQuote && (event.metaKey || event.ctrlKey)) {
             event.preventDefault();
@@ -196,6 +301,14 @@ export default function RichText({
           // highlight — translated from Google Docs' clipboard shape and
           // cleaned (lib/paste.ts). Plain text when that is all there is.
           event.preventDefault();
+          // An address pasted over selected words links them, as in a Doc.
+          const plain = event.clipboardData.getData("text/plain").trim();
+          const selected = window.getSelection();
+          if (selected && !selected.isCollapsed && /^https?:\/\/\S+$/i.test(plain)) {
+            document.execCommand("createLink", false, plain);
+            changed();
+            return;
+          }
           const html = event.clipboardData.getData("text/html");
           if (html) {
             const clean = cleanPastedHtml(html);
@@ -252,6 +365,12 @@ export default function RichText({
                     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
             event.preventDefault();
             format("bold");
+          }
+          if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === "k") {
+            event.preventDefault();
+            event.stopPropagation();
+            startLink();
+            return;
           }
           // ⌘⇧8 / Ctrl+Shift+8: bulleted list, as in Google Docs. By the key's
           // place, not its character — Shift+8 types "*" on one layout and
