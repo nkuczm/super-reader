@@ -1735,6 +1735,8 @@
   }
 }
 @media (max-width: 900px) { .contacts-panel { height: 100dvh; } }
+/* A phone: the contacts take the whole screen. */
+@media (max-width: 640px) { .contacts-panel { left: 0; width: 100vw; box-shadow: none; border-radius: 0; } }
 
 /* ---------- tab outline over the document's left edge ---------- */
 .subject-main { position: relative; }
