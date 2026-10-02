@@ -588,8 +588,53 @@ export default function SubjectPage(props: Props) {
     removeBox: (box: BoxItem) => onBoard((current) => remove(remove(current, box.id), posId(box.id))),
   };
 
+  // A refresh comes back to the same place: how far down the document was
+  // read (the whiteboard keeps its own pan and zoom the same way).
+  const pageRef = useRef<HTMLDivElement | null>(null);
+  const placeKey = `super-reader:subject-place:${props.note.id}`;
+  useEffect(() => {
+    const scroller = pageRef.current?.closest<HTMLElement>(".main");
+    if (!scroller) return;
+    let saved = 0;
+    try {
+      saved = Number(JSON.parse(sessionStorage.getItem(placeKey) ?? "{}").scroll) || 0;
+    } catch {
+      /* nowhere to return to */
+    }
+    // The page grows as boxes measure themselves; keep trying briefly.
+    let tries = 0;
+    let frame = 0;
+    let restoring = saved > 0;
+    const restore = () => {
+      if (!saved) return;
+      scroller.scrollTop = saved;
+      if (Math.abs(scroller.scrollTop - saved) > 2 && tries++ < 90) frame = requestAnimationFrame(restore);
+      else restoring = false;
+    };
+    restore();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onScroll = () => {
+      if (restoring || timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        try {
+          const held = JSON.parse(sessionStorage.getItem(placeKey) ?? "{}");
+          sessionStorage.setItem(placeKey, JSON.stringify({ ...held, scroll: Math.round(scroller.scrollTop) }));
+        } catch {
+          /* not remembered */
+        }
+      }, 200);
+    };
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      scroller.removeEventListener("scroll", onScroll);
+      if (timer) clearTimeout(timer);
+    };
+  }, [placeKey, meta.view]);
+
   return (
-    <div className="subject-page">
+    <div className="subject-page" ref={pageRef}>
       <div className="main-head subject-head">
         {props.onOpenMenu && (
           <button className="menu-btn" onClick={props.onOpenMenu} aria-label="Open feeds">
@@ -777,7 +822,7 @@ export default function SubjectPage(props: Props) {
       </div>
       )}
       {meta.view === "board" ? (
-        <Whiteboard {...shared} board={board} onBoard={onBoard} addBox={addBox} pickImage={pickImage} boxWidth={props.boxWidth ?? 0} />
+        <Whiteboard {...shared} placeKey={placeKey} board={board} onBoard={onBoard} addBox={addBox} pickImage={pickImage} boxWidth={props.boxWidth ?? 0} />
       ) : (
         <DocumentView {...shared} addBox={addBox} pickImage={pickImage} />
       )}
@@ -1126,6 +1171,7 @@ const CARD_W = 300;
 
 function Whiteboard(
   shared: Shared & {
+    placeKey: string;
     boxWidth: number;
     board: Board | undefined;
     onBoard: Props["onBoard"];
@@ -1168,7 +1214,27 @@ function Whiteboard(
   // A phone starts zoomed out, so more than one card fits across.
   const startView = () =>
     typeof window !== "undefined" && window.innerWidth < 760 ? { x: 12, y: 12, zoom: 0.55 } : { x: 40, y: 40, zoom: 1 };
-  const [view, setView] = useState(startView);
+  const [view, setView] = useState(() => {
+    try {
+      const held = JSON.parse(sessionStorage.getItem(shared.placeKey) ?? "{}").board;
+      if (held && [held.x, held.y, held.zoom].every((n) => typeof n === "number" && Number.isFinite(n))) return held as { x: number; y: number; zoom: number };
+    } catch {
+      /* start fresh */
+    }
+    return startView();
+  });
+  // Where the board was panned and zoomed to, kept for a refresh.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try {
+        const held = JSON.parse(sessionStorage.getItem(shared.placeKey) ?? "{}");
+        sessionStorage.setItem(shared.placeKey, JSON.stringify({ ...held, board: view }));
+      } catch {
+        /* not remembered */
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [view, shared.placeKey]);
   /**
    * What is being dragged: the node under the pointer at (x, y), and any
    * others moving with it — a selection, or a section label's own items —
