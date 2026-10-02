@@ -1848,7 +1848,7 @@
   padding: 2px 0; outline: none; width: 100%;
 }
 .subject-image-caption:focus { color: var(--text); }
-/* The resize handle is always there to be found, stronger under the pointer. */
-.wb-resize::after { opacity: 0.55; background: var(--text-dim); width: 4px; height: 44px; margin-top: -22px; }
-.wb-node:hover .wb-resize::after { opacity: 0.9; }
+/* Only under the pointer, as before — but in a colour that stands out from
+   the card's own border, which it used to match and so vanish into. */
+.wb-resize::after { background: var(--text-dim); width: 4px; height: 44px; margin-top: -22px; }
 .wb-resize:hover::after, .wb-resize:active::after { opacity: 1; background: var(--accent); }
