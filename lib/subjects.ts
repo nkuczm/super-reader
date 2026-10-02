@@ -172,6 +172,8 @@ export type ContactItem = Base & {
   origin: "story" | "suggested" | "you";
   email?: string;
   phone?: string;
+  /** Their LinkedIn profile, as typed in. */
+  linkedin?: string;
   /** Where the email came from: the stories, or typed in. */
   emailFrom?: "story" | "you";
   state: "pending" | "kept" | "dismissed";
@@ -650,6 +652,7 @@ function putContact(board: Board, found: FoundContact, cardIds: Set<string>, now
       origin: existing?.origin === "you" ? "you" : existing?.origin === "story" ? "story" : found.origin,
       email,
       phone: existing?.phone,
+      linkedin: existing?.linkedin,
       emailFrom: existing?.email ? existing.emailFrom : found.email ? "story" : undefined,
       state: existing?.state ?? "pending",
       at: now,
@@ -1126,4 +1129,18 @@ export function authorsOf(cards: { id: string; author?: string; source?: string 
     }
   }
   return [...found.values()];
+}
+
+/** A LinkedIn profile address, tidied, or null if it is not one. */
+export function cleanLinkedIn(value: string): string | null {
+  let text = value.trim();
+  if (!text) return null;
+  if (!/^https?:\/\//i.test(text)) text = `https://${text}`;
+  try {
+    const url = new URL(text);
+    if (!/(^|\.)linkedin\.com$/i.test(url.hostname) || url.pathname.length < 2) return null;
+    return `https://www.linkedin.com${url.pathname.replace(/\/+$/, "")}`;
+  } catch {
+    return null;
+  }
 }

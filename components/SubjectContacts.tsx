@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { authorsOf, contactId, type Card, type ContactItem } from "@/lib/subjects";
+import { authorsOf, cleanLinkedIn, contactId, type Card, type ContactItem } from "@/lib/subjects";
 
-type Detail = "email" | "phone";
+type Detail = "email" | "phone" | "linkedin";
 
 /**
  * The subject's contacts: people to interview, from the stories and
@@ -143,6 +143,17 @@ function ContactRow({
       setProblem("That doesn't look like an email address.");
       return;
     }
+    if (editing.kind === "linkedin") {
+      const link = value ? cleanLinkedIn(value) : null;
+      if (value && !link) {
+        setProblem("That doesn't look like a LinkedIn profile link.");
+        return;
+      }
+      onSave({ ...contact, linkedin: link ?? undefined, state: "kept" });
+      setEditing(null);
+      setProblem(null);
+      return;
+    }
     if (editing.kind === "phone" && value && value.replace(/\D/g, "").length < 6) {
       setProblem("That doesn't look like a phone number.");
       return;
@@ -188,7 +199,10 @@ function ContactRow({
             </a>
           )}
           {contact.phone && <a href={`tel:${contact.phone.replace(/[^\d+]/g, "")}`}>{contact.phone}</a>}
-          {!contact.email && !contact.phone && !editing && <span className="contact-none">No email found in the stories</span>}
+          {contact.linkedin && cleanLinkedIn(contact.linkedin) && (
+            <a href={cleanLinkedIn(contact.linkedin)!} target="_blank" rel="noopener noreferrer">LinkedIn ↗</a>
+          )}
+          {!contact.email && !contact.phone && !contact.linkedin && !editing && <span className="contact-none">No email found in the stories</span>}
         </div>
         {editing ? (
           <form
@@ -204,17 +218,20 @@ function ContactRow({
               aria-label="Detail"
               onChange={(e) => {
                 const kind = e.target.value as Detail;
-                setEditing({ kind, value: (kind === "email" ? contact.email : contact.phone) ?? "" });
+                setEditing({ kind, value: (kind === "email" ? contact.email : kind === "phone" ? contact.phone : contact.linkedin) ?? "" });
               }}
             >
               <option value="email">Email</option>
               <option value="phone">Phone</option>
+              <option value="linkedin">LinkedIn</option>
             </select>
             <input
               className="input"
               autoFocus
-              type={editing.kind === "email" ? "email" : "tel"}
-              placeholder={editing.kind === "email" ? "name@example.com" : "+1 555 010 0000"}
+              type={editing.kind === "email" ? "email" : editing.kind === "phone" ? "tel" : "url"}
+              placeholder={
+                editing.kind === "email" ? "name@example.com" : editing.kind === "phone" ? "+1 555 010 0000" : "linkedin.com/in/name"
+              }
               value={editing.value}
               onChange={(e) => setEditing({ ...editing, value: e.target.value })}
               onKeyDown={(e) => e.key === "Escape" && setEditing(null)}
@@ -225,7 +242,7 @@ function ContactRow({
           </form>
         ) : (
           <button className="link-btn contact-add-detail" onClick={() => setEditing({ kind: "email", value: contact.email ?? "" })}>
-            {contact.email || contact.phone ? "Edit email or phone ▾" : "Add email or phone ▾"}
+            {contact.email || contact.phone || contact.linkedin ? "Edit email, phone or LinkedIn ▾" : "Add email, phone or LinkedIn ▾"}
           </button>
         )}
       </div>

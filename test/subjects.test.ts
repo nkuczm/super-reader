@@ -225,3 +225,11 @@ test("a story's byline gives its authors as contacts, outlets and desks aside", 
   ]);
   assert.deepEqual(found, [{ name: "Ann Lee", refs: ["a", "b"] }, { name: "Sam Roe", refs: ["a"] }]);
 });
+
+test("a LinkedIn link is tidied, and anything else refused", async () => {
+  const { cleanLinkedIn } = await import("../lib/subjects");
+  assert.equal(cleanLinkedIn("linkedin.com/in/ann-lee/"), "https://www.linkedin.com/in/ann-lee");
+  assert.equal(cleanLinkedIn("https://uk.linkedin.com/in/ann"), "https://www.linkedin.com/in/ann");
+  assert.equal(cleanLinkedIn("https://evil.example/linkedin.com/in/x"), null);
+  assert.equal(cleanLinkedIn("javascript:alert(1)"), null);
+});

@@ -71,7 +71,7 @@ export function subjectHtml(note: Note, board: Board | undefined, now = new Date
   if (contacts.length > 0) {
     parts.push("<h2>Contacts</h2><ul>");
     for (const c of contacts) {
-      const details = [c.role, c.email, c.phone].filter(Boolean).map((d) => escapeHtml(d!)).join(" · ");
+      const details = [c.role, c.email, c.phone, c.linkedin].filter(Boolean).map((d) => escapeHtml(d!)).join(" · ");
       parts.push(`<li><b>${escapeHtml(c.name)}</b>${details ? ` — ${details}` : ""}${c.why ? `<br><i>${escapeHtml(c.why)}</i>` : ""}</li>`);
     }
     parts.push("</ul>");
