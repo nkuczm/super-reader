@@ -49,11 +49,17 @@ export default function SubjectContacts({
         : { id, kind: "contact" as const, name, role: "Author", why: "", refs, origin: "story" as const, state: "kept" as const, at: 0 },
     ];
   });
+  // People you mean to reach, or have, come first of all — in whichever
+  // list they started — the ones still to reach at the very top.
+  const outreach = [...authors, ...contacts.filter((c) => !authors.some((a) => a.id === c.id))]
+    .filter((c) => c.outreach)
+    .sort((a, b) => (a.outreach === b.outreach ? 0 : a.outreach === "want" ? -1 : 1));
+  const reaching = new Set(outreach.map((c) => c.id));
   const authorIds = new Set(authors.map((a) => a.id));
-  const fromStories = contacts.filter((c) => c.origin === "story" && !authorIds.has(c.id));
-  // Yours first: people you added, and suggestions you accepted.
-  const yours = contacts.filter((c) => c.origin === "you" || (c.origin === "suggested" && c.state === "kept"));
-  const suggested = contacts.filter((c) => c.origin === "suggested" && c.state !== "kept");
+  const fromStories = contacts.filter((c) => c.origin === "story" && !authorIds.has(c.id) && !reaching.has(c.id));
+  // Then yours: people you added, and suggestions you picked as worth contacting.
+  const yours = contacts.filter((c) => !reaching.has(c.id) && (c.origin === "you" || (c.origin === "suggested" && c.state === "kept")));
+  const suggested = contacts.filter((c) => c.origin === "suggested" && c.state !== "kept" && !reaching.has(c.id));
   const [hideSuggested, setHideSuggested] = useState(() => {
     try {
       return localStorage.getItem(HIDE_SUGGESTED_KEY) === "1";
@@ -126,8 +132,9 @@ export default function SubjectContacts({
           to them — or add someone yourself.
         </p>
       )}
+      {section("Reaching out", outreach)}
       {section("Your contacts", yours)}
-      {section("Authors", authors, undefined, (n) => `Wrote ${n} ${n === 1 ? "story" : "stories"} here`)}
+      {section("Authors", authors.filter((a) => !reaching.has(a.id)), undefined, (n) => `Wrote ${n} ${n === 1 ? "story" : "stories"} here`)}
       {section("In the stories", fromStories)}
       {suggested.length > 0 && (
         <div className="contacts-suggested-head">
@@ -183,7 +190,7 @@ function ContactRow({
   };
 
   return (
-    <li className={`contact${contact.state === "pending" && contact.origin === "suggested" ? " pending" : ""}`}>
+    <li className={`contact${contact.state === "pending" && contact.origin === "suggested" ? " pending" : ""}${contact.outreach ? ` outreach-${contact.outreach}` : ""}${contact.origin === "suggested" && contact.state === "kept" ? " picked" : ""}`}>
       <div className="contact-main">
         <div className="contact-name">
           <span className="contact-avatar" aria-hidden="true">
@@ -196,6 +203,25 @@ function ContactRow({
           </span>
           {contact.name}
           {contact.role && <span className="contact-role">{contact.role}</span>}
+          {contact.origin === "suggested" && contact.state === "kept" && <span className="contact-badge picked">Picked</span>}
+        </div>
+        <div className="contact-outreach" role="group" aria-label="Outreach">
+          <button
+            className={`outreach-btn${contact.outreach === "want" ? " on" : ""}`}
+            aria-pressed={contact.outreach === "want"}
+            title="Mark as someone to interview or contact"
+            onClick={() => onSave({ ...contact, outreach: contact.outreach === "want" ? undefined : "want", state: "kept" })}
+          >
+            ☆ Want to contact
+          </button>
+          <button
+            className={`outreach-btn reached${contact.outreach === "reached" ? " on" : ""}`}
+            aria-pressed={contact.outreach === "reached"}
+            title="Mark that you got in touch"
+            onClick={() => onSave({ ...contact, outreach: contact.outreach === "reached" ? "want" : "reached", state: "kept" })}
+          >
+            ✓ In touch
+          </button>
         </div>
         {contact.why && <p className="contact-why">{contact.why}</p>}
         {stories.length > 0 && (

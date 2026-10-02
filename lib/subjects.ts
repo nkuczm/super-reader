@@ -190,6 +190,8 @@ export type ContactItem = Base & {
   /** Where the email came from: the stories, or typed in. */
   emailFrom?: "story" | "you";
   state: "pending" | "kept" | "dismissed";
+  /** Whether the reader means to reach them, and whether they have. */
+  outreach?: "want" | "reached";
 };
 
 /**
@@ -669,6 +671,7 @@ function putContact(board: Board, found: FoundContact, cardIds: Set<string>, now
       linkedin: existing?.linkedin,
       notes: existing?.notes,
       photo: existing?.photo,
+      outreach: existing?.outreach,
       emailFrom: existing?.email ? existing.emailFrom : found.email ? "story" : undefined,
       state: existing?.state ?? "pending",
       at: now,
