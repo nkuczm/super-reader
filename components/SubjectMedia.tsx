@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DEFAULT_DRAWING_HEIGHT, DRAWING_WIDTH, safeImage, safeStrokes, type BoxItem, type Stroke } from "@/lib/subjects";
 import { EMBED_TYPE } from "./RichText";
+import { parseTranscript, safeTranscript, speakersOf, titleFromFile } from "@/lib/transcript";
 import { colName, display, evaluate, isError, MAX_COLS, MAX_ROWS, safeGrid, type Grid } from "@/lib/sheet";
 
 const COLORS = ["#111111", "#2563eb", "#dc2626", "#16a34a", "#f59e0b"];
@@ -346,6 +347,175 @@ export function TableBox({ box, onChange }: { box: BoxItem; onChange: (next: Par
         <button disabled={cols <= 1} onClick={() => { setEditing(null); save(grid.map((row) => row.slice(0, -1))); }}>− Column</button>
         <span className="sheet-hint">Type = for a formula: =SUM(A1:A5), =AVG(B:B), =MEDIAN(…)</span>
       </div>
+    </div>
+  );
+}
+
+const SPEAKER_COLORS = ["#2563eb", "#c2410c", "#15803d", "#7c3aed", "#be185d", "#0e7490"];
+
+/**
+ * An interview transcript: a scrolling box of who said what. Drop a file on
+ * it or paste the text; Riverside, Otter, Zoom and "Name: text" exports are
+ * split into speakers. The magnifying glass searches within.
+ */
+export function TranscriptBox({ box, onChange }: { box: BoxItem; onChange: (next: Partial<BoxItem>) => void }) {
+  const { title, turns } = safeTranscript(box.transcript);
+  const speakers = speakersOf(turns);
+  const [searching, setSearching] = useState(false);
+  const [query, setQuery] = useState("");
+  const [hit, setHit] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const scroller = useRef<HTMLDivElement | null>(null);
+
+  const load = (text: string, name?: string) => {
+    const next = parseTranscript(text);
+    if (next.length === 0) return setProblem("There was no text in that.");
+    setProblem(null);
+    onChange({ transcript: { title: title || (name ? titleFromFile(name) : ""), turns: next } });
+  };
+  const readFile = async (file: File) => {
+    if (!/^text\/|\/(json|x-subrip)$/.test(file.type) && !/\.(txt|vtt|srt|md|text)$/i.test(file.name))
+      return setProblem("That file isn't plain text — export the transcript as .txt, .vtt or .srt.");
+    if (file.size > 2_000_000) return setProblem("That file is too large for a transcript.");
+    load(await file.text(), file.name);
+  };
+
+  const needle = query.trim().toLowerCase();
+  const pattern = needle ? new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi") : null;
+  const total = pattern ? turns.reduce((n, t) => n + (t.x.match(pattern)?.length ?? 0) + (t.s?.match(pattern)?.length ?? 0), 0) : 0;
+  const current = total ? ((hit % total) + total) % total : 0;
+
+  // Keep the current match in view, inside the box — never scrolling the page.
+  useEffect(() => {
+    const host = scroller.current;
+    const mark = host?.querySelector<HTMLElement>("mark.on");
+    if (!host || !mark) return;
+    const top = mark.getBoundingClientRect().top - host.getBoundingClientRect().top + host.scrollTop;
+    host.scrollTo({ top: top - host.clientHeight / 3, behavior: "smooth" });
+  }, [current, needle]);
+
+  let seen = 0;
+  const marked = (text: string) => {
+    if (!pattern) return text;
+    const out: React.ReactNode[] = [];
+    let last = 0;
+    for (const m of text.matchAll(pattern)) {
+      out.push(text.slice(last, m.index));
+      const n = seen++;
+      out.push(<mark key={m.index} className={n === current ? "on" : undefined}>{m[0]}</mark>);
+      last = m.index! + m[0].length;
+    }
+    out.push(text.slice(last));
+    return out;
+  };
+  const colorOf = (s?: string) => (s ? SPEAKER_COLORS[speakers.indexOf(s) % SPEAKER_COLORS.length] : undefined);
+
+  const drop = {
+    onDragOver: (e: React.DragEvent) => {
+      if (!e.dataTransfer.types.includes("Files")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setDragging(true);
+    },
+    onDragLeave: () => setDragging(false),
+    onDrop: (e: React.DragEvent) => {
+      const file = e.dataTransfer.files[0];
+      setDragging(false);
+      if (!file) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (turns.length && !window.confirm("Replace this transcript with the file?")) return;
+      void readFile(file);
+    },
+  };
+
+  return (
+    <div className={`transcript${dragging ? " dragging" : ""}`} onPointerDown={(e) => e.stopPropagation()} {...drop}>
+      <div className="transcript-head">
+        <span className="transcript-kind">Transcript</span>
+        <input
+          className="transcript-title"
+          placeholder="Interview with…"
+          defaultValue={title}
+          onBlur={(e) => e.target.value !== title && onChange({ transcript: { title: e.target.value.slice(0, 200), turns } })}
+        />
+        {turns.length > 0 && (
+          <button className={`transcript-search-btn${searching ? " on" : ""}`} title="Search this transcript" aria-label="Search this transcript"
+            onClick={() => { setSearching((v) => !v); if (searching) setQuery(""); }}>
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+              <circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" strokeWidth="2" />
+              <path d="M15 15l5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+          </button>
+        )}
+      </div>
+      {searching && (
+        <div className="transcript-find">
+          <input
+            autoFocus
+            placeholder="Find in transcript"
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setHit(0); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); setHit((h) => h + (e.shiftKey ? -1 : 1)); }
+              if (e.key === "Escape") { setSearching(false); setQuery(""); }
+            }}
+          />
+          <span className="transcript-count">{needle ? (total ? `${current + 1} of ${total}` : "No matches") : ""}</span>
+          <button disabled={!total} aria-label="Previous match" onClick={() => setHit((h) => h - 1)}>↑</button>
+          <button disabled={!total} aria-label="Next match" onClick={() => setHit((h) => h + 1)}>↓</button>
+        </div>
+      )}
+      {turns.length === 0 ? (
+        <div className="transcript-empty">
+          <p>Drop a transcript file here (.txt, .vtt, .srt) or paste the text — speakers are separated automatically.</p>
+          <textarea
+            placeholder="Paste a transcript…"
+            rows={4}
+            onPaste={(e) => {
+              const text = e.clipboardData.getData("text/plain");
+              if (!text.trim()) return;
+              e.preventDefault();
+              load(text);
+            }}
+            onBlur={(e) => e.target.value.trim() && load(e.target.value)}
+          />
+          <label className="link-btn transcript-pick">
+            Choose a file…
+            <input type="file" accept=".txt,.vtt,.srt,.md,text/plain" hidden
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) void readFile(f); e.target.value = ""; }} />
+          </label>
+        </div>
+      ) : (
+        <div className="transcript-body" ref={scroller} onWheel={(e) => e.stopPropagation()}>
+          {turns.map((turn, i) => {
+            const same = i > 0 && turns[i - 1].s === turn.s;
+            return (
+              <div key={i} className={`transcript-turn${same ? " cont" : ""}`}>
+                {(!same || turn.t) && (
+                  <div className="transcript-who">
+                    {!same && turn.s && <b style={{ color: colorOf(turn.s) }}>{marked(turn.s)}</b>}
+                    {turn.t && <span className="transcript-time">{turn.t}</span>}
+                  </div>
+                )}
+                {turn.x.split("\n\n").map((para, j) => <p key={j}>{marked(para)}</p>)}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {problem && <p className="transcript-problem">{problem}</p>}
+      {turns.length > 0 && (
+        <div className="transcript-foot">
+          <span>{speakers.length > 0 ? speakers.join(" · ") : "One speaker"} · {turns.length} turns</span>
+          <label className="link-btn">
+            Replace…
+            <input type="file" accept=".txt,.vtt,.srt,.md,text/plain" hidden
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) void readFile(f); e.target.value = ""; }} />
+          </label>
+        </div>
+      )}
     </div>
   );
 }

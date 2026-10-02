@@ -17,6 +17,7 @@
  * device still holds it and would otherwise put it back.
  */
 
+import type { Transcript } from "./transcript";
 import { isQuote, type Note } from "./notes";
 import { canonicalUrl } from "./url";
 
@@ -64,6 +65,8 @@ export type BoxItem = Base & {
   label?: boolean;
   /** A little spreadsheet: what was typed in each cell, formulas included. */
   table?: string[][];
+  /** An interview transcript, split into who said what. */
+  transcript?: Transcript;
 };
 
 export const DRAWING_WIDTH = 600;
@@ -337,6 +340,7 @@ export function slimBoardsForSync(boards: Boards, budget = BOARDS_SYNC_BUDGET): 
     ]),
   ) as Boards;
 }
+
 
 export function sameBoards(a: Boards, b: Boards): boolean {
   return JSON.stringify(sortKeys(a)) === JSON.stringify(sortKeys(b));
