@@ -200,6 +200,32 @@ export default function QuoteToNote({
     return () => document.removeEventListener("pointerdown", away);
   }, [writing, saveNote]);
 
+  // Typing straight after filing a quote writes its note: the first key
+  // lands in the note's bullet, without having to click into it first.
+  useEffect(() => {
+    if (!added?.entryId || !onQuoteNote || writing) return;
+    const type = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest?.("input, textarea, select, [contenteditable]")) return;
+      const field = toast.current?.querySelector<HTMLElement>(".quote-note-box .rich-body");
+      if (!field) return;
+      event.preventDefault();
+      startWriting();
+      field.focus();
+      const li = field.querySelector("li") ?? field;
+      const range = document.createRange();
+      range.selectNodeContents(li);
+      range.collapse(false);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+      document.execCommand("insertText", false, event.key);
+    };
+    window.addEventListener("keydown", type);
+    return () => window.removeEventListener("keydown", type);
+  });
+
   /** Clicked into: the bubble stays for as long as the note takes. */
   const startWriting = () => {
     if (hide.current) clearTimeout(hide.current);
