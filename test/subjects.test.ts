@@ -256,3 +256,12 @@ test("Highlight on a highlighted passage takes it off; elsewhere it marks", asyn
   h = toggleHighlight(h, "https://a.example/s", "lazy dog", 3);
   assert.equal(highlightsFor(h, "https://a.example/s").length, 1);
 });
+
+test("an embedded picture keeps the width it was sized to, and nothing else", async () => {
+  const { sanitizeRichText } = await import("../lib/subjects");
+  assert.equal(
+    sanitizeRichText('<p><img data-embed="box1" data-w="320" src="data:image/png;base64,AAAA" style="width:320px" onerror="x()"></p>'),
+    '<p><img data-embed="box1" data-w="320"></p>',
+  );
+  assert.equal(sanitizeRichText('<img data-embed="box1" data-w="99999">'), '<img data-embed="box1">');
+});

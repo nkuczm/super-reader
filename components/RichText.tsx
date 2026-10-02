@@ -39,7 +39,10 @@ export default function RichText({
   onOpenQuote,
   resolveEmbed,
   onEmbed,
+  onDropImage,
 }: {
+  /** A picture file dropped on the text: keep it, and say which box holds it. */
+  onDropImage?: (file: File) => Promise<string | null>;
   /** The picture for a drawing or image set into the text, by its box id. */
   resolveEmbed?: (id: string) => string | undefined;
   /** A drawing or image box was dropped into the text: it now lives here. */
@@ -67,6 +70,43 @@ export default function RichText({
   const [inLink, setInLink] = useState<{ href: string; top: number; left: number } | null>(null);
   /** Making a link: the text it goes on, and the address being typed. */
   const [linking, setLinking] = useState<{ range: Range; value: string } | null>(null);
+  /** A picture in the text under the pointer, and where its corner pin goes. */
+  const [pinFor, setPinFor] = useState<{ img: HTMLImageElement; left: number; top: number } | null>(null);
+  const wrap = useRef<HTMLDivElement | null>(null);
+
+  function placePin(img: HTMLImageElement | null) {
+    const box = wrap.current?.getBoundingClientRect();
+    if (!img || !box) return setPinFor(null);
+    const r = img.getBoundingClientRect();
+    setPinFor({ img, left: r.right - box.left, top: r.bottom - box.top });
+  }
+
+  /** Drag the corner: the picture follows, any size the text has room for. */
+  function startSizing(event: React.PointerEvent) {
+    const img = pinFor?.img;
+    const node = el.current;
+    if (!img || !node) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startW = img.getBoundingClientRect().width;
+    const max = node.clientWidth;
+    const target = event.currentTarget as HTMLElement;
+    target.setPointerCapture(event.pointerId);
+    const move = (e: PointerEvent) => {
+      const w = Math.round(Math.min(max, Math.max(60, startW + (e.clientX - startX))));
+      img.style.width = `${w}px`;
+      img.setAttribute("data-w", String(w));
+      placePin(img);
+    };
+    const up = () => {
+      target.removeEventListener("pointermove", move);
+      target.removeEventListener("pointerup", up);
+      changed();
+    };
+    target.addEventListener("pointermove", move);
+    target.addEventListener("pointerup", up);
+  }
 
   useEffect(() => {
     const checkLink = () => {
@@ -170,6 +210,8 @@ export default function RichText({
       if (src && img.getAttribute("src") !== src) img.setAttribute("src", src);
       img.classList.add("rt-embed");
       img.setAttribute("draggable", "false");
+      const w = Number(img.getAttribute("data-w"));
+      img.style.width = w ? `${w}px` : "";
     });
   }
 
@@ -213,7 +255,18 @@ export default function RichText({
   }
 
   return (
-    <div className={`rich ${className ?? ""}`}>
+    <div className={`rich ${className ?? ""}`} ref={wrap} onMouseLeave={() => setPinFor(null)}>
+      {pinFor && (
+        <span
+          className="embed-size-pin"
+          style={{ left: pinFor.left, top: pinFor.top }}
+          role="separator"
+          aria-label="Drag to resize the picture"
+          title="Drag to resize"
+          onPointerDown={startSizing}
+          onMouseDown={(e) => e.preventDefault()}
+        />
+      )}
       {inQuote && onOpenQuote && (
         <button
           type="button"
@@ -321,13 +374,54 @@ export default function RichText({
           document.execCommand("insertText", false, event.clipboardData.getData("text/plain"));
           changed();
         }}
+        onMouseMove={(event) => {
+          const img = (event.target as HTMLElement).closest?.("img.rt-embed") as HTMLImageElement | null;
+          if (img) placePin(img);
+        }}
         onDragOver={(event) => {
+          if (onDropImage && event.dataTransfer.types.includes("Files")) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "copy";
+            return;
+          }
           if (onEmbed && event.dataTransfer.types.includes(EMBED_TYPE)) {
             event.preventDefault();
             event.dataTransfer.dropEffect = "move";
           }
         }}
         onDrop={(event) => {
+          // A photo from the desktop or another page: kept small, set in the
+          // text where it was let go.
+          const files = onDropImage ? [...event.dataTransfer.files].filter((f) => f.type.startsWith("image/")) : [];
+          if (files.length > 0) {
+            event.preventDefault();
+            event.stopPropagation();
+            const node = el.current;
+            if (!node) return;
+            const range = caretRangeAt(event.clientX, event.clientY);
+            void (async () => {
+              const ids: string[] = [];
+              for (const file of files.slice(0, 6)) {
+                const id = await onDropImage!(file);
+                if (id) ids.push(id);
+              }
+              if (ids.length === 0) return;
+              node.focus();
+              const selection = window.getSelection();
+              selection?.removeAllRanges();
+              if (range && node.contains(range.startContainer)) selection?.addRange(range);
+              else {
+                const end = document.createRange();
+                end.selectNodeContents(node);
+                end.collapse(false);
+                selection?.addRange(end);
+              }
+              document.execCommand("insertHTML", false, ids.map((id) => `<p><img data-embed="${id}"></p>`).join("") + "<p><br></p>");
+              fillEmbeds();
+              changed();
+            })();
+            return;
+          }
           const id = onEmbed ? event.dataTransfer.getData(EMBED_TYPE) : "";
           if (!id) return;
           event.preventDefault();

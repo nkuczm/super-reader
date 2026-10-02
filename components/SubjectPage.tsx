@@ -128,6 +128,18 @@ export default function SubjectPage(props: Props) {
     return item && item.kind === "box" && !item.deleted ? embedSrc(item) : undefined;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [board]);
+  /** A photo dropped into some text: made small, kept in a box of its own, set into the text. */
+  const dropImage = async (file: File) => {
+    try {
+      const image = await shrinkImage(file);
+      const id = newItemId("box");
+      onBoard((current) => put(current, { id, kind: "box", html: "", image, caption: "", embedded: true, at: Date.now() }));
+      return id;
+    } catch (error) {
+      setImageProblem(error instanceof Error ? error.message : "Could not add that picture.");
+      return null;
+    }
+  };
   const embedBox = (id: string) =>
     onBoard((current) => {
       const item = current?.[id];
@@ -440,6 +452,7 @@ export default function SubjectPage(props: Props) {
   const shared = {
     resolveEmbed,
     embedBox,
+    dropImage,
     tabs,
     currentTab,
     moveCard,
@@ -706,6 +719,7 @@ type Shared = {
   setBox: (box: BoxItem, html: string) => void;
   resolveEmbed: (id: string) => string | undefined;
   embedBox: (id: string) => void;
+  dropImage: (file: File) => Promise<string | null>;
   updateBox: (box: BoxItem, change: Partial<BoxItem>) => void;
   removeBox: (box: BoxItem) => void;
 };
@@ -761,6 +775,7 @@ function StoryCard({
           html={composeCardDoc(card.note, card.quotes)}
           resolveEmbed={shared.resolveEmbed}
           onEmbed={shared.embedBox}
+          onDropImage={shared.dropImage}
           placeholder="Add notes…"
           onOpenQuote={(id) => {
             const quote = card.quotes.find((q) => q.id === id);
@@ -814,7 +829,7 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
         <ImageView box={box} onChange={(change) => shared.updateBox(box, change)} />
       ) : (
         <RichText html={box.html} placeholder="Write anything…" autoFocus={shared.focusBox === box.id}
-          resolveEmbed={shared.resolveEmbed} onEmbed={shared.embedBox}
+          resolveEmbed={shared.resolveEmbed} onEmbed={shared.embedBox} onDropImage={shared.dropImage}
           onChange={(html) => shared.setBox(box, html)} />
       )}
     </div>
