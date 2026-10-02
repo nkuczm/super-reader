@@ -10,7 +10,9 @@ import { DrawingPad, ImageView, TableBox, TranscriptBox, shrinkImage, DRAWING_HE
 import { tableHtml, transcriptHtml } from "@/lib/subject-doc";
 import type { Writing } from "./useAccount";
 import type { Note, NoteEntry } from "@/lib/notes";
+import type { StoryItem } from "@/lib/subjects";
 import {
+  addStory,
   applySynthesis,
   cardNoteId,
   cardsOf,
@@ -119,6 +121,87 @@ const INSIGHT_LABEL: Record<InsightItem["type"], string> = {
  * where they can be moved and joined with lines.
  */
 const NEW_TABLE = () => [["", "", ""], ["", "", ""], ["", "", ""]];
+
+/** Blocks copied on the whiteboard, as the clipboard carries them between subjects. */
+const BLOCKS_TYPE = "web application/x-super-reader-blocks";
+/** The last blocks copied, for a browser that will not carry a custom clipboard type. */
+let blockClipboard: string | null = null;
+
+type CopiedBlock = {
+  box?: Omit<BoxItem, "id" | "at" | "kind">;
+  story?: { link: string; title: string; source?: string; publishedAt?: string; author?: string };
+  note?: string;
+  dx: number;
+  dy: number;
+  w: number;
+};
+type CopiedBlocks = { v: 1; items: CopiedBlock[]; links: [number, number][]; text: string };
+
+function blocksFor(board: Board | undefined, cards: Card[], ids: string[], positions: Map<string, { x: number; y: number; w: number }>): CopiedBlocks | null {
+  const items = live(board);
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const kept: string[] = [];
+  const blocks: CopiedBlock[] = [];
+  const text: string[] = [];
+  const spots = ids.map((id) => positions.get(id)).filter(Boolean) as { x: number; y: number; w: number }[];
+  const ox = Math.min(...spots.map((p) => p.x));
+  const oy = Math.min(...spots.map((p) => p.y));
+  for (const id of ids) {
+    const at = positions.get(id);
+    if (!at) continue;
+    const item = byId.get(id) ?? byId.get(`story:${id}`);
+    const place = { dx: at.x - ox, dy: at.y - oy, w: at.w };
+    if (item?.kind === "box") {
+      const { id: _id, at: _at, kind: _kind, embedded: _embedded, ...box } = item as BoxItem;
+      blocks.push({ box, ...place });
+      text.push(textOf(box.html || "") || box.caption || box.transcript?.title || "");
+    } else if (item?.kind === "story" || cards.some((c) => c.id === id)) {
+      // A story: from its own item, or from the card its quotes make.
+      const card = cards.find((c) => c.id === id);
+      const s = (item as StoryItem | undefined) ?? { link: card!.link, title: card!.title, source: card!.source, publishedAt: card!.publishedAt, author: card!.author };
+      const note = (byId.get(cardNoteId(id)) as { html?: string } | undefined)?.html;
+      blocks.push({ story: { link: s.link, title: s.title, source: s.source, publishedAt: s.publishedAt, author: s.author }, note, ...place });
+      text.push(`${s.title} — ${s.link}`);
+    } else continue;
+    kept.push(id);
+  }
+  if (blocks.length === 0) return null;
+  const index = new Map(kept.map((id, i) => [id, i]));
+  const links: [number, number][] = [];
+  for (const item of items) {
+    if (item.kind !== "link") continue;
+    const l = item as LinkItem;
+    const a = index.get(l.from);
+    const b = index.get(l.to);
+    if (a !== undefined && b !== undefined) links.push([a, b]);
+  }
+  return { v: 1, items: blocks, links, text: text.filter(Boolean).join("\n\n") };
+}
+
+function readBlocks(json: string | null | undefined): CopiedBlocks | null {
+  if (!json) return null;
+  try {
+    const parsed = JSON.parse(json) as CopiedBlocks;
+    if (parsed?.v !== 1 || !Array.isArray(parsed.items)) return null;
+    const items = parsed.items.slice(0, 200).flatMap((b): CopiedBlock[] => {
+      const place = { dx: Number(b.dx) || 0, dy: Number(b.dy) || 0, w: Math.min(1200, Math.max(120, Number(b.w) || 300)) };
+      if (b.story && typeof b.story.link === "string" && typeof b.story.title === "string") {
+        return [{ story: b.story, note: typeof b.note === "string" ? sanitizeRichText(b.note) : undefined, ...place }];
+      }
+      if (b.box && typeof b.box === "object") {
+        const box = b.box;
+        return [{ box: { ...box, html: sanitizeRichText(String(box.html ?? "")) }, ...place }];
+      }
+      return [];
+    });
+    const links = (Array.isArray(parsed.links) ? parsed.links : []).filter(
+      (l): l is [number, number] => Array.isArray(l) && Number.isInteger(l[0]) && Number.isInteger(l[1]),
+    );
+    return items.length ? { v: 1, items, links, text: "" } : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Whether the wheel, over `target`, should scroll a box inside `stop` rather than the board. */
 function scrollsItself(target: Element | null, stop: Element, deltaY: number) {
@@ -1420,6 +1503,92 @@ function Whiteboard(
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
+
+  /**
+   * ⌘C / ⌘X / ⌘V for blocks: the selection (or the block under the
+   * pointer) with the links between them, pasted into this subject or any
+   * other — where the pointer is, keeping their layout.
+   */
+  const pointer = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    const host = canvas.current;
+    if (!host) return;
+    const track = (e: PointerEvent) => (pointer.current = toBoard(e.clientX, e.clientY));
+    host.addEventListener("pointermove", track);
+    return () => host.removeEventListener("pointermove", track);
+  });
+  useEffect(() => {
+    const typing = (e: Event) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.("input, textarea, [contenteditable]")) return true;
+      const sel = window.getSelection();
+      return Boolean(sel && !sel.isCollapsed && String(sel).trim());
+    };
+    const picked = () => {
+      if (selected.size) return [...selected];
+      return focus && positions.has(focus) ? [focus] : [];
+    };
+    const copy = (e: ClipboardEvent, cut: boolean) => {
+      if (typing(e)) return;
+      const ids = picked();
+      const blocks = blocksFor(board, shared.cards, ids, positions);
+      if (!blocks) return;
+      e.preventDefault();
+      const json = JSON.stringify(blocks);
+      blockClipboard = json;
+      e.clipboardData?.setData(BLOCKS_TYPE, json);
+      e.clipboardData?.setData("text/plain", blocks.text);
+      if (cut) {
+        onBoard((current) => ids.reduce((next, id) => remove(remove(next, id), posId(id)), current ?? {}));
+        setSelected(new Set());
+      }
+    };
+    const paste = (e: ClipboardEvent) => {
+      if (typing(e)) return;
+      const json = e.clipboardData?.getData(BLOCKS_TYPE) || (e.clipboardData?.getData("text/plain") ? null : blockClipboard);
+      const blocks = readBlocks(json ?? blockClipboard);
+      if (!blocks) return;
+      e.preventDefault();
+      const rect = canvas.current?.getBoundingClientRect();
+      const at = pointer.current ?? toBoard((rect?.left ?? 0) + 80, (rect?.top ?? 0) + 80);
+      const fresh = new Set<string>();
+      onBoard((current) => {
+        let next = current ?? {};
+        const ids: string[] = [];
+        const now = Date.now();
+        for (const block of blocks.items) {
+          let id: string;
+          if (block.story) {
+            id = canonicalUrl(block.story.link);
+            next = addStory(next, block.story, now);
+            if (block.note) next = put(next, { id: cardNoteId(id), kind: "cardnote", card: id, html: block.note, at: now });
+          } else {
+            id = newItemId("box");
+            next = put(next, { ...block.box!, id, kind: "box", at: now });
+          }
+          ids.push(id);
+          fresh.add(id);
+          next = put(next, { id: posId(id), kind: "pos", target: id, x: Math.round(at.x + block.dx), y: Math.round(at.y + block.dy), w: block.w, at: now });
+        }
+        for (const [a, b] of blocks.links) {
+          const [from, to] = [ids[a], ids[b]].sort();
+          if (from && to && from !== to) next = put(next, { id: `link:${from}|${to}`, kind: "link", from, to, at: now });
+        }
+        return next;
+      });
+      setSelected(fresh);
+    };
+    const onCopy = (e: ClipboardEvent) => copy(e, false);
+    const onCut = (e: ClipboardEvent) => copy(e, true);
+    document.addEventListener("copy", onCopy);
+    document.addEventListener("cut", onCut);
+    document.addEventListener("paste", paste);
+    return () => {
+      document.removeEventListener("copy", onCopy);
+      document.removeEventListener("cut", onCut);
+      document.removeEventListener("paste", paste);
+    };
+  });
 
   // Space held down turns a drag over empty board back into panning.
   const spaceHeld = useRef(false);
