@@ -1913,11 +1913,11 @@
 .hl-layer { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
 .hl { position: absolute; border-radius: 2px; mix-blend-mode: multiply; }
 .hl-highlight { background: rgba(253, 230, 138, 0.75); }
-.hl-quote { background: rgba(147, 197, 253, 0.45); }
+.hl-quote { background: rgba(253, 230, 138, 0.75); }
 @media (prefers-color-scheme: dark) {
   .hl { mix-blend-mode: screen; }
   .hl-highlight { background: rgba(124, 94, 16, 0.75); }
-  .hl-quote { background: rgba(37, 99, 235, 0.35); }
+  .hl-quote { background: rgba(124, 94, 16, 0.75); }
 }
 /* The page makes room on the right for comments, as a document's margin does. */
 .reader:has(.reader-body.with-margin) { margin-left: max(28px, calc(50% - 560px)); }
