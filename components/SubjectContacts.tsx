@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { authorsOf, cleanLinkedIn, contactId, type Card, type ContactItem } from "@/lib/subjects";
 
+const HIDE_SUGGESTED_KEY = "super-reader:hide-suggested-contacts";
+
 type Detail = "email" | "phone" | "linkedin";
 
 /**
@@ -51,14 +53,31 @@ export default function SubjectContacts({
   });
   const authorIds = new Set(authors.map((a) => a.id));
   const fromStories = contacts.filter((c) => c.origin === "story" && !authorIds.has(c.id));
-  const suggested = contacts.filter((c) => c.origin === "suggested");
-  const yours = contacts.filter((c) => c.origin === "you");
+  // Yours first: people you added, and suggestions you accepted.
+  const yours = contacts.filter((c) => c.origin === "you" || (c.origin === "suggested" && c.state === "kept"));
+  const suggested = contacts.filter((c) => c.origin === "suggested" && c.state !== "kept");
+  const [hideSuggested, setHideSuggested] = useState(() => {
+    try {
+      return localStorage.getItem(HIDE_SUGGESTED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleSuggested = () =>
+    setHideSuggested((v) => {
+      try {
+        localStorage.setItem(HIDE_SUGGESTED_KEY, v ? "0" : "1");
+      } catch {
+        /* not remembered */
+      }
+      return !v;
+    });
   const byId = new Map(cards.map((card) => [card.id, card]));
 
   const section = (title: string, list: ContactItem[], note?: string, refsLabel?: (n: number) => string) =>
     list.length > 0 && (
       <section className="contacts-section">
-        <h2>{title}</h2>
+        {title && <h2>{title}</h2>}
         {note && <p className="sub">{note}</p>}
         <ul className="contacts-list">
           {list.map((contact) => (
@@ -109,10 +128,16 @@ export default function SubjectContacts({
           to them — or add someone yourself.
         </p>
       )}
+      {section("Your contacts", yours)}
       {section("Authors", authors, undefined, (n) => `Wrote ${n} ${n === 1 ? "story" : "stories"} here`)}
       {section("In the stories", fromStories)}
-      {section("Suggested", suggested, "Connected to the stories but not in them — check the role before reaching out.")}
-      {section("Added by you", yours)}
+      {suggested.length > 0 && (
+        <div className="contacts-suggested-head">
+          <h2>Suggested</h2>
+          <button className="link-btn" onClick={toggleSuggested}>{hideSuggested ? `Show (${suggested.length})` : "Hide"}</button>
+        </div>
+      )}
+      {!hideSuggested && section("", suggested)}
     </div>
   );
 }
@@ -204,6 +229,29 @@ function ContactRow({
           )}
           {!contact.email && !contact.phone && !contact.linkedin && !editing && <span className="contact-none">No email found in the stories</span>}
         </div>
+        <textarea
+          className="contact-notes"
+          placeholder="Notes…"
+          defaultValue={contact.notes ?? ""}
+          rows={1}
+          ref={(el) => {
+            // Tall enough for notes already written.
+            if (el && el.value) {
+              el.style.height = "auto";
+              el.style.height = `${el.scrollHeight}px`;
+            }
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onInput={(e) => {
+            const el = e.currentTarget;
+            el.style.height = "auto";
+            el.style.height = `${el.scrollHeight}px`;
+          }}
+          onBlur={(e) => {
+            const value = e.currentTarget.value.slice(0, 4000);
+            if (value !== (contact.notes ?? "")) onSave({ ...contact, notes: value || undefined, state: "kept" });
+          }}
+        />
         {editing ? (
           <form
             className="contact-edit"

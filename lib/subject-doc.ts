@@ -72,7 +72,7 @@ export function subjectHtml(note: Note, board: Board | undefined, now = new Date
     parts.push("<h2>Contacts</h2><ul>");
     for (const c of contacts) {
       const details = [c.role, c.email, c.phone, c.linkedin].filter(Boolean).map((d) => escapeHtml(d!)).join(" · ");
-      parts.push(`<li><b>${escapeHtml(c.name)}</b>${details ? ` — ${details}` : ""}${c.why ? `<br><i>${escapeHtml(c.why)}</i>` : ""}</li>`);
+      parts.push(`<li><b>${escapeHtml(c.name)}</b>${details ? ` — ${details}` : ""}${c.why ? `<br><i>${escapeHtml(c.why)}</i>` : ""}${c.notes ? `<br>${escapeHtml(c.notes).replace(/\n/g, "<br>")}` : ""}</li>`);
     }
     parts.push("</ul>");
   }
