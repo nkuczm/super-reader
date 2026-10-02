@@ -3,6 +3,7 @@ import { sanitizeArticleHtml } from "@/lib/article";
 import { addInboxItem, clearInboxItems, readInbox, readPage, setSubjectIndex, type InboxItem } from "@/lib/inbox";
 import { readSync } from "@/lib/sync";
 import { isConfigured } from "@/lib/db";
+import { cleanLinkedIn, safeImage } from "@/lib/subjects";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,6 +49,27 @@ export async function POST(request: Request) {
   }
   const code = await codeFrom(body.code);
   if (!code) return reply({ error: "That sync code was not found. Check it in Super Reader → Sync." }, 404);
+  // A person from a profile page, rather than an article.
+  if (body.contact && typeof body.contact === "object") {
+    const c = body.contact as Record<string, unknown>;
+    const name = typeof c.name === "string" ? c.name.trim().slice(0, 120) : "";
+    if (!name) return reply({ error: "No name found on that page." }, 400);
+    if (!body.subjectId && !body.newSubject) return reply({ error: "Choose a subject for the contact." }, 400);
+    const linkedin = typeof c.linkedin === "string" ? cleanLinkedIn(c.linkedin) ?? undefined : undefined;
+    const photo = typeof c.photo === "string" && c.photo.length < 200_000 ? safeImage(c.photo) : undefined;
+    const pageUrl = linkedin ?? "https://www.linkedin.com/";
+    const item: InboxItem = {
+      id: `x${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`,
+      savedAt: Date.now(),
+      article: { url: pageUrl, title: name, html: "", excerpt: "", wordCount: 0 } as never,
+      subjectId: typeof body.subjectId === "string" ? body.subjectId.slice(0, 80) : undefined,
+      newSubject: typeof body.newSubject === "string" ? body.newSubject.trim().slice(0, 120) || undefined : undefined,
+      note: typeof body.note === "string" ? body.note.trim().slice(0, 4000) || undefined : undefined,
+      contact: { name, role: typeof c.role === "string" ? c.role.trim().slice(0, 200) : undefined, linkedin, photo },
+    };
+    await addInboxItem(code, item);
+    return reply({ ok: true, title: name });
+  }
   const page = (body.article ?? {}) as Record<string, unknown>;
   let url: URL;
   try {

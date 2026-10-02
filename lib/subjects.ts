@@ -178,6 +178,8 @@ export type ContactItem = Base & {
   linkedin?: string;
   /** The reader's own notes on them: when they called, what they said. */
   notes?: string;
+  /** A small headshot, as a data: URL — added by the reader or the extension. */
+  photo?: string;
   /** Where the email came from: the stories, or typed in. */
   emailFrom?: "story" | "you";
   state: "pending" | "kept" | "dismissed";
@@ -658,6 +660,7 @@ function putContact(board: Board, found: FoundContact, cardIds: Set<string>, now
       phone: existing?.phone,
       linkedin: existing?.linkedin,
       notes: existing?.notes,
+      photo: existing?.photo,
       emailFrom: existing?.email ? existing.emailFrom : found.email ? "story" : undefined,
       state: existing?.state ?? "pending",
       at: now,

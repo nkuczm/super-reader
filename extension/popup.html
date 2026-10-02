@@ -18,6 +18,24 @@
         <p id="setup-error" class="error" hidden></p>
       </section>
 
+      <section id="person" hidden>
+        <div class="person">
+          <img id="person-photo" alt="" hidden />
+          <div class="person-text">
+            <input id="person-name" placeholder="Name" />
+            <input id="person-role" placeholder="Role" />
+          </div>
+        </div>
+        <label class="label" for="person-subject">Add as a contact in</label>
+        <select id="person-subject"></select>
+        <input id="person-new-subject" placeholder="New subject name" hidden />
+        <textarea id="person-note" rows="2" placeholder="Note (optional)"></textarea>
+        <label class="check"><input type="checkbox" id="person-with-photo" checked /> Include their photo</label>
+        <button id="person-save" class="primary" disabled>Add contact</button>
+        <p id="person-status" class="status" hidden></p>
+        <footer><button class="link" data-disconnect>Disconnect</button></footer>
+      </section>
+
       <section id="save" hidden>
         <div class="page">
           <div id="title" class="title">Reading the page…</div>
@@ -35,7 +53,7 @@
         <textarea id="note" rows="2" placeholder="Note (optional)"></textarea>
         <button id="save-btn" class="primary" disabled>Save</button>
         <p id="status" class="status" hidden></p>
-        <footer><button id="disconnect" class="link">Disconnect</button></footer>
+        <footer><button id="disconnect" class="link" data-disconnect>Disconnect</button></footer>
       </section>
     </main>
     <script src="popup.js"></script>

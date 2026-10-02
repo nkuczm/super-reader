@@ -1,11 +1,28 @@
 {
   "manifest_version": 3,
   "name": "Super Reader",
-  "version": "1.0.0",
-  "description": "Save the article you're reading to Super Reader, text and all, and file it into a subject.",
-  "action": { "default_popup": "popup.html", "default_title": "Save to Super Reader" },
-  "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["https://super-reader-wine.vercel.app/*"],
-  "optional_host_permissions": ["https://*/*", "http://localhost/*"],
-  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" }
+  "version": "1.1.0",
+  "description": "Save the article you're reading to Super Reader, text and all, and file it into a subject \u2014 or add the person whose LinkedIn profile you're viewing as a contact.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Save to Super Reader"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://super-reader-wine.vercel.app/*"
+  ],
+  "optional_host_permissions": [
+    "https://media.licdn.com/*",
+    "https://*/*",
+    "http://localhost/*"
+  ],
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
 }

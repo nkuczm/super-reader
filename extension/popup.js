@@ -19,8 +19,170 @@ async function settings() {
 }
 
 function show(id) {
-  for (const section of ["setup", "save"]) $(section).hidden = section !== id;
+  for (const section of ["setup", "save", "person"]) $(section).hidden = section !== id;
 }
+
+/** A LinkedIn profile page: what the popup offers there is "add as a contact". */
+function isProfile(url) {
+  try {
+    const u = new URL(url);
+    return /(^|\.)linkedin\.com$/.test(u.hostname) && /^\/in\/[^/]+/.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Runs inside the profile page, on what the reader is looking at: the name,
+ * the headline under it, and the address of the profile photo. Nothing is
+ * fetched from the page's side — this only reads what is already on screen.
+ */
+function extractProfile() {
+  const text = (el) => (el && el.textContent ? el.textContent.replace(/\s+/g, " ").trim() : "");
+  const h1 = document.querySelector("main h1") || document.querySelector("h1");
+  const name = text(h1) || document.title.replace(/\s*\|\s*LinkedIn.*$/i, "").replace(/^\(\d+\)\s*/, "").trim();
+  // The headline sits just after the name block.
+  let role = "";
+  const section = h1 && (h1.closest("section") || h1.parentElement);
+  if (section) {
+    const candidate = section.querySelector(".text-body-medium, [data-generated-suggestion-target]");
+    role = text(candidate);
+  }
+  if (!role) {
+    const og = document.querySelector('meta[property="og:description"], meta[name="description"]');
+    role = og ? (og.getAttribute("content") || "").split("·")[0].trim().slice(0, 160) : "";
+  }
+  const firstWord = name.split(" ")[0] || "";
+  const imgs = [...document.querySelectorAll("main img")];
+  const photo =
+    imgs.find((img) => /profile-picture|pv-top-card/i.test(img.className) && img.src.startsWith("https://")) ||
+    imgs.find((img) => firstWord && (img.alt || "").includes(firstWord) && img.naturalWidth >= 100 && img.src.startsWith("https://"));
+  const canonical = location.origin + location.pathname.replace(/\/(overlay|details|recent-activity)\/.*$/, "").replace(/\/+$/, "");
+  return { name, role: role.slice(0, 200), photo: photo ? photo.src : "", url: canonical };
+}
+
+let person = null;
+
+/** The photo, made small and kept as data: a 160px JPEG. */
+async function photoData(src) {
+  const res = await fetch(src);
+  if (!res.ok) throw new Error("photo unavailable");
+  const bitmap = await createImageBitmap(await res.blob());
+  const size = 160;
+  const scale = size / Math.min(bitmap.width, bitmap.height);
+  const canvas = new OffscreenCanvas(size, size);
+  const ctx = canvas.getContext("2d");
+  const w = bitmap.width * scale;
+  const h = bitmap.height * scale;
+  ctx.drawImage(bitmap, (size - w) / 2, (size - h) / 2, w, h);
+  const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.82 });
+  return await new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function fillSubjects(select, { required }) {
+  const { code, server } = await settings();
+  try {
+    const res = await fetch(`${server}/api/inbox?code=${encodeURIComponent(code)}`, { cache: "no-store" });
+    const data = res.ok ? await res.json() : {};
+    for (const subject of data.subjects || []) {
+      const option = document.createElement("option");
+      option.value = subject.id;
+      option.textContent = subject.name;
+      select.appendChild(option);
+    }
+  } catch {
+    /* only "new subject" then */
+  }
+  const make = document.createElement("option");
+  make.value = "__new";
+  make.textContent = "+ New subject…";
+  select.appendChild(make);
+  const { lastSubject } = await chrome.storage.local.get("lastSubject");
+  if (lastSubject && [...select.options].some((o) => o.value === lastSubject)) select.value = lastSubject;
+  else if (required && select.options.length) select.selectedIndex = 0;
+}
+
+async function startPerson(tab) {
+  show("person");
+  void fillSubjects($("person-subject"), { required: true }).then(() => {
+    $("person-new-subject").hidden = $("person-subject").value !== "__new";
+  });
+  try {
+    const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: extractProfile });
+    person = result;
+    $("person-name").value = person.name;
+    $("person-role").value = person.role;
+    if (person.photo) {
+      $("person-photo").src = person.photo;
+      $("person-photo").hidden = false;
+    } else {
+      $("person-with-photo").closest("label").hidden = true;
+    }
+    $("person-save").disabled = false;
+  } catch (error) {
+    personStatus("Couldn't read this profile — fill in the name and role yourself.", "error");
+    person = { name: "", role: "", photo: "", url: tab.url };
+    $("person-save").disabled = false;
+  }
+}
+
+function personStatus(text, kind = "") {
+  const el = $("person-status");
+  el.hidden = !text;
+  el.textContent = text;
+  el.className = `status ${kind}`;
+}
+
+$("person-subject").addEventListener("change", () => {
+  $("person-new-subject").hidden = $("person-subject").value !== "__new";
+  if (!$("person-new-subject").hidden) $("person-new-subject").focus();
+});
+
+$("person-save").addEventListener("click", async () => {
+  const name = $("person-name").value.trim();
+  if (!name) return personStatus("Add their name first.", "error");
+  const choice = $("person-subject").value;
+  const newSubject = choice === "__new" ? $("person-new-subject").value.trim() : "";
+  if (choice === "__new" && !newSubject) return personStatus("Name the new subject.", "error");
+  $("person-save").disabled = true;
+  let photo;
+  if (person && person.photo && $("person-with-photo").checked) {
+    try {
+      // Asked once, the first time: permission to fetch the photo itself.
+      const granted = await chrome.permissions.request({ origins: ["https://media.licdn.com/*"] });
+      if (granted) photo = await photoData(person.photo);
+    } catch {
+      photo = undefined;
+    }
+  }
+  personStatus("Adding…");
+  const { code, server } = await settings();
+  try {
+    const res = await fetch(`${server}/api/inbox`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        code,
+        subjectId: choice !== "__new" ? choice : undefined,
+        newSubject: newSubject || undefined,
+        note: $("person-note").value.trim() || undefined,
+        contact: { name, role: $("person-role").value.trim(), linkedin: person && person.url, photo },
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Could not add (${res.status})`);
+    if (choice !== "__new") await chrome.storage.local.set({ lastSubject: choice });
+    personStatus(`Added ${name} — they'll be in the subject's contacts on your next visit.`, "done");
+    setTimeout(() => window.close(), 1600);
+  } catch (error) {
+    personStatus(error.message || String(error), "error");
+    $("person-save").disabled = false;
+  }
+});
 
 function status(text, kind = "") {
   const el = $("status");
@@ -166,21 +328,30 @@ $("connect").addEventListener("click", async () => {
     const res = await fetch(`${server}/api/inbox?code=${encodeURIComponent(code)}`, { cache: "no-store" });
     if (!res.ok) throw new Error(res.status === 404 ? "That sync code wasn't found." : `Couldn't reach Super Reader (${res.status}).`);
     await chrome.storage.local.set({ code, server });
-    void startSave();
+    void start();
   } catch (e) {
     error.textContent = e.message || String(e);
     error.hidden = false;
   }
 });
 
-$("disconnect").addEventListener("click", async () => {
-  await chrome.storage.local.remove(["code", "lastSubject"]);
-  show("setup");
-});
+for (const button of document.querySelectorAll("[data-disconnect]")) {
+  button.addEventListener("click", async () => {
+    await chrome.storage.local.remove(["code", "lastSubject"]);
+    show("setup");
+  });
+}
+
+/** After connecting, or on opening: a profile gets the contact form, anything else the save form. */
+async function start() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab && isProfile(tab.url || "")) return startPerson(tab);
+  return startSave();
+}
 
 (async () => {
   const { code, server } = await settings();
   $("server").value = server;
-  if (code) void startSave();
+  if (code) void start();
   else show("setup");
 })();

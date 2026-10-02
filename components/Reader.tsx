@@ -97,6 +97,7 @@ import {
   addQuoteNote,
   quoteNotesFor,
   cardNoteId,
+  contactId,
   loadBoards,
   mergeBoards,
   pruneBoards,
@@ -1830,6 +1831,37 @@ export default function Reader() {
    */
   const fileFromExtension = useCallback(
     (item: InboxItem) => {
+      // A person from a profile page: into the chosen subject's contacts.
+      if (item.contact) {
+        const person = item.contact;
+        let target = item.subjectId && notesRef.current.some((n) => n.id === item.subjectId) ? item.subjectId : undefined;
+        if (!target && item.newSubject) target = createNote(item.newSubject);
+        if (!target) return;
+        const id = contactId(person.name);
+        commitBoard(target, (board) => {
+          const held = board?.[id];
+          const prior = held && held.kind === "contact" && !held.deleted ? held : undefined;
+          return putItem(board, {
+            id,
+            kind: "contact",
+            name: prior?.name ?? person.name,
+            role: person.role || prior?.role || "",
+            why: prior?.why ?? "",
+            refs: prior?.refs ?? [],
+            origin: prior?.origin ?? "you",
+            email: prior?.email,
+            emailFrom: prior?.emailFrom,
+            phone: prior?.phone,
+            linkedin: person.linkedin ?? prior?.linkedin,
+            photo: person.photo ?? prior?.photo,
+            notes: [prior?.notes, item.note].filter(Boolean).join("\n") || undefined,
+            state: "kept",
+            at: Date.now(),
+          });
+        });
+        touchSubject(target);
+        return;
+      }
       const article = item.article;
       if (!article.url) return;
       // Filed under the link the story already has here, if it has one —
@@ -1918,7 +1950,12 @@ export default function Reader() {
       });
       setPasteNotice({
         kind: "done",
-        text: items.length === 1 ? `Saved from Chrome: ${items[0].article.title}` : `Saved ${items.length} stories from Chrome.`,
+        text:
+          items.length === 1
+            ? items[0].contact
+              ? `Added ${items[0].contact.name} to contacts, from Chrome.`
+              : `Saved from Chrome: ${items[0].article.title}`
+            : `Saved ${items.length} items from Chrome.`,
       });
     } catch {
       /* the next visit tries again */
