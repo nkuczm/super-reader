@@ -172,3 +172,20 @@ test("contacts from a run keep what the reader did with them", async () => {
   assert.equal(bylineOf({ publishedAt: "2026-09-30T12:00:00Z", author: "Ann Lee", source: "Wire" }), "Sep 30, 2026 · Ann Lee · Wire");
   assert.equal(bylineOf({ author: "Wire", source: "Wire" }), "Wire");
 });
+
+test("quotes stay top-level bullets, even when added after a note under the last quote", async () => {
+  const { composeCardDoc } = await import("../lib/subjects");
+  const q = (id: string) => ({ id, text: id });
+  const noted = '<ul><li><a data-quote="a">“a”</a><ul><li>my note</li></ul></li></ul>';
+  assert.equal(
+    composeCardDoc(noted, [q("a"), q("b")]),
+    '<ul><li><a data-quote="a">“a”</a><ul><li>my note</li></ul></li><li><a data-quote="b">“b”</a></li></ul>',
+  );
+  // Already nested by the old behaviour: lifted back out, notes kept with their quote.
+  const broken =
+    '<ul><li><a data-quote="a">“a”</a><ul><li>BUNKER</li><li><a data-quote="b">“b”</a></li><li><a data-quote="c">“c”</a><ul><li>tf?</li></ul></li></ul></li></ul>';
+  assert.equal(
+    composeCardDoc(broken, [q("a"), q("b"), q("c")]),
+    '<ul><li><a data-quote="a">“a”</a><ul><li>BUNKER</li></ul></li><li><a data-quote="b">“b”</a></li><li><a data-quote="c">“c”</a><ul><li>tf?</li></ul></li></ul>',
+  );
+});
