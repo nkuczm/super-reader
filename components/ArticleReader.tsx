@@ -253,6 +253,8 @@ export default function ArticleReader({
   const [wide, setWide] = useState(false);
   /** A mark that was clicked: what can be done with it, and where. */
   const [picked, setPicked] = useState<{ mark: ArticleMark; top: number; left: number } | null>(null);
+  /** The commented passage in focus, as in a document: its highlight brightens and its comment comes forward. */
+  const [activeMark, setActiveMark] = useState<string | null>(null);
 
   useEffect(() => {
     const host = prose.current;
@@ -620,7 +622,11 @@ export default function ArticleReader({
           const hit = painted.find((p) =>
             p.rects.some((r) => x >= r.left && x <= r.left + r.width && y >= r.top && y <= r.top + r.height),
           );
-          setPicked(hit ? { mark: hit.mark, top: y + 14, left: Math.min(x, body.width - 220) } : null);
+          const commented = Boolean(hit?.mark.comments?.length);
+          setActiveMark(commented ? hit!.mark.id : null);
+          // A commented passage on a wide screen shows its comment in the
+          // margin; elsewhere a small card says what can be done with it.
+          setPicked(hit && !(commented && wide) ? { mark: hit.mark, top: y + 14, left: Math.min(x, body.width - 220) } : null);
         }}
       >
         <h1>{article?.title ?? fallbackTitle}</h1>
@@ -765,7 +771,8 @@ export default function ArticleReader({
             {painted.length > 0 && (
               <div className="hl-layer" aria-hidden="true">
                 {painted.flatMap((p) =>
-                  p.rects.map((r, i) => <span key={`${p.mark.id}-${i}`} className={`hl hl-${p.mark.kind}`} style={r} />),
+                  p.rects.map((r, i) => <span key={`${p.mark.id}-${i}`}
+                    className={`hl hl-${p.mark.kind}${p.mark.comments?.length ? " hl-commented" : ""}${activeMark === p.mark.id ? " hl-active" : ""}`} style={r} />),
                 )}
               </div>
             )}
@@ -773,19 +780,30 @@ export default function ArticleReader({
               <div className={`hl-comments${wide ? " side" : " inline"}`}>
                 {comments.map((c) =>
                   wide ? (
-                    <button key={c.mark.id} className="hl-comment" style={{ top: c.top }}
+                    <div key={c.mark.id} role="button" tabIndex={0}
+                      className={`hl-comment${activeMark === c.mark.id ? " active" : ""}`} style={{ top: c.top }}
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (c.mark.noteId) onOpenNote?.(c.mark.noteId);
+                        setActiveMark(c.mark.id);
                       }}
-                      title={c.mark.noteName ? `In ${c.mark.noteName} — open the subject` : undefined}>
+                      onKeyDown={(e) => e.key === "Enter" && setActiveMark(c.mark.id)}>
+                      {c.mark.noteId && (
+                        <button className="hl-comment-subject" title={`Open ${c.mark.noteName ?? "the subject"}`}
+                          aria-label={`Open ${c.mark.noteName ?? "the subject"}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpenNote?.(c.mark.noteId!);
+                          }}>
+                          {Icon.note}
+                        </button>
+                      )}
                       {c.mark.comments!.map((line, i) => (
                         <span key={i} className="hl-comment-line" style={{ paddingLeft: (line.length - line.trimStart().length) * 6 }}>
                           {line.trim()}
                         </span>
                       ))}
                       {c.mark.noteName && <span className="hl-comment-from">{c.mark.noteName}</span>}
-                    </button>
+                    </div>
                   ) : (
                     // No margin on a narrow screen: a marker at the end of the
                     // passage, opening the comment when tapped.
@@ -794,6 +812,7 @@ export default function ArticleReader({
                       onClick={(e) => {
                         e.stopPropagation();
                         const r = c.rects[c.rects.length - 1];
+                        setActiveMark(c.mark.id);
                         setPicked({ mark: c.mark, top: r.top + r.height + 6, left: Math.max(0, r.left - 120) });
                       }}>
                       💬
@@ -814,8 +833,8 @@ export default function ArticleReader({
                     Remove highlight
                   </button>
                 ) : (
-                  <button className="link-btn" onClick={() => { if (picked.mark.noteId) onOpenNote?.(picked.mark.noteId); setPicked(null); }}>
-                    In {picked.mark.noteName ?? "a subject"} →
+                  <button className="link-btn hl-pop-subject" onClick={() => { if (picked.mark.noteId) onOpenNote?.(picked.mark.noteId); setPicked(null); }}>
+                    {Icon.note} {picked.mark.noteName ?? "Open the subject"}
                   </button>
                 )}
               </div>

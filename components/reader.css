@@ -2138,3 +2138,21 @@
 .contact.picked:not(.outreach-want):not(.outreach-reached) { border-left: 3px solid var(--accent); }
 .contact-badge { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; margin-left: 6px; }
 .contact-badge.picked { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
+
+/* ---------- commented passages, as in a document ---------- */
+.hl.hl-commented { background: rgba(234, 179, 8, 0.5); }
+.hl.hl-commented.hl-active { background: rgba(253, 224, 71, 1); box-shadow: 0 0 0 1px rgba(234, 179, 8, 0.6); }
+@media (prefers-color-scheme: dark) {
+  .hl.hl-commented { background: rgba(161, 120, 10, 0.8); }
+  .hl.hl-commented.hl-active { background: rgba(234, 179, 8, 0.95); }
+}
+.hl-comment { padding-right: 30px; transition: transform 0.12s, box-shadow 0.12s; }
+.hl-comment.active { border-left-color: #eab308; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14); transform: translateX(-6px); z-index: 2; }
+.hl-comment-subject {
+  position: absolute; top: 5px; right: 5px; width: 22px; height: 22px; display: grid; place-items: center;
+  border: 0; background: none; border-radius: 6px; color: var(--text-dim); cursor: pointer;
+}
+.hl-comment-subject svg { width: 14px; height: 14px; }
+.hl-comment-subject:hover { background: var(--bg-hover); color: var(--accent); }
+.hl-pop-subject { display: inline-flex; align-items: center; gap: 5px; }
+.hl-pop-subject svg { width: 13px; height: 13px; }
