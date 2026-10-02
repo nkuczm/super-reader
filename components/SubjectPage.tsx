@@ -588,11 +588,23 @@ export default function SubjectPage(props: Props) {
           <MoreMenu>
             {(close) => (
               <>
-                <button role="menuitem" onClick={() => { close(); addBox(); }}>Add text box</button>
-                <button role="menuitem" onClick={() => { close(); addBox(undefined, { drawing: [], height: DRAWING_HEIGHT }); }}>Add drawing</button>
-                <button role="menuitem" onClick={() => { close(); imageInput.current?.click(); }}>Add image…</button>
-                <button role="menuitem" onClick={() => { close(); addBox(undefined, { table: NEW_TABLE() }); }}>Add table</button>
-                <button role="menuitem" onClick={() => { close(); addBox(undefined, { transcript: { title: "", turns: [] } }); }}>Add transcript</button>
+                <div className="more-add" role="group" aria-label="Add">
+                  <span>Add</span>
+                  {(
+                    [
+                      ["¶", "Text box", () => addBox()],
+                      ["✎", "Drawing", () => addBox(undefined, { drawing: [], height: DRAWING_HEIGHT })],
+                      ["▣", "Image", () => imageInput.current?.click()],
+                      ["▦", "Table", () => addBox(undefined, { table: NEW_TABLE() })],
+                      ["❝", "Transcript", () => addBox(undefined, { transcript: { title: "", turns: [] } })],
+                    ] as const
+                  ).map(([icon, label, run]) => (
+                    <button key={label} role="menuitem" title={`Add ${label.toLowerCase()}`} aria-label={`Add ${label.toLowerCase()}`}
+                      onClick={() => { close(); run(); }}>
+                      {icon}
+                    </button>
+                  ))}
+                </div>
                 <button role="menuitem" title="Copy this tab as formatted text, for Google Docs and the like"
                   onClick={() => { close(); void copyTab(); }}>Copy this tab</button>
                 {props.onToggleHideBoxes && (
