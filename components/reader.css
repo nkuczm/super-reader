@@ -1802,3 +1802,27 @@
     background-color: #7c5e10 !important; color: inherit !important;
   }
 }
+
+/* ---------- quiet boxes: a subject that reads as one document ---------- */
+.quiet-boxes .subject-doc .subject-card,
+.quiet-boxes .subject-doc .subject-box {
+  border-color: transparent; box-shadow: none; background: transparent;
+  transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
+}
+.quiet-boxes .subject-doc .subject-card:hover,
+.quiet-boxes .subject-doc .subject-box:hover,
+.quiet-boxes .subject-doc .subject-card:focus-within,
+.quiet-boxes .subject-doc .subject-box:focus-within {
+  border-color: var(--border); background: var(--bg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+/* The controls on a story or box show with its border. */
+.quiet-boxes .subject-doc .subject-card-head > :not(.subject-card-title),
+.quiet-boxes .subject-doc .subject-box-head { opacity: 0; transition: opacity 0.15s; }
+.quiet-boxes .subject-doc .subject-card:hover .subject-card-head > *,
+.quiet-boxes .subject-doc .subject-card:focus-within .subject-card-head > *,
+.quiet-boxes .subject-doc .subject-box:hover .subject-box-head,
+.quiet-boxes .subject-doc .subject-box:focus-within .subject-box-head { opacity: 1; }
+/* No hover on touch screens: keep the controls reachable there. */
+@media (hover: none) {
+  .quiet-boxes .subject-doc .subject-card-head > *, .quiet-boxes .subject-doc .subject-box-head { opacity: 0.6; }
+}

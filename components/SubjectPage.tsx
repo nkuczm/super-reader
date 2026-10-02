@@ -78,6 +78,9 @@ type Props = {
   saveLabel?: string;
   /** Date, author and outlet of a story still on the device, by link. */
   articleMeta?: (link: string) => { publishedAt?: string; author?: string; source?: string } | undefined;
+  /** Borders around stories and boxes only on hover or while editing (Settings). */
+  hideBoxes?: boolean;
+  onToggleHideBoxes?: () => void;
 };
 
 const RAIL_KEY = "super-reader:tab-rail";
@@ -439,6 +442,11 @@ export default function SubjectPage(props: Props) {
                 <button role="menuitem" onClick={() => { close(); addBox(); }}>Add text box</button>
                 <button role="menuitem" title="Copy this tab as formatted text, for Google Docs and the like"
                   onClick={() => { close(); void copyTab(); }}>Copy this tab</button>
+                {props.onToggleHideBoxes && (
+                  <button role="menuitemcheckbox" aria-checked={Boolean(props.hideBoxes)} onClick={props.onToggleHideBoxes}>
+                    Hide boxes{props.hideBoxes && <span className="more-check">✓</span>}
+                  </button>
+                )}
                 <button role="menuitemcheckbox" aria-checked={Boolean(meta.offline)}
                   onClick={() => onBoard((current) => put(current, { ...metaOf(current), offline: !metaOf(current).offline }))}>
                   Available offline{meta.offline && <span className="more-check">✓</span>}
@@ -480,7 +488,7 @@ export default function SubjectPage(props: Props) {
       )}
       {aiStatus && <div className="subject-ai-bar">{aiStatus}</div>}
       <div className={`subject-body${contactsOpen ? " with-contacts" : ""}`}>
-      <div className={`subject-main${railOpen ? " rail-open" : " rail-closed"}`}>
+      <div className={`subject-main${railOpen ? " rail-open" : " rail-closed"}${props.hideBoxes ? " quiet-boxes" : ""}`}>
       {railOpen && (
       <div className={`tab-rail open${meta.view === "board" ? " on-board" : ""}`}>
           <>
