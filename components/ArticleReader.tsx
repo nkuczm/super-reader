@@ -246,6 +246,8 @@ export default function ArticleReader({
   }, [article?.html]);
   /** Where the quote being returned to sits, in boxes to paint over it. */
   /** Where each mark sits over the text, measured from the laid-out page. */
+  /** Bumped to load the article again. */
+  const [attempt, setAttempt] = useState(0);
   const [painted, setPainted] = useState<{ mark: ArticleMark; rects: Rect[] }[]>([]);
   /** Room beside the article for comments, as in a document's margin. */
   const [wide, setWide] = useState(false);
@@ -458,7 +460,17 @@ export default function ArticleReader({
       cancelled = true;
       clearTimeout(slowTimer);
     };
-  }, [url, feedUrl, fallbackTitle, keyHeaders]);
+  }, [url, feedUrl, fallbackTitle, keyHeaders, attempt]);
+
+  // Back from scanning the article in with the extension (or from anywhere,
+  // while the article could not be read): try again — the copy the
+  // extension saved is now there to be found.
+  useEffect(() => {
+    if (!error) return;
+    const again = () => setAttempt((n) => n + 1);
+    window.addEventListener("focus", again);
+    return () => window.removeEventListener("focus", again);
+  }, [error]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -640,8 +652,20 @@ export default function ArticleReader({
               </div>
             )}
             <div className="reader-error-actions">
+              {/* Opens the article with a marker the Super Reader extension
+                  watches for: it reads the page as this browser sees it,
+                  saves it, and comes back here, where it then shows. */}
               <a
                 className="btn small"
+                href={`${url.split("#")[0]}#super-reader-capture`}
+                target="_blank"
+                rel="opener"
+                title="Needs the Super Reader Chrome extension — it reads the page in your browser and brings it back here"
+              >
+                Scan it in yourself
+              </a>
+              <a
+                className="btn ghost small"
                 href={url}
                 target="_blank"
                 rel="noreferrer noopener"

@@ -52,11 +52,23 @@ function extractProfile() {
     const og = document.querySelector('meta[property="og:description"], meta[name="description"]');
     role = og ? (og.getAttribute("content") || "").split("·")[0].trim().slice(0, 160) : "";
   }
+  // The profile photo, by its address rather than LinkedIn's class names,
+  // which change: their profile pictures are served as "profile-displayphoto".
+  // The largest on the page is the person's own; small ones are people in
+  // the sidebar.
   const firstWord = name.split(" ")[0] || "";
-  const imgs = [...document.querySelectorAll("main img")];
-  const photo =
-    imgs.find((img) => /profile-picture|pv-top-card/i.test(img.className) && img.src.startsWith("https://")) ||
-    imgs.find((img) => firstWord && (img.alt || "").includes(firstWord) && img.naturalWidth >= 100 && img.src.startsWith("https://"));
+  const imgs = [...document.querySelectorAll("img")].filter((img) => (img.currentSrc || img.src || "").startsWith("https://"));
+  const size = (img) => Math.max(img.naturalWidth || 0, img.getBoundingClientRect().width || 0);
+  const byAddress = imgs
+    .filter((img) => /profile-displayphoto|profile-framedphoto/i.test(img.currentSrc || img.src))
+    .sort((a, b) => size(b) - size(a));
+  const byName = imgs
+    .filter((img) => firstWord && (img.alt || "").includes(firstWord) && size(img) >= 80)
+    .sort((a, b) => size(b) - size(a));
+  const pick = byAddress[0] || byName[0];
+  const og = document.querySelector('meta[property="og:image"]');
+  const ogImage = og && /^https:\/\//.test(og.getAttribute("content") || "") ? og.getAttribute("content") : "";
+  const photo = pick ? { src: pick.currentSrc || pick.src } : ogImage ? { src: ogImage } : null;
   const canonical = location.origin + location.pathname.replace(/\/(overlay|details|recent-activity)\/.*$/, "").replace(/\/+$/, "");
   return { name, role: role.slice(0, 200), photo: photo ? photo.src : "", url: canonical };
 }
@@ -65,8 +77,8 @@ let person = null;
 
 /** The photo, made small and kept as data: a 160px JPEG. */
 async function photoData(src) {
-  const res = await fetch(src);
-  if (!res.ok) throw new Error("photo unavailable");
+  const res = await fetch(src, { credentials: "omit" });
+  if (!res.ok) throw new Error(`the image host answered ${res.status}`);
   const bitmap = await createImageBitmap(await res.blob());
   const size = 160;
   const scale = size / Math.min(bitmap.width, bitmap.height);
@@ -150,13 +162,17 @@ $("person-save").addEventListener("click", async () => {
   if (choice === "__new" && !newSubject) return personStatus("Name the new subject.", "error");
   $("person-save").disabled = true;
   let photo;
-  if (person && person.photo && $("person-with-photo").checked) {
-    try {
-      // Asked once, the first time: permission to fetch the photo itself.
-      const granted = await chrome.permissions.request({ origins: ["https://media.licdn.com/*"] });
-      if (granted) photo = await photoData(person.photo);
-    } catch {
-      photo = undefined;
+  let photoProblem = "";
+  if (person && $("person-with-photo").checked) {
+    if (!person.photo) photoProblem = "No photo found on this profile.";
+    else {
+      try {
+        // Allowed at install (manifest host_permissions), so no prompt here —
+        // a prompt opened from a popup can close it and lose the photo.
+        photo = await photoData(person.photo);
+      } catch (error) {
+        photoProblem = `Couldn't fetch their photo (${error.message || error}).`;
+      }
     }
   }
   personStatus("Adding…");
@@ -176,8 +192,13 @@ $("person-save").addEventListener("click", async () => {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || `Could not add (${res.status})`);
     if (choice !== "__new") await chrome.storage.local.set({ lastSubject: choice });
-    personStatus(`Added ${name} — they'll be in the subject's contacts on your next visit.`, "done");
-    setTimeout(() => window.close(), 1600);
+    // Said plainly when the photo did not come along, rather than added
+    // without it in silence.
+    personStatus(
+      `Added ${name} — they'll be in the subject's contacts on your next visit.${photoProblem ? ` ${photoProblem}` : ""}`,
+      photoProblem ? "" : "done",
+    );
+    if (!photoProblem) setTimeout(() => window.close(), 1600);
   } catch (error) {
     personStatus(error.message || String(error), "error");
     $("person-save").disabled = false;
@@ -191,46 +212,11 @@ function status(text, kind = "") {
   el.className = `status ${kind}`;
 }
 
-/** Runs inside the page: the article as Readability reads it, and any selection. */
-function extractArticle() {
-  const meta = (names) => {
-    for (const name of names) {
-      const el = document.querySelector(`meta[property="${name}"], meta[name="${name}"], meta[itemprop="${name}"]`);
-      const value = el && el.getAttribute("content");
-      if (value) return value.trim();
-    }
-    return undefined;
-  };
-  const selection = String(window.getSelection() || "").replace(/\s+/g, " ").trim();
-  let parsed = null;
-  try {
-    // A copy: Readability rearranges the document it is given.
-    parsed = new Readability(document.cloneNode(true), { charThreshold: 250 }).parse();
-  } catch (error) {
-    parsed = null;
-  }
-  const time = document.querySelector("time[datetime]");
-  return {
-    url: location.href,
-    title: (parsed && parsed.title) || meta(["og:title", "twitter:title"]) || document.title,
-    byline: (parsed && parsed.byline) || meta(["author", "article:author"]),
-    siteName: (parsed && parsed.siteName) || meta(["og:site_name"]),
-    publishedAt:
-      (parsed && parsed.publishedTime) ||
-      meta(["article:published_time", "datePublished", "date"]) ||
-      (time && time.getAttribute("datetime")) ||
-      undefined,
-    html: parsed && parsed.content ? parsed.content : "",
-    excerpt: (parsed && parsed.excerpt) || meta(["og:description", "description"]),
-    selection: selection.slice(0, 4000),
-  };
-}
-
 async function readPage() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !/^https?:/.test(tab.url || "")) throw new Error("This page can't be saved — open an article first.");
-  await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["vendor/Readability.js"] });
-  const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: extractArticle });
+  await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["vendor/Readability.js", "extract.js"] });
+  const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => window.__superReaderExtract() });
   return result;
 }
 
