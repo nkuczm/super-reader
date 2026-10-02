@@ -10,7 +10,8 @@ import { DrawingPad, ImageView, TableBox, TranscriptBox, shrinkImage, DRAWING_HE
 import { tableHtml, transcriptHtml } from "@/lib/subject-doc";
 import type { Writing } from "./useAccount";
 import type { Note, NoteEntry } from "@/lib/notes";
-import type { StoryItem } from "@/lib/subjects";
+import { safeHref, type StoryItem } from "@/lib/subjects";
+import { titleFromUrl } from "@/lib/manual";
 import {
   addStory,
   applySynthesis,
@@ -1604,6 +1605,59 @@ function Whiteboard(
     };
   });
 
+  /**
+   * A story added from its link, where the board was right-clicked: the
+   * link on the clipboard if there is one, otherwise a field to paste it in.
+   * Its address names it at once; the page's own title follows if it can be read.
+   */
+  const [linkAsk, setLinkAsk] = useState<{ left: number; top: number; at: { x: number; y: number }; value: string; problem?: string } | null>(null);
+  const addStoryAt = (link: string, at: { x: number; y: number }) => {
+    const id = canonicalUrl(link);
+    let host = "";
+    try {
+      host = new URL(link).hostname.replace(/^www\./, "");
+    } catch {
+      /* no host */
+    }
+    const title = titleFromUrl(link) ?? host ?? link;
+    onBoard((current) =>
+      put(placeNew(addStory(current, { link, title, source: host || undefined }), id), { id: posId(id), kind: "pos", target: id, x: at.x, y: at.y, w: CARD_W, at: Date.now() }),
+    );
+    void (async () => {
+      try {
+        const res = await fetch(`/api/article?url=${encodeURIComponent(link)}&x=${EXTRACT_VERSION}`);
+        if (!res.ok) return;
+        const data = (await res.json()) as { title?: string; siteName?: string; publishedAt?: string; byline?: string };
+        if (!data.title) return;
+        onBoard((current) => {
+          const held = current?.[`story:${id}`] as StoryItem | undefined;
+          if (!held || held.deleted) return current ?? {};
+          return put(current, {
+            ...held,
+            title: data.title!.slice(0, 300),
+            source: data.siteName?.slice(0, 120) || held.source,
+            publishedAt: data.publishedAt || held.publishedAt,
+            author: data.byline?.slice(0, 120) || held.author,
+            at: Date.now(),
+          });
+        });
+      } catch {
+        /* kept under the title its address gives */
+      }
+    })();
+  };
+  const storyFromClipboard = async (spot: { left: number; top: number; at: { x: number; y: number } }) => {
+    let text = "";
+    try {
+      text = (await navigator.clipboard.readText()).trim();
+    } catch {
+      /* the browser would not share the clipboard: ask instead */
+    }
+    const link = /^\S+$/.test(text) ? safeHref(text) : null;
+    if (link) addStoryAt(link, spot.at);
+    else setLinkAsk({ ...spot, value: "" });
+  };
+
   // Space held down turns a drag over empty board back into panning.
   const spaceHeld = useRef(false);
   useEffect(() => {
@@ -1816,6 +1870,9 @@ function Whiteboard(
       </div>
       {menu && (
         <div className="wb-menu" role="menu" style={{ left: menu.left, top: menu.top }} onPointerDown={(e) => e.stopPropagation()}>
+          <button role="menuitem" onClick={() => { void storyFromClipboard(menu); setMenu(null); }}>
+            <span className="wb-menu-icon">🔗</span> Story from link
+          </button>
           <button role="menuitem" onClick={() => { shared.addBox(menu.at, { label: true, html: "" }); setMenu(null); }}>
             <span className="wb-menu-icon">H</span> Section label
           </button>
@@ -1835,6 +1892,27 @@ function Whiteboard(
             <span className="wb-menu-icon">❝</span> Transcript
           </button>
         </div>
+      )}
+      {linkAsk && (
+        <form
+          className="wb-link-ask"
+          style={{ left: linkAsk.left, top: linkAsk.top }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onSubmit={(e) => {
+            e.preventDefault();
+            const link = safeHref(linkAsk.value.trim());
+            if (!link) return setLinkAsk({ ...linkAsk, problem: "That isn't a web link." });
+            addStoryAt(link, linkAsk.at);
+            setLinkAsk(null);
+          }}
+        >
+          <input autoFocus className="input" placeholder="Paste a story's link" value={linkAsk.value}
+            onChange={(e) => setLinkAsk({ ...linkAsk, value: e.target.value, problem: undefined })}
+            onKeyDown={(e) => e.key === "Escape" && setLinkAsk(null)}
+            onBlur={() => !linkAsk.value.trim() && setLinkAsk(null)} />
+          <button className="btn small">Add</button>
+          {linkAsk.problem && <span className="signin-error">{linkAsk.problem}</span>}
+        </form>
       )}
       <div
         ref={canvas}
