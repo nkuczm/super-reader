@@ -437,6 +437,7 @@ export async function previewFromMetadata(
 
   const { body, finalUrl } = await fetchText(url, timeoutMs);
   const dom = new JSDOM(body, { url: finalUrl, virtualConsole: new VirtualConsole() });
+  assertNotChallenge(dom);
 
   const title = metaOf(dom, ["og:title", "twitter:title"]) ?? dom.window.document.title?.trim();
   const description = metaOf(dom, ["og:description", "twitter:description", "description"]);
@@ -461,6 +462,31 @@ export async function previewFromMetadata(
   };
 }
 
+/**
+ * A bot check standing where the page should be — "Client Challenge",
+ * "Just a moment…", "Attention Required!". It answers 200, so nothing else
+ * notices; read as an article it becomes a story titled "Client Challenge"
+ * and is cached for a day. Measured on sfgate.com, 2 Oct 2026.
+ */
+const CHALLENGE_TITLE =
+  /^(client challenge|just a moment\.*|attention required!?.*|access denied|are you a robot\??|pardon our interruption|security check(point)?|vercel security checkpoint|please verify you are a human|human verification|one more step)$/i;
+const CHALLENGE_TEXT =
+  /(a required part of this site couldn.t load|verify(ing)? (that )?you are (a )?human|enable javascript and cookies to continue|checking (if the site connection is secure|your browser)|press (&|and) hold)/i;
+
+export function isChallengePage(title: string | undefined, text: string): boolean {
+  if (title && CHALLENGE_TITLE.test(title.trim())) return true;
+  // Only a short page: a real article may quote these words.
+  return text.length < 2500 && CHALLENGE_TEXT.test(text);
+}
+
+export const CHALLENGE_ERROR = "403 bot check: the site showed a browser check instead of the article";
+
+function assertNotChallenge(dom: JSDOM) {
+  const doc = dom.window.document;
+  const text = (doc.body?.textContent ?? "").replace(/\s+/g, " ").trim();
+  if (isChallengePage(doc.title, text)) throw new Error(CHALLENGE_ERROR);
+}
+
 export async function extractArticle(
   url: string,
   /** Headers for this fetch alone — a reader's subscription cookie. */
@@ -471,6 +497,7 @@ export async function extractArticle(
   // jsdom logs noisily about CSS it cannot parse; none of it matters here.
   const virtualConsole = new VirtualConsole();
   const dom = new JSDOM(body, { url: finalUrl, virtualConsole });
+  assertNotChallenge(dom);
 
   const publishedAt =
     toIso(metaOf(dom, ["article:published_time", "datePublished", "date"])) ??
