@@ -334,6 +334,9 @@ export default function SettingsDialog({
             <button className="btn ghost small" onClick={onOpenSpend}>
               AI spending
             </button>
+            <a className="btn ghost small" href="/extension" target="_blank" rel="noopener">
+              Chrome extension
+            </a>
           </div>
           <p className="field-note">
             How many stories each source is delivering and which look broken or
