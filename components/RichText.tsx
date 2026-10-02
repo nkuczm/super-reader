@@ -4,6 +4,23 @@ import { useEffect, useRef, useState } from "react";
 import { sanitizeRichText } from "@/lib/subjects";
 import { cleanPastedHtml } from "@/lib/paste";
 
+/** The drag type a drawing or image box carries, for dropping into text. */
+export const EMBED_TYPE = "application/x-super-reader-box";
+
+function caretRangeAt(x: number, y: number): Range | null {
+  const doc = document as Document & {
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+  };
+  if (doc.caretRangeFromPoint) return doc.caretRangeFromPoint(x, y);
+  const pos = doc.caretPositionFromPoint?.(x, y);
+  if (!pos) return null;
+  const range = document.createRange();
+  range.setStart(pos.offsetNode, pos.offset);
+  range.collapse(true);
+  return range;
+}
+
 /**
  * A small formatted-text field: bold, italic, highlight, bullets, heading.
  *
@@ -20,7 +37,13 @@ export default function RichText({
   className,
   autoFocus,
   onOpenQuote,
+  resolveEmbed,
+  onEmbed,
 }: {
+  /** The picture for a drawing or image set into the text, by its box id. */
+  resolveEmbed?: (id: string) => string | undefined;
+  /** A drawing or image box was dropped into the text: it now lives here. */
+  onEmbed?: (id: string) => void;
   /**
    * Quotes in the text are links to their passage. With this set, the caret
    * in one shows a "Go to passage" chip, and ⌘/Ctrl-click follows it.
@@ -72,7 +95,21 @@ export default function RichText({
       node.innerHTML = clean;
       last.current = clean;
     }
-  }, [html]);
+    fillEmbeds();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [html, resolveEmbed]);
+
+  /** Give each embedded drawing or picture its image; the src is never saved. */
+  function fillEmbeds() {
+    const node = el.current;
+    if (!node || !resolveEmbed) return;
+    node.querySelectorAll<HTMLImageElement>("img[data-embed]").forEach((img) => {
+      const src = resolveEmbed(img.dataset.embed!);
+      if (src && img.getAttribute("src") !== src) img.setAttribute("src", src);
+      img.classList.add("rt-embed");
+      img.setAttribute("draggable", "false");
+    });
+  }
 
   useEffect(() => {
     if (autoFocus) el.current?.focus();
@@ -169,6 +206,38 @@ export default function RichText({
             }
           }
           document.execCommand("insertText", false, event.clipboardData.getData("text/plain"));
+          changed();
+        }}
+        onDragOver={(event) => {
+          if (onEmbed && event.dataTransfer.types.includes(EMBED_TYPE)) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+          }
+        }}
+        onDrop={(event) => {
+          const id = onEmbed ? event.dataTransfer.getData(EMBED_TYPE) : "";
+          if (!id) return;
+          event.preventDefault();
+          event.stopPropagation();
+          const node = el.current;
+          if (!node) return;
+          // Where it was let go: on its own line there, breaking the text.
+          const range = caretRangeAt(event.clientX, event.clientY);
+          node.focus();
+          const selection = window.getSelection();
+          if (range && node.contains(range.startContainer)) {
+            selection?.removeAllRanges();
+            selection?.addRange(range);
+          } else {
+            const end = document.createRange();
+            end.selectNodeContents(node);
+            end.collapse(false);
+            selection?.removeAllRanges();
+            selection?.addRange(end);
+          }
+          document.execCommand("insertHTML", false, `<p><img data-embed="${id}"></p><p><br></p>`);
+          fillEmbeds();
+          onEmbed!(id);
           changed();
         }}
         onKeyDown={(event) => {

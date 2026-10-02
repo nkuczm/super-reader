@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Icon } from "./icons";
 import RichText from "./RichText";
 import SubjectHistory from "./SubjectHistory";
+import { EXTRACT_VERSION } from "@/lib/offline";
 import SubjectContacts from "./SubjectContacts";
 import { DrawingPad, ImageView, shrinkImage, DRAWING_HEIGHT } from "./SubjectMedia";
 import type { Writing } from "./useAccount";
@@ -17,6 +18,8 @@ import {
   sanitizeRichText,
   quoteIdsIn,
   live,
+  cardInfoId,
+  embedSrc,
   bylineOf,
   contactsOf,
   contactId,
@@ -85,6 +88,9 @@ type Props = {
 };
 
 const RAIL_KEY = "super-reader:tab-rail";
+/** Stories whose details were already looked up this visit. */
+const infoTried = new Set<string>();
+const BOARD_USED_KEY = "super-reader:board-used";
 
 type RunState = { state: "idle" | "running" | "error"; message?: string };
 
@@ -107,6 +113,21 @@ export default function SubjectPage(props: Props) {
   const { note, board, onBoard, keyHeaders, hasAiKey, ai } = props;
   const meta = metaOf(board);
   const [historyOpen, setHistoryOpen] = useState(false);
+
+  // Drawings and pictures set into text: shown from their own box, which
+  // leaves the page's layout once it has been dropped in.
+  const boardRef = useRef(board);
+  boardRef.current = board;
+  const resolveEmbed = useCallback((id: string) => {
+    const item = boardRef.current?.[id];
+    return item && item.kind === "box" && !item.deleted ? embedSrc(item) : undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [board]);
+  const embedBox = (id: string) =>
+    onBoard((current) => {
+      const item = current?.[id];
+      return item && item.kind === "box" ? put(current, { ...item, embedded: true, at: Date.now() }) : (current ?? {});
+    });
   const imageInput = useRef<HTMLInputElement | null>(null);
   const [imageProblem, setImageProblem] = useState<string | null>(null);
   const addImage = async (file: File | undefined) => {
@@ -171,6 +192,43 @@ export default function SubjectPage(props: Props) {
       }),
     [note, board, articleMeta],
   );
+  // Stories missing a date, author or outlet have them read off the article
+  // itself, once, and kept with the subject so every device has them.
+  useEffect(() => {
+    const missing = allCards
+      .filter((card) => (!card.publishedAt || !card.source) && !board?.[cardInfoId(card.id)] && !infoTried.has(card.id))
+      .slice(0, 6);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      for (const card of missing) {
+        infoTried.add(card.id);
+        try {
+          const res = await fetch(`/api/article?url=${encodeURIComponent(card.link)}&x=${EXTRACT_VERSION}`);
+          if (!res.ok || cancelled) continue;
+          const data = (await res.json()) as { publishedAt?: string; byline?: string; siteName?: string };
+          if (!data.publishedAt && !data.byline && !data.siteName) continue;
+          onBoard((current) =>
+            put(current, {
+              id: cardInfoId(card.id),
+              kind: "cardinfo",
+              card: card.id,
+              publishedAt: data.publishedAt,
+              author: data.byline?.slice(0, 120),
+              source: data.siteName?.slice(0, 120),
+              at: Date.now(),
+            }),
+          );
+        } catch {
+          /* the article could not be read; the byline keeps what it has */
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allCards]);
   const items = useMemo(() => live(board), [board]);
   // Tabs: each is its own page of stories and boxes. The AI still reads the
   // whole subject, so insights can connect stories across tabs.
@@ -179,7 +237,7 @@ export default function SubjectPage(props: Props) {
   const cards = allCards.filter((card) => tabOf(board, card.id, tabs) === currentTab);
   const tabCardIds = new Set(cards.map((card) => card.id));
   const boxes = items.filter(
-    (item): item is BoxItem => item.kind === "box" && tabOf(board, item.id, tabs) === currentTab,
+    (item): item is BoxItem => item.kind === "box" && !item.embedded && tabOf(board, item.id, tabs) === currentTab,
   );
   // An insight shows on each tab whose stories it draws on; one about no
   // story in particular shows on the first tab.
@@ -341,19 +399,21 @@ export default function SubjectPage(props: Props) {
     return () => clearTimeout(timer);
   }, [hasAiKey, input, meta, synthesize]);
 
-  const aiStatus = !hasAiKey ? (
-    <span className="subject-ai-hint">
-      Add your {PROVIDER_NAME[ai.provider]} key in Settings → API keys for insights.
-    </span>
-  ) : run.state === "running" ? (
+  // Why Insights cannot run yet goes on the button, not in a line of its own.
+  const insightsWhyNot = !hasAiKey
+    ? `Add your ${PROVIDER_NAME[ai.provider]} key in Settings → API keys for insights.`
+    : allCards.length < 2
+      ? "Insights start once there are two stories."
+      : null;
+  const aiStatus = run.state === "running" ? (
     <span className="subject-ai-hint">Thinking across {allCards.length} stories…</span>
   ) : run.state === "error" ? (
     <span className="subject-ai-hint error">{run.message}</span>
-  ) : allCards.length < 2 ? (
-    <span className="subject-ai-hint">Insights start once there are two stories.</span>
   ) : null;
 
   const shared = {
+    resolveEmbed,
+    embedBox,
     tabs,
     currentTab,
     moveCard,
@@ -441,7 +501,7 @@ export default function SubjectPage(props: Props) {
               onClick={() => setView("board")}>Whiteboard</button>
           </div>
           <button className="btn ghost small" disabled={!hasAiKey || allCards.length < 2 || run.state === "running"}
-            onClick={() => void synthesize()} title="Find connections and suggest reading now">
+            onClick={() => void synthesize()} title={insightsWhyNot ?? "Find connections and suggest reading now"}>
             ✦ Insights
           </button>
           <button
@@ -607,6 +667,8 @@ type Shared = {
   setCardNote: (card: Card, html: string) => void;
   decide: (suggestion: SuggestItem, state: "accepted" | "dismissed") => void;
   setBox: (box: BoxItem, html: string) => void;
+  resolveEmbed: (id: string) => string | undefined;
+  embedBox: (id: string) => void;
   updateBox: (box: BoxItem, change: Partial<BoxItem>) => void;
   removeBox: (box: BoxItem) => void;
 };
@@ -660,6 +722,8 @@ function StoryCard({
         <RichText
           className="subject-card-note"
           html={composeCardDoc(card.note, card.quotes)}
+          resolveEmbed={shared.resolveEmbed}
+          onEmbed={shared.embedBox}
           placeholder="Add notes…"
           onOpenQuote={(id) => {
             const quote = card.quotes.find((q) => q.id === id);
@@ -699,6 +763,7 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
         <ImageView box={box} onChange={(change) => shared.updateBox(box, change)} />
       ) : (
         <RichText html={box.html} placeholder="Write anything…" autoFocus={shared.focusBox === box.id}
+          resolveEmbed={shared.resolveEmbed} onEmbed={shared.embedBox}
           onChange={(html) => shared.setBox(box, html)} />
       )}
     </div>
@@ -818,6 +883,24 @@ function Whiteboard(
     addBox: (at?: { x: number; y: number }) => void;
   },
 ) {
+  // The how-to line under the tools goes once the board has been used.
+  const [boardUsed, setBoardUsed] = useState(true);
+  useEffect(() => {
+    try {
+      setBoardUsed(localStorage.getItem(BOARD_USED_KEY) === "1");
+    } catch {
+      /* show it */
+    }
+  }, []);
+  const markBoardUsed = () => {
+    if (boardUsed) return;
+    setBoardUsed(true);
+    try {
+      localStorage.setItem(BOARD_USED_KEY, "1");
+    } catch {
+      /* not remembered */
+    }
+  };
   const { board, onBoard } = shared;
   // A phone starts zoomed out, so more than one card fits across.
   const startView = () =>
@@ -1167,28 +1250,38 @@ function Whiteboard(
           onClick={() => setConnecting((c) => (c === false ? null : false))}>
           {connecting === false ? "Connect" : connecting === null ? "Pick the first…" : "Now the second…"}
         </button>
-        <button className="btn ghost small" onClick={() => zoomBy(1.1)} aria-label="Zoom in">+</button>
         <button className="btn ghost small" onClick={() => zoomBy(1 / 1.1)} aria-label="Zoom out">−</button>
-        <button className="btn ghost small" onClick={() => setView(startView())}>Reset view</button>
-        <button className={`btn ghost small${showAiLinks ? " on" : ""}`} onClick={() => setShowAiLinks((v) => !v)}
-          title="Show every line from the AI's insights to the stories they draw on">
-          AI links
-        </button>
-        <button className="btn ghost small" title="Put everything back in tidy columns"
-          onClick={() =>
-            onBoard((current) => {
-              let next = current ?? {};
-              for (const item of live(next)) if (item.kind === "pos") next = remove(next, item.id);
-              return next;
-            })
-          }>
-          Tidy up
-        </button>
-        <span className="wb-hint">Drag by the title · point at a card to see its AI links · double-click for a text box</span>
+        <button className="btn ghost small" onClick={() => zoomBy(1.1)} aria-label="Zoom in">+</button>
+        <MoreMenu>
+          {(close) => (
+            <>
+              <button role="menuitem" onClick={() => { close(); setView(startView()); }}>Reset view</button>
+              <button role="menuitemcheckbox" aria-checked={showAiLinks} title="Show every line from the AI's insights to the stories they draw on"
+                onClick={() => setShowAiLinks((v) => !v)}>
+                AI links{showAiLinks && <span className="more-check">✓</span>}
+              </button>
+              <button role="menuitem" title="Put everything back in tidy columns"
+                onClick={() => {
+                  close();
+                  onBoard((current) => {
+                    let next = current ?? {};
+                    for (const item of live(next)) if (item.kind === "pos") next = remove(next, item.id);
+                    return next;
+                  });
+                }}>
+                Tidy up
+              </button>
+            </>
+          )}
+        </MoreMenu>
+        {!boardUsed && (
+          <span className="wb-hint">Drag by the title · point at a card to see its AI links · double-click for a text box</span>
+        )}
       </div>
       <div
         ref={canvas}
         className={`wb-canvas${connecting !== false ? " connecting" : ""}`}
+        onPointerDownCapture={markBoardUsed}
         onPointerDown={startPan}
         onDoubleClick={(event) => {
           if (event.target === event.currentTarget) shared.addBox(toBoard(event.clientX, event.clientY));

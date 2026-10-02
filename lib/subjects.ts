@@ -58,9 +58,29 @@ export type BoxItem = Base & {
   /** An image, as a downscaled data: URL. */
   image?: string;
   caption?: string;
+  /** Set into a text box's text, so it is shown there rather than on its own. */
+  embedded?: boolean;
 };
 
 export const DRAWING_WIDTH = 600;
+export const DEFAULT_DRAWING_HEIGHT = 300;
+
+/** A drawing as a self-contained SVG picture, for setting into text. */
+export function drawingSvg(box: BoxItem): string {
+  const height = Math.min(1200, Math.max(80, Number(box.height) || DEFAULT_DRAWING_HEIGHT));
+  const paths = safeStrokes(box.drawing)
+    .map((s) => `<path d="${s.d}" stroke="${s.color}" stroke-width="${s.w}" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`)
+    .join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${DRAWING_WIDTH} ${height}" width="${DRAWING_WIDTH}" height="${height}"><rect width="100%" height="100%" fill="#fff"/>${paths}</svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+/** What an embedded box shows as a picture. */
+export function embedSrc(box: BoxItem | undefined): string | undefined {
+  if (!box) return undefined;
+  if (box.drawing) return drawingSvg(box);
+  return safeImage(box.image);
+}
 
 /** Only an image this app made: a base64 PNG, JPEG or WebP data URL. */
 export function safeImage(src: string | undefined): string | undefined {
@@ -157,7 +177,19 @@ export type ContactItem = Base & {
   state: "pending" | "kept" | "dismissed";
 };
 
+/**
+ * What was learned about a story after it was filed — its date, author and
+ * outlet, read from the article itself — for stories saved before those were
+ * kept, or from a page the feed said little about.
+ */
+export type CardInfoItem = Base & { kind: "cardinfo"; card: string; publishedAt?: string; author?: string; source?: string };
+
+export function cardInfoId(cardId: string) {
+  return `cardinfo:${cardId}`;
+}
+
 export type BoardItem =
+  | CardInfoItem
   | ContactItem
   | StoryItem
   | CardNoteItem
@@ -369,6 +401,14 @@ export function cardsOf(note: Note, board: Board | undefined): Card[] {
     }
   }
   for (const item of live(board)) {
+    if (item.kind === "cardinfo") {
+      const card = cards.get(item.card);
+      if (card) {
+        card.publishedAt ??= item.publishedAt;
+        card.author ??= item.author;
+        card.source ??= item.source;
+      }
+    }
     if (item.kind === "cardnote") {
       const card = cards.get(item.card);
       if (card) card.note = item.html;
@@ -634,7 +674,7 @@ export function emailsIn(text: string): Set<string> {
 /* ------------------------------------------------------------------------ */
 
 const ALLOWED_TAGS = new Set([
-  "p", "div", "br", "b", "strong", "i", "em", "u", "s", "mark", "ul", "ol", "li", "h3", "blockquote", "span", "a",
+  "img", "p", "div", "br", "b", "strong", "i", "em", "u", "s", "mark", "ul", "ol", "li", "h3", "blockquote", "span", "a",
 ]);
 
 /**
@@ -648,6 +688,13 @@ export function sanitizeRichText(html: string): string {
   const pattern = /<\/?([a-zA-Z0-9]+)([^>]*)>|([^<]+)/g;
   let match: RegExpExecArray | null;
   const source = String(html ?? "")
+    // A drawing or picture set into the text is kept by reference to its own
+    // box — never as a src, which would carry the whole picture through the
+    // text and past its size limit.
+    .replace(/<img\b[^>]*>/gi, (tag) => {
+      const id = tag.match(/data-embed=["']?([A-Za-z0-9_:-]{1,60})/)?.[1];
+      return id ? `<img data-embed="${id}">` : "";
+    })
     .slice(0, MAX_HTML)
     .replace(/<(script|style|iframe|object|embed|template)[\s\S]*?<\/\1>/gi, "")
     .replace(/<!--[\s\S]*?-->/g, "");
@@ -689,6 +736,11 @@ export function sanitizeRichText(html: string): string {
     }
     if (tag === "br") {
       out.push("<br>");
+      continue;
+    }
+    if (tag === "img") {
+      const id = match[2].match(/data-embed="([A-Za-z0-9_:-]{1,60})"/)?.[1];
+      if (id && !closing) out.push(`<img data-embed="${id}">`);
       continue;
     }
     if (closing) {
@@ -748,7 +800,7 @@ export function composeCardDoc(html: string, quotes: { id: string; text: string 
 
 /* A minimal tree for the card's own (sanitised, well-formed) HTML. */
 type HtmlNode = { tag: string; open: string; children: (HtmlNode | string)[] };
-const VOID_TAGS = new Set(["br"]);
+const VOID_TAGS = new Set(["br", "img"]);
 
 function parseHtml(html: string): (HtmlNode | string)[] {
   const root: HtmlNode = { tag: "", open: "", children: [] };
@@ -990,7 +1042,7 @@ export function addQuoteNote(
 }
 
 /** "Oct 1, 2026 · Jane Doe · The Outlet" — what is known of a story, in that order. */
-export function bylineOf(card: { publishedAt?: string; author?: string; source?: string }): string {
+export function bylineOf(card: { publishedAt?: string; author?: string; source?: string; link?: string }): string {
   const parts: string[] = [];
   const when = card.publishedAt ? new Date(card.publishedAt) : null;
   if (when && !Number.isNaN(when.getTime())) {
@@ -1000,5 +1052,13 @@ export function bylineOf(card: { publishedAt?: string; author?: string; source?:
   // A feed's author is sometimes just the outlet again.
   if (author && author.toLowerCase() !== card.source?.trim().toLowerCase()) parts.push(author.slice(0, 80));
   if (card.source?.trim()) parts.push(card.source.trim());
+  else if (card.link) {
+    // No outlet name known: its address still says where it is from.
+    try {
+      parts.push(new URL(card.link).hostname.replace(/^www\./, ""));
+    } catch {
+      /* not a web address */
+    }
+  }
   return parts.join(" · ");
 }
