@@ -614,6 +614,13 @@ export default function ArticleReader({
       <article
         className={`reader-body${wide && comments.length > 0 ? " with-margin" : ""}`}
         onClick={(event) => {
+          // A link in the story opens in its own tab, leaving the reader where it was.
+          const link = (event.target as HTMLElement).closest<HTMLAnchorElement>("a[href]");
+          if (link && /^https?:/i.test(link.href) && !link.getAttribute("href")?.startsWith("#")) {
+            event.preventDefault();
+            window.open(link.href, "_blank", "noopener,noreferrer");
+            return;
+          }
           // A click on marked text, not a selection: what can be done with it.
           if (window.getSelection()?.toString()) return;
           const body = event.currentTarget.getBoundingClientRect();
