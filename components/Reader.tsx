@@ -247,6 +247,7 @@ function withPastedStories(list: Loaded[], manual: ManualStories, following: Rea
 }
 
 const VIEW_KEY = "super-reader:view";
+const READING_KEY = "super-reader:reading";
 const GRANDFATHER_KEY = "super-reader:subjects-before-signin";
 const SIGNIN_ERA_KEY = "super-reader:signin-era";
 const SUBJECT_USED_KEY = "super-reader:subject-used:v1";
@@ -486,6 +487,11 @@ export default function Reader() {
     setNotes(storedNotes);
     // A refresh on a subject comes back to that subject, not the feed.
     try {
+      // And an article open over it comes back open, where it was left.
+      const open = JSON.parse(sessionStorage.getItem(READING_KEY) ?? "null");
+      if (open && typeof open.url === "string") {
+        setReading({ url: open.url, title: String(open.title ?? ""), feedUrl: open.feedUrl, summary: open.summary });
+      }
       const view = JSON.parse(sessionStorage.getItem(VIEW_KEY) ?? "null");
       if (view?.type === "subjects") setSelection({ type: "subjects" });
       if (view?.type === "note" && storedNotes.some((n) => n.id === view.id)) setSelection({ type: "note", id: view.id });
@@ -2721,6 +2727,20 @@ export default function Reader() {
   const scrollToTop = useCallback(() => {
     listRef.current?.scrollTo({ top: 0, behavior: "auto" });
   }, []);
+
+  // The article open in this tab, so a refresh reopens it. Its arrival
+  // highlight is left out: that was for the moment it was first opened.
+  useEffect(() => {
+    if (!ready) return;
+    try {
+      if (reading) {
+        const { url, title, feedUrl, summary } = reading;
+        sessionStorage.setItem(READING_KEY, JSON.stringify({ url, title, feedUrl, summary }));
+      } else sessionStorage.removeItem(READING_KEY);
+    } catch {
+      /* storage unavailable */
+    }
+  }, [reading, ready]);
 
   // Remember an open subject for this tab, so a refresh lands back on it.
   useEffect(() => {
