@@ -2113,3 +2113,11 @@
   border-color: var(--accent);
 }
 .rich-body ul[data-check] > li[data-checked="true"] { color: var(--text-dim); text-decoration: line-through; }
+
+/* ---------- several transcripts in one block ---------- */
+.transcript-tabs { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.transcript-tab { display: inline-flex; align-items: center; gap: 6px; max-width: 200px; border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); border-radius: 999px; padding: 2px 10px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.transcript-tab.on { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg)); }
+.transcript-tab.add { padding: 2px 9px; }
+.transcript-tab-x { font-size: 14px; line-height: 1; color: var(--text-dim); }
+.transcript-tab-x:hover { color: var(--text); }

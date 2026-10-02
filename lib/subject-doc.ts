@@ -65,7 +65,7 @@ export function subjectHtml(note: Note, board: Board | undefined, now = new Date
     for (const box of tabBoxes) {
       const image = safeImage(box.image);
       if (image) parts.push(`<p><img src="${image}" alt="" style="max-width:100%"></p>${box.caption ? `<p><i>${escapeHtml(box.caption)}</i></p>` : ""}`);
-      else if (box.transcript) parts.push(transcriptHtml(box.transcript));
+      else if (box.transcript) parts.push(transcriptHtml(box.transcript, box.transcriptTabs));
       else if (box.table) parts.push(tableHtml(box.table));
       else if (box.drawing) parts.push("<p><i>[A drawing — open the subject in Super Reader to see it]</i></p>");
       else parts.push(unlinkQuotes(box.html, board));
@@ -112,7 +112,11 @@ export function tableHtml(table: unknown): string {
 }
 
 /** A transcript as who-said-what paragraphs, for the exported copy. */
-export function transcriptHtml(input: unknown): string {
+export function transcriptHtml(input: unknown, more?: unknown): string {
+  return [input, ...(Array.isArray(more) ? more : [])].map(oneTranscriptHtml).join("");
+}
+
+function oneTranscriptHtml(input: unknown): string {
   const { title, turns } = safeTranscript(input);
   const head = `<p><b>Transcript${title ? ` — ${escapeHtml(title)}` : ""}</b></p>`;
   return head + turns

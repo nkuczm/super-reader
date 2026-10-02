@@ -463,7 +463,7 @@ export default function SubjectPage(props: Props) {
       if (bylineOf(card)) parts.push(`<p><i>${escapeHtml(bylineOf(card))}</i></p>`);
       parts.push(unlinkQuotes(composeCardDoc(card.note, card.quotes)));
     }
-    for (const box of boxes) parts.push(box.transcript ? transcriptHtml(box.transcript) : box.table ? tableHtml(box.table) : unlinkQuotes(box.html));
+    for (const box of boxes) parts.push(box.transcript ? transcriptHtml(box.transcript, box.transcriptTabs) : box.table ? tableHtml(box.table) : unlinkQuotes(box.html));
     if (insights.length > 0) {
       parts.push("<h3>Insights</h3><ul>");
       for (const insight of insights) parts.push(`<li><b>${INSIGHT_LABEL[insight.type]}:</b> ${escapeHtml(insight.text)}</li>`);
