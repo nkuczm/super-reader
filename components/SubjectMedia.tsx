@@ -1,87 +1,213 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { DRAWING_WIDTH, safeImage, safeStrokes, type BoxItem, type Stroke } from "@/lib/subjects";
+import { DEFAULT_DRAWING_HEIGHT, DRAWING_WIDTH, safeImage, safeStrokes, type BoxItem, type Stroke } from "@/lib/subjects";
+import { EMBED_TYPE } from "./RichText";
 
 const COLORS = ["#111111", "#2563eb", "#dc2626", "#16a34a", "#f59e0b"];
 const PEN_SIZES = [2, 5];
-export const DRAWING_HEIGHT = 300;
+export const DRAWING_HEIGHT = DEFAULT_DRAWING_HEIGHT;
+
+/** A handle to drag a drawing or picture into a text box's text. */
+function EmbedGrip({ id }: { id: string }) {
+  return (
+    <span
+      className="embed-grip"
+      draggable
+      title="Drag into a text box to set it in the text"
+      onPointerDown={(e) => e.stopPropagation()}
+      onDragStart={(event) => {
+        event.dataTransfer.setData(EMBED_TYPE, id);
+        event.dataTransfer.effectAllowed = "move";
+      }}
+    >
+      ⠿
+    </span>
+  );
+}
+
+/** Every number pair in a stroke's path, for the eraser to test against. */
+function pointsOf(d: string): [number, number][] {
+  const nums = d.match(/-?\d+(\.\d+)?/g)?.map(Number) ?? [];
+  const out: [number, number][] = [];
+  for (let i = 0; i + 1 < nums.length; i += 2) out.push([nums[i], nums[i + 1]]);
+  return out;
+}
 
 /**
  * A drawing pad: strokes in a fixed 600-wide space so a sketch keeps its
- * shape at any width, on any device. Saved when each stroke ends.
+ * shape at any width, on any device. Saved when each stroke ends. ⌘Z and
+ * ⌘⇧Z undo and redo while the pad is in use; the tools show only then too.
  */
 export function DrawingPad({ box, onChange }: { box: BoxItem; onChange: (next: Partial<BoxItem>) => void }) {
   const strokes = safeStrokes(box.drawing);
-  const height = Math.min(1200, Math.max(120, Number(box.height) || DRAWING_HEIGHT));
+  const height = Math.min(1200, Math.max(80, Number(box.height) || DRAWING_HEIGHT));
   const [color, setColor] = useState(COLORS[0]);
   const [size, setSize] = useState(PEN_SIZES[0]);
+  const [erasing, setErasing] = useState(false);
   const [live, setLive] = useState<string | null>(null);
   const svg = useRef<SVGSVGElement | null>(null);
   const path = useRef<string[]>([]);
+  /** Undo and redo, as whole stroke lists, for this visit. */
+  const past = useRef<Stroke[][]>([]);
+  const future = useRef<Stroke[][]>([]);
+  /** Strokes as they stand mid-erase, before the change is saved. */
+  const erased = useRef<Stroke[] | null>(null);
+  const [, redraw] = useState(0);
 
-  const point = (event: React.PointerEvent) => {
+  const commit = (next: Stroke[]) => {
+    past.current.push(strokes);
+    future.current = [];
+    onChange({ drawing: next });
+  };
+
+  const toPoint = (event: React.PointerEvent): [number, number] => {
     const rect = svg.current!.getBoundingClientRect();
     const scale = DRAWING_WIDTH / rect.width;
-    const x = Math.round((event.clientX - rect.left) * scale * 10) / 10;
-    const y = Math.round((event.clientY - rect.top) * scale * 10) / 10;
-    return `${x} ${y}`;
+    return [
+      Math.round((event.clientX - rect.left) * scale * 10) / 10,
+      Math.round((event.clientY - rect.top) * scale * 10) / 10,
+    ];
+  };
+
+  const eraseAt = (x: number, y: number) => {
+    const current = erased.current ?? strokes;
+    const r = 10;
+    const kept = current.filter(
+      (s) => !pointsOf(s.d).some(([px, py]) => (px - x) ** 2 + (py - y) ** 2 <= (r + s.w) ** 2),
+    );
+    if (kept.length !== current.length) {
+      erased.current = kept;
+      redraw((n) => n + 1);
+    }
   };
 
   const finish = () => {
+    if (erasing) {
+      if (erased.current && erased.current.length !== strokes.length) commit(erased.current);
+      erased.current = null;
+      path.current = [];
+      return;
+    }
     if (path.current.length === 0) return;
     // A single tap still leaves a dot.
     const parts = path.current.length === 1 ? [path.current[0], path.current[0]] : path.current;
     const d = `M ${parts[0]} ${parts.slice(1).map((p) => `L ${p}`).join(" ")}`;
     path.current = [];
     setLive(null);
-    onChange({ drawing: [...strokes, { d, color, w: size }] });
+    commit([...strokes, { d, color, w: size }]);
   };
 
+  const shown = erased.current ?? strokes;
+
   return (
-    <div className="drawing">
+    <div
+      className="drawing"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (!(event.metaKey || event.ctrlKey)) return;
+        const key = event.key.toLowerCase();
+        const redo = (key === "z" && event.shiftKey) || key === "y";
+        if (key !== "z" && key !== "y") return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (redo) {
+          const next = future.current.pop();
+          if (!next) return;
+          past.current.push(strokes);
+          onChange({ drawing: next });
+        } else {
+          const prev = past.current.pop();
+          if (!prev) return;
+          future.current.push(strokes);
+          onChange({ drawing: prev });
+        }
+      }}
+    >
       <div className="drawing-tools" onPointerDown={(e) => e.stopPropagation()}>
+        <EmbedGrip id={box.id} />
         {COLORS.map((c) => (
-          <button key={c} className={`drawing-color${c === color ? " on" : ""}`} style={{ background: c }}
-            aria-label={`Pen colour ${c}`} onClick={() => setColor(c)} />
+          <button key={c} className={`drawing-color${c === color && !erasing ? " on" : ""}`} style={{ background: c }}
+            aria-label={`Pen colour ${c}`} onClick={() => { setColor(c); setErasing(false); }} />
         ))}
         {PEN_SIZES.map((w) => (
-          <button key={w} className={`drawing-size${w === size ? " on" : ""}`} aria-label={`Pen size ${w}`} onClick={() => setSize(w)}>
+          <button key={w} className={`drawing-size${w === size && !erasing ? " on" : ""}`} aria-label={`Pen size ${w}`}
+            onClick={() => { setSize(w); setErasing(false); }}>
             <span style={{ width: w + 2, height: w + 2 }} />
           </button>
         ))}
-        <button className="link-btn" disabled={strokes.length === 0} onClick={() => onChange({ drawing: strokes.slice(0, -1) })}>
-          Undo
+        <button className={`drawing-eraser${erasing ? " on" : ""}`} aria-pressed={erasing} title="Eraser — drag over a line to remove it"
+          onClick={() => setErasing((e) => !e)}>
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+            <path d="M16 3l5 5-10 10H6l-3-3z M9 9l6 6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+          </svg>
         </button>
-        <button className="link-btn" disabled={strokes.length === 0} onClick={() => onChange({ drawing: [] })}>
-          Clear
-        </button>
-        <button className="link-btn" onClick={() => onChange({ height: Math.min(1200, height + 150) })}>Taller</button>
       </div>
-      <svg
-        ref={svg}
-        className="drawing-canvas"
-        viewBox={`0 0 ${DRAWING_WIDTH} ${height}`}
-        onPointerDown={(event) => {
-          event.stopPropagation();
-          event.preventDefault();
-          (event.target as Element).setPointerCapture?.(event.pointerId);
-          path.current = [point(event)];
-          setLive(`M ${path.current[0]}`);
-        }}
-        onPointerMove={(event) => {
-          if (path.current.length === 0) return;
-          path.current.push(point(event));
-          setLive(`M ${path.current[0]} ${path.current.slice(1).map((p) => `L ${p}`).join(" ")}`);
-        }}
-        onPointerUp={finish}
-        onPointerCancel={finish}
-      >
-        {strokes.map((s, i) => (
-          <path key={i} d={s.d} stroke={s.color} strokeWidth={s.w} fill="none" strokeLinecap="round" strokeLinejoin="round" />
-        ))}
-        {live && <path d={live} stroke={color} strokeWidth={size} fill="none" strokeLinecap="round" strokeLinejoin="round" />}
-      </svg>
+      <div className="drawing-frame">
+        <svg
+          ref={svg}
+          className={`drawing-canvas${erasing ? " erasing" : ""}`}
+          viewBox={`0 0 ${DRAWING_WIDTH} ${height}`}
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            event.preventDefault();
+            (event.currentTarget.parentElement?.parentElement as HTMLElement | null)?.focus({ preventScroll: true });
+            (event.target as Element).setPointerCapture?.(event.pointerId);
+            const [x, y] = toPoint(event);
+            if (erasing) {
+              path.current = ["e"];
+              eraseAt(x, y);
+              return;
+            }
+            path.current = [`${x} ${y}`];
+            setLive(`M ${path.current[0]}`);
+          }}
+          onPointerMove={(event) => {
+            if (path.current.length === 0) return;
+            const [x, y] = toPoint(event);
+            if (erasing) return eraseAt(x, y);
+            path.current.push(`${x} ${y}`);
+            setLive(`M ${path.current[0]} ${path.current.slice(1).map((p) => `L ${p}`).join(" ")}`);
+          }}
+          onPointerUp={finish}
+          onPointerCancel={finish}
+        >
+          {shown.map((s, i) => (
+            <path key={i} d={s.d} stroke={s.color} strokeWidth={s.w} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+          ))}
+          {live && <path d={live} stroke={color} strokeWidth={size} fill="none" strokeLinecap="round" strokeLinejoin="round" />}
+        </svg>
+        <span
+          className="drawing-pin"
+          role="separator"
+          aria-label="Drag to make the drawing taller or shorter"
+          title="Drag to resize"
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            event.preventDefault();
+            const rect = svg.current!.getBoundingClientRect();
+            const scale = DRAWING_WIDTH / rect.width;
+            const startY = event.clientY;
+            const startH = height;
+            const target = event.currentTarget;
+            target.setPointerCapture(event.pointerId);
+            let next = startH;
+            const move = (e: PointerEvent) => {
+              next = Math.round(Math.min(1200, Math.max(80, startH + (e.clientY - startY) * scale)));
+              svg.current?.setAttribute("viewBox", `0 0 ${DRAWING_WIDTH} ${next}`);
+            };
+            const up = () => {
+              target.removeEventListener("pointermove", move);
+              target.removeEventListener("pointerup", up);
+              target.removeEventListener("pointercancel", up);
+              if (next !== startH) onChange({ height: next });
+            };
+            target.addEventListener("pointermove", move);
+            target.addEventListener("pointerup", up);
+            target.addEventListener("pointercancel", up);
+          }}
+        />
+      </div>
     </div>
   );
 }
@@ -90,6 +216,7 @@ export function ImageView({ box, onChange }: { box: BoxItem; onChange: (next: Pa
   const src = safeImage(box.image);
   return (
     <figure className="subject-image">
+      <EmbedGrip id={box.id} />
       {src ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={src} alt={box.caption || ""} />

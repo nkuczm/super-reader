@@ -27,8 +27,15 @@ import {
 
 const LABEL: Record<InsightItem["type"], string> = { connection: "Connection", question: "Question", deeper: "Deeper" };
 
-function unlinkQuotes(html: string) {
-  return sanitizeRichText(html).replace(/<a data-quote="[^"]+">([\s\S]*?)<\/a>/g, "$1");
+function unlinkQuotes(html: string, board?: Board) {
+  return sanitizeRichText(html)
+    .replace(/<a data-quote="[^"]+">([\s\S]*?)<\/a>/g, "$1")
+    .replace(/<img data-embed="([^"]+)">/g, (_, id: string) => {
+      const item = board?.[id];
+      if (!item || item.kind !== "box") return "";
+      const image = safeImage(item.image);
+      return image ? `<img src="${image}" alt="" style="max-width:100%">` : item.drawing ? "<i>[A drawing]</i>" : "";
+    });
 }
 
 export function subjectHtml(note: Note, board: Board | undefined, now = new Date()): string {
@@ -45,19 +52,19 @@ export function subjectHtml(note: Note, board: Board | undefined, now = new Date
   ];
   for (const tab of tabs) {
     const tabCards = cards.filter((card) => tabOf(board, card.id, tabs) === tab.id);
-    const tabBoxes = boxes.filter((box) => tabOf(board, box.id, tabs) === tab.id);
+    const tabBoxes = boxes.filter((box) => !box.embedded && tabOf(board, box.id, tabs) === tab.id);
     if (tabs.length > 1) parts.push(`<h2>${escapeHtml(tab.name)}</h2>`);
     if (tabCards.length === 0 && tabBoxes.length === 0) parts.push("<p><i>Empty</i></p>");
     for (const card of tabCards) {
       parts.push(`<h3><a href="${escapeHtml(card.link)}">${escapeHtml(card.title)}</a></h3>`);
       if (bylineOf(card)) parts.push(`<p><i>${escapeHtml(bylineOf(card))}</i></p>`);
-      parts.push(unlinkQuotes(composeCardDoc(card.note, card.quotes)));
+      parts.push(unlinkQuotes(composeCardDoc(card.note, card.quotes), board));
     }
     for (const box of tabBoxes) {
       const image = safeImage(box.image);
       if (image) parts.push(`<p><img src="${image}" alt="" style="max-width:100%"></p>${box.caption ? `<p><i>${escapeHtml(box.caption)}</i></p>` : ""}`);
       else if (box.drawing) parts.push("<p><i>[A drawing — open the subject in Super Reader to see it]</i></p>");
-      else parts.push(unlinkQuotes(box.html));
+      else parts.push(unlinkQuotes(box.html, board));
     }
   }
   const contacts = contactsOf(board);
