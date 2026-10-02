@@ -118,6 +118,19 @@ const INSIGHT_LABEL: Record<InsightItem["type"], string> = {
  */
 const NEW_TABLE = () => [["", "", ""], ["", "", ""], ["", "", ""]];
 
+/** Whether the wheel, over `target`, should scroll a box inside `stop` rather than the board. */
+function scrollsItself(target: Element | null, stop: Element, deltaY: number) {
+  for (let node = target; node && node !== stop; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node);
+    if ((overflowY === "auto" || overflowY === "scroll") && node.scrollHeight > node.clientHeight + 1) {
+      const atTop = node.scrollTop <= 0;
+      const atBottom = node.scrollTop + node.clientHeight >= node.scrollHeight - 1;
+      if ((deltaY < 0 && !atTop) || (deltaY > 0 && !atBottom)) return true;
+    }
+  }
+  return false;
+}
+
 export default function SubjectPage(props: Props) {
   const { note, board, onBoard, keyHeaders, hasAiKey, ai } = props;
   const meta = metaOf(board);
@@ -1293,6 +1306,8 @@ function Whiteboard(
     const el = canvas.current;
     if (!el) return;
     const onWheel = (event: WheelEvent) => {
+      // Something with its own scroll — a transcript — scrolls itself.
+      if (!event.ctrlKey && !event.metaKey && scrollsItself(event.target as Element | null, el, event.deltaY)) return;
       event.preventDefault();
       const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
       if (event.ctrlKey || event.metaKey) {
