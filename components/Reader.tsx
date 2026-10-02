@@ -3576,6 +3576,7 @@ export default function Reader() {
               })
             }
             hideBoxes={settings.hideSubjectBoxes}
+            boxWidth={settings.textBoxWidth}
             onToggleHideBoxes={() =>
               setSettings((current) => {
                 const next = { ...current, hideSubjectBoxes: !current.hideSubjectBoxes };

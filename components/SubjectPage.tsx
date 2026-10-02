@@ -88,6 +88,8 @@ type Props = {
   articleMeta?: (link: string) => { publishedAt?: string; author?: string; source?: string } | undefined;
   /** Borders around stories and boxes only on hover or while editing (Settings). */
   hideBoxes?: boolean;
+  /** A text box's width from settings, in pixels; 0 for the default. */
+  boxWidth?: number;
   onToggleHideBoxes?: () => void;
   /** Tuck the app's sidebar away for room to work (desktop). */
   sidebarHidden?: boolean;
@@ -320,7 +322,7 @@ export default function SubjectPage(props: Props) {
     const id = newItemId("box");
     onBoard((current) => {
       let next = placeNew(put(current, { id, kind: "box", html: "", ...extra, at: Date.now() }), id);
-      if (at) next = put(next, { id: posId(id), kind: "pos", target: id, x: at.x, y: at.y, w: 280, at: Date.now() });
+      if (at) next = put(next, { id: posId(id), kind: "pos", target: id, x: at.x, y: at.y, w: props.boxWidth || 280, at: Date.now() });
       return next;
     });
     setFocusBox(id);
@@ -659,7 +661,8 @@ export default function SubjectPage(props: Props) {
       )}
       {aiStatus && <div className="subject-ai-bar">{aiStatus}</div>}
       <div className={`subject-body${contactsOpen ? " with-contacts" : ""}`}>
-      <div className={`subject-main${railOpen ? " rail-open" : " rail-closed"}${props.hideBoxes ? " quiet-boxes" : ""}`}>
+      <div className={`subject-main${railOpen ? " rail-open" : " rail-closed"}${props.hideBoxes ? " quiet-boxes" : ""}`}
+        style={props.boxWidth ? ({ "--box-w": `${props.boxWidth}px` } as React.CSSProperties) : undefined}>
       {railOpen && (
       <div className={`tab-rail open${meta.view === "board" ? " on-board" : ""}`}>
           <>
@@ -685,7 +688,7 @@ export default function SubjectPage(props: Props) {
       </div>
       )}
       {meta.view === "board" ? (
-        <Whiteboard {...shared} board={board} onBoard={onBoard} addBox={addBox} pickImage={pickImage} />
+        <Whiteboard {...shared} board={board} onBoard={onBoard} addBox={addBox} pickImage={pickImage} boxWidth={props.boxWidth ?? 0} />
       ) : (
         <DocumentView {...shared} addBox={addBox} pickImage={pickImage} />
       )}
@@ -836,7 +839,7 @@ function StoryCard({
 
 function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dragHandle?: (e: React.PointerEvent) => void }) {
   return (
-    <div className={`subject-box${box.label ? " label-box" : ""}`}>
+    <div className={`subject-box${box.label ? " label-box" : ""}${!box.label && !box.drawing && !box.table && !box.transcript && box.image === undefined && box.caption === undefined ? " text-box" : ""}`}>
       <div className="subject-box-head" onPointerDown={dragHandle}>
         <span className="subject-box-grip" aria-hidden="true">⋮⋮</span>
         <button className="icon-btn subtle" aria-label="Delete text box" onPointerDown={(e) => e.stopPropagation()}
@@ -1027,6 +1030,7 @@ const CARD_W = 300;
 
 function Whiteboard(
   shared: Shared & {
+    boxWidth: number;
     board: Board | undefined;
     onBoard: Props["onBoard"];
     addBox: (at?: { x: number; y: number }, extra?: Partial<BoxItem>) => void;
@@ -1069,7 +1073,16 @@ function Whiteboard(
   const startView = () =>
     typeof window !== "undefined" && window.innerWidth < 760 ? { x: 12, y: 12, zoom: 0.55 } : { x: 40, y: 40, zoom: 1 };
   const [view, setView] = useState(startView);
-  const [drag, setDrag] = useState<{ id: string; x: number; y: number } | null>(null);
+  /**
+   * What is being dragged: the node under the pointer at (x, y), and any
+   * others moving with it — a selection, or a section label's own items —
+   * from where each started, by the same distance.
+   */
+  const [drag, setDrag] = useState<{ id: string; x: number; y: number; dx: number; dy: number; group: Map<string, { x: number; y: number; w: number }> } | null>(null);
+  /** Nodes picked by dragging a box over them, to move together. */
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  /** The box being dragged out over empty board, in board coordinates. */
+  const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   /** A card being widened or narrowed, by its right-hand edge. */
   const [resize, setResize] = useState<{ id: string; w: number } | null>(null);
   const [connecting, setConnecting] = useState<string | null | false>(false);
@@ -1114,11 +1127,11 @@ function Whiteboard(
     const cardsBottom = Math.ceil(shared.cards.length / 2) * 200;
     const laid = layoutBoard(
       nodes
-        .filter((node) => node.id !== drag?.id)
+        .filter((node) => node.id !== drag?.id && !drag?.group.has(node.id))
         .map((node) => {
           const h = sizes[node.id]?.h ?? 160;
           const saved = placed.get(node.id);
-          const width = resize?.id === node.id ? resize.w : (saved?.w ?? CARD_W);
+          const width = resize?.id === node.id ? resize.w : (saved?.w ?? (node.kind === "box" && shared.boxWidth ? shared.boxWidth : CARD_W));
           if (saved) return { id: node.id, placed: true, x: saved.x, y: saved.y, w: width, h };
           const n = counters[node.kind]++;
           const x =
@@ -1129,6 +1142,9 @@ function Whiteboard(
     );
     if (drag) {
       laid.set(drag.id, { x: drag.x, y: drag.y, w: placed.get(drag.id)?.w ?? CARD_W, h: sizes[drag.id]?.h ?? 160 });
+      for (const [other, from] of drag.group) {
+        laid.set(other, { x: from.x + drag.dx, y: from.y + drag.dy, w: from.w, h: sizes[other]?.h ?? 160 });
+      }
     }
     return laid;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1157,9 +1173,7 @@ function Whiteboard(
       window.removeEventListener("pointerup", up);
       setResize(null);
       if (w !== start.w) {
-        onBoard((current) =>
-          put(current, { id: posId(id), kind: "pos", target: id, x: Math.round(start.x), y: Math.round(start.y), w, at: Date.now() }),
-        );
+        place([{ id, x: start.x, y: start.y, w }]);
       }
     };
     window.addEventListener("pointermove", move);
@@ -1188,6 +1202,51 @@ function Whiteboard(
   const cardIds = new Set(shared.cards.map((c) => c.id));
   const labelIds = new Set(shared.boxes.filter((b) => b.label).map((b) => b.id));
   /** The section label at a point on the board, if any. */
+  /**
+   * Moves and resizes, undoable with ⌘Z and ⌘⇧Z: each records where its
+   * nodes were (or that they had never been placed) and where they went.
+   */
+  type Spot = { id: string; x: number; y: number; w: number };
+  const moves = useRef<{ past: { before: (PosItem | string)[]; after: Spot[] }[]; future: { before: (PosItem | string)[]; after: Spot[] }[] }>({ past: [], future: [] });
+  const writeSpots = (current: Board | undefined, spots: Spot[]) =>
+    spots.reduce(
+      (next, p) => put(next, { id: posId(p.id), kind: "pos", target: p.id, x: Math.round(p.x), y: Math.round(p.y), w: Math.round(p.w), at: Date.now() }),
+      current ?? {},
+    );
+  const restore = (current: Board | undefined, before: (PosItem | string)[]) =>
+    before.reduce(
+      (next, b) => (typeof b === "string" ? remove(next, posId(b)) : put(next, { ...b, at: Date.now() })),
+      current ?? {},
+    );
+  const beforeOf = (ids: string[]) =>
+    ids.map((nid) => (live(board).find((i) => i.kind === "pos" && (i as PosItem).target === nid) as PosItem | undefined) ?? nid);
+  const place = (spots: Spot[]) => {
+    moves.current.past.push({ before: beforeOf(spots.map((p) => p.id)), after: spots });
+    if (moves.current.past.length > 100) moves.current.past.shift();
+    moves.current.future = [];
+    onBoard((current) => writeSpots(current, spots));
+  };
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z" && e.key.toLowerCase() !== "y") return;
+      // Typing has its own undo; so does a drawing.
+      if ((e.target as HTMLElement).closest?.("input, textarea, [contenteditable], .drawing")) return;
+      const redo = e.shiftKey || e.key.toLowerCase() === "y";
+      const step = (redo ? moves.current.future : moves.current.past).pop();
+      if (!step) return;
+      e.preventDefault();
+      if (redo) {
+        moves.current.past.push(step);
+        onBoard((current) => writeSpots(current, step.after));
+      } else {
+        moves.current.future.push(step);
+        onBoard((current) => restore(current, step.before));
+      }
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [onBoard]);
+
   const labelUnder = (x: number, y: number, except: string) => {
     for (const id of labelIds) {
       if (id === except) continue;
@@ -1220,13 +1279,31 @@ function Whiteboard(
     if (!start) return;
     const origin = { px: event.clientX, py: event.clientY, x: start.x, y: start.y, w: start.w };
     let last = { x: start.x, y: start.y };
+    // What moves with it: the rest of a selection it is part of, and
+    // everything connected to any section label that moves.
+    const movers = new Set<string>(selected.has(id) ? selected : [id]);
+    if (!selected.has(id) && selected.size) setSelected(new Set());
+    const links = live(board).filter((i): i is LinkItem => i.kind === "link");
+    for (const mover of [...movers]) {
+      if (!labelIds.has(mover)) continue;
+      for (const l of links) {
+        if (l.from === mover) movers.add(l.to);
+        if (l.to === mover) movers.add(l.from);
+      }
+    }
+    movers.delete(id);
+    const group = new Map<string, { x: number; y: number; w: number }>();
+    for (const other of movers) {
+      const rect = positions.get(other);
+      if (rect) group.set(other, { x: rect.x, y: rect.y, w: rect.w });
+    }
     // A press on a title is a click until it moves: only then is it a drag.
     let moved = false;
     const move = (e: PointerEvent) => {
       if (!moved && Math.hypot(e.clientX - origin.px, e.clientY - origin.py) < 5) return;
       moved = true;
       last = { x: origin.x + (e.clientX - origin.px) / view.zoom, y: origin.y + (e.clientY - origin.py) / view.zoom };
-      setDrag({ id, ...last });
+      setDrag({ id, ...last, dx: last.x - origin.x, dy: last.y - origin.y, group });
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
@@ -1244,6 +1321,16 @@ function Whiteboard(
       // A story dropped onto a section label joins that section: it lines up
       // under the label, below the stories already there, and is connected
       // to it.
+      if (moved && group.size > 0) {
+        // A group keeps its shape: each lands where it was, moved by as much.
+        const dx = last.x - origin.x;
+        const dy = last.y - origin.y;
+        place([
+          { id, x: last.x, y: last.y, w: origin.w },
+          ...[...group].map(([other, from]) => ({ id: other, x: from.x + dx, y: from.y + dy, w: from.w })),
+        ]);
+        return;
+      }
       const target = moved && cardIds.has(id) ? labelUnder(last.x + origin.w / 2, last.y + 20, id) : null;
       if (target) {
         const label = positions.get(target)!;
@@ -1258,19 +1345,15 @@ function Whiteboard(
           if (Math.abs(rect.x - label.x) < 40) y = Math.max(y, rect.y + (sizes[other]?.h ?? 160) + 14);
         }
         const [from, to] = [target, id].sort();
-        onBoard((current) =>
-          put(
-            put(current, { id: posId(id), kind: "pos", target: id, x: Math.round(label.x), y: Math.round(y), w: origin.w, at: Date.now() }),
-            { id: `link:${from}|${to}`, kind: "link", from, to, at: Date.now() },
-          ),
-        );
+        place([{ id, x: label.x, y, w: origin.w }]);
+        onBoard((current) => put(current, { id: `link:${from}|${to}`, kind: "link", from, to, at: Date.now() }));
         return;
       }
       if (moved && (last.x !== start.x || last.y !== start.y)) {
         // Dropped on top of something: it lands just below instead.
         const others = [...positions.entries()].filter(([other]) => other !== id).map(([, rect]) => rect);
         const landed = settle({ x: last.x, y: last.y, w: origin.w, h: sizes[id]?.h ?? 160 }, others);
-        onBoard((current) => put(current, { id: posId(id), kind: "pos", target: id, x: Math.round(landed.x), y: Math.round(landed.y), w: origin.w, at: Date.now() }));
+        place([{ id, x: landed.x, y: landed.y, w: origin.w }]);
       }
     };
     window.addEventListener("pointermove", move);
@@ -1279,7 +1362,38 @@ function Whiteboard(
 
   const startPan = (event: React.PointerEvent) => {
     if (event.pointerType === "touch") return; // touch pans in the gesture handler
-    if (event.button !== 0 || event.target !== event.currentTarget) return;
+    if (event.target !== event.currentTarget) return;
+    // A plain drag over empty board draws a box that selects what it touches;
+    // Shift-drag or the middle button pans (as do the wheel and the trackpad).
+    if (event.button === 0 && !event.shiftKey && !spaceHeld.current) {
+      const a = toBoard(event.clientX, event.clientY);
+      let box = { x0: a.x, y0: a.y, x1: a.x, y1: a.y };
+      setSelected(new Set());
+      const move = (e: PointerEvent) => {
+        const b = toBoard(e.clientX, e.clientY);
+        box = { ...box, x1: b.x, y1: b.y };
+        setMarquee(box);
+      };
+      const up = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        setMarquee(null);
+        const [l, r] = [Math.min(box.x0, box.x1), Math.max(box.x0, box.x1)];
+        const [t, btm] = [Math.min(box.y0, box.y1), Math.max(box.y0, box.y1)];
+        if (r - l < 4 && btm - t < 4) return;
+        const hit = new Set<string>();
+        for (const [nid, rect] of positions) {
+          const h = sizes[nid]?.h ?? 160;
+          if (rect.x < r && rect.x + rect.w > l && rect.y < btm && rect.y + h > t) hit.add(nid);
+        }
+        setSelected(hit);
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      return;
+    }
+    if (event.button !== 0 && event.button !== 1) return;
+    event.preventDefault();
     const origin = { px: event.clientX, py: event.clientY, x: view.x, y: view.y };
     const move = (e: PointerEvent) => setView((v) => ({ ...v, x: origin.x + e.clientX - origin.px, y: origin.y + e.clientY - origin.py }));
     const up = () => {
@@ -1289,6 +1403,24 @@ function Whiteboard(
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
+
+  // Space held down turns a drag over empty board back into panning.
+  const spaceHeld = useRef(false);
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.code === "Space" && !(e.target as HTMLElement).closest?.("input, textarea, [contenteditable]")) spaceHeld.current = true;
+      if (e.key === "Escape") setSelected(new Set());
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.code === "Space") spaceHeld.current = false;
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+    };
+  }, []);
 
   const MIN_ZOOM = 0.3;
   const MAX_ZOOM = 2;
@@ -1479,7 +1611,7 @@ function Whiteboard(
           )}
         </MoreMenu>
         {!boardUsed && (
-          <span className="wb-hint">Drag by the title · point at a card to see its AI links · double-click for a text box</span>
+          <span className="wb-hint">Drag by the title · drag empty space to select several · Shift-drag to pan · double-click for a text box</span>
         )}
       </div>
       {menu && (
@@ -1527,6 +1659,17 @@ function Whiteboard(
               line(link.id, link.from, link.to, "wb-line", () => onBoard((current) => remove(current, link.id))),
             )}
           </svg>
+          {marquee && (
+            <div
+              className="wb-marquee"
+              style={{
+                left: Math.min(marquee.x0, marquee.x1),
+                top: Math.min(marquee.y0, marquee.y1),
+                width: Math.abs(marquee.x1 - marquee.x0),
+                height: Math.abs(marquee.y1 - marquee.y0),
+              }}
+            />
+          )}
           {nodes.map((node) => {
             const pos = positions.get(node.id)!;
             return (
@@ -1536,7 +1679,7 @@ function Whiteboard(
                   if (el) nodeEls.current.set(node.id, el);
                   else nodeEls.current.delete(node.id);
                 }}
-                className={`wb-node kind-${node.kind}${connecting === node.id ? " picked" : ""}${drag?.id === node.id ? " dragging" : ""}`}
+                className={`wb-node kind-${node.kind}${connecting === node.id ? " picked" : ""}${drag?.id === node.id || drag?.group.has(node.id) ? " dragging" : ""}${selected.has(node.id) ? " selected" : ""}`}
                 style={{ left: pos.x, top: pos.y, width: pos.w }}
                 onPointerEnter={() => setFocus(node.id)}
                 onPointerLeave={() => setFocus((current) => (current === node.id ? null : current))}

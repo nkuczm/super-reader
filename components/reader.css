@@ -2075,3 +2075,19 @@
 .more-add button { width: 34px; height: 30px; border: 0; background: none; border-radius: 6px; font-size: 16px; color: var(--text); cursor: pointer; }
 .more-add button:hover { background: var(--bg-hover); }
 .more-menu > button { padding: 6px 10px; }
+
+/* ---------- whiteboard: selecting several to move together ---------- */
+.wb-marquee { position: absolute; z-index: 20; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); border-radius: 3px; pointer-events: none; }
+.wb-node.selected { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 10px; }
+
+/* ---------- a chosen text-box width, in the document ---------- */
+.subject-doc .subject-box.text-box { max-width: var(--box-w, none); }
+
+/* ---------- settings: text box width ---------- */
+.box-width-setting { margin: 10px 0 4px; }
+.box-width-value { float: right; color: var(--text); font-variant-numeric: tabular-nums; }
+.box-width-controls { display: flex; align-items: center; gap: 10px; }
+.box-width-controls input[type="range"] { flex: 1; accent-color: var(--accent); }
+.box-width-preview { margin-top: 8px; padding: 10px; border: 1px dashed var(--border); border-radius: 8px; background: var(--bg-hover); overflow: hidden; }
+.box-width-sample { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; line-height: 1.45; transition: width 0.12s; }
+.box-width-sample p { margin: 4px 0 0; color: var(--text); }
