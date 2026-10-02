@@ -25,10 +25,12 @@ export default function QuoteToNote({
   onMoveQuote,
   onQuoteNote,
   onHighlight,
+  isHighlighted,
   noun = "note",
 }: {
   /** Mark the passage in the article without filing it anywhere. */
   onHighlight?: (text: string) => void;
+  isHighlighted?: (text: string) => boolean;
   /** Jot a note under the quote just filed; it lands as bullets beneath it. */
   onQuoteNote?: (noteId: string, entryId: string, html: string) => void;
   /** "note", or "subject" with Subjects switched on. */
@@ -249,7 +251,8 @@ export default function QuoteToNote({
                   window.getSelection()?.removeAllRanges();
                 }}
               >
-                <span className="quote-highlight-swatch" aria-hidden="true" /> Highlight
+                <span className="quote-highlight-swatch" aria-hidden="true" />{" "}
+                {isHighlighted?.(placed.text) ? "Remove highlight" : "Highlight"}
               </button>
             )}
             <button

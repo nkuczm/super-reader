@@ -52,6 +52,8 @@ type Props = {
   marks?: ArticleMark[];
   /** Mark the selected passage without filing it anywhere. */
   onHighlight?: (text: string) => void;
+  /** Whether the selection is over an existing highlight — the button then takes it off. */
+  isHighlighted?: (text: string) => boolean;
   onRemoveHighlight?: (id: string) => void;
   /** With Subjects on: add this whole story to a subject, or to a new one. */
   subjects?: {
@@ -102,6 +104,7 @@ export default function ArticleReader({
   subjects,
   marks,
   onHighlight,
+  isHighlighted,
   onRemoveHighlight,
   onClose,
 }: Props) {
@@ -840,6 +843,7 @@ export default function ArticleReader({
                 onMoveQuote={onMoveQuote}
                 onQuoteNote={subjects ? onQuoteNote : undefined}
                 onHighlight={onHighlight}
+                isHighlighted={isHighlighted}
               />
             )}
             {article.via === "preview" && (

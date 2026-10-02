@@ -169,7 +169,8 @@ import type { ArticleMark } from "./ArticleReader";
 import type { InboxItem } from "@/lib/inbox";
 import SignInCard, { AccountStrip, describe as describeSave } from "./SignInCard";
 import {
-  addHighlight,
+  highlightsOverlapping,
+  toggleHighlight,
   highlightsFor,
   loadHighlights,
   mergeHighlights,
@@ -3459,7 +3460,8 @@ export default function Reader() {
             highlight={reading.quote}
             onQuote={settings.quoteToNote && !subjectsLocked ? quoteIntoNote : undefined}
             marks={readingMarks}
-            onHighlight={(text) => commitHighlights((current) => addHighlight(current, reading.url, text))}
+            onHighlight={(text) => commitHighlights((current) => toggleHighlight(current, reading.url, text))}
+            isHighlighted={(text) => highlightsOverlapping(highlights, reading.url, text).length > 0}
             onRemoveHighlight={(id) => commitHighlights((current) => removeHighlight(current, id))}
             onQuoteNote={(noteId, entryId, html) => {
               const target = notesRef.current.find((n) => n.id === noteId);

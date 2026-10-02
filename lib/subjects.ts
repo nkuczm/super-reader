@@ -60,6 +60,8 @@ export type BoxItem = Base & {
   caption?: string;
   /** Set into a text box's text, so it is shown there rather than on its own. */
   embedded?: boolean;
+  /** A section label: one line of big header text, which stories gather under. */
+  label?: boolean;
 };
 
 export const DRAWING_WIDTH = 600;
