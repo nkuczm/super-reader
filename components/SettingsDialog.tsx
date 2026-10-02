@@ -274,6 +274,24 @@ export default function SettingsDialog({
           </label>
 
           {settings.subjects && (
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={settings.hideSubjectBoxes}
+                onChange={(event) => onChange({ ...settings, hideSubjectBoxes: event.target.checked })}
+              />
+              <span>
+                Hide boxes in subjects
+                <em>
+                  In a subject&apos;s document view, the borders around each story and text box
+                  disappear, so it reads like one document. They come back when you point at
+                  one or work inside it.
+                </em>
+              </span>
+            </label>
+          )}
+
+          {settings.subjects && (
             <div className="ai-choice">
               <p className="field-note" style={{ marginTop: 0 }}>AI for insights and suggested reading</p>
               <div className="seg" role="radiogroup" aria-label="AI provider">

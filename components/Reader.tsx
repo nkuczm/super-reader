@@ -3298,6 +3298,14 @@ export default function Reader() {
             signedIn={Boolean(auth.account)}
             onRestored={applyWriting}
             articleMeta={articleMeta}
+            hideBoxes={settings.hideSubjectBoxes}
+            onToggleHideBoxes={() =>
+              setSettings((current) => {
+                const next = { ...current, hideSubjectBoxes: !current.hideSubjectBoxes };
+                saveSettings(next);
+                return next;
+              })
+            }
             saveLabel={
               auth.account ? (auth.backupProblem ? "Not backed up to Drive — see ⋯" : describeSave(auth.status, auth.savedAt)) : undefined
             }

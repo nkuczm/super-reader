@@ -202,6 +202,8 @@ export type Settings = {
    * and behave exactly as they did before.
    */
   subjects: boolean;
+  /** In a subject's document view, draw a story's or text box's border only on hover or while editing it. */
+  hideSubjectBoxes: boolean;
   /** Which AI the Subjects insights use, with the reader's own key for it. */
   aiProvider: "anthropic" | "openai";
   /** The OpenAI model, when that is the provider. */
@@ -217,6 +219,7 @@ export const DEFAULT_SETTINGS: Settings = {
   quoteToNote: true,
   openOnSite: [],
   subjects: false,
+  hideSubjectBoxes: false,
   aiProvider: "anthropic",
   openaiModel: "gpt-5-mini",
 };
@@ -244,6 +247,7 @@ export function loadSettings(): Settings {
           : DEFAULT_SETTINGS.bigStoryMetric,
       hideRead: Boolean(parsed.hideRead),
       subjects: parsed.subjects === true,
+      hideSubjectBoxes: parsed.hideSubjectBoxes === true,
       aiProvider: parsed.aiProvider === "openai" ? "openai" : "anthropic",
       openaiModel:
         typeof parsed.openaiModel === "string" && parsed.openaiModel.trim()
