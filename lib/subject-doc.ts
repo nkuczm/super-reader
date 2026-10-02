@@ -12,6 +12,7 @@ import {
   bylineOf,
   cardsOf,
   contactsOf,
+  safeImage,
   composeCardDoc,
   escapeHtml,
   live,
@@ -52,7 +53,12 @@ export function subjectHtml(note: Note, board: Board | undefined, now = new Date
       if (bylineOf(card)) parts.push(`<p><i>${escapeHtml(bylineOf(card))}</i></p>`);
       parts.push(unlinkQuotes(composeCardDoc(card.note, card.quotes)));
     }
-    for (const box of tabBoxes) parts.push(unlinkQuotes(box.html));
+    for (const box of tabBoxes) {
+      const image = safeImage(box.image);
+      if (image) parts.push(`<p><img src="${image}" alt="" style="max-width:100%"></p>${box.caption ? `<p><i>${escapeHtml(box.caption)}</i></p>` : ""}`);
+      else if (box.drawing) parts.push("<p><i>[A drawing — open the subject in Super Reader to see it]</i></p>");
+      else parts.push(unlinkQuotes(box.html));
+    }
   }
   const contacts = contactsOf(board);
   if (contacts.length > 0) {

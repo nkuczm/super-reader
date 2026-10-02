@@ -1826,3 +1826,29 @@
 @media (hover: none) {
   .quiet-boxes .subject-doc .subject-card-head > *, .quiet-boxes .subject-doc .subject-box-head { opacity: 0.6; }
 }
+
+/* ---------- drawings and pictures in a subject ---------- */
+.drawing { display: flex; flex-direction: column; gap: 6px; }
+.drawing-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.drawing-color { width: 18px; height: 18px; border-radius: 50%; border: 2px solid transparent; padding: 0; cursor: pointer; box-shadow: 0 0 0 1px var(--border); }
+.drawing-color.on { border-color: var(--bg); box-shadow: 0 0 0 2px var(--accent); }
+.drawing-size { width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); display: grid; place-items: center; cursor: pointer; padding: 0; }
+.drawing-size span { display: block; border-radius: 50%; background: var(--text); }
+.drawing-size.on { border-color: var(--accent); }
+.drawing-tools .link-btn { font-size: 12.5px; }
+.drawing-canvas {
+  width: 100%; height: auto; display: block; background: #fff; border: 1px dashed var(--border);
+  border-radius: 8px; touch-action: none; cursor: crosshair;
+}
+@media (prefers-color-scheme: dark) { .drawing-canvas { background: #f4f4f5; } }
+.subject-image { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.subject-image img { max-width: 100%; height: auto; border-radius: 8px; display: block; }
+.subject-image-caption {
+  border: 0; background: transparent; color: var(--text-dim); font-size: 13px; font-style: italic;
+  padding: 2px 0; outline: none; width: 100%;
+}
+.subject-image-caption:focus { color: var(--text); }
+/* The resize handle is always there to be found, stronger under the pointer. */
+.wb-resize::after { opacity: 0.55; background: var(--text-dim); width: 4px; height: 44px; margin-top: -22px; }
+.wb-node:hover .wb-resize::after { opacity: 0.9; }
+.wb-resize:hover::after, .wb-resize:active::after { opacity: 1; background: var(--accent); }

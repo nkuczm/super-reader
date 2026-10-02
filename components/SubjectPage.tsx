@@ -5,6 +5,7 @@ import { Icon } from "./icons";
 import RichText from "./RichText";
 import SubjectHistory from "./SubjectHistory";
 import SubjectContacts from "./SubjectContacts";
+import { DrawingPad, ImageView, shrinkImage, DRAWING_HEIGHT } from "./SubjectMedia";
 import type { Writing } from "./useAccount";
 import type { Note, NoteEntry } from "@/lib/notes";
 import {
@@ -106,6 +107,18 @@ export default function SubjectPage(props: Props) {
   const { note, board, onBoard, keyHeaders, hasAiKey, ai } = props;
   const meta = metaOf(board);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const imageInput = useRef<HTMLInputElement | null>(null);
+  const [imageProblem, setImageProblem] = useState<string | null>(null);
+  const addImage = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const image = await shrinkImage(file);
+      setImageProblem(null);
+      addBox(undefined, { image, caption: "" });
+    } catch (error) {
+      setImageProblem(error instanceof Error ? error.message : "Could not add that picture.");
+    }
+  };
   /** The Contacts side tab, in place of the current tab's page. */
   const [contactsOpen, setContactsOpen] = useState(false);
   /** The tab outline over the document's left edge; remembered, shut on phones. */
@@ -190,10 +203,10 @@ export default function SubjectPage(props: Props) {
 
   const setView = (view: "doc" | "board") => onBoard((current) => put(current, { ...metaOf(current), view }));
 
-  const addBox = (at?: { x: number; y: number }) => {
+  const addBox = (at?: { x: number; y: number }, extra: Partial<BoxItem> = {}) => {
     const id = newItemId("box");
     onBoard((current) => {
-      let next = placeNew(put(current, { id, kind: "box", html: "", at: Date.now() }), id);
+      let next = placeNew(put(current, { id, kind: "box", html: "", ...extra, at: Date.now() }), id);
       if (at) next = put(next, { id: posId(id), kind: "pos", target: id, x: at.x, y: at.y, w: 280, at: Date.now() });
       return next;
     });
@@ -355,6 +368,12 @@ export default function SubjectPage(props: Props) {
     setCardNote,
     decide,
     setBox: (box: BoxItem, html: string) => onBoard((current) => put(current, { ...box, html, at: Date.now() })),
+    updateBox: (box: BoxItem, change: Partial<BoxItem>) =>
+      onBoard((current) => {
+        const held = current?.[box.id];
+        const base = held && held.kind === "box" ? held : box;
+        return put(current, { ...base, ...change, at: Date.now() });
+      }),
     removeBox: (box: BoxItem) => onBoard((current) => remove(remove(current, box.id), posId(box.id))),
   };
 
@@ -440,6 +459,8 @@ export default function SubjectPage(props: Props) {
             {(close) => (
               <>
                 <button role="menuitem" onClick={() => { close(); addBox(); }}>Add text box</button>
+                <button role="menuitem" onClick={() => { close(); addBox(undefined, { drawing: [], height: DRAWING_HEIGHT }); }}>Add drawing</button>
+                <button role="menuitem" onClick={() => { close(); imageInput.current?.click(); }}>Add image…</button>
                 <button role="menuitem" title="Copy this tab as formatted text, for Google Docs and the like"
                   onClick={() => { close(); void copyTab(); }}>Copy this tab</button>
                 {props.onToggleHideBoxes && (
@@ -479,6 +500,12 @@ export default function SubjectPage(props: Props) {
           )}
         </div>
       )}
+      <input ref={imageInput} type="file" accept="image/*" hidden
+        onChange={(event) => {
+          void addImage(event.target.files?.[0]);
+          event.target.value = "";
+        }} />
+      {imageProblem && <div className="subject-ai-bar">{imageProblem}</div>}
       {historyOpen && (
         <SubjectHistory
           subjectId={note.id}
@@ -580,6 +607,7 @@ type Shared = {
   setCardNote: (card: Card, html: string) => void;
   decide: (suggestion: SuggestItem, state: "accepted" | "dismissed") => void;
   setBox: (box: BoxItem, html: string) => void;
+  updateBox: (box: BoxItem, change: Partial<BoxItem>) => void;
   removeBox: (box: BoxItem) => void;
 };
 
@@ -665,8 +693,14 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
           {Icon.close}
         </button>
       </div>
-      <RichText html={box.html} placeholder="Write anything…" autoFocus={shared.focusBox === box.id}
-        onChange={(html) => shared.setBox(box, html)} />
+      {box.drawing ? (
+        <DrawingPad box={box} onChange={(change) => shared.updateBox(box, change)} />
+      ) : box.image !== undefined || box.caption !== undefined ? (
+        <ImageView box={box} onChange={(change) => shared.updateBox(box, change)} />
+      ) : (
+        <RichText html={box.html} placeholder="Write anything…" autoFocus={shared.focusBox === box.id}
+          onChange={(html) => shared.setBox(box, html)} />
+      )}
     </div>
   );
 }
