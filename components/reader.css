@@ -2091,3 +2091,25 @@
 .box-width-preview { margin-top: 8px; padding: 10px; border: 1px dashed var(--border); border-radius: 8px; background: var(--bg-hover); overflow: hidden; }
 .box-width-sample { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; line-height: 1.45; transition: width 0.12s; }
 .box-width-sample p { margin: 4px 0 0; color: var(--text); }
+.wb-canvas.selecting, .wb-canvas.selecting * { user-select: none; -webkit-user-select: none; }
+
+/* ---------- dismissing an insight ---------- */
+.subject-insight, .subject-inline-insight, .subject-insight-row { position: relative; }
+.insight-dismiss { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border: 0; background: none; border-radius: 6px; color: var(--text-dim); font-size: 16px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity 0.12s; }
+.subject-insight:hover .insight-dismiss, .subject-inline-insight:hover .insight-dismiss, .subject-insight-row:hover .insight-dismiss, .insight-dismiss:focus-visible { opacity: 1; }
+@media (hover: none) { .insight-dismiss { opacity: 0.6; } }
+.insight-dismiss:hover { background: var(--bg-hover); color: var(--text); }
+.subject-inline-insight, .subject-insight-row { padding-right: 28px; }
+
+/* ---------- checklists in text boxes ---------- */
+.rich-body ul[data-check] { list-style: none; padding-left: 24px; }
+.rich-body ul[data-check] > li { position: relative; }
+.rich-body ul[data-check] > li::before {
+  content: ""; position: absolute; left: -22px; top: 0.25em; width: 14px; height: 14px; box-sizing: border-box;
+  border: 1.5px solid var(--text-dim); border-radius: 4px; background: var(--bg); cursor: pointer;
+}
+.rich-body ul[data-check] > li[data-checked="true"]::before {
+  background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px no-repeat;
+  border-color: var(--accent);
+}
+.rich-body ul[data-check] > li[data-checked="true"] { color: var(--text-dim); text-decoration: line-through; }

@@ -250,6 +250,27 @@ export default function RichText({
 
   const swipe = useRef<{ x: number; y: number } | null>(null);
 
+  /** The list the caret is in, if any. */
+  function listAtCaret(): HTMLUListElement | null {
+    const node = window.getSelection()?.anchorNode;
+    const elNode = node && (node.nodeType === 1 ? (node as Element) : node.parentElement);
+    const list = elNode?.closest("ul");
+    return list && el.current?.contains(list) ? (list as HTMLUListElement) : null;
+  }
+
+  /** Lines into a checklist, or a checklist back into plain lines. */
+  function toggleChecklist() {
+    el.current?.focus();
+    const list = listAtCaret();
+    if (list?.hasAttribute("data-check")) {
+      document.execCommand("insertUnorderedList");
+    } else {
+      if (!list) document.execCommand("insertUnorderedList");
+      listAtCaret()?.setAttribute("data-check", "");
+    }
+    changed();
+  }
+
   function format(command: string, value?: string) {
     el.current?.focus();
     document.execCommand(command, false, value);
@@ -287,6 +308,7 @@ export default function RichText({
           <mark>H</mark>
         </button>
         <button type="button" title="Bulleted list (⌘⇧8)" onClick={() => format("insertUnorderedList")}>• List</button>
+        <button type="button" title="Checklist (⌘⇧9)" onClick={toggleChecklist}>☐ Check</button>
         <button type="button" title="Heading" onClick={() => format("formatBlock", "h3")}>H3</button>
         <button type="button" title="Link (⌘K)" onClick={startLink}>Link</button>
       </div>
@@ -362,6 +384,15 @@ export default function RichText({
           flush();
         }}
         onClick={(event) => {
+          // A click on a checklist item's box ticks it.
+          const item = (event.target as HTMLElement).closest<HTMLLIElement>("ul[data-check] > li");
+          if (item && event.clientX < item.getBoundingClientRect().left) {
+            event.preventDefault();
+            if (item.getAttribute("data-checked") === "true") item.removeAttribute("data-checked");
+            else item.setAttribute("data-checked", "true");
+            changed();
+            return;
+          }
           const web = (event.target as HTMLElement).closest<HTMLAnchorElement>("a[href]");
           if (web && (event.metaKey || event.ctrlKey)) {
             event.preventDefault();
@@ -494,6 +525,20 @@ export default function RichText({
           // ⌘⇧8 / Ctrl+Shift+8: bulleted list, as in Google Docs. By the key's
           // place, not its character — Shift+8 types "*" on one layout and
           // "(" on another.
+          if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.code === "Digit9") {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleChecklist();
+            return;
+          }
+          // A new line in a checklist starts unticked, whatever the line before was.
+          if (event.key === "Enter" && listAtCaret()?.hasAttribute("data-check")) {
+            setTimeout(() => {
+              const node = window.getSelection()?.anchorNode;
+              const li = (node && (node.nodeType === 1 ? (node as Element) : node.parentElement))?.closest("li");
+              if (li && !li.textContent?.trim()) li.removeAttribute("data-checked");
+            }, 0);
+          }
           if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.code === "Digit8") {
             event.preventDefault();
             format("insertUnorderedList");
