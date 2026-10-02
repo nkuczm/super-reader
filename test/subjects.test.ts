@@ -245,3 +245,14 @@ test("a writer's links survive sanitising, script addresses do not", async () =>
   assert.equal(sanitizeRichText('<a href="javascript:alert(1)">x</a>'), "x");
   assert.equal(sanitizeRichText('<a data-quote="q1" href="https://e.com">q</a>'), '<a data-quote="q1">q</a>');
 });
+
+test("Highlight on a highlighted passage takes it off; elsewhere it marks", async () => {
+  const { toggleHighlight, highlightsFor } = await import("../lib/highlights");
+  let h = toggleHighlight({}, "https://a.example/s", "quick brown fox", 1);
+  assert.equal(highlightsFor(h, "https://a.example/s").length, 1);
+  // Selecting part of it, or the passage around it, removes it.
+  h = toggleHighlight(h, "https://a.example/s?utm_source=x", "brown", 2);
+  assert.equal(highlightsFor(h, "https://a.example/s").length, 0);
+  h = toggleHighlight(h, "https://a.example/s", "lazy dog", 3);
+  assert.equal(highlightsFor(h, "https://a.example/s").length, 1);
+});

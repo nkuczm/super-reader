@@ -18,6 +18,7 @@ import {
   sanitizeRichText,
   quoteIdsIn,
   live,
+  textOf,
   authorsOf,
   cardInfoId,
   embedSrc,
@@ -134,12 +135,19 @@ export default function SubjectPage(props: Props) {
     });
   const imageInput = useRef<HTMLInputElement | null>(null);
   const [imageProblem, setImageProblem] = useState<string | null>(null);
+  /** Where a picture chosen from the whiteboard's menu should land. */
+  const imageAt = useRef<{ x: number; y: number } | undefined>(undefined);
+  const pickImage = (at?: { x: number; y: number }) => {
+    imageAt.current = at;
+    imageInput.current?.click();
+  };
   const addImage = async (file: File | undefined) => {
     if (!file) return;
     try {
       const image = await shrinkImage(file);
       setImageProblem(null);
-      addBox(undefined, { image, caption: "" });
+      addBox(imageAt.current, { image, caption: "" });
+      imageAt.current = undefined;
     } catch (error) {
       setImageProblem(error instanceof Error ? error.message : "Could not add that picture.");
     }
@@ -629,7 +637,7 @@ export default function SubjectPage(props: Props) {
       </div>
       )}
       {meta.view === "board" ? (
-        <Whiteboard {...shared} board={board} onBoard={onBoard} addBox={addBox} />
+        <Whiteboard {...shared} board={board} onBoard={onBoard} addBox={addBox} pickImage={pickImage} />
       ) : (
         <DocumentView {...shared} />
       )}
@@ -778,7 +786,7 @@ function StoryCard({
 
 function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dragHandle?: (e: React.PointerEvent) => void }) {
   return (
-    <div className="subject-box">
+    <div className={`subject-box${box.label ? " label-box" : ""}`}>
       <div className="subject-box-head" onPointerDown={dragHandle}>
         <span className="subject-box-grip" aria-hidden="true">⋮⋮</span>
         <button className="icon-btn subtle" aria-label="Delete text box" onPointerDown={(e) => e.stopPropagation()}
@@ -786,7 +794,21 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
           {Icon.close}
         </button>
       </div>
-      {box.drawing ? (
+      {box.label ? (
+        <input
+          className="section-label"
+          defaultValue={textOf(box.html)}
+          placeholder="Section"
+          autoFocus={shared.focusBox === box.id}
+          aria-label="Section label"
+          onPointerDown={(e) => e.stopPropagation()}
+          onBlur={(e) => {
+            const text = e.currentTarget.value.trim().slice(0, 120);
+            if (text !== textOf(box.html)) shared.setBox(box, escapeHtml(text));
+          }}
+          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        />
+      ) : box.drawing ? (
         <DrawingPad box={box} onChange={(change) => shared.updateBox(box, change)} />
       ) : box.image !== undefined || box.caption !== undefined ? (
         <ImageView box={box} onChange={(change) => shared.updateBox(box, change)} />
@@ -909,9 +931,23 @@ function Whiteboard(
   shared: Shared & {
     board: Board | undefined;
     onBoard: Props["onBoard"];
-    addBox: (at?: { x: number; y: number }) => void;
+    addBox: (at?: { x: number; y: number }, extra?: Partial<BoxItem>) => void;
+    pickImage: (at?: { x: number; y: number }) => void;
   },
 ) {
+  /** The right-click menu on empty board: where it opened, on screen and on the board. */
+  const [menu, setMenu] = useState<{ left: number; top: number; at: { x: number; y: number } } | null>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setMenu(null);
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", esc);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", esc);
+    };
+  }, [menu]);
   // The how-to line under the tools goes once the board has been used.
   const [boardUsed, setBoardUsed] = useState(true);
   useEffect(() => {
@@ -1051,6 +1087,20 @@ function Whiteboard(
     .flatMap((insight) => insight.refs.map((ref) => ({ id: `${insight.id}->${ref}`, from: insight.id, to: ref })))
     .filter((link) => showAiLinks || (focus !== null && (link.from === focus || link.to === focus)));
 
+  const cardIds = new Set(shared.cards.map((c) => c.id));
+  const labelIds = new Set(shared.boxes.filter((b) => b.label).map((b) => b.id));
+  /** The section label at a point on the board, if any. */
+  const labelUnder = (x: number, y: number, except: string) => {
+    for (const id of labelIds) {
+      if (id === except) continue;
+      const rect = positions.get(id);
+      if (!rect) continue;
+      const h = sizes[id]?.h ?? 56;
+      if (x >= rect.x && x <= rect.x + rect.w && y >= rect.y - 20 && y <= rect.y + h + 20) return id;
+    }
+    return null;
+  };
+
   const startDrag = (id: string) => (event: React.PointerEvent) => {
     if (event.button !== 0) return;
     if (connecting !== false) {
@@ -1092,6 +1142,31 @@ function Whiteboard(
         };
         window.addEventListener("click", swallow, { capture: true, once: true });
         setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 0);
+      }
+      // A story dropped onto a section label joins that section: it lines up
+      // under the label, below the stories already there, and is connected
+      // to it.
+      const target = moved && cardIds.has(id) ? labelUnder(last.x + origin.w / 2, last.y + 20, id) : null;
+      if (target) {
+        const label = positions.get(target)!;
+        const linked = new Set(
+          live(board)
+            .filter((i): i is LinkItem => i.kind === "link")
+            .flatMap((l) => (l.from === target ? [l.to] : l.to === target ? [l.from] : [])),
+        );
+        let y = label.y + (sizes[target]?.h ?? 56) + 14;
+        for (const [other, rect] of [...positions.entries()].sort((a, b) => a[1].y - b[1].y)) {
+          if (other === id || !linked.has(other) || !cardIds.has(other)) continue;
+          if (Math.abs(rect.x - label.x) < 40) y = Math.max(y, rect.y + (sizes[other]?.h ?? 160) + 14);
+        }
+        const [from, to] = [target, id].sort();
+        onBoard((current) =>
+          put(
+            put(current, { id: posId(id), kind: "pos", target: id, x: Math.round(label.x), y: Math.round(y), w: origin.w, at: Date.now() }),
+            { id: `link:${from}|${to}`, kind: "link", from, to, at: Date.now() },
+          ),
+        );
+        return;
       }
       if (moved && (last.x !== start.x || last.y !== start.y)) {
         // Dropped on top of something: it lands just below instead.
@@ -1307,6 +1382,22 @@ function Whiteboard(
           <span className="wb-hint">Drag by the title · point at a card to see its AI links · double-click for a text box</span>
         )}
       </div>
+      {menu && (
+        <div className="wb-menu" role="menu" style={{ left: menu.left, top: menu.top }} onPointerDown={(e) => e.stopPropagation()}>
+          <button role="menuitem" onClick={() => { shared.addBox(menu.at, { label: true, html: "" }); setMenu(null); }}>
+            <span className="wb-menu-icon">H</span> Section label
+          </button>
+          <button role="menuitem" onClick={() => { shared.addBox(menu.at); setMenu(null); }}>
+            <span className="wb-menu-icon">¶</span> Text box
+          </button>
+          <button role="menuitem" onClick={() => { shared.addBox(menu.at, { drawing: [], height: DRAWING_HEIGHT }); setMenu(null); }}>
+            <span className="wb-menu-icon">✎</span> Drawing
+          </button>
+          <button role="menuitem" onClick={() => { shared.pickImage(menu.at); setMenu(null); }}>
+            <span className="wb-menu-icon">▣</span> Image…
+          </button>
+        </div>
+      )}
       <div
         ref={canvas}
         className={`wb-canvas${connecting !== false ? " connecting" : ""}`}
@@ -1314,6 +1405,13 @@ function Whiteboard(
         onPointerDown={startPan}
         onDoubleClick={(event) => {
           if (event.target === event.currentTarget) shared.addBox(toBoard(event.clientX, event.clientY));
+        }}
+        onContextMenu={(event) => {
+          if (event.target !== event.currentTarget) return;
+          event.preventDefault();
+          markBoardUsed();
+          const box = event.currentTarget.getBoundingClientRect();
+          setMenu({ left: event.clientX - box.left, top: event.clientY - box.top, at: toBoard(event.clientX, event.clientY) });
         }}
       >
         <div className="wb-layer" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}>

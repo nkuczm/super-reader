@@ -82,3 +82,24 @@ export function sameHighlights(a: Highlights, b: Highlights) {
   if (keys.length !== Object.keys(b ?? {}).length) return false;
   return keys.every((id) => b[id] && b[id].at === a[id].at && !!b[id].deleted === !!a[id].deleted);
 }
+
+/** The article's highlights that a selection overlaps: one inside it, or it inside one. */
+export function highlightsOverlapping(highlights: Highlights, link: string, text: string): Highlight[] {
+  const norm = (t: string) => t.replace(/\s+/g, " ").trim().toLowerCase();
+  const sel = norm(text);
+  if (!sel) return [];
+  return highlightsFor(highlights, link).filter((h) => {
+    const held = norm(h.text);
+    return held.includes(sel) || sel.includes(held);
+  });
+}
+
+/**
+ * The Highlight button as a toggle: a selection over existing highlights
+ * takes them off; anywhere else, it marks the passage.
+ */
+export function toggleHighlight(highlights: Highlights, link: string, text: string, now = Date.now()): Highlights {
+  const over = highlightsOverlapping(highlights, link, text);
+  if (over.length === 0) return addHighlight(highlights, link, text, now);
+  return over.reduce((acc, h) => removeHighlight(acc, h.id, now), highlights);
+}
