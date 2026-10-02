@@ -1943,3 +1943,6 @@
 .hl-layer { z-index: 0; }
 .hl { mix-blend-mode: normal !important; }
 .reader-body .prose { position: relative; z-index: 1; }
+.contact-refs-toggle { font-size: 12px; padding: 0; color: var(--text-dim); }
+.contact-refs ul { list-style: none; margin: 4px 0 0; padding: 0 0 0 8px; border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
+.contact-refs li .link-btn { font-size: 12.5px; text-align: left; padding: 1px 0; }

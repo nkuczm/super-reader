@@ -1096,3 +1096,34 @@ export function quoteNotesFor(note: Note, board: Board | undefined, quoteId: str
 function decodeEntities(text: string) {
   return text.replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
 }
+
+/**
+ * The people who wrote the subject's stories, from each story's byline, with
+ * the stories each wrote. "By Ann Lee and Sam Roe" is two people; an outlet
+ * or a desk standing in for a byline ("Reuters", "Staff") is nobody.
+ */
+export function authorsOf(cards: { id: string; author?: string; source?: string }[]): { name: string; refs: string[] }[] {
+  const found = new Map<string, { name: string; refs: string[] }>();
+  for (const card of cards) {
+    if (!card.author) continue;
+    const names = card.author
+      .replace(/^\s*by\s+/i, "")
+      .split(/\s*(?:,|;|&|\band\b|\|)\s*/i)
+      .map((n) => n.replace(/\s+/g, " ").trim())
+      .filter(
+        (n) =>
+          n.split(" ").length >= 2 &&
+          n.split(" ").length <= 5 &&
+          !/[@/:]|\d/.test(n) &&
+          !/\b(staff|desk|editors?|reporters?|news|team|wire|press|contributors?)\b/i.test(n) &&
+          n.toLowerCase() !== card.source?.trim().toLowerCase(),
+      );
+    for (const name of names) {
+      const id = contactId(name);
+      const held = found.get(id) ?? { name, refs: [] };
+      if (!held.refs.includes(card.id)) held.refs.push(card.id);
+      found.set(id, held);
+    }
+  }
+  return [...found.values()];
+}

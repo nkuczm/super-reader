@@ -18,6 +18,7 @@ import {
   sanitizeRichText,
   quoteIdsIn,
   live,
+  authorsOf,
   cardInfoId,
   embedSrc,
   bylineOf,
@@ -161,6 +162,10 @@ export default function SubjectPage(props: Props) {
     }
   };
   const contacts = useMemo(() => contactsOf(board), [board]);
+  const dismissedContacts = useMemo(
+    () => live(board).filter((i) => i.kind === "contact" && i.state === "dismissed").map((i) => i.id),
+    [board],
+  );
   const [exporting, setExporting] = useState<null | "working" | { url: string } | { error: string }>(null);
   const exportDoc = async () => {
     setExporting("working");
@@ -192,6 +197,16 @@ export default function SubjectPage(props: Props) {
       }),
     [note, board, articleMeta],
   );
+  /** Everyone the Contacts panel lists — stored people and the stories' authors. */
+  const contactCount = useMemo(() => {
+    const ids = new Set(contacts.map((c) => c.id));
+    const gone = new Set(dismissedContacts);
+    for (const a of authorsOf(allCards)) {
+      const id = contactId(a.name);
+      if (!gone.has(id)) ids.add(id);
+    }
+    return ids.size;
+  }, [contacts, dismissedContacts, allCards]);
   // Stories missing a date, author or outlet have them read off the article
   // itself, once, and kept with the subject so every device has them.
   useEffect(() => {
@@ -513,7 +528,7 @@ export default function SubjectPage(props: Props) {
           >
             <span className="contacts-icon" aria-hidden="true">👥</span>
             <span className="contacts-label">Contacts</span>
-            {contacts.length > 0 && <span className="count">{contacts.length}</span>}
+            {contactCount > 0 && <span className="count">{contactCount}</span>}
           </button>
           <MoreMenu>
             {(close) => (
@@ -644,6 +659,7 @@ export default function SubjectPage(props: Props) {
             )
           }
           onOpenCard={(card) => props.onOpenArticle(card.link, card.title, "")}
+          dismissedIds={dismissedContacts}
         />
         </aside>
       )}
