@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { authorsOf, cleanLinkedIn, contactId, safeImage, type Card, type ContactItem } from "@/lib/subjects";
+import { shrinkImage } from "./SubjectMedia";
 
 const HIDE_SUGGESTED_KEY = "super-reader:hide-suggested-contacts";
 
@@ -162,8 +163,15 @@ function ContactRow({
   onRemove: (contact: ContactItem) => void;
   onOpenCard: (card: Card) => void;
 }) {
-  /** All three details at once — any, all or none of them filled in. */
-  const [editing, setEditing] = useState<{ email: string; phone: string; linkedin: string } | null>(null);
+  /** Everything on the card at once — any, all or none of it filled in. */
+  const [editing, setEditing] = useState<{
+    name: string; role: string; why: string; email: string; phone: string; linkedin: string; photo?: string;
+  } | null>(null);
+  const startEditing = () =>
+    setEditing({
+      name: contact.name, role: contact.role ?? "", why: contact.why ?? "",
+      email: contact.email ?? "", phone: contact.phone ?? "", linkedin: contact.linkedin ?? "", photo: contact.photo,
+    });
   const [problem, setProblem] = useState<string | null>(null);
   const [showRefs, setShowRefs] = useState(false);
 
@@ -176,8 +184,14 @@ function ContactRow({
     if (phone && phone.replace(/\D/g, "").length < 6) return setProblem("That phone number doesn't look right.");
     const linkedin = linkedinRaw ? cleanLinkedIn(linkedinRaw) : null;
     if (linkedinRaw && !linkedin) return setProblem("That doesn't look like a LinkedIn profile link.");
+    const name = editing.name.trim().slice(0, 120);
+    if (!name) return setProblem("A contact needs a name.");
     onSave({
       ...contact,
+      name,
+      role: editing.role.trim().slice(0, 200),
+      why: editing.why.trim().slice(0, 400),
+      photo: safeImage(editing.photo),
       email: email || undefined,
       // Still "from the story" if it is the address the story gave.
       emailFrom: email ? (email === contact.email ? contact.emailFrom : "you") : undefined,
@@ -286,6 +300,51 @@ function ContactRow({
             }}
             onKeyDown={(e) => e.key === "Escape" && setEditing(null)}
           >
+            <div className="contact-photo-edit">
+              <span className="contact-avatar" aria-hidden="true">
+                {safeImage(editing.photo) ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={safeImage(editing.photo)} alt="" />
+                ) : (
+                  (editing.name || "?").split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase()
+                )}
+              </span>
+              <label className="link-btn">
+                {editing.photo ? "Change photo" : "Add photo"}
+                <input type="file" accept="image/*" hidden
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (!file) return;
+                    try {
+                      const photo = await shrinkImage(file, 160);
+                      setEditing((cur) => (cur ? { ...cur, photo } : cur));
+                    } catch {
+                      setProblem("That file isn't a picture this browser can open.");
+                    }
+                  }} />
+              </label>
+              {editing.photo && (
+                <button type="button" className="link-btn" onClick={() => setEditing({ ...editing, photo: undefined })}>Remove</button>
+              )}
+            </div>
+            {(
+              [
+                ["name", "Name", "text", "Full name"],
+                ["role", "Role", "text", "Role or organisation"],
+              ] as const
+            ).map(([key, label, type, placeholder]) => (
+              <label key={key} className="contact-field">
+                <span>{label}</span>
+                <input className="input" type={type} placeholder={placeholder} value={editing[key]} autoFocus={key === "name"}
+                  onChange={(e) => setEditing({ ...editing, [key]: e.target.value })} />
+              </label>
+            ))}
+            <label className="contact-field">
+              <span>Why</span>
+              <textarea className="input" rows={2} placeholder="Why they're worth talking to" value={editing.why}
+                onChange={(e) => setEditing({ ...editing, why: e.target.value })} />
+            </label>
             {(
               [
                 ["email", "Email", "email", "name@example.com"],
@@ -294,12 +353,11 @@ function ContactRow({
                 // silently refuse "linkedin.com/in/…" for lacking https://.
                 ["linkedin", "LinkedIn", "text", "linkedin.com/in/name"],
               ] as const
-            ).map(([key, label, type, placeholder], i) => (
+            ).map(([key, label, type, placeholder]) => (
               <label key={key} className="contact-field">
                 <span>{label}</span>
                 <input
                   className="input"
-                  autoFocus={i === 0}
                   type={type}
                   placeholder={placeholder}
                   value={editing[key]}
@@ -314,11 +372,8 @@ function ContactRow({
             </div>
           </form>
         ) : (
-          <button
-            className="link-btn contact-add-detail"
-            onClick={() => setEditing({ email: contact.email ?? "", phone: contact.phone ?? "", linkedin: contact.linkedin ?? "" })}
-          >
-            {contact.email || contact.phone || contact.linkedin ? "Edit email, phone, LinkedIn" : "Add email, phone, LinkedIn"}
+          <button className="link-btn contact-add-detail" onClick={startEditing}>
+            Edit contact
           </button>
         )}
       </div>
