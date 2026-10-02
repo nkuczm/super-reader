@@ -132,7 +132,7 @@ export default function RichText({
         <button type="button" title="Highlight" onClick={() => format("hiliteColor", "#fde68a")}>
           <mark>H</mark>
         </button>
-        <button type="button" title="Bulleted list" onClick={() => format("insertUnorderedList")}>• List</button>
+        <button type="button" title="Bulleted list (⌘⇧8)" onClick={() => format("insertUnorderedList")}>• List</button>
         <button type="button" title="Heading" onClick={() => format("formatBlock", "h3")}>H3</button>
       </div>
       <div
@@ -183,6 +183,15 @@ export default function RichText({
                     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
             event.preventDefault();
             format("bold");
+          }
+          // ⌘⇧8 / Ctrl+Shift+8: bulleted list, as in Google Docs. By the key's
+          // place, not its character — Shift+8 types "*" on one layout and
+          // "(" on another.
+          if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.code === "Digit8") {
+            event.preventDefault();
+            format("insertUnorderedList");
+            event.stopPropagation();
+            return;
           }
           if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "i") {
             event.preventDefault();
