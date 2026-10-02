@@ -214,3 +214,14 @@ test("the notes under a quote come back as lines for the article's margin", asyn
   });
   assert.deepEqual(quoteNotesFor(note, board, "q1"), ["Why & how", "  deeper"]);
 });
+
+test("a story's byline gives its authors as contacts, outlets and desks aside", async () => {
+  const { authorsOf } = await import("../lib/subjects");
+  const found = authorsOf([
+    { id: "a", author: "By Ann Lee and Sam Roe", source: "Wire" },
+    { id: "b", author: "Ann Lee", source: "Wire" },
+    { id: "c", author: "Reuters Staff", source: "Reuters" },
+    { id: "d", author: "Wire", source: "Wire" },
+  ]);
+  assert.deepEqual(found, [{ name: "Ann Lee", refs: ["a", "b"] }, { name: "Sam Roe", refs: ["a"] }]);
+});

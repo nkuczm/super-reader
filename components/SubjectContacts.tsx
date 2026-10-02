@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Card, ContactItem } from "@/lib/subjects";
+import { authorsOf, contactId, type Card, type ContactItem } from "@/lib/subjects";
 
 type Detail = "email" | "phone";
 
@@ -20,6 +20,7 @@ export default function SubjectContacts({
   onRemove,
   onAdd,
   onOpenCard,
+  dismissedIds,
 }: {
   contacts: ContactItem[];
   cards: Card[];
@@ -30,14 +31,31 @@ export default function SubjectContacts({
   onRemove: (contact: ContactItem) => void;
   onAdd: (name: string, role: string) => void;
   onOpenCard: (card: Card) => void;
+  /** People removed from the list, so an author removed is not brought back. */
+  dismissedIds: string[];
 }) {
   const [adding, setAdding] = useState<{ name: string; role: string } | null>(null);
-  const fromStories = contacts.filter((c) => c.origin === "story");
+  // The stories' own authors are contacts without asking: a byline is the
+  // surest lead there is. One removed stays removed (a dismissed item).
+  const held = new Map(contacts.map((c) => [c.id, c]));
+  const dismissed = new Set(dismissedIds);
+  const authors: ContactItem[] = authorsOf(cards).flatMap(({ name, refs }) => {
+    const id = contactId(name);
+    if (dismissed.has(id)) return [];
+    const mine = held.get(id);
+    return [
+      mine
+        ? { ...mine, refs: [...new Set([...refs, ...mine.refs])] }
+        : { id, kind: "contact" as const, name, role: "Author", why: "", refs, origin: "story" as const, state: "kept" as const, at: 0 },
+    ];
+  });
+  const authorIds = new Set(authors.map((a) => a.id));
+  const fromStories = contacts.filter((c) => c.origin === "story" && !authorIds.has(c.id));
   const suggested = contacts.filter((c) => c.origin === "suggested");
   const yours = contacts.filter((c) => c.origin === "you");
   const byId = new Map(cards.map((card) => [card.id, card]));
 
-  const section = (title: string, list: ContactItem[], note?: string) =>
+  const section = (title: string, list: ContactItem[], note?: string, refsLabel?: (n: number) => string) =>
     list.length > 0 && (
       <section className="contacts-section">
         <h2>{title}</h2>
@@ -47,7 +65,9 @@ export default function SubjectContacts({
             <ContactRow
               key={contact.id}
               contact={contact}
-              stories={contact.refs.map((ref) => byId.get(ref)).filter((c): c is Card => !!c)}
+              // Only someone actually in the stories has stories to list.
+              stories={contact.origin === "suggested" ? [] : contact.refs.map((ref) => byId.get(ref)).filter((c): c is Card => !!c)}
+              refsLabel={refsLabel ?? ((n) => `Mentioned in ${n} ${n === 1 ? "story" : "stories"}`)}
               onSave={onSave}
               onRemove={onRemove}
               onOpenCard={onOpenCard}
@@ -89,6 +109,7 @@ export default function SubjectContacts({
           to them — or add someone yourself.
         </p>
       )}
+      {section("Authors", authors, undefined, (n) => `Wrote ${n} ${n === 1 ? "story" : "stories"} here`)}
       {section("In the stories", fromStories)}
       {section("Suggested", suggested, "Connected to the stories but not in them — check the role before reaching out.")}
       {section("Added by you", yours)}
@@ -102,7 +123,9 @@ function ContactRow({
   onSave,
   onRemove,
   onOpenCard,
+  refsLabel,
 }: {
+  refsLabel: (n: number) => string;
   contact: ContactItem;
   stories: Card[];
   onSave: (contact: ContactItem) => void;
@@ -111,6 +134,7 @@ function ContactRow({
 }) {
   const [editing, setEditing] = useState<{ kind: Detail; value: string } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [showRefs, setShowRefs] = useState(false);
 
   const save = () => {
     if (!editing) return;
@@ -141,14 +165,20 @@ function ContactRow({
         </div>
         {contact.why && <p className="contact-why">{contact.why}</p>}
         {stories.length > 0 && (
-          <p className="contact-refs">
-            {stories.map((card, i) => (
-              <span key={card.id}>
-                {i > 0 && " · "}
-                <button className="link-btn" onClick={() => onOpenCard(card)}>{card.title}</button>
-              </span>
-            ))}
-          </p>
+          <div className="contact-refs">
+            <button className="link-btn contact-refs-toggle" aria-expanded={showRefs} onClick={() => setShowRefs((v) => !v)}>
+              {refsLabel(stories.length)} {showRefs ? "▾" : "▸"}
+            </button>
+            {showRefs && (
+              <ul>
+                {stories.map((card) => (
+                  <li key={card.id}>
+                    <button className="link-btn" onClick={() => onOpenCard(card)}>{card.title}</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
         <div className="contact-details">
           {contact.email && (
