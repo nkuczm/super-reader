@@ -95,6 +95,7 @@ import {
   cardsOf,
   metaOf,
   addQuoteNote,
+  quoteNotesFor,
   loadBoards,
   mergeBoards,
   pruneBoards,
@@ -163,7 +164,18 @@ import {
 import type { WatchMarks } from "@/lib/alerts";
 import type { SavedRemoval } from "@/lib/saved";
 import { useAccount, type Writing } from "./useAccount";
+import type { ArticleMark } from "./ArticleReader";
 import SignInCard, { AccountStrip, describe as describeSave } from "./SignInCard";
+import {
+  addHighlight,
+  highlightsFor,
+  loadHighlights,
+  mergeHighlights,
+  removeHighlight,
+  sameHighlights,
+  saveHighlights,
+  type Highlights,
+} from "@/lib/highlights";
 import "./reader.css";
 
 type Loaded = Article & { sourceId: string };
@@ -345,6 +357,9 @@ export default function Reader() {
   /** Stories pasted in by hand (lib/manual.ts). */
   const [manual, setManual] = useState<ManualStories>({});
   const manualRef = useRef<ManualStories>({});
+  /** Passages marked in articles with "Highlight" (lib/highlights.ts). */
+  const [highlights, setHighlights] = useState<Highlights>({});
+  const highlightsRef = useRef<Highlights>({});
   const [pasteNotice, setPasteNotice] = useState<{ kind: "busy" | "done" | "error"; text: string } | null>(null);
   const boardsRef = useRef<Boards>({});
   /** Per-source delivery history for the status page (lib/health.ts). */
@@ -493,6 +508,9 @@ export default function Reader() {
     const storedManual = loadManual();
     manualRef.current = storedManual;
     setManual(storedManual);
+    const storedHighlights = loadHighlights();
+    highlightsRef.current = storedHighlights;
+    setHighlights(storedHighlights);
     setVault(loadVault());
     setApiKeys(loadUnlockedKeys());
     updatedAtRef.current = loadUpdatedAt();
@@ -519,6 +537,7 @@ export default function Reader() {
     noteRemovals?: NoteRemoval[];
     boards?: Boards;
     manual?: ManualStories;
+    highlights?: Highlights;
     prefs?: unknown;
     teams?: unknown;
     vault?: unknown;
@@ -628,6 +647,12 @@ export default function Reader() {
       setManual(mergedManual);
       saveManual(mergedManual);
     }
+    const mergedHighlights = mergeHighlights(highlightsRef.current, payload.highlights ?? {});
+    if (!sameHighlights(mergedHighlights, highlightsRef.current)) {
+      highlightsRef.current = mergedHighlights;
+      setHighlights(mergedHighlights);
+      saveHighlights(mergedHighlights);
+    }
     const marks = mergeMarks(marksRef.current, payload.watchMarks ?? {});
     if (!unchanged(marks, marksRef.current)) {
       marksRef.current = marks;
@@ -695,6 +720,7 @@ export default function Reader() {
       // The same for subject boards: compared as they would be sent.
       (writingHere && !sameBoards(slimBoardsForSync(mergedBoards), payload.boards ?? {})) ||
       !sameManual(mergedManual, payload.manual ?? {}) ||
+      !sameHighlights(mergedHighlights, payload.highlights ?? {}) ||
       prefsRef.current.at > (cleanSharedPrefs(payload.prefs)?.at ?? 0) ||
       // Compared as it would be *sent*, not as it is held: the wire copy is
       // cut to a budget, and comparing the full set against the server's copy
@@ -824,6 +850,7 @@ export default function Reader() {
     noteRemovals,
     boards,
     manual,
+    highlights,
     prefs,
     vault,
     teams,
@@ -881,6 +908,7 @@ export default function Reader() {
               ? {}
               : { notes: slimNotesForSync(notes), noteRemovals, boards: slimBoardsForSync(boards) }),
             manual,
+            highlights,
             prefs,
             teams,
             vault,
@@ -913,6 +941,7 @@ export default function Reader() {
     noteRemovals,
     boards,
     manual,
+    highlights,
     prefs,
     teams,
     ready,
@@ -951,6 +980,7 @@ export default function Reader() {
           ? {}
           : { notes: slimNotesForSync(notes), noteRemovals, boards: slimBoardsForSync(boards) }),
         manual,
+        highlights,
         prefs,
         teams,
         vault,
@@ -976,6 +1006,7 @@ export default function Reader() {
     noteRemovals,
     boards,
     manual,
+    highlights,
     prefs,
     teams,
     vault,
@@ -2055,6 +2086,31 @@ export default function Reader() {
     return articles.filter((a) => ids.has(a.sourceId));
   }, [articles, feeds, selection, savedAsArticles, downloadedAsArticles, teamAsArticles, manualAsArticles]);
 
+  /**
+   * What is marked in the article being read: its own highlights, and every
+   * quote any subject took from it, with what was written under that quote
+   * as a comment for the margin.
+   */
+  const readingMarks = useMemo<ArticleMark[]>(() => {
+    if (!reading) return [];
+    const key = canonicalUrl(reading.url);
+    const marks: ArticleMark[] = highlightsFor(highlights, reading.url).map((h) => ({ id: h.id, text: h.text, kind: "highlight" }));
+    for (const note of notes) {
+      for (const entry of note.entries) {
+        if (entry.kind !== "quote" || canonicalUrl(entry.link) !== key) continue;
+        marks.push({
+          id: entry.id,
+          text: entry.text,
+          kind: "quote",
+          noteId: note.id,
+          noteName: note.name,
+          comments: settings.subjects ? quoteNotesFor(note, boards[note.id], entry.id) : [],
+        });
+      }
+    }
+    return marks;
+  }, [reading, highlights, notes, boards, settings.subjects]);
+
   /** What the device knows of a story — for the byline on a subject's card. */
   const articleMetaMap = useMemo(() => {
     const map = new Map<string, { publishedAt?: string; author?: string; source?: string }>();
@@ -2523,6 +2579,13 @@ export default function Reader() {
   useEffect(() => {
     clearAlertsRef.current = clearAlerts;
   }, [clearAlerts]);
+
+  const commitHighlights = useCallback((update: (current: Highlights) => Highlights) => {
+    const next = update(highlightsRef.current);
+    highlightsRef.current = next;
+    setHighlights(next);
+    saveHighlights(next);
+  }, []);
 
   /** Back to the first headline. */
   const commitManual = useCallback((update: (current: ManualStories) => ManualStories) => {
@@ -3234,6 +3297,9 @@ export default function Reader() {
             notes={notesByUse}
             highlight={reading.quote}
             onQuote={settings.quoteToNote && !subjectsLocked ? quoteIntoNote : undefined}
+            marks={readingMarks}
+            onHighlight={(text) => commitHighlights((current) => addHighlight(current, reading.url, text))}
+            onRemoveHighlight={(id) => commitHighlights((current) => removeHighlight(current, id))}
             onQuoteNote={(noteId, entryId, html) => {
               const target = notesRef.current.find((n) => n.id === noteId);
               if (target) commitBoard(noteId, (board) => addQuoteNote(target, board, entryId, html));

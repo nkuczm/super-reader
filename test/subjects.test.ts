@@ -203,3 +203,14 @@ test("a bot-check page is not an article, and a story's address gives a fallback
   );
   assert.equal(titleFromUrl("https://example.com/"), null);
 });
+
+test("the notes under a quote come back as lines for the article's margin", async () => {
+  const { quoteNotesFor, put, cardNoteId } = await import("../lib/subjects");
+  const now = Date.now();
+  const note = { id: "n", name: "N", at: now, entries: [{ id: "q1", kind: "quote", text: "First", link: "https://a.example/s", articleTitle: "S", at: now }] } as never;
+  const board = put({}, {
+    id: cardNoteId("https://a.example/s"), kind: "cardnote", card: "https://a.example/s",
+    html: '<ul><li><a data-quote="q1">“First”</a><ul><li>Why &amp; how<ul><li>deeper</li></ul></li></ul></li></ul>', at: now,
+  });
+  assert.deepEqual(quoteNotesFor(note, board, "q1"), ["Why & how", "  deeper"]);
+});

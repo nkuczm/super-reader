@@ -24,8 +24,11 @@ export default function QuoteToNote({
   onOpenNote,
   onMoveQuote,
   onQuoteNote,
+  onHighlight,
   noun = "note",
 }: {
+  /** Mark the passage in the article without filing it anywhere. */
+  onHighlight?: (text: string) => void;
   /** Jot a note under the quote just filed; it lands as bullets beneath it. */
   onQuoteNote?: (noteId: string, entryId: string, html: string) => void;
   /** "note", or "subject" with Subjects switched on. */
@@ -175,7 +178,10 @@ export default function QuoteToNote({
 
   /** File what was written under the quote, and let the bubble go. */
   const saveNote = useCallback(() => {
-    const html = draft.current;
+    // Read from the field itself: its change report waits for a pause in
+    // typing, and Done pressed straight after the last word would beat it.
+    const field = toast.current?.querySelector<HTMLElement>(".quote-note-box .rich-body");
+    const html = field ? field.innerHTML : draft.current;
     draft.current = "";
     setWriting(false);
     if (added?.entryId && onQuoteNote && html) onQuoteNote(added.noteId, added.entryId, html);
@@ -232,6 +238,20 @@ export default function QuoteToNote({
           style={docked ? undefined : { top: placed.top, left: placed.left }}
         >
           {!picking ? (
+            <div className="quote-pop-row">
+            {onHighlight && (
+              <button
+                className="btn small quote-highlight"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  onHighlight(placed.text);
+                  setPlaced(null);
+                  window.getSelection()?.removeAllRanges();
+                }}
+              >
+                <span className="quote-highlight-swatch" aria-hidden="true" /> Highlight
+              </button>
+            )}
             <button
               className="btn small quote-add"
               // mousedown would clear the selection before the click lands.
@@ -247,6 +267,7 @@ export default function QuoteToNote({
             >
               {Icon.note} Add to {noun}
             </button>
+            </div>
           ) : (
             <div className="quote-menu" role="menu">
               {notes.map((note) => (
