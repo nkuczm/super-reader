@@ -67,6 +67,8 @@ export type BoxItem = Base & {
   table?: string[][];
   /** An interview transcript, split into who said what. */
   transcript?: Transcript;
+  /** More transcripts in the same block, shown as tabs after the first. */
+  transcriptTabs?: Transcript[];
 };
 
 export const DRAWING_WIDTH = 600;

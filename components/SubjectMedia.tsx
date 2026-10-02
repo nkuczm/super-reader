@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { DEFAULT_DRAWING_HEIGHT, DRAWING_WIDTH, safeImage, safeStrokes, type BoxItem, type Stroke } from "@/lib/subjects";
 import { EMBED_TYPE } from "./RichText";
-import { parseTranscript, safeTranscript, speakersOf, titleFromFile } from "@/lib/transcript";
+import { parseTranscript, safeTranscript, speakersOf, titleFromFile, type Transcript } from "@/lib/transcript";
 import { colName, display, evaluate, isError, MAX_COLS, MAX_ROWS, safeGrid, type Grid } from "@/lib/sheet";
 
 const COLORS = ["#111111", "#2563eb", "#dc2626", "#16a34a", "#f59e0b"];
@@ -359,7 +359,13 @@ const SPEAKER_COLORS = ["#2563eb", "#c2410c", "#15803d", "#7c3aed", "#be185d", "
  * split into speakers. The magnifying glass searches within.
  */
 export function TranscriptBox({ box, onChange }: { box: BoxItem; onChange: (next: Partial<BoxItem>) => void }) {
-  const { title, turns } = safeTranscript(box.transcript);
+  // One block can hold several transcripts — one per person — as tabs.
+  const tabs = [box.transcript, ...(box.transcriptTabs ?? [])].map(safeTranscript);
+  const [active, setActive] = useState(0);
+  const tab = Math.min(active, tabs.length - 1);
+  const { title, turns } = tabs[tab];
+  const write = (next: Transcript[]) => onChange({ transcript: next[0], transcriptTabs: next.slice(1) });
+  const writeTab = (t: Transcript) => write(tabs.map((x, j) => (j === tab ? t : x)));
   const speakers = speakersOf(turns);
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
@@ -372,7 +378,7 @@ export function TranscriptBox({ box, onChange }: { box: BoxItem; onChange: (next
     const next = parseTranscript(text);
     if (next.length === 0) return setProblem("There was no text in that.");
     setProblem(null);
-    onChange({ transcript: { title: title || (name ? titleFromFile(name) : ""), turns: next } });
+    writeTab({ title: title || (name ? titleFromFile(name) : ""), turns: next });
   };
   const readFile = async (file: File) => {
     if (!/^text\/|\/(json|x-subrip)$/.test(file.type) && !/\.(txt|vtt|srt|md|text)$/i.test(file.name))
@@ -437,8 +443,9 @@ export function TranscriptBox({ box, onChange }: { box: BoxItem; onChange: (next
         <input
           className="transcript-title"
           placeholder="Interview with…"
+          key={tab}
           defaultValue={title}
-          onBlur={(e) => e.target.value !== title && onChange({ transcript: { title: e.target.value.slice(0, 200), turns } })}
+          onBlur={(e) => e.target.value !== title && writeTab({ title: e.target.value.slice(0, 200), turns })}
         />
         {turns.length > 0 && (
           <button className={`transcript-search-btn${searching ? " on" : ""}`} title="Search this transcript" aria-label="Search this transcript"
@@ -449,6 +456,25 @@ export function TranscriptBox({ box, onChange }: { box: BoxItem; onChange: (next
             </svg>
           </button>
         )}
+      </div>
+      <div className="transcript-tabs" role="tablist">
+        {tabs.map((t, j) => (
+          <button key={j} role="tab" aria-selected={j === tab} className={`transcript-tab${j === tab ? " on" : ""}`}
+            onClick={() => { setActive(j); setQuery(""); setHit(0); }}>
+            {t.title || `Transcript ${j + 1}`}
+            {j === tab && tabs.length > 1 && (
+              <span className="transcript-tab-x" role="button" aria-label="Remove this transcript" title="Remove this transcript"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (t.turns.length && !window.confirm(`Remove “${t.title || `Transcript ${j + 1}`}” from this block?`)) return;
+                  write(tabs.filter((_, k) => k !== j));
+                  setActive(Math.max(0, j - 1));
+                }}>×</span>
+            )}
+          </button>
+        ))}
+        <button className="transcript-tab add" title="Add another transcript to this block" aria-label="Add another transcript"
+          onClick={() => { write([...tabs, { title: "", turns: [] }]); setActive(tabs.length); setQuery(""); }}>+</button>
       </div>
       {searching && (
         <div className="transcript-find">
