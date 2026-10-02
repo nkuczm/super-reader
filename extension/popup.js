@@ -95,19 +95,29 @@ async function photoData(src) {
   });
 }
 
-async function fillSubjects(select, { required }) {
+/** Fills a subject list from scratch — however many times it is asked to. */
+async function fillSubjects(select, { required, keep = 0 }) {
+  const run = (select.dataset.run = String(Number(select.dataset.run || 0) + 1));
   const { code, server } = await settings();
+  let subjects = [];
   try {
     const res = await fetch(`${server}/api/inbox?code=${encodeURIComponent(code)}`, { cache: "no-store" });
     const data = res.ok ? await res.json() : {};
-    for (const subject of data.subjects || []) {
-      const option = document.createElement("option");
-      option.value = subject.id;
-      option.textContent = subject.name;
-      select.appendChild(option);
-    }
+    subjects = data.subjects || [];
   } catch {
     /* only "new subject" then */
+  }
+  // A later fill started while this one waited: let it do the work.
+  if (select.dataset.run !== run) return;
+  while (select.options.length > keep) select.remove(keep);
+  const seen = new Set();
+  for (const subject of subjects) {
+    if (seen.has(subject.id)) continue;
+    seen.add(subject.id);
+    const option = document.createElement("option");
+    option.value = subject.id;
+    option.textContent = subject.name;
+    select.appendChild(option);
   }
   const make = document.createElement("option");
   make.value = "__new";
@@ -221,27 +231,7 @@ async function readPage() {
 }
 
 async function loadSubjects() {
-  const { code, server } = await settings();
-  try {
-    const res = await fetch(`${server}/api/inbox?code=${encodeURIComponent(code)}`, { cache: "no-store" });
-    if (!res.ok) return;
-    const data = await res.json();
-    const select = $("subject");
-    for (const subject of data.subjects || []) {
-      const option = document.createElement("option");
-      option.value = subject.id;
-      option.textContent = subject.name;
-      select.appendChild(option);
-    }
-    const make = document.createElement("option");
-    make.value = "__new";
-    make.textContent = "+ New subject…";
-    select.appendChild(make);
-    const { lastSubject } = await chrome.storage.local.get("lastSubject");
-    if (lastSubject && [...select.options].some((o) => o.value === lastSubject)) select.value = lastSubject;
-  } catch {
-    /* saving still works without the list */
-  }
+  await fillSubjects($("subject"), { required: false, keep: 1 });
 }
 
 async function startSave() {
