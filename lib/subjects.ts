@@ -683,16 +683,105 @@ export function quoteIdsIn(html: string): Set<string> {
 export function composeCardDoc(html: string, quotes: { id: string; text: string }[]): string {
   const present = quoteIdsIn(html);
   const missing = quotes.filter((quote) => !present.has(quote.id));
-  if (missing.length === 0) return html;
-  const items = missing
-    .map((quote) => `<li><a data-quote="${quote.id}">“${escapeHtml(quote.text.trim())}”</a></li>`)
-    .join("");
-  const last = html.lastIndexOf('data-quote="');
-  if (last >= 0) {
-    const close = html.indexOf("</ul>", last);
-    if (close >= 0) return html.slice(0, close) + items + html.slice(close);
+  const nodes = liftQuotes(parseHtml(html));
+  if (missing.length > 0) {
+    const items: HtmlNode[] = missing.map((quote) => ({
+      tag: "li",
+      open: "<li>",
+      children: [{ tag: "a", open: `<a data-quote="${quote.id}">`, children: [`“${escapeHtml(quote.text.trim())}”`] }],
+    }));
+    // After the last top-level list holding a quote, at its own level —
+    // never inside a note nested under the last quote.
+    const lists = nodes.filter((n): n is HtmlNode => typeof n !== "string" && n.tag === "ul" && n.children.some(isQuoteItem));
+    const target = lists[lists.length - 1];
+    if (target) target.children.push(...items);
+    else nodes.unshift({ tag: "ul", open: "<ul>", children: items });
   }
-  return `<ul>${items}</ul>${html}`;
+  return serializeHtml(nodes);
+}
+
+/* A minimal tree for the card's own (sanitised, well-formed) HTML. */
+type HtmlNode = { tag: string; open: string; children: (HtmlNode | string)[] };
+const VOID_TAGS = new Set(["br"]);
+
+function parseHtml(html: string): (HtmlNode | string)[] {
+  const root: HtmlNode = { tag: "", open: "", children: [] };
+  const stack = [root];
+  const pattern = /<(\/?)([a-zA-Z0-9]+)([^>]*)>|([^<]+)/g;
+  for (let m = pattern.exec(html); m; m = pattern.exec(html)) {
+    const top = stack[stack.length - 1];
+    if (m[4] !== undefined) {
+      top.children.push(m[4]);
+      continue;
+    }
+    const tag = m[2].toLowerCase();
+    if (m[1]) {
+      const at = stack.map((n) => n.tag).lastIndexOf(tag);
+      if (at > 0) stack.length = at;
+      continue;
+    }
+    const node: HtmlNode = { tag, open: m[0], children: [] };
+    top.children.push(node);
+    if (!VOID_TAGS.has(tag) && !m[3].trim().endsWith("/")) stack.push(node);
+  }
+  return root.children;
+}
+
+function serializeHtml(nodes: (HtmlNode | string)[]): string {
+  return nodes
+    .map((n) => (typeof n === "string" ? n : VOID_TAGS.has(n.tag) ? n.open : `${n.open}${serializeHtml(n.children)}</${n.tag}>`))
+    .join("");
+}
+
+/** A bullet that is a quote: its first real content is a quote link. */
+function isQuoteItem(node: HtmlNode | string): boolean {
+  if (typeof node === "string" || node.tag !== "li") return false;
+  const first = node.children.find((c) => typeof c !== "string" || c.trim());
+  return !!first && typeof first !== "string" && first.tag === "a" && first.open.includes("data-quote=");
+}
+
+/**
+ * Every quote is a top-level bullet. One that ended up inside a nested list
+ * — a quote added after a note under the previous quote, before this was
+ * fixed — is lifted back out to sit after the bullet it was under, keeping
+ * whatever is nested under it.
+ */
+function liftQuotes(nodes: (HtmlNode | string)[]): (HtmlNode | string)[] {
+  for (const node of nodes) {
+    if (typeof node === "string" || node.tag !== "ul") continue;
+    const next: (HtmlNode | string)[] = [];
+    for (const item of node.children) {
+      next.push(item);
+      if (typeof item === "string" || item.tag !== "li") continue;
+      next.push(...pullQuotes(item));
+    }
+    node.children = next;
+  }
+  return nodes;
+}
+
+/** Take the quote bullets out of the lists nested in a bullet, in order. */
+function pullQuotes(item: HtmlNode): HtmlNode[] {
+  const pulled: HtmlNode[] = [];
+  for (const child of item.children) {
+    if (typeof child === "string" || (child.tag !== "ul" && child.tag !== "ol")) continue;
+    const kept: (HtmlNode | string)[] = [];
+    for (const li of child.children) {
+      if (isQuoteItem(li)) {
+        const quote = li as HtmlNode;
+        pulled.push(quote, ...pullQuotes(quote));
+      } else {
+        kept.push(li);
+        if (typeof li !== "string" && li.tag === "li") pulled.push(...pullQuotes(li));
+      }
+    }
+    child.children = kept;
+  }
+  // A nested list left with no bullets goes too.
+  item.children = item.children.filter(
+    (c) => typeof c === "string" || !(c.tag === "ul" || c.tag === "ol") || c.children.some((li) => typeof li !== "string"),
+  );
+  return pulled;
 }
 
 /** A card's writing without its quotes — the AI is given those separately. */
