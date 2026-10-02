@@ -41,7 +41,43 @@ export type StoryItem = Base & {
 export type CardNoteItem = Base & { kind: "cardnote"; card: string; html: string };
 
 /** A free text box, anywhere on the board. Sanitised HTML. */
-export type BoxItem = Base & { kind: "box"; html: string };
+/** One pen stroke of a drawing: an SVG path in the drawing's own 600-wide space. */
+export type Stroke = { d: string; color: string; w: number };
+
+/**
+ * A free box, anywhere on the board: text (sanitised HTML), or a drawing, or
+ * an image. One kind for all three, so placing, tabs, the whiteboard and
+ * deleting treat them alike.
+ */
+export type BoxItem = Base & {
+  kind: "box";
+  html: string;
+  drawing?: Stroke[];
+  /** A drawing's height in its 600-wide space. */
+  height?: number;
+  /** An image, as a downscaled data: URL. */
+  image?: string;
+  caption?: string;
+};
+
+export const DRAWING_WIDTH = 600;
+
+/** Only an image this app made: a base64 PNG, JPEG or WebP data URL. */
+export function safeImage(src: string | undefined): string | undefined {
+  return src && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(src) ? src : undefined;
+}
+
+/** A stroke as synced data says it is: path commands and numbers only. */
+export function safeStrokes(strokes: unknown): Stroke[] {
+  if (!Array.isArray(strokes)) return [];
+  return strokes
+    .filter((s): s is Stroke => !!s && typeof s.d === "string" && /^[ML0-9 .-]+$/.test(s.d))
+    .map((s) => ({
+      d: s.d.slice(0, 20000),
+      color: /^#[0-9a-f]{6}$/i.test(s.color) ? s.color : "#111111",
+      w: Math.min(12, Math.max(1, Number(s.w) || 2)),
+    }));
+}
 
 /** Where something sits on the whiteboard. One per card, box or insight. */
 export type PosItem = Base & { kind: "pos"; target: string; x: number; y: number; w: number };
@@ -247,7 +283,17 @@ export function slimBoardsForSync(boards: Boards, budget = BOARDS_SYNC_BUDGET): 
     ) as Boards;
   const lighter = without(["insight", "suggest"]);
   if (size(lighter) <= budget) return lighter;
-  return without(["insight", "suggest", "pos", "link"]);
+  const leaner = without(["insight", "suggest", "pos", "link"]);
+  if (size(leaner) <= budget) return leaner;
+  // Pictures last of all: they stay with the account and on the device.
+  return Object.fromEntries(
+    Object.entries(leaner).map(([id, board]) => [
+      id,
+      Object.fromEntries(
+        Object.entries(board).map(([key, item]) => [key, item.kind === "box" && item.image ? { ...item, image: undefined } : item]),
+      ),
+    ]),
+  ) as Boards;
 }
 
 export function sameBoards(a: Boards, b: Boards): boolean {
