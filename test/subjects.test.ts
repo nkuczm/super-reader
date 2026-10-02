@@ -265,3 +265,11 @@ test("an embedded picture keeps the width it was sized to, and nothing else", as
   );
   assert.equal(sanitizeRichText('<img data-embed="box1" data-w="99999">'), '<img data-embed="box1">');
 });
+
+test("sanitizeRichText keeps a checklist and its ticks, nothing else", async () => {
+  const { sanitizeRichText } = await import("../lib/subjects");
+  assert.equal(
+    sanitizeRichText(`<ul data-check="" onclick="x"><li data-checked="true" style="a">done</li><li data-checked="false">todo</li></ul>`),
+    `<ul data-check=""><li data-checked="true">done</li><li>todo</li></ul>`,
+  );
+});

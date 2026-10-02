@@ -393,7 +393,8 @@ export default function SubjectPage(props: Props) {
     holder.querySelectorAll("li ul, li ol").forEach((list) => list.prepend(document.createTextNode("\n")));
     holder.querySelectorAll("li").forEach((li) => {
       const depth = Math.max(0, li.parentElement ? countAncestors(li.parentElement, "ul, ol") : 0);
-      li.prepend(document.createTextNode(`${"  ".repeat(depth)}• `));
+      const mark = li.parentElement?.hasAttribute("data-check") ? (li.getAttribute("data-checked") === "true" ? "☑" : "☐") : "•";
+      li.prepend(document.createTextNode(`${"  ".repeat(depth)}${mark} `));
     });
     holder.querySelectorAll("h2, h3, p, li, ul, ol").forEach((el) => el.append(document.createTextNode("\n")));
     const text = (holder.textContent ?? "").replace(/\n{3,}/g, "\n\n").trim();
@@ -489,6 +490,7 @@ export default function SubjectPage(props: Props) {
     removeQuotes,
     setCardNote,
     decide,
+    dismissInsight: (insight: InsightItem) => onBoard((current) => remove(current, insight.id)),
     setBox: (box: BoxItem, html: string) => onBoard((current) => put(current, { ...box, html, at: Date.now() })),
     updateBox: (box: BoxItem, change: Partial<BoxItem>) =>
       onBoard((current) => {
@@ -754,6 +756,7 @@ type Shared = {
   removeQuotes: (ids: string[]) => void;
   setCardNote: (card: Card, html: string) => void;
   decide: (suggestion: SuggestItem, state: "accepted" | "dismissed") => void;
+  dismissInsight: (insight: InsightItem) => void;
   setBox: (box: BoxItem, html: string) => void;
   resolveEmbed: (id: string) => string | undefined;
   embedBox: (id: string) => void;
@@ -830,6 +833,8 @@ function StoryCard({
         {own.map((insight) => (
           <div key={insight.id} className="subject-inline-insight">
             <span className="ai-tag">✦ {INSIGHT_LABEL[insight.type]}</span> {insight.text}
+            <button className="insight-dismiss" aria-label="Dismiss" title="Dismiss"
+              onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.dismissInsight(insight)}>×</button>
           </div>
         ))}
       </div>
@@ -878,13 +883,15 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
   );
 }
 
-function InsightCard({ insight, cards, dragHandle }: { insight: InsightItem; cards: Card[]; dragHandle?: (e: React.PointerEvent) => void }) {
+function InsightCard({ insight, cards, dragHandle, shared }: { insight: InsightItem; cards: Card[]; dragHandle?: (e: React.PointerEvent) => void; shared: Shared }) {
   const titles = insight.refs
     .map((ref) => cards.find((card) => card.id === ref)?.title)
     .filter(Boolean);
   return (
     <div className="subject-insight" onPointerDown={dragHandle}>
       <span className="ai-tag">✦ {INSIGHT_LABEL[insight.type]}</span>
+      <button className="insight-dismiss" aria-label="Dismiss" title="Dismiss"
+              onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.dismissInsight(insight)}>×</button>
       <p>{insight.text}</p>
       {titles.length > 0 && <div className="subject-insight-refs">Draws on: {titles.join(" · ")}</div>}
     </div>
@@ -1009,6 +1016,8 @@ function DocumentView(
             <div key={insight.id} className="subject-insight-row">
               <span className="ai-tag">{INSIGHT_LABEL[insight.type]}</span>
               <p>{insight.text}</p>
+              <button className="insight-dismiss" aria-label="Dismiss" title="Dismiss"
+              onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.dismissInsight(insight)}>×</button>
             </div>
           ))}
         </div>
@@ -1103,7 +1112,7 @@ function Whiteboard(
     })),
     ...shared.insights.map((insight) => ({
       id: insight.id, kind: "insight" as const,
-      render: (d: (e: React.PointerEvent) => void) => <InsightCard insight={insight} cards={shared.cards} dragHandle={d} />,
+      render: (d: (e: React.PointerEvent) => void) => <InsightCard insight={insight} cards={shared.cards} dragHandle={d} shared={shared} />,
     })),
     ...shared.suggestions.map((suggestion) => ({
       id: suggestion.id, kind: "suggest" as const,
@@ -1199,7 +1208,6 @@ function Whiteboard(
     .flatMap((insight) => insight.refs.map((ref) => ({ id: `${insight.id}->${ref}`, from: insight.id, to: ref })))
     .filter((link) => showAiLinks || (focus !== null && (link.from === focus || link.to === focus)));
 
-  const cardIds = new Set(shared.cards.map((c) => c.id));
   const labelIds = new Set(shared.boxes.filter((b) => b.label).map((b) => b.id));
   /** The section label at a point on the board, if any. */
   /**
@@ -1275,6 +1283,9 @@ function Whiteboard(
     event.stopPropagation();
     // Text fields are for typing, not for dragging.
     if ((event.target as HTMLElement).closest(".rich-body, input, textarea")) return;
+    // A drag moves the card, never selects or drags the text on the page.
+    event.preventDefault();
+    window.getSelection()?.removeAllRanges();
     const start = positions.get(id);
     if (!start) return;
     const origin = { px: event.clientX, py: event.clientY, x: start.x, y: start.y, w: start.w };
@@ -1308,6 +1319,7 @@ function Whiteboard(
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
       setDrag(null);
       if (moved) {
         // The click that ends a drag must not open the story it dragged.
@@ -1318,7 +1330,7 @@ function Whiteboard(
         window.addEventListener("click", swallow, { capture: true, once: true });
         setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 0);
       }
-      // A story dropped onto a section label joins that section: it lines up
+      // Anything dropped onto a section label joins that section: it lines up
       // under the label, below the stories already there, and is connected
       // to it.
       if (moved && group.size > 0) {
@@ -1331,7 +1343,7 @@ function Whiteboard(
         ]);
         return;
       }
-      const target = moved && cardIds.has(id) ? labelUnder(last.x + origin.w / 2, last.y + 20, id) : null;
+      const target = moved && !labelIds.has(id) ? labelUnder(last.x + origin.w / 2, last.y + 20, id) : null;
       if (target) {
         const label = positions.get(target)!;
         const linked = new Set(
@@ -1341,7 +1353,7 @@ function Whiteboard(
         );
         let y = label.y + (sizes[target]?.h ?? 56) + 14;
         for (const [other, rect] of [...positions.entries()].sort((a, b) => a[1].y - b[1].y)) {
-          if (other === id || !linked.has(other) || !cardIds.has(other)) continue;
+          if (other === id || !linked.has(other) || labelIds.has(other)) continue;
           if (Math.abs(rect.x - label.x) < 40) y = Math.max(y, rect.y + (sizes[other]?.h ?? 160) + 14);
         }
         const [from, to] = [target, id].sort();
@@ -1358,6 +1370,7 @@ function Whiteboard(
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
   };
 
   const startPan = (event: React.PointerEvent) => {
@@ -1366,6 +1379,10 @@ function Whiteboard(
     // A plain drag over empty board draws a box that selects what it touches;
     // Shift-drag or the middle button pans (as do the wheel and the trackpad).
     if (event.button === 0 && !event.shiftKey && !spaceHeld.current) {
+      // Selecting cards, not the text across the page.
+      event.preventDefault();
+      window.getSelection()?.removeAllRanges();
+      (document.activeElement as HTMLElement | null)?.blur?.();
       const a = toBoard(event.clientX, event.clientY);
       let box = { x0: a.x, y0: a.y, x1: a.x, y1: a.y };
       setSelected(new Set());
@@ -1638,7 +1655,7 @@ function Whiteboard(
       )}
       <div
         ref={canvas}
-        className={`wb-canvas${connecting !== false ? " connecting" : ""}`}
+        className={`wb-canvas${connecting !== false ? " connecting" : ""}${marquee ? " selecting" : ""}`}
         onPointerDownCapture={markBoardUsed}
         onPointerDown={startPan}
         onDoubleClick={(event) => {

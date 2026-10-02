@@ -779,7 +779,10 @@ export function sanitizeRichText(html: string): string {
       }
     } else {
       stack.push(tag);
-      out.push(`<${tag}>`);
+      // A checklist: a list marked as one, and each item ticked or not.
+      if (tag === "ul" && /\bdata-check\b/.test(match[2])) out.push(`<ul data-check="">`);
+      else if (tag === "li" && /\bdata-checked=["']?true/.test(match[2])) out.push(`<li data-checked="true">`);
+      else out.push(`<${tag}>`);
     }
   }
   while (stack.length) {
