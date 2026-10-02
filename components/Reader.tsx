@@ -96,6 +96,7 @@ import {
   metaOf,
   addQuoteNote,
   quoteNotesFor,
+  cardNoteId,
   loadBoards,
   mergeBoards,
   pruneBoards,
@@ -165,6 +166,7 @@ import type { WatchMarks } from "@/lib/alerts";
 import type { SavedRemoval } from "@/lib/saved";
 import { useAccount, type Writing } from "./useAccount";
 import type { ArticleMark } from "./ArticleReader";
+import type { InboxItem } from "@/lib/inbox";
 import SignInCard, { AccountStrip, describe as describeSave } from "./SignInCard";
 import {
   addHighlight,
@@ -1808,6 +1810,127 @@ export default function Reader() {
     },
     [commitNotes],
   );
+
+  /* ---------- the browser extension's inbox (lib/inbox.ts) ---------- */
+
+  /**
+   * File what the extension saved: the article into Saved with its text in
+   * the offline store — the copy the reader's own browser read — and, when a
+   * subject was chosen, the story or the selected quote (and a note under
+   * it) into that subject. Then the inbox lets go of it.
+   */
+  const fileFromExtension = useCallback(
+    (item: InboxItem) => {
+      const article = item.article;
+      const link = article.url;
+      if (!link) return;
+      void writeCached(article, link);
+      if (!savedRef.current.some((a) => canonicalUrl(a.link) === canonicalUrl(link))) {
+        const entry: SavedArticle = {
+          id: `ext:${link}`,
+          title: article.title,
+          link,
+          publishedAt: article.publishedAt,
+          summary: article.excerpt,
+          author: article.byline,
+          sourceTitle: article.siteName,
+          savedAt: Date.now(),
+        };
+        setSaved((current) => {
+          const next = [entry, ...current.filter((a) => canonicalUrl(a.link) !== canonicalUrl(link))];
+          saveSaved(next);
+          return next;
+        });
+      }
+      let noteId = item.subjectId && notesRef.current.some((n) => n.id === item.subjectId) ? item.subjectId : undefined;
+      if (!noteId && item.newSubject) noteId = createNote(item.newSubject);
+      if (!noteId) return;
+      const target = noteId;
+      const story = { link, title: article.title, source: article.siteName, publishedAt: article.publishedAt, author: article.byline };
+      if (item.quote) {
+        const quoteId = newId();
+        commitNotes((current) =>
+          appendQuote(current, target, {
+            id: quoteId,
+            kind: "quote",
+            text: item.quote!,
+            link,
+            articleTitle: article.title,
+            sourceTitle: article.siteName,
+            publishedAt: article.publishedAt,
+            author: article.byline,
+            at: Date.now(),
+          }),
+        );
+        commitBoard(target, (board) => placeNew(board, canonicalUrl(link)));
+        if (item.note) {
+          const note = notesRef.current.find((n) => n.id === target);
+          const html = `<ul><li>${item.note.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</li></ul>`;
+          if (note) commitBoard(target, (board) => addQuoteNote(note, board, quoteId, html));
+        }
+      } else {
+        commitBoard(target, (board) => {
+          let next = placeNew(addStory(board, story), canonicalUrl(link));
+          if (item.note) {
+            const id = canonicalUrl(link);
+            const text = item.note.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            next = putItem(next, { id: cardNoteId(id), kind: "cardnote", card: id, html: `<p>${text}</p>`, at: Date.now() });
+          }
+          return next;
+        });
+      }
+      touchSubject(target);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [createNote, commitNotes, commitBoard, touchSubject],
+  );
+
+  const checkInbox = useCallback(async () => {
+    const code = syncCode;
+    if (!code) return;
+    try {
+      const res = await fetch(`/api/inbox?code=${encodeURIComponent(code)}`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = (await res.json()) as { items?: InboxItem[] };
+      const items = data.items ?? [];
+      if (items.length === 0) return;
+      for (const item of items) fileFromExtension(item);
+      await fetch("/api/inbox", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code, ids: items.map((i) => i.id) }),
+      });
+      setPasteNotice({
+        kind: "done",
+        text: items.length === 1 ? `Saved from Chrome: ${items[0].article.title}` : `Saved ${items.length} stories from Chrome.`,
+      });
+    } catch {
+      /* the next visit tries again */
+    }
+  }, [syncCode, fileFromExtension]);
+
+  // Collected on arrival and whenever the window comes back into view.
+  useEffect(() => {
+    if (!ready || !syncCode) return;
+    void checkInbox();
+    const onFocus = () => void checkInbox();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [ready, syncCode, checkInbox]);
+
+  // The extension offers subjects by name; leave it the current list.
+  const subjectIndex = useMemo(() => JSON.stringify(notes.map((n) => ({ id: n.id, name: n.name }))), [notes]);
+  useEffect(() => {
+    if (!ready || !syncCode) return;
+    const timer = setTimeout(() => {
+      void fetch("/api/inbox", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code: syncCode, subjects: JSON.parse(subjectIndex) }),
+      }).catch(() => {});
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [ready, syncCode, subjectIndex]);
 
   /**
    * A highlighted passage becomes a quote, and the article behind it becomes

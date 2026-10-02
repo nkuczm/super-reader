@@ -1,0 +1,21 @@
+:root { color-scheme: light dark; --accent: #2563eb; --border: #e4e4e7; --dim: #71717a; --bg: #fff; --sub: #f4f4f5; }
+@media (prefers-color-scheme: dark) { :root { --border: #3f3f46; --dim: #a1a1aa; --bg: #18181b; --sub: #27272a; } }
+body { margin: 0; width: 340px; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); }
+main { padding: 14px; }
+h1 { font-size: 16px; margin: 0 0 6px; }
+p { margin: 0 0 10px; color: var(--dim); font-size: 13px; }
+input, select, textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: inherit; margin-bottom: 8px; }
+textarea { resize: vertical; }
+.primary { width: 100%; padding: 9px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+.primary:disabled { opacity: 0.5; cursor: default; }
+.link { border: 0; background: none; color: var(--dim); font: inherit; font-size: 12px; cursor: pointer; padding: 0; }
+.page { background: var(--sub); border-radius: 8px; padding: 9px 10px; margin-bottom: 10px; }
+.title { font-weight: 650; line-height: 1.3; }
+.meta { font-size: 12px; color: var(--dim); margin-top: 2px; }
+.label { display: block; font-size: 12px; font-weight: 600; color: var(--dim); margin: 0 0 4px; }
+blockquote { margin: 0 0 10px; padding: 4px 0 4px 10px; border-left: 3px solid var(--accent); font-size: 13px; max-height: 90px; overflow: auto; }
+.status { margin: 8px 0 0; color: inherit; }
+.error, .status.error { color: #dc2626; }
+.status.done { color: #16a34a; }
+details { margin: 0 0 8px; font-size: 12px; color: var(--dim); }
+footer { margin-top: 10px; text-align: right; }
