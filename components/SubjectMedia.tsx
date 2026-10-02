@@ -14,7 +14,7 @@ function EmbedGrip({ id }: { id: string }) {
     <span
       className="embed-grip"
       draggable
-      title="Drag into a text box to set it in the text"
+      title="Drag into a text box to set it in the text — then drag its corner to size it"
       onPointerDown={(e) => e.stopPropagation()}
       onDragStart={(event) => {
         event.dataTransfer.setData(EMBED_TYPE, id);

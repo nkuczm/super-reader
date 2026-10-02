@@ -704,7 +704,8 @@ export function sanitizeRichText(html: string): string {
     // text and past its size limit.
     .replace(/<img\b[^>]*>/gi, (tag) => {
       const id = tag.match(/data-embed=["']?([A-Za-z0-9_:-]{1,60})/)?.[1];
-      return id ? `<img data-embed="${id}">` : "";
+      const w = Number(tag.match(/data-w=["']?(\d{2,4})/)?.[1]);
+      return id ? `<img data-embed="${id}"${w >= 40 && w <= 2000 ? ` data-w="${w}"` : ""}>` : "";
     })
     .slice(0, MAX_HTML)
     .replace(/<(script|style|iframe|object|embed|template)[\s\S]*?<\/\1>/gi, "")
@@ -758,7 +759,9 @@ export function sanitizeRichText(html: string): string {
     }
     if (tag === "img") {
       const id = match[2].match(/data-embed="([A-Za-z0-9_:-]{1,60})"/)?.[1];
-      if (id && !closing) out.push(`<img data-embed="${id}">`);
+      // The width the writer dragged it to, if they did.
+      const w = Number(match[2].match(/data-w="(\d{2,4})"/)?.[1]);
+      if (id && !closing) out.push(`<img data-embed="${id}"${w >= 40 && w <= 2000 ? ` data-w="${w}"` : ""}>`);
       continue;
     }
     if (closing) {
