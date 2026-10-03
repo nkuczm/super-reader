@@ -2239,3 +2239,14 @@
 .wb-far-title { transition: opacity 0.35s ease; }
 /* Touch devices: no per-card transitions on the board — each would be its own compositing layer. */
 @media (pointer: coarse) { .wb-node { transition: none; } }
+
+/* ---------- phone: the text toolbar rides just above the keyboard ---------- */
+.rich-tools.docked {
+  position: fixed; left: 0; right: 0; z-index: 95; height: auto; opacity: 1; margin: 0;
+  padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px)); gap: 4px;
+  background: color-mix(in srgb, var(--bg) 96%, transparent); backdrop-filter: blur(8px);
+  border-top: 1px solid var(--border); box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.08);
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none; flex-wrap: nowrap;
+}
+.rich-tools.docked::-webkit-scrollbar { display: none; }
+.rich-tools.docked button { flex-shrink: 0; min-height: 34px; padding: 4px 10px; }

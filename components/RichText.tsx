@@ -253,6 +253,44 @@ export default function RichText({
 
   const swipe = useRef<{ x: number; y: number } | null>(null);
 
+  /**
+   * On a phone, while this box is being written in, the toolbar rides just
+   * above the keyboard instead of sitting at the top of a box that may be a
+   * long scroll away. The visual viewport says where the keyboard begins;
+   * the page keeps room under the caret so the line being typed is never
+   * behind the toolbar.
+   */
+  const tools = useRef<HTMLDivElement | null>(null);
+  const [docked, setDocked] = useState(false);
+  const [kbBottom, setKbBottom] = useState(0);
+  useEffect(() => {
+    if (!docked) return;
+    const vv = window.visualViewport;
+    const scroller = wrap.current?.closest<HTMLElement>(".main") ?? null;
+    const place = () => {
+      const bottom = vv ? Math.max(0, window.innerHeight - (vv.offsetTop + vv.height)) : 0;
+      setKbBottom(bottom);
+      // The caret's line stays above the toolbar.
+      const sel = window.getSelection();
+      const bar = tools.current?.getBoundingClientRect();
+      if (!sel?.rangeCount || !bar || !scroller) return;
+      const r = sel.getRangeAt(0).getBoundingClientRect();
+      if (r.height && r.bottom > bar.top - 8) scroller.scrollBy({ top: r.bottom - bar.top + 16 });
+    };
+    if (scroller) scroller.style.scrollPaddingBottom = "64px";
+    place();
+    vv?.addEventListener("resize", place);
+    vv?.addEventListener("scroll", place);
+    document.addEventListener("selectionchange", place);
+    return () => {
+      vv?.removeEventListener("resize", place);
+      vv?.removeEventListener("scroll", place);
+      document.removeEventListener("selectionchange", place);
+      if (scroller) scroller.style.scrollPaddingBottom = "";
+    };
+  }, [docked]);
+  const coarse = () => typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
+
   /** The list the caret is in, if any. */
   function listAtCaret(): HTMLUListElement | null {
     const node = window.getSelection()?.anchorNode;
@@ -320,7 +358,11 @@ export default function RichText({
   }
 
   return (
-    <div className={`rich ${className ?? ""}`} ref={wrap} onMouseLeave={() => setPinFor(null)}>
+    <div className={`rich ${className ?? ""}`} ref={wrap} onMouseLeave={() => setPinFor(null)}
+      onFocus={() => coarse() && setDocked(true)}
+      onBlur={() => setTimeout(() => {
+        if (!wrap.current?.contains(document.activeElement)) setDocked(false);
+      }, 0)}>
       {pinFor && (
         <span
           className="embed-size-pin"
@@ -343,7 +385,8 @@ export default function RichText({
           ↗ Go to passage
         </button>
       )}
-      <div className="rich-tools" onMouseDown={(event) => event.preventDefault()}>
+      <div ref={tools} className={`rich-tools${docked ? " docked" : ""}`} style={docked ? { bottom: kbBottom } : undefined}
+        onMouseDown={(event) => event.preventDefault()}>
         <button type="button" title="Bold (⌘B)" onClick={() => format("bold")}><b>B</b></button>
         <button type="button" title="Italic (⌘I)" onClick={() => format("italic")}><i>I</i></button>
         <button type="button" title="Highlight (again to remove)" onClick={toggleHighlight}>
