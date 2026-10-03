@@ -2196,3 +2196,4 @@
 .reader-find { position: sticky; top: 8px; z-index: 5; margin: 6px 0 14px; padding: 6px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06); color: var(--text-dim); }
 ::highlight(transcript-find) { background-color: rgba(250, 204, 21, 0.45); }
 ::highlight(transcript-find-on) { background-color: rgba(245, 158, 11, 0.9); color: #000; }
+.wb-menu button:disabled { color: var(--text-dim); cursor: default; background: none; }

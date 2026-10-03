@@ -1309,7 +1309,20 @@ function Whiteboard(
   const [drag, setDrag] = useState<{ id: string; x: number; y: number; dx: number; dy: number; group: Map<string, { x: number; y: number; w: number }> } | null>(null);
   /** Nodes picked by dragging a box over them, to move together. */
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  /** The box being dragged out over empty board, in board coordinates. */
+  /** The right-click menu on a block: where it opened, and for which. */
+  const [nodeMenu, setNodeMenu] = useState<{ id: string; left: number; top: number } | null>(null);
+  useEffect(() => {
+    if (!nodeMenu) return;
+    const close = () => setNodeMenu(null);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setNodeMenu(null);
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", esc);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", esc);
+    };
+  }, [nodeMenu]);
+  /** The block box being dragged out over empty board, in board coordinates. */
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   /** A card being widened or narrowed, by its right-hand edge. */
   /** A card being resized, and any others selected with it — each by the same amount. */
@@ -2037,6 +2050,25 @@ function Whiteboard(
           <span className="wb-hint">Drag by the title · drag empty space to select several · Shift-drag to pan · double-click for a text box</span>
         )}
       </div>
+      {nodeMenu && (() => {
+        // The block right-clicked, or the whole selection if it is part of one.
+        const ids = selected.has(nodeMenu.id) ? [...selected] : [nodeMenu.id];
+        const linked = live(board).filter(
+          (i): i is LinkItem => i.kind === "link" && (ids.includes((i as LinkItem).from) || ids.includes((i as LinkItem).to)),
+        );
+        return (
+          <div className="wb-menu" role="menu" style={{ left: nodeMenu.left, top: nodeMenu.top }} onPointerDown={(e) => e.stopPropagation()}>
+            <button role="menuitem" disabled={linked.length === 0}
+              onClick={() => {
+                onBoard((current) => linked.reduce((next, l) => remove(next, l.id), current ?? {}));
+                setNodeMenu(null);
+              }}>
+              <span className="wb-menu-icon">⤫</span>
+              {linked.length === 0 ? "No connections" : `Unlink (${linked.length} connection${linked.length === 1 ? "" : "s"})`}
+            </button>
+          </div>
+        );
+      })()}
       {menu && (
         <div className="wb-menu" role="menu" style={{ left: menu.left, top: menu.top }} onPointerDown={(e) => e.stopPropagation()}>
           <button role="menuitem" onClick={() => { void storyFromClipboard(menu); setMenu(null); }}>
@@ -2128,6 +2160,14 @@ function Whiteboard(
                 }}
                 className={`wb-node kind-${node.kind}${connecting === node.id ? " picked" : ""}${drag?.id === node.id || drag?.group.has(node.id) ? " dragging" : ""}${selected.has(node.id) ? " selected" : ""}`}
                 style={{ left: pos.x, top: pos.y, width: pos.w }}
+                onContextMenu={(event) => {
+                  // Typing keeps the browser's own menu (spelling, copy and paste).
+                  if ((event.target as HTMLElement).closest(".rich-body, input, textarea")) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const box = canvas.current!.getBoundingClientRect();
+                  setNodeMenu({ id: node.id, left: event.clientX - box.left, top: event.clientY - box.top });
+                }}
                 onPointerEnter={() => setFocus(node.id)}
                 onPointerLeave={() => setFocus((current) => (current === node.id ? null : current))}
                 onPointerDownCapture={(event) => {
