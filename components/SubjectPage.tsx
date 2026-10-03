@@ -2088,6 +2088,25 @@ function Whiteboard(
         })
     : [];
   const grouped = new Set(sections.flatMap((sec) => sec.rects.map((r) => r.id)));
+  // Headers that would collide are nudged apart, top to bottom, after measuring.
+  const titleEls = useRef(new Map<string, HTMLDivElement>());
+  useLayoutEffect(() => {
+    const els = [...titleEls.current.values()];
+    for (const el of els) el.style.marginTop = "0px";
+    if (els.length < 2) return;
+    const placed: DOMRect[] = [];
+    for (const el of els.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)) {
+      let r = el.getBoundingClientRect();
+      for (let guard = 0; guard < 20; guard++) {
+        const hit = placed.find((p) => r.left < p.right + 6 && r.right > p.left - 6 && r.top < p.bottom + 4 && r.bottom > p.top - 4);
+        if (!hit) break;
+        const shift = hit.bottom + 6 - r.top;
+        el.style.marginTop = `${parseFloat(el.style.marginTop || "0") + shift / view.zoom}px`;
+        r = el.getBoundingClientRect();
+      }
+      placed.push(r);
+    }
+  });
 
   const line = (key: string, from: string, to: string, className: string, onRemove?: () => void) => {
     const a = positions.get(from);
@@ -2263,7 +2282,7 @@ function Whiteboard(
         }}
       >
         <div className="wb-layer" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}>
-          <svg className="wb-lines" width={1} height={1}>
+          <svg className="wb-lines" width={1} height={1} style={haze > 0 ? { filter: `blur(${blurPx / view.zoom}px)`, transition: "filter 0.35s ease" } : undefined}>
             {aiLinks.map((link) => line(link.id, link.from, link.to, "wb-line ai"))}
             {userLinks.map((link) =>
               line(link.id, link.from, link.to, "wb-line", () => onBoard((current) => remove(current, link.id))),
@@ -2286,18 +2305,6 @@ function Whiteboard(
                 <div key={r.id} className="wb-far-blob"
                   style={{ left: r.x, top: r.y, width: r.w, height: r.h, background: sec.color, opacity: 0.5 * tint, filter: `blur(${(blurPx * 2) / view.zoom}px)` }} />
               ))}
-              <div className="wb-far-title"
-                style={{
-                  opacity: Math.min(1, haze * 1.4),
-                  left: sec.box.x0, top: sec.box.y0, width: sec.box.x1 - sec.box.x0, height: sec.box.y1 - sec.box.y0,
-                  // As big as reads at a glance, but each word fits the patch's width.
-                  fontSize: Math.min(
-                    22 / view.zoom,
-                    ((sec.box.x1 - sec.box.x0) * 0.88) / Math.max(3, Math.max(...sec.text.split(/\s+/).map((w) => w.length)) * 0.62),
-                  ),
-                }}>
-                {sec.text}
-              </div>
             </div>
           ))}
           {nodes.map((node) => {
@@ -2339,6 +2346,28 @@ function Whiteboard(
                   title="Drag to resize"
                   onPointerDown={startResize(node.id)}
                 />
+              </div>
+            );
+          })}
+          {/* Section headers over everything, never blurred, all the same size on screen. */}
+          {sections.map((sec) => {
+            const cx = (sec.box.x0 + sec.box.x1) / 2;
+            const cy = (sec.box.y0 + sec.box.y1) / 2;
+            const fit = ((sec.box.x1 - sec.box.x0) * view.zoom * 0.9) / Math.max(4, Math.max(...sec.text.split(/\s+/).map((w) => w.length)) * 0.6);
+            const px = Math.min(40, Math.max(22, fit));
+            return (
+              <div key={`title-${sec.id}`} className="wb-far-title" aria-hidden="true"
+                style={{
+                  left: cx, top: cy, opacity: Math.min(1, haze * 1.4),
+                  fontSize: px / view.zoom,
+                  // Wraps to about its section's width, never narrower than a few words.
+                  maxWidth: Math.max(sec.box.x1 - sec.box.x0, 160 / view.zoom),
+                }}
+                ref={(el) => {
+                  if (el) titleEls.current.set(sec.id, el);
+                  else titleEls.current.delete(sec.id);
+                }}>
+                {sec.text}
               </div>
             );
           })}
