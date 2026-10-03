@@ -2193,10 +2193,18 @@ export default function Reader() {
   }
 
   function updateSettings(next: Settings) {
-    setSettings(next);
-    saveSettings(next);
-    // Turning Subjects on, or choosing an AI, is a choice for every device.
-    if (!sameSharedPrefs(prefsRef.current, next)) {
+    // Turning Subjects on or off, or choosing an AI, is a choice for every
+    // device — but only when this change actually makes it. Changing the
+    // sort, say, must not re-broadcast whatever this device happens to hold
+    // for Subjects: a device whose copy was stale used to switch Subjects off
+    // everywhere that way (3 Oct 2026).
+    const madeChoice = !sameSharedPrefs(sharedPrefsOf(settings, 0), next);
+    const settled = madeChoice
+      ? next
+      : { ...next, subjects: prefsRef.current.subjects, aiProvider: prefsRef.current.aiProvider, openaiModel: prefsRef.current.openaiModel };
+    setSettings(settled);
+    saveSettings(settled);
+    if (madeChoice) {
       const stamped = sharedPrefsOf(next, Math.max(Date.now(), prefsRef.current.at + 1));
       prefsRef.current = stamped;
       setPrefs(stamped);
