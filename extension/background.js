@@ -38,12 +38,14 @@ async function capture(tab) {
       return;
     }
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["vendor/Readability.js", "extract.js"] });
+    // A YouTube video: its transcript, as this browser sees it, is the text.
+    const youtube = /(^|\.)youtube\.com$/.test(new URL(tab.url).hostname);
     const [{ result: page }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: () => window.__superReaderExtract(),
+      func: youtube ? () => window.__superReaderYoutube() : () => window.__superReaderExtract(),
     });
     if (!page || !page.html) {
-      await badge(tab.id, "?", "No article found on this page to scan in.");
+      await badge(tab.id, "?", youtube ? "This video has no transcript to scan in." : "No article found on this page to scan in.");
       return;
     }
     page.url = withoutMark(page.url);

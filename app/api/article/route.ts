@@ -1,3 +1,4 @@
+import { youtubeId } from "@/lib/youtube";
 import { NextResponse } from "next/server";
 import {
   extractArticle,
@@ -203,6 +204,22 @@ export async function GET(request: Request) {
     target.toString(),
     decodeKeysHeader(request.headers.get(KEYS_HEADER)),
   );
+
+  // A YouTube video has no prose for the extractor to find (and its page is
+  // a bot check to a server): straight to its oEmbed preview. The transcript
+  // comes from the reader's browser — lib/youtube.ts.
+  if (youtubeId(target.toString())) {
+    try {
+      const video = await previewFromMetadata(target.toString(), Math.min(12_000, remaining()));
+      if (video) {
+        return NextResponse.json(video, {
+          headers: { "cache-control": "public, max-age=600" },
+        });
+      }
+    } catch {
+      /* fall through to the general path */
+    }
+  }
 
   try {
     const article = await extractArticle(

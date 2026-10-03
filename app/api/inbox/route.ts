@@ -87,6 +87,8 @@ export async function POST(request: Request) {
     siteName: str(page.siteName, 200),
     publishedAt: str(page.publishedAt, 60),
   });
+  // A video's transcript, read in the reader's browser by the extension.
+  if (page.transcript === true) article.transcript = true;
   const item: InboxItem = {
     id: `x${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`,
     savedAt: Date.now(),

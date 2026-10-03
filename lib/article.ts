@@ -21,6 +21,8 @@ export type ReadableArticle = {
   html: string;
   wordCount: number;
   truncated: boolean;
+  /** The text is a video's transcript: the reader offers to search it. */
+  transcript?: boolean;
   /** Files this article points at — the filed PDF, say. */
   attachments?: Attachment[];
   /**

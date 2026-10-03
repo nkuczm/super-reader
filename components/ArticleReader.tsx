@@ -9,6 +9,7 @@ import { EXTRACT_VERSION, readCached, writeCached } from "@/lib/offline";
 import { loadSyncCode } from "@/lib/store";
 import { sanitizeRichText } from "@/lib/subjects";
 import { cleanPastedHtml } from "@/lib/paste";
+import { parsePastedTranscript, transcriptArticleHtml, youtubeId } from "@/lib/youtube";
 import { timeAgo, hostOf } from "./format";
 import QuoteToNote from "./QuoteToNote";
 import { findQuoteRange } from "@/lib/highlight";
@@ -120,20 +121,75 @@ export default function ArticleReader({
   const [error, setError] = useState<string | null>(null);
   /** The article's text pasted in by hand, for a site that will not give it to us. */
   const [pasting, setPasting] = useState(false);
+  /** Searching a video's transcript: matches are marked without touching the text. */
+  const [find, setFind] = useState("");
+  const [findAt, setFindAt] = useState(0);
+  const [findCount, setFindCount] = useState(0);
+  const bodyRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const registry = (globalThis.CSS as unknown as { highlights?: Map<string, unknown> } | undefined)?.highlights;
+    const HighlightCtor = (globalThis as unknown as { Highlight?: new (...r: Range[]) => unknown }).Highlight;
+    const clear = () => {
+      registry?.delete("transcript-find");
+      registry?.delete("transcript-find-on");
+    };
+    const needle = find.trim().toLowerCase();
+    const root = bodyRef.current?.querySelector(".prose") ?? bodyRef.current;
+    if (!needle || !root) {
+      clear();
+      setFindCount(0);
+      return clear;
+    }
+    const ranges: Range[] = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node && ranges.length < 2000; node = walker.nextNode()) {
+      const text = (node.textContent ?? "").toLowerCase();
+      for (let i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + needle.length)) {
+        const r = document.createRange();
+        r.setStart(node, i);
+        r.setEnd(node, i + needle.length);
+        ranges.push(r);
+      }
+    }
+    setFindCount(ranges.length);
+    if (ranges.length === 0) {
+      clear();
+      return clear;
+    }
+    const at = ((findAt % ranges.length) + ranges.length) % ranges.length;
+    if (registry && HighlightCtor) {
+      registry.set("transcript-find", new HighlightCtor(...ranges));
+      registry.set("transcript-find-on", new HighlightCtor(ranges[at]));
+    }
+    const rect = ranges[at].getBoundingClientRect();
+    const scroller = bodyRef.current?.closest<HTMLElement>(".main, .reader-scroll") ?? document.scrollingElement;
+    if (scroller && (rect.top < 120 || rect.bottom > window.innerHeight - 80)) {
+      scroller.scrollBy({ top: rect.top - window.innerHeight / 3, behavior: "smooth" });
+    }
+    return clear;
+  }, [find, findAt, article]);
   const pasteBox = useRef<HTMLDivElement | null>(null);
   const keepPasted = () => {
     const box = pasteBox.current;
     const words = (box?.innerText ?? "").trim().split(/\s+/).filter(Boolean).length;
     if (!box || words < 5) return;
-    const html = sanitizeRichText(box.innerHTML);
+    // A video's transcript, copied from YouTube's "Show transcript" panel:
+    // its times become links into the video, its lines paragraphs.
+    const video = youtubeId(url);
+    const lines = video ? parsePastedTranscript(box.innerText) : [];
+    const html = video && lines.length
+      ? sanitizeRichText((article?.html ?? "").replace(/<h2>Transcript[\s\S]*$/, "") + transcriptArticleHtml(video, lines))
+      : sanitizeRichText(box.innerHTML);
     const pasted: ReadableArticle = {
+      ...(article ?? {}),
       via: "page",
       url,
       title: article?.title || fallbackTitle || hostOf(url),
-      siteName: hostOf(url),
+      siteName: article?.siteName || hostOf(url),
       html,
       wordCount: words,
       truncated: false,
+      transcript: Boolean(video && lines.length) || undefined,
     };
     setArticle(pasted);
     setError(null);
@@ -506,6 +562,38 @@ export default function ArticleReader({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  const isVideo = Boolean(youtubeId(url));
+  const pastePanel = pasting ? (
+              <div className="reader-paste">
+                <p className="sub">
+                  Open the story on the site, select all of it, copy, and paste it here. It is kept on this device as the
+                  article&apos;s text, so highlights and quotes work as usual.
+                </p>
+                <div
+                  ref={pasteBox}
+                  className="reader-paste-box prose"
+                  contentEditable
+                  suppressContentEditableWarning
+                  data-placeholder="Paste the article here…"
+                  onPaste={(event) => {
+                    // Formatting is kept but cleaned; plain text becomes paragraphs.
+                    event.preventDefault();
+                    const html = event.clipboardData.getData("text/html");
+                    const text = event.clipboardData.getData("text/plain");
+                    const clean = html
+                      ? sanitizeRichText(cleanPastedHtml(html))
+                      : text.split(/\n\s*\n|\n/).map((l) => l.trim()).filter(Boolean)
+                          .map((l) => `<p>${l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>`).join("");
+                    document.execCommand("insertHTML", false, clean);
+                  }}
+                />
+                <div className="reader-error-actions">
+                  <button className="btn small" onClick={keepPasted}>Use this text</button>
+                  <button className="btn ghost small" onClick={() => setPasting(false)}>Cancel</button>
+                </div>
+              </div>
+  ) : null;
+
   return (
     <div className="reader">
       <div className="reader-bar">
@@ -636,6 +724,7 @@ export default function ArticleReader({
       </div>
 
       <article
+        ref={bodyRef}
         className={`reader-body${wide && comments.length > 0 ? " with-margin" : ""}`}
         onClick={(event) => {
           // A link in the story opens in its own tab, leaving the reader where it was.
@@ -676,6 +765,43 @@ export default function ArticleReader({
             .filter(Boolean)
             .join("  ·  ")}
         </p>
+
+        {article?.transcript && (
+          <div className="transcript-find reader-find" role="search">
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+              <circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" strokeWidth="2" />
+              <path d="M15 15l5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+            <input
+              placeholder="Search the transcript"
+              value={find}
+              onChange={(e) => { setFind(e.target.value); setFindAt(0); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); setFindAt((n) => n + (e.shiftKey ? -1 : 1)); }
+                if (e.key === "Escape") setFind("");
+              }}
+            />
+            <span className="transcript-count">
+              {find.trim() ? (findCount ? `${((findAt % findCount) + findCount) % findCount + 1} of ${findCount}` : "No matches") : ""}
+            </span>
+            <button disabled={!findCount} aria-label="Previous match" onClick={() => setFindAt((n) => n - 1)}>↑</button>
+            <button disabled={!findCount} aria-label="Next match" onClick={() => setFindAt((n) => n + 1)}>↓</button>
+          </div>
+        )}
+
+        {isVideo && article && !article.transcript && !error && (
+          <div className="reader-error reader-video">
+            <p>No transcript yet — YouTube won&apos;t give it to the app&apos;s server, but your browser can get it.</p>
+            <div className="reader-error-actions">
+              <a className="btn small" href={`${url.split("#")[0]}#super-reader-capture`} target="_blank" rel="opener"
+                title="Needs the Super Reader Chrome extension — it reads the transcript in your browser and brings it back here">
+                Get the transcript
+              </a>
+              <button className="btn ghost small" onClick={() => setPasting((v) => !v)}>Paste the transcript</button>
+            </div>
+            {pastePanel}
+          </div>
+        )}
 
         {error && (
           <div className="reader-error">
@@ -721,36 +847,7 @@ export default function ArticleReader({
                 </button>
               )}
             </div>
-            {pasting && (
-              <div className="reader-paste">
-                <p className="sub">
-                  Open the story on the site, select all of it, copy, and paste it here. It is kept on this device as the
-                  article&apos;s text, so highlights and quotes work as usual.
-                </p>
-                <div
-                  ref={pasteBox}
-                  className="reader-paste-box prose"
-                  contentEditable
-                  suppressContentEditableWarning
-                  data-placeholder="Paste the article here…"
-                  onPaste={(event) => {
-                    // Formatting is kept but cleaned; plain text becomes paragraphs.
-                    event.preventDefault();
-                    const html = event.clipboardData.getData("text/html");
-                    const text = event.clipboardData.getData("text/plain");
-                    const clean = html
-                      ? sanitizeRichText(cleanPastedHtml(html))
-                      : text.split(/\n\s*\n|\n/).map((l) => l.trim()).filter(Boolean)
-                          .map((l) => `<p>${l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>`).join("");
-                    document.execCommand("insertHTML", false, clean);
-                  }}
-                />
-                <div className="reader-error-actions">
-                  <button className="btn small" onClick={keepPasted}>Use this text</button>
-                  <button className="btn ghost small" onClick={() => setPasting(false)}>Cancel</button>
-                </div>
-              </div>
-            )}
+            {pastePanel}
           </div>
         )}
 
