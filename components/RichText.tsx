@@ -387,6 +387,12 @@ export default function RichText({
       )}
       <div ref={tools} className={`rich-tools${docked ? " docked" : ""}`} style={docked ? { bottom: kbBottom } : undefined}
         onMouseDown={(event) => event.preventDefault()}>
+        {docked && (
+          <>
+            <button type="button" className="rich-undo" title="Undo" aria-label="Undo" onClick={() => format("undo")}>↶</button>
+            <button type="button" className="rich-undo" title="Redo" aria-label="Redo" onClick={() => format("redo")}>↷</button>
+          </>
+        )}
         <button type="button" title="Bold (⌘B)" onClick={() => format("bold")}><b>B</b></button>
         <button type="button" title="Italic (⌘I)" onClick={() => format("italic")}><i>I</i></button>
         <button type="button" title="Highlight (again to remove)" onClick={toggleHighlight}>

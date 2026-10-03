@@ -1198,6 +1198,7 @@ function DocumentView(
     document.addEventListener("paste", paste);
     return () => document.removeEventListener("paste", paste);
   });
+  const holdRef = useRef<{ x: number; y: number; timer: ReturnType<typeof setTimeout> } | null>(null);
   const pick = (run: () => void) => () => {
     run();
     setMenu(null);
@@ -1208,7 +1209,25 @@ function DocumentView(
   ].sort((a, b) => a.at - b.at);
 
   return (
-    <div className="subject-doc" onContextMenu={open} onDoubleClick={open}>
+    <div className="subject-doc" onContextMenu={open} onDoubleClick={open}
+      // Press and hold on empty space: the same menu, for a touch screen.
+      onTouchStart={(e) => {
+        if (e.target !== e.currentTarget || e.touches.length !== 1) return;
+        const t = e.touches[0];
+        const x = t.clientX;
+        const y = t.clientY;
+        holdRef.current = { x, y, timer: setTimeout(() => {
+          holdRef.current = null;
+          setMenu({ left: Math.min(x, window.innerWidth - 200), top: Math.min(y, window.innerHeight - 200) });
+          navigator.vibrate?.(10);
+        }, 550) };
+      }}
+      onTouchMove={(e) => {
+        const h = holdRef.current;
+        const t = e.touches[0];
+        if (h && t && Math.hypot(t.clientX - h.x, t.clientY - h.y) > 8) { clearTimeout(h.timer); holdRef.current = null; }
+      }}
+      onTouchEnd={() => { if (holdRef.current) clearTimeout(holdRef.current.timer); holdRef.current = null; }}>
       {menu && (
         <div className="wb-menu doc-menu" role="menu" style={{ left: menu.left, top: menu.top }} onPointerDown={(e) => e.stopPropagation()}>
           <button role="menuitem" onClick={pick(() => shared.addBox())}><span className="wb-menu-icon">¶</span> Text box</button>
@@ -1919,7 +1938,7 @@ function Whiteboard(
   }, []);
 
   // Phones keep the old floor: drawing the whole board at a tenth is heavy for them.
-  const MIN_ZOOM = lowPower ? 0.3 : 0.1;
+  const MIN_ZOOM = lowPower ? 0.15 : 0.1;
   const MAX_ZOOM = 2;
   /** Zoom by a factor, keeping the board point under (x, y) where it is. */
   const zoomAround = (factor: number, x?: number, y?: number) =>
@@ -1988,9 +2007,46 @@ function Whiteboard(
         view: viewRef.current,
       };
     };
+    /**
+     * Press and hold — the touch screen's right-click. Held still on empty
+     * board it opens the add menu there; on a card, that card's menu. Any
+     * movement, a second finger, or lifting first is an ordinary gesture.
+     */
+    let hold: { timer: ReturnType<typeof setTimeout>; x: number; y: number } | null = null;
+    const cancelHold = () => {
+      if (hold) clearTimeout(hold.timer);
+      hold = null;
+    };
+    const startHold = (event: PointerEvent) => {
+      cancelHold();
+      const target = event.target as Element | null;
+      if (target?.closest?.(".rich-body, input, textarea, button, select, .drawing-canvas")) return;
+      const x = event.clientX;
+      const y = event.clientY;
+      hold = {
+        x, y,
+        timer: setTimeout(() => {
+          hold = null;
+          gesture = null;
+          const rect = el.getBoundingClientRect();
+          const v = viewRef.current;
+          const at = { x: Math.round((x - rect.left - v.x) / v.zoom), y: Math.round((y - rect.top - v.y) / v.zoom) };
+          const node = [...nodeEls.current.entries()].find(([, n]) => n.contains(target));
+          if (node) setNodeMenu({ id: node[0], left: x - rect.left, top: y - rect.top });
+          else if (isBoard(target)) setMenu({ left: x - rect.left, top: y - rect.top, at });
+          navigator.vibrate?.(10);
+          // The lift that follows must not count as a tap on what is under it.
+          const swallow = (e: Event) => { e.stopPropagation(); e.preventDefault(); };
+          window.addEventListener("click", swallow, { capture: true, once: true });
+          setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 600);
+        }, 550),
+      };
+    };
     const onDown = (event: PointerEvent) => {
       if (event.pointerType !== "touch") return;
       touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (touches.size === 1) startHold(event);
+      else cancelHold();
       if (touches.size === 2) startPinch();
       else if (touches.size === 1 && isBoard(event.target)) {
         gesture = { kind: "pan", startX: event.clientX, startY: event.clientY, view: viewRef.current };
@@ -1998,6 +2054,7 @@ function Whiteboard(
     };
     const onMove = (event: PointerEvent) => {
       if (!touches.has(event.pointerId)) return;
+      if (hold && Math.hypot(event.clientX - hold.x, event.clientY - hold.y) > 8) cancelHold();
       touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
       if (!gesture) return;
       if (gesture.kind === "pan") {
@@ -2019,6 +2076,7 @@ function Whiteboard(
       setView({ zoom, x: midX - boardX * zoom, y: midY - boardY * zoom });
     };
     const onUp = (event: PointerEvent) => {
+      cancelHold();
       if (!touches.delete(event.pointerId)) return;
       if (touches.size === 1 && gesture?.kind === "pinch") {
         // Lifting one finger of a pinch carries on as a pan from here, with

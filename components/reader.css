@@ -2250,3 +2250,7 @@
 }
 .rich-tools.docked::-webkit-scrollbar { display: none; }
 .rich-tools.docked button { flex-shrink: 0; min-height: 34px; padding: 4px 10px; }
+.rich-tools.docked .rich-undo { font-size: 18px; min-width: 38px; }
+.rich-tools.docked .rich-undo + .rich-undo { margin-right: 6px; }
+/* Holding a card or the board opens our menu, not the phone's own callout. */
+.wb-canvas, .subject-doc { -webkit-touch-callout: none; }
