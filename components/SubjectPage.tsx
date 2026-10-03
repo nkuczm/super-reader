@@ -1918,7 +1918,8 @@ function Whiteboard(
     };
   }, []);
 
-  const MIN_ZOOM = 0.1;
+  // Phones keep the old floor: drawing the whole board at a tenth is heavy for them.
+  const MIN_ZOOM = lowPower ? 0.3 : 0.1;
   const MAX_ZOOM = 2;
   /** Zoom by a factor, keeping the board point under (x, y) where it is. */
   const zoomAround = (factor: number, x?: number, y?: number) =>
@@ -2066,7 +2067,10 @@ function Whiteboard(
   // everything stays sharp, however small, while it can still be read.
   const FAR_START = 0.28;
   const FAR_END = 0.14;
-  const farT = Math.min(1, Math.max(0, (FAR_START - view.zoom) / (FAR_START - FAR_END)));
+  // Not on a phone or tablet at all: even without blur, the zoomed-out view
+  // still closed the subject on an iPhone (3 Oct 2026). There the board
+  // stays plain at every zoom.
+  const farT = lowPower ? 0 : Math.min(1, Math.max(0, (FAR_START - view.zoom) / (FAR_START - FAR_END)));
   const tint = Math.min(1, farT / 0.5);
   const haze = Math.min(1, Math.max(0, (farT - 0.45) / 0.55));
   /**
