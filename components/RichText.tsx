@@ -7,6 +7,9 @@ import { cleanPastedHtml } from "@/lib/paste";
 /** The drag type a drawing or image box carries, for dropping into text. */
 export const EMBED_TYPE = "application/x-super-reader-box";
 
+/** Arrows typed out, and what they become. */
+const ARROWS: [string, string][] = [["<-->", "↔"], ["←>", "↔"], ["-->", "→"], ["<--", "←"]];
+
 function caretRangeAt(x: number, y: number): Range | null {
   const doc = document as Document & {
     caretRangeFromPoint?: (x: number, y: number) => Range | null;
@@ -290,6 +293,26 @@ export default function RichText({
     changed();
   }
 
+  /** "-->" becomes →, "<--" becomes ←, and ← followed by ">" becomes ↔, as they are typed. */
+  function typeArrow() {
+    const sel = window.getSelection();
+    const node = sel?.anchorNode;
+    if (!sel?.isCollapsed || !node || node.nodeType !== Node.TEXT_NODE) return;
+    const text = node.textContent ?? "";
+    const end = sel.anchorOffset;
+    const before = text.slice(0, end);
+    const rule = ARROWS.find(([typed]) => before.endsWith(typed));
+    if (!rule) return;
+    const [typed, arrow] = rule;
+    node.textContent = before.slice(0, -typed.length) + arrow + text.slice(end);
+    const at = end - typed.length + arrow.length;
+    const range = document.createRange();
+    range.setStart(node, at);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
   function format(command: string, value?: string) {
     el.current?.focus();
     document.execCommand(command, false, value);
@@ -373,7 +396,10 @@ export default function RichText({
         contentEditable
         suppressContentEditableWarning
         data-placeholder={placeholder}
-        onInput={changed}
+        onInput={(event) => {
+          if ((event.nativeEvent as InputEvent).inputType === "insertText") typeArrow();
+          changed();
+        }}
         onTouchStart={(event) => {
           const t = event.touches[0];
           swipe.current = event.touches.length === 1 ? { x: t.clientX, y: t.clientY } : null;
