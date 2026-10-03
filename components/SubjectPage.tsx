@@ -1375,6 +1375,10 @@ function Whiteboard(
    * gesture goes on panning, and gone a moment after it all stops.
    */
   const [mapShown, setMapShown] = useState(false);
+  /** A touch device: no blur filters, which are what crashed Safari when zoomed out. */
+  const [lowPower] = useState(
+    () => typeof window !== "undefined" && (window.matchMedia?.("(pointer: coarse)").matches || window.innerWidth < 900),
+  );
   const lastZoom = useRef<number | null>(null);
   const mapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mapShownRef = useRef(false);
@@ -2065,8 +2069,13 @@ function Whiteboard(
   const farT = Math.min(1, Math.max(0, (FAR_START - view.zoom) / (FAR_START - FAR_END)));
   const tint = Math.min(1, farT / 0.5);
   const haze = Math.min(1, Math.max(0, (farT - 0.45) / 0.55));
-  /** Blur in screen pixels at full haze: enough to settle the colour, not to erase the shapes. */
-  const blurPx = 2.5 * haze;
+  /**
+   * Blur in screen pixels at full haze: enough to settle the colour, not to
+   * erase the shapes. None on a phone or tablet: blur filters over many large
+   * cards ran Safari out of memory and the page was killed (3 Oct 2026), so
+   * there the cards fade instead.
+   */
+  const blurPx = lowPower ? 0 : 2.5 * haze;
   const far = farT > 0;
   const sections = far
     ? shared.boxes
@@ -2282,7 +2291,7 @@ function Whiteboard(
         }}
       >
         <div className="wb-layer" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}>
-          <svg className="wb-lines" width={1} height={1} style={haze > 0 ? { filter: `blur(${blurPx / view.zoom}px)`, transition: "filter 0.35s ease" } : undefined}>
+          <svg className="wb-lines" width={1} height={1} style={haze > 0 && !lowPower ? { filter: `blur(${blurPx / view.zoom}px)`, transition: "filter 0.35s ease" } : undefined}>
             {aiLinks.map((link) => line(link.id, link.from, link.to, "wb-line ai"))}
             {userLinks.map((link) =>
               line(link.id, link.from, link.to, "wb-line", () => onBoard((current) => remove(current, link.id))),
@@ -2303,7 +2312,7 @@ function Whiteboard(
             <div key={`far-${sec.id}`} className="wb-far" aria-hidden="true">
               {sec.rects.map((r) => (
                 <div key={r.id} className="wb-far-blob"
-                  style={{ left: r.x, top: r.y, width: r.w, height: r.h, background: sec.color, opacity: 0.5 * tint, filter: `blur(${(blurPx * 2) / view.zoom}px)` }} />
+                  style={{ left: r.x, top: r.y, width: r.w, height: r.h, background: sec.color, opacity: 0.5 * tint, ...(blurPx > 0 ? { filter: `blur(${(blurPx * 2) / view.zoom}px)` } : {}) }} />
               ))}
             </div>
           ))}
@@ -2320,7 +2329,11 @@ function Whiteboard(
                 style={{
                   left: pos.x, top: pos.y, width: pos.w,
                   // Every card blurs as the board zooms out; a section's cards also fade under its colour.
-                  ...(haze > 0 ? { filter: `blur(${blurPx / view.zoom}px)`, opacity: grouped.has(node.id) ? 1 - 0.35 * haze : 1 } : {}),
+                  ...(haze > 0
+                    ? lowPower
+                      ? { opacity: grouped.has(node.id) ? 1 - 0.55 * haze : 1 - 0.35 * haze }
+                      : { filter: `blur(${blurPx / view.zoom}px)`, opacity: grouped.has(node.id) ? 1 - 0.35 * haze : 1 }
+                    : {}),
                 }}
                 onContextMenu={(event) => {
                   // Typing keeps the browser's own menu (spelling, copy and paste).
