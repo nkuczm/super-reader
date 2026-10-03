@@ -1289,6 +1289,19 @@ function Whiteboard(
     }
     return startView();
   });
+  useEffect(() => {
+    const zoomed = lastZoom.current !== null && Math.abs(lastZoom.current - view.zoom) > 0.0005;
+    lastZoom.current = view.zoom;
+    if (!zoomed && !mapShownRef.current) return;
+    mapShownRef.current = true;
+    setMapShown(true);
+    if (mapTimer.current) clearTimeout(mapTimer.current);
+    mapTimer.current = setTimeout(() => {
+      mapShownRef.current = false;
+      setMapShown(false);
+    }, 1400);
+  }, [view]);
+
   // Where the board was panned and zoomed to, kept for a refresh.
   useEffect(() => {
     const t = setTimeout(() => {
@@ -1331,6 +1344,14 @@ function Whiteboard(
   const [focus, setFocus] = useState<string | null>(null);
   const [showAiLinks, setShowAiLinks] = useState(false);
   const [sizes, setSizes] = useState<Record<string, { w: number; h: number }>>({});
+  /**
+   * The minimap: shown when the board is zoomed, kept up while the same
+   * gesture goes on panning, and gone a moment after it all stops.
+   */
+  const [mapShown, setMapShown] = useState(false);
+  const lastZoom = useRef<number | null>(null);
+  const mapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mapShownRef = useRef(false);
   const nodeEls = useRef(new Map<string, HTMLDivElement>());
   const canvas = useRef<HTMLDivElement | null>(null);
 
@@ -1856,7 +1877,7 @@ function Whiteboard(
     };
   }, []);
 
-  const MIN_ZOOM = 0.3;
+  const MIN_ZOOM = 0.1;
   const MAX_ZOOM = 2;
   /** Zoom by a factor, keeping the board point under (x, y) where it is. */
   const zoomAround = (factor: number, x?: number, y?: number) =>
@@ -2115,6 +2136,42 @@ function Whiteboard(
           {linkAsk.problem && <span className="signin-error">{linkAsk.problem}</span>}
         </form>
       )}
+      {mapShown && (() => {
+        // Everything on the board, and the part on screen, at one scale.
+        const host = canvas.current?.getBoundingClientRect();
+        if (!host) return null;
+        const seen = { x: -view.x / view.zoom, y: -view.y / view.zoom, w: host.width / view.zoom, h: host.height / view.zoom };
+        const rects = [...positions.entries()].map(([id, r]) => ({ id, x: r.x, y: r.y, w: r.w, h: sizes[id]?.h ?? 160 }));
+        const all = [...rects, seen];
+        const minX = Math.min(...all.map((r) => r.x)) - 40;
+        const minY = Math.min(...all.map((r) => r.y)) - 40;
+        const maxX = Math.max(...all.map((r) => r.x + r.w)) + 40;
+        const maxY = Math.max(...all.map((r) => r.y + r.h)) + 40;
+        const W = 200;
+        const H = 140;
+        const k = Math.min(W / (maxX - minX), H / (maxY - minY));
+        const ox = (W - (maxX - minX) * k) / 2;
+        const oy = (H - (maxY - minY) * k) / 2;
+        const sx = (x: number) => ox + (x - minX) * k;
+        const sy = (y: number) => oy + (y - minY) * k;
+        return (
+          <svg className="wb-minimap" width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-label="Map of the whole board"
+            onPointerDown={(e) => {
+              // A click on the map centres the view there.
+              e.stopPropagation();
+              const r = e.currentTarget.getBoundingClientRect();
+              const bx = minX + (e.clientX - r.left - ox) / k;
+              const by = minY + (e.clientY - r.top - oy) / k;
+              setView((v) => ({ ...v, x: host.width / 2 - bx * v.zoom, y: host.height / 2 - by * v.zoom }));
+            }}>
+            {rects.map((r) => (
+              <rect key={r.id} className={labelIds.has(r.id) ? "mm-label" : "mm-node"} x={sx(r.x)} y={sy(r.y)}
+                width={Math.max(2, r.w * k)} height={Math.max(2, r.h * k)} rx={1.5} />
+            ))}
+            <rect className="mm-view" x={sx(seen.x)} y={sy(seen.y)} width={seen.w * k} height={seen.h * k} rx={2} />
+          </svg>
+        );
+      })()}
       <div
         ref={canvas}
         className={`wb-canvas${connecting !== false ? " connecting" : ""}${marquee ? " selecting" : ""}`}
