@@ -10,7 +10,7 @@ import { DrawingPad, ImageView, TableBox, TranscriptBox, shrinkImage, DRAWING_HE
 import { tableHtml, transcriptHtml } from "@/lib/subject-doc";
 import type { Writing } from "./useAccount";
 import type { Note, NoteEntry } from "@/lib/notes";
-import { safeHref, type StoryItem } from "@/lib/subjects";
+import { safeHref, youtubeThumbnail, type StoryItem } from "@/lib/subjects";
 import { titleFromUrl } from "@/lib/manual";
 import {
   addStory,
@@ -842,7 +842,7 @@ export default function SubjectPage(props: Props) {
         style={props.boxWidth ? ({ "--box-w": `${props.boxWidth}px` } as React.CSSProperties) : undefined}>
       {railOpen && (
       // A zero-height sticky anchor: the outline stays in view down a long document.
-      <div className="tab-rail-anchor">
+      <div className={meta.view === "board" ? undefined : "tab-rail-anchor"}>
       <div className={`tab-rail open${meta.view === "board" ? " on-board" : ""}`}>
           <>
             <div className="tab-rail-head">
@@ -984,6 +984,15 @@ function StoryCard({
         </button>
       </div>
       {bylineOf(card) && <div className="subject-card-source">{bylineOf(card)}</div>}
+      {youtubeThumbnail(card.link) && (
+        <button className="subject-card-thumb" aria-label={`Open ${card.title}`}
+          onClick={() => shared.onOpenArticle(card.link, card.title, "")}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={youtubeThumbnail(card.link)!} alt="" loading="lazy" draggable={false}
+            onError={(e) => ((e.currentTarget.parentElement as HTMLElement).style.display = "none")} />
+          <span className="subject-card-play" aria-hidden="true">▶</span>
+        </button>
+      )}
       <div className="subject-card-body">
         {/* One document per story: the quotes are bullets in it, as links to
             their passages, and everything around them is yours to write. */}
