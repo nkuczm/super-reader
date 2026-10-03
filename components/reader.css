@@ -2231,9 +2231,9 @@
 .wb-far { position: absolute; left: 0; top: 0; pointer-events: none; }
 .wb-far-blob { position: absolute; border-radius: 18px; transition: opacity 0.35s ease, filter 0.35s ease; }
 .wb-far-title {
-  position: absolute; display: grid; place-items: center; text-align: center; padding: 4%;
-  font-weight: 800; line-height: 1.05; letter-spacing: -0.02em; color: var(--text);
-  text-shadow: 0 0 12px var(--bg), 0 0 4px var(--bg); overflow: hidden; word-break: normal; overflow-wrap: normal;
+  position: absolute; z-index: 40; transform: translate(-50%, -50%); width: max-content; pointer-events: none;
+  text-align: center; font-weight: 800; line-height: 1.08; letter-spacing: -0.02em; color: var(--text);
+  text-shadow: 0 0 0.35em var(--bg), 0 0 0.12em var(--bg); overflow-wrap: normal; word-break: normal;
 }
 .wb-node { transition: filter 0.35s ease, opacity 0.35s ease; }
 .wb-far-title { transition: opacity 0.35s ease; }
