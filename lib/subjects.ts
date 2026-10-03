@@ -63,6 +63,9 @@ export type BoxItem = Base & {
   embedded?: boolean;
   /** A section label: one line of big header text, which stories gather under. */
   label?: boolean;
+  /** A section label's colour (one of LABEL_COLORS) and whether it underlines or fills behind the text. */
+  labelColor?: string;
+  labelStyle?: "underline" | "fill";
   /** A little spreadsheet: what was typed in each cell, formulas included. */
   table?: string[][];
   /** An interview transcript, split into who said what. */
@@ -1208,4 +1211,12 @@ export function youtubeThumbnail(link: string): string | null {
     id = url.searchParams.get("v") ?? url.pathname.match(/^\/(?:shorts|live|embed|v)\/([^/?#]+)/)?.[1] ?? null;
   }
   return id && /^[A-Za-z0-9_-]{6,20}$/.test(id) ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null;
+}
+
+/** The colours a section label can take. */
+export const LABEL_COLORS = ["#2563eb", "#7c3aed", "#db2777", "#dc2626", "#ea580c", "#ca8a04", "#16a34a", "#0d9488", "#475569"];
+
+/** A label's colour, if it is one of ours; otherwise the theme's accent. */
+export function labelColorOf(box: { labelColor?: string }): string {
+  return box.labelColor && LABEL_COLORS.includes(box.labelColor) ? box.labelColor : "var(--accent)";
 }

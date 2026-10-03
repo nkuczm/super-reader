@@ -2209,3 +2209,30 @@
 .wb-minimap .mm-node { fill: color-mix(in srgb, var(--text-dim) 35%, transparent); }
 .wb-minimap .mm-label { fill: color-mix(in srgb, var(--accent) 55%, transparent); }
 .wb-minimap .mm-view { fill: rgba(250, 204, 21, 0.12); stroke: #eab308; stroke-width: 1.5; }
+
+/* ---------- section label colour and style ---------- */
+.section-label { border-bottom-color: var(--label-color, var(--accent)); }
+.section-label.fill {
+  border-bottom: 0; border-radius: 8px; padding: 2px 10px;
+  background: color-mix(in srgb, var(--label-color, var(--accent)) 22%, transparent);
+}
+.label-style-wrap { position: relative; display: inline-flex; margin-left: 6px; }
+.label-color-btn { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--border); cursor: pointer; padding: 0; }
+.label-style-pop {
+  position: absolute; top: 20px; left: 0; z-index: 30; display: flex; flex-direction: column; gap: 8px; padding: 8px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16); width: max-content;
+}
+.label-swatches { display: grid; grid-template-columns: repeat(9, 18px); gap: 5px; }
+.label-swatch { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--border); cursor: pointer; padding: 0; }
+.label-swatch.on { box-shadow: 0 0 0 2px var(--text); }
+.label-style-seg button { font-size: 12px; padding: 3px 10px; }
+
+/* ---------- the board zoomed out past reading: sections as colour ---------- */
+.wb-far { position: absolute; left: 0; top: 0; pointer-events: none; }
+.wb-far-blob { position: absolute; border-radius: 24px; opacity: 0.55; }
+.wb-far-title {
+  position: absolute; display: grid; place-items: center; text-align: center; padding: 4%;
+  font-weight: 800; line-height: 1.05; letter-spacing: -0.02em; color: var(--text);
+  text-shadow: 0 0 12px var(--bg), 0 0 4px var(--bg); overflow: hidden; word-break: normal; overflow-wrap: normal;
+}
+.wb-node.far-hidden { opacity: 0; }

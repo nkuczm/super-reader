@@ -10,7 +10,7 @@ import { DrawingPad, ImageView, TableBox, TranscriptBox, shrinkImage, DRAWING_HE
 import { tableHtml, transcriptHtml } from "@/lib/subject-doc";
 import type { Writing } from "./useAccount";
 import type { Note, NoteEntry } from "@/lib/notes";
-import { safeHref, youtubeThumbnail, type StoryItem } from "@/lib/subjects";
+import { LABEL_COLORS, labelColorOf, safeHref, youtubeThumbnail, type StoryItem } from "@/lib/subjects";
 import { titleFromUrl } from "@/lib/manual";
 import {
   addStory,
@@ -1028,10 +1028,35 @@ function StoryCard({
 }
 
 function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dragHandle?: (e: React.PointerEvent) => void }) {
+  const [styling, setStyling] = useState(false);
   return (
     <div className={`subject-box${box.label ? " label-box" : ""}${!box.label && !box.drawing && !box.table && !box.transcript && box.image === undefined && box.caption === undefined ? " text-box" : ""}`}>
       <div className="subject-box-head" onPointerDown={dragHandle}>
         <span className="subject-box-grip" aria-hidden="true">⋮⋮</span>
+        {box.label && (
+          <span className="label-style-wrap" onPointerDown={(e) => e.stopPropagation()}>
+            <button className="label-color-btn" style={{ background: labelColorOf(box) }} aria-label="Section colour"
+              title="Colour and style" onClick={() => setStyling((v) => !v)} />
+            {styling && (
+              <span className="label-style-pop" role="dialog" aria-label="Section style">
+                <span className="label-swatches">
+                  {LABEL_COLORS.map((c) => (
+                    <button key={c} className={`label-swatch${box.labelColor === c ? " on" : ""}`} style={{ background: c }}
+                      aria-label={`Colour ${c}`} onClick={() => shared.updateBox(box, { labelColor: c })} />
+                  ))}
+                </span>
+                <span className="seg label-style-seg">
+                  {(["underline", "fill"] as const).map((st) => (
+                    <button key={st} className={(box.labelStyle ?? "underline") === st ? "on" : ""}
+                      onClick={() => shared.updateBox(box, { labelStyle: st })}>
+                      {st === "underline" ? "Underline" : "Background"}
+                    </button>
+                  ))}
+                </span>
+              </span>
+            )}
+          </span>
+        )}
         <button className="icon-btn subtle" aria-label="Delete text box" onPointerDown={(e) => e.stopPropagation()}
           onClick={() => shared.removeBox(box)}>
           {Icon.close}
@@ -1039,7 +1064,8 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
       </div>
       {box.label ? (
         <input
-          className="section-label"
+          className={`section-label${box.labelStyle === "fill" ? " fill" : ""}`}
+          style={{ "--label-color": labelColorOf(box) } as React.CSSProperties}
           defaultValue={textOf(box.html)}
           placeholder="Section"
           autoFocus={shared.focusBox === box.id}
@@ -2015,6 +2041,33 @@ function Whiteboard(
     };
   };
 
+  /**
+   * Zoomed out past reading: each section label and everything connected to
+   * it becomes a soft patch of the label's colour in the shape of its blocks,
+   * with only the header written over it.
+   */
+  const far = view.zoom < 0.35;
+  const sections = far
+    ? shared.boxes
+        .filter((b) => b.label && positions.has(b.id))
+        .map((label) => {
+          const members = [label.id];
+          for (const item of live(board)) {
+            if (item.kind !== "link") continue;
+            const l = item as LinkItem;
+            if (l.from === label.id && positions.has(l.to)) members.push(l.to);
+            if (l.to === label.id && positions.has(l.from)) members.push(l.from);
+          }
+          const rects = members.map((id) => ({ id, ...positions.get(id)!, h: sizes[id]?.h ?? 160 }));
+          const x0 = Math.min(...rects.map((r) => r.x));
+          const y0 = Math.min(...rects.map((r) => r.y));
+          const x1 = Math.max(...rects.map((r) => r.x + r.w));
+          const y1 = Math.max(...rects.map((r) => r.y + r.h));
+          return { id: label.id, text: textOf(label.html).trim() || "Section", color: labelColorOf(label), rects, box: { x0, y0, x1, y1 } };
+        })
+    : [];
+  const grouped = new Set(sections.flatMap((sec) => sec.rects.map((r) => r.id)));
+
   const line = (key: string, from: string, to: string, className: string, onRemove?: () => void) => {
     const a = positions.get(from);
     const b = positions.get(to);
@@ -2206,6 +2259,24 @@ function Whiteboard(
               }}
             />
           )}
+          {sections.map((sec) => (
+            <div key={`far-${sec.id}`} className="wb-far" aria-hidden="true">
+              {sec.rects.map((r) => (
+                <div key={r.id} className="wb-far-blob" style={{ left: r.x, top: r.y, width: r.w, height: r.h, background: sec.color, filter: `blur(${Math.min(40, 6 / view.zoom)}px)` }} />
+              ))}
+              <div className="wb-far-title"
+                style={{
+                  left: sec.box.x0, top: sec.box.y0, width: sec.box.x1 - sec.box.x0, height: sec.box.y1 - sec.box.y0,
+                  // As big as reads at a glance, but each word fits the patch's width.
+                  fontSize: Math.min(
+                    22 / view.zoom,
+                    ((sec.box.x1 - sec.box.x0) * 0.88) / Math.max(3, Math.max(...sec.text.split(/\s+/).map((w) => w.length)) * 0.62),
+                  ),
+                }}>
+                {sec.text}
+              </div>
+            </div>
+          ))}
           {nodes.map((node) => {
             const pos = positions.get(node.id)!;
             return (
@@ -2215,7 +2286,7 @@ function Whiteboard(
                   if (el) nodeEls.current.set(node.id, el);
                   else nodeEls.current.delete(node.id);
                 }}
-                className={`wb-node kind-${node.kind}${connecting === node.id ? " picked" : ""}${drag?.id === node.id || drag?.group.has(node.id) ? " dragging" : ""}${selected.has(node.id) ? " selected" : ""}`}
+                className={`wb-node kind-${node.kind}${connecting === node.id ? " picked" : ""}${drag?.id === node.id || drag?.group.has(node.id) ? " dragging" : ""}${selected.has(node.id) ? " selected" : ""}${grouped.has(node.id) ? " far-hidden" : ""}`}
                 style={{ left: pos.x, top: pos.y, width: pos.w }}
                 onContextMenu={(event) => {
                   // Typing keeps the browser's own menu (spelling, copy and paste).
