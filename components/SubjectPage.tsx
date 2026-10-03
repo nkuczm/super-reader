@@ -124,6 +124,17 @@ const INSIGHT_LABEL: Record<InsightItem["type"], string> = {
 const NEW_TABLE = () => [["", "", ""], ["", "", ""], ["", "", ""]];
 
 /** Blocks copied on the whiteboard, as the clipboard carries them between subjects. */
+/** A heading in a tab's outline: a section label (n = -1) or the nth heading in a text box. */
+type OutlineEntry = { id: string; n: number; level: number; text: string };
+
+/** A brief glow on what the reader was just taken to. */
+function flashEl(el: HTMLElement) {
+  el.classList.remove("outline-flash");
+  void el.offsetWidth;
+  el.classList.add("outline-flash");
+  setTimeout(() => el.classList.remove("outline-flash"), 1400);
+}
+
 /** A card's width, within what the board allows. */
 const clampW = (w: number) => Math.round(Math.min(900, Math.max(200, w)));
 
@@ -588,6 +599,32 @@ export default function SubjectPage(props: Props) {
     removeBox: (box: BoxItem) => onBoard((current) => remove(remove(current, box.id), posId(box.id))),
   };
 
+  /**
+   * The open tab's outline: its section labels and the headings written in
+   * its text boxes, in the order the document shows them.
+   */
+  const outline = [...boxes]
+    .sort((a, b) => a.at - b.at)
+    .flatMap((box): OutlineEntry[] => {
+      if (box.label) return textOf(box.html).trim() ? [{ id: box.id, n: -1, level: 1, text: textOf(box.html).trim() }] : [];
+      return [...(box.html || "").matchAll(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi)]
+        .map((m, n) => ({ id: box.id, n, level: Math.min(3, Number(m[1])), text: textOf(m[2]).trim() }))
+        .filter((h) => h.text);
+    });
+  /** Take the reader to an outline entry: scrolled to in the document, panned to on the whiteboard. */
+  const goTo = (entry: OutlineEntry) => {
+    if (window.innerWidth <= 900) setRailOpen(false);
+    if (meta.view === "board") {
+      window.dispatchEvent(new CustomEvent("super-reader:goto", { detail: entry }));
+      return;
+    }
+    const host = document.querySelector<HTMLElement>(`.subject-doc [data-item="${CSS.escape(entry.id)}"]`);
+    if (!host) return;
+    const target = entry.n >= 0 ? host.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6")[entry.n] ?? host : host;
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    flashEl(host);
+  };
+
   // A refresh comes back to the same place: how far down the document was
   // read (the whiteboard keeps its own pan and zoom the same way).
   const pageRef = useRef<HTMLDivElement | null>(null);
@@ -798,6 +835,8 @@ export default function SubjectPage(props: Props) {
       <div className={`subject-main${railOpen ? " rail-open" : " rail-closed"}${props.hideBoxes ? " quiet-boxes" : ""}`}
         style={props.boxWidth ? ({ "--box-w": `${props.boxWidth}px` } as React.CSSProperties) : undefined}>
       {railOpen && (
+      // A zero-height sticky anchor: the outline stays in view down a long document.
+      <div className="tab-rail-anchor">
       <div className={`tab-rail open${meta.view === "board" ? " on-board" : ""}`}>
           <>
             <div className="tab-rail-head">
@@ -809,16 +848,15 @@ export default function SubjectPage(props: Props) {
             <TabBar
               tabs={tabs}
               current={currentTab}
-              onSwitch={(tab) => {
-                switchTab(tab);
-                // On a phone the outline covers the page; it gets out of the way.
-                if (window.innerWidth <= 900) setRailOpen(false);
-              }}
+              onSwitch={(tab) => switchTab(tab)}
               onAdd={(name) => onBoard((current) => addTab(current, name).board)}
               onRename={(tab, name) => onBoard((current) => renameTab(current, tab, name))}
               onDelete={(tab) => onBoard((current) => deleteTab(current, tab))}
+              outline={outline}
+              onGo={goTo}
             />
           </>
+      </div>
       </div>
       )}
       {meta.view === "board" ? (
@@ -1139,7 +1177,7 @@ function DocumentView(
         </p>
       )}
       {stack.map((entry) => (
-        <div key={entry.key}>{entry.node}</div>
+        <div key={entry.key} data-item={entry.key}>{entry.node}</div>
       ))}
       {apart.length > 0 && (
         <div className="subject-insights-card">
@@ -1724,6 +1762,26 @@ function Whiteboard(
     else setLinkAsk({ ...spot, value: "" });
   };
 
+  // An outline entry picked from the tab list: bring it to the top middle of the board.
+  useEffect(() => {
+    const go = (event: Event) => {
+      const entry = (event as CustomEvent<OutlineEntry>).detail;
+      const rect = positions.get(entry.id);
+      const box = canvas.current?.getBoundingClientRect();
+      if (!rect || !box) return;
+      const node = nodeEls.current.get(entry.id);
+      let dy = 0;
+      if (node && entry.n >= 0) {
+        const h = node.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6")[entry.n];
+        if (h) dy = (h.getBoundingClientRect().top - node.getBoundingClientRect().top) / view.zoom;
+      }
+      setView((v) => ({ ...v, x: box.width / 2 - (rect.x + rect.w / 2) * v.zoom, y: 60 - (rect.y + dy) * v.zoom }));
+      if (node) flashEl(node);
+    };
+    window.addEventListener("super-reader:goto", go);
+    return () => window.removeEventListener("super-reader:goto", go);
+  });
+
   // Space held down turns a drag over empty board back into panning.
   const spaceHeld = useRef(false);
   useEffect(() => {
@@ -2067,7 +2125,11 @@ function TabBar({
   onRename,
   onDelete,
   contacts,
+  outline = [],
+  onGo,
 }: {
+  outline?: OutlineEntry[];
+  onGo?: (entry: OutlineEntry) => void;
   tabs: Tab[];
   current: string;
   onSwitch: (tab: string) => void;
@@ -2078,6 +2140,8 @@ function TabBar({
 }) {
   const [editing, setEditing] = useState<{ id: string | null; draft: string } | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
+  /** The open tab's headings, shown by clicking its name. */
+  const [outlineOpen, setOutlineOpen] = useState(false);
 
   const finish = () => {
     if (!editing) return;
@@ -2123,7 +2187,14 @@ function TabBar({
               aria-selected={tab.id === current}
               className="subject-tab-name"
               title="Double-click to rename"
-              onClick={() => onSwitch(tab.id)}
+              aria-expanded={onGo && tab.id === current ? outlineOpen : undefined}
+              onClick={() => {
+                if (tab.id === current) setOutlineOpen((o) => !o);
+                else {
+                  onSwitch(tab.id);
+                  setOutlineOpen(true);
+                }
+              }}
               onDoubleClick={() => setEditing({ id: tab.id, draft: tab.name })}
             >
               {tab.name}
@@ -2132,6 +2203,21 @@ function TabBar({
               <button className="subject-tab-close" aria-label={`Close tab ${tab.name}`} onClick={() => setConfirming(tab.id)}>
                 ×
               </button>
+            )}
+            {onGo && tab.id === current && outlineOpen && (
+              <ul className="tab-outline">
+                {outline.length === 0 ? (
+                  <li className="tab-outline-empty">No headings yet — add a section label, or an H heading in a text box.</li>
+                ) : (
+                  outline.map((entry, i) => (
+                    <li key={`${entry.id}-${entry.n}-${i}`}>
+                      <button className={`tab-outline-item level-${entry.level}`} onClick={() => onGo(entry)} title={entry.text}>
+                        {entry.text}
+                      </button>
+                    </li>
+                  ))
+                )}
+              </ul>
             )}
           </span>
         ),
