@@ -1504,7 +1504,13 @@ function Whiteboard(
       else {
         if (connecting !== id) {
           const [from, to] = [connecting, id].sort();
-          onBoard((current) => put(current, { id: `link:${from}|${to}`, kind: "link", from, to, at: Date.now() }));
+          const linkId = `link:${from}|${to}`;
+          // Connecting two already-connected cards disconnects them.
+          onBoard((current) =>
+            current?.[linkId] && !current[linkId].deleted
+              ? remove(current, linkId)
+              : put(current, { id: linkId, kind: "link", from, to, at: Date.now() }),
+          );
         }
         setConnecting(false);
       }
@@ -1982,6 +1988,8 @@ function Whiteboard(
     const { d, mid } = edgePath(a, b);
     return (
       <g key={key} className={className}>
+        {/* A wide invisible stroke to point at: hovering the line shows its ×. */}
+        {onRemove && <path d={d} className="wb-line-hit" />}
         <path d={d} />
         {onRemove && (
           <g className="wb-unlink" transform={`translate(${mid.x} ${mid.y})`} onClick={onRemove}>
@@ -1999,7 +2007,7 @@ function Whiteboard(
       <div className="wb-tools">
         <button className={`btn ghost small${connecting !== false ? " on" : ""}`}
           onClick={() => setConnecting((c) => (c === false ? null : false))}>
-          {connecting === false ? "Connect" : connecting === null ? "Pick the first…" : "Now the second…"}
+          {connecting === false ? "Connect" : connecting === null ? "Pick the first…" : "Now the second… (or a connected one to disconnect)"}
         </button>
         <button className="btn ghost small" onClick={() => zoomBy(1 / 1.1)} aria-label="Zoom out">−</button>
         <button className="btn ghost small" onClick={() => zoomBy(1.1)} aria-label="Zoom in">+</button>
