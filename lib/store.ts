@@ -320,8 +320,10 @@ export function loadSharedPrefs(settings: Settings): SharedPrefs {
       /* fall through */
     }
   }
-  const chosen = !sameSharedPrefs(sharedPrefsOf(DEFAULT_SETTINGS, 0), settings);
-  return sharedPrefsOf(settings, chosen ? Date.now() : 0);
+  // A device with no record of when these were chosen claims no date at all,
+  // so whatever another device chose wins over its leftovers. Stamping "now"
+  // here let a stale copy override a real choice made elsewhere.
+  return sharedPrefsOf(settings, 0);
 }
 
 export function saveSharedPrefs(prefs: SharedPrefs) {
