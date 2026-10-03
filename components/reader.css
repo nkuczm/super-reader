@@ -2229,10 +2229,11 @@
 
 /* ---------- the board zoomed out past reading: sections as colour ---------- */
 .wb-far { position: absolute; left: 0; top: 0; pointer-events: none; }
-.wb-far-blob { position: absolute; border-radius: 24px; opacity: 0.55; }
+.wb-far-blob { position: absolute; border-radius: 18px; transition: opacity 0.35s ease, filter 0.35s ease; }
 .wb-far-title {
   position: absolute; display: grid; place-items: center; text-align: center; padding: 4%;
   font-weight: 800; line-height: 1.05; letter-spacing: -0.02em; color: var(--text);
   text-shadow: 0 0 12px var(--bg), 0 0 4px var(--bg); overflow: hidden; word-break: normal; overflow-wrap: normal;
 }
-.wb-node.far-hidden { opacity: 0; }
+.wb-node { transition: filter 0.35s ease, opacity 0.35s ease; }
+.wb-far-title { transition: opacity 0.35s ease; }
