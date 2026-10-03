@@ -528,6 +528,18 @@ them rather than re-discovering them:
   address, and opens on the site. Passing the check means running the
   site's JavaScript challenge as a browser would — see below; we don't.
 
+- **YouTube transcripts** — measured 3 Oct 2026 from the deployment: the
+  watch page answers a server **200** with 1.26 MB, but its player response
+  says `playabilityStatus: LOGIN_REQUIRED`, "Sign in to confirm you're not a
+  bot", and lists **no caption tracks**. That is a bot check on the source of
+  the request; services that do get transcripts from servers do it through
+  residential proxies or forged clients, which this app will not use (see
+  below). The oEmbed preview (title, channel, thumbnail) still answers. The
+  transcript comes from the reader's own browser instead: the extension reads
+  the caption track or the "Show transcript" panel off the page
+  (`extension/extract.js`, `__superReaderYoutube`), or the reader pastes the
+  panel's text, whose times `lib/youtube.ts` turns into links into the video.
+
 When adding a publisher that walls us, put it in the known-publisher table with
 a route that works, or leave it out. Do not ship an entry that 403s.
 

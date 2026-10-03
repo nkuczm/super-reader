@@ -30,3 +30,17 @@ test("lines group into paragraphs at pauses", () => {
   const lines = [0, 2, 4, 20, 22].map((start, i) => ({ start, text: `l${i}` }));
   assert.deepEqual(paragraphs(lines), [{ start: 0, text: "l0 l1 l2" }, { start: 20, text: "l3 l4" }]);
 });
+
+test("a transcript pasted from YouTube's panel keeps its times", async () => {
+  const { parsePastedTranscript, transcriptArticleHtml } = await import("../lib/youtube");
+  const panel = "0:00\nwelcome to the show\n0:03\ntoday we talk budgets\n1:02:05 and that is all";
+  assert.deepEqual(parsePastedTranscript(panel), [
+    { start: 0, text: "welcome to the show" },
+    { start: 3, text: "today we talk budgets" },
+    { start: 3725, text: "and that is all" },
+  ]);
+  assert.deepEqual(parsePastedTranscript("no times here\nat all"), [{ start: -1, text: "no times here" }, { start: -1, text: "at all" }]);
+  const html = transcriptArticleHtml("abc123def45", parsePastedTranscript(panel));
+  assert.match(html, /<a href="https:\/\/www\.youtube\.com\/watch\?v=abc123def45&amp;t=0s">0:00<\/a> welcome to the show today we talk budgets/);
+  assert.match(html, />1:02:05<\/a> and that is all/);
+});

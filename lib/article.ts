@@ -2,7 +2,6 @@ import { Readability } from "@mozilla/readability";
 import { JSDOM, VirtualConsole } from "jsdom";
 import sanitizeHtml from "sanitize-html";
 import { fetchText, stripHtml, absolute, toIso, stripChrome } from "./feed";
-import { fetchYoutubeTranscript, paragraphs, youtubeId, type VideoTranscript } from "./youtube";
 import { isPaywalled } from "./subscriptions";
 import type { Attachment } from "./types";
 
@@ -410,45 +409,18 @@ async function oEmbedPreview(url: string): Promise<ReadableArticle | null> {
   if (!data?.title) return null;
 
   const thumb = typeof data.thumbnail_url === "string" ? data.thumbnail_url : "";
-  // A YouTube video's own captions, as the text of the article: each
-  // paragraph opens with its time, linked to that moment in the video.
-  let transcript: VideoTranscript | null = null;
-  const id = youtubeId(url);
-  if (id) {
-    try {
-      transcript = await fetchYoutubeTranscript(url);
-    } catch {
-      /* no captions, or YouTube would not give them to a server */
-    }
-  }
-  const stamp = (t: number) => {
-    const s = Math.floor(t);
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const ss = String(s % 60).padStart(2, "0");
-    return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
-  };
-  const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const body = transcript
-    ? `<h2>Transcript${transcript.auto ? " (auto-generated)" : ""}</h2>` +
-      paragraphs(transcript.lines)
-        .map((p) => `<p><a href="https://www.youtube.com/watch?v=${id}&amp;t=${Math.floor(p.start)}s">${stamp(p.start)}</a> ${esc(p.text)}</p>`)
-        .join("")
-    : "";
-  const words = transcript ? transcript.lines.reduce((n, l) => n + l.text.split(/\s+/).length, 0) : 0;
   return {
-    via: transcript ? "page" : "preview",
+    via: "preview",
     url,
     title: String(data.title),
     byline: data.author_name ? String(data.author_name) : undefined,
     siteName: data.provider_name ? String(data.provider_name) : undefined,
     html: sanitize(
-      (thumb ? `<figure><img src="${thumb}" alt="" /></figure>` : "") + body,
+      thumb ? `<figure><img src="${thumb}" alt="" /></figure>` : "",
       url,
     ),
-    wordCount: words,
+    wordCount: 0,
     truncated: false,
-    transcript: Boolean(transcript),
   };
 }
 

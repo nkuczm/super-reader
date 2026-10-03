@@ -9,6 +9,7 @@ import { EXTRACT_VERSION, readCached, writeCached } from "@/lib/offline";
 import { loadSyncCode } from "@/lib/store";
 import { sanitizeRichText } from "@/lib/subjects";
 import { cleanPastedHtml } from "@/lib/paste";
+import { parsePastedTranscript, transcriptArticleHtml, youtubeId } from "@/lib/youtube";
 import { timeAgo, hostOf } from "./format";
 import QuoteToNote from "./QuoteToNote";
 import { findQuoteRange } from "@/lib/highlight";
@@ -172,15 +173,23 @@ export default function ArticleReader({
     const box = pasteBox.current;
     const words = (box?.innerText ?? "").trim().split(/\s+/).filter(Boolean).length;
     if (!box || words < 5) return;
-    const html = sanitizeRichText(box.innerHTML);
+    // A video's transcript, copied from YouTube's "Show transcript" panel:
+    // its times become links into the video, its lines paragraphs.
+    const video = youtubeId(url);
+    const lines = video ? parsePastedTranscript(box.innerText) : [];
+    const html = video && lines.length
+      ? sanitizeRichText((article?.html ?? "").replace(/<h2>Transcript[\s\S]*$/, "") + transcriptArticleHtml(video, lines))
+      : sanitizeRichText(box.innerHTML);
     const pasted: ReadableArticle = {
+      ...(article ?? {}),
       via: "page",
       url,
       title: article?.title || fallbackTitle || hostOf(url),
-      siteName: hostOf(url),
+      siteName: article?.siteName || hostOf(url),
       html,
       wordCount: words,
       truncated: false,
+      transcript: Boolean(video && lines.length) || undefined,
     };
     setArticle(pasted);
     setError(null);
@@ -553,6 +562,38 @@ export default function ArticleReader({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  const isVideo = Boolean(youtubeId(url));
+  const pastePanel = pasting ? (
+              <div className="reader-paste">
+                <p className="sub">
+                  Open the story on the site, select all of it, copy, and paste it here. It is kept on this device as the
+                  article&apos;s text, so highlights and quotes work as usual.
+                </p>
+                <div
+                  ref={pasteBox}
+                  className="reader-paste-box prose"
+                  contentEditable
+                  suppressContentEditableWarning
+                  data-placeholder="Paste the article here…"
+                  onPaste={(event) => {
+                    // Formatting is kept but cleaned; plain text becomes paragraphs.
+                    event.preventDefault();
+                    const html = event.clipboardData.getData("text/html");
+                    const text = event.clipboardData.getData("text/plain");
+                    const clean = html
+                      ? sanitizeRichText(cleanPastedHtml(html))
+                      : text.split(/\n\s*\n|\n/).map((l) => l.trim()).filter(Boolean)
+                          .map((l) => `<p>${l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>`).join("");
+                    document.execCommand("insertHTML", false, clean);
+                  }}
+                />
+                <div className="reader-error-actions">
+                  <button className="btn small" onClick={keepPasted}>Use this text</button>
+                  <button className="btn ghost small" onClick={() => setPasting(false)}>Cancel</button>
+                </div>
+              </div>
+  ) : null;
+
   return (
     <div className="reader">
       <div className="reader-bar">
@@ -748,6 +789,20 @@ export default function ArticleReader({
           </div>
         )}
 
+        {isVideo && article && !article.transcript && !error && (
+          <div className="reader-error reader-video">
+            <p>No transcript yet — YouTube won&apos;t give it to the app&apos;s server, but your browser can get it.</p>
+            <div className="reader-error-actions">
+              <a className="btn small" href={`${url.split("#")[0]}#super-reader-capture`} target="_blank" rel="opener"
+                title="Needs the Super Reader Chrome extension — it reads the transcript in your browser and brings it back here">
+                Get the transcript
+              </a>
+              <button className="btn ghost small" onClick={() => setPasting((v) => !v)}>Paste the transcript</button>
+            </div>
+            {pastePanel}
+          </div>
+        )}
+
         {error && (
           <div className="reader-error">
             <p>{error}</p>
@@ -792,36 +847,7 @@ export default function ArticleReader({
                 </button>
               )}
             </div>
-            {pasting && (
-              <div className="reader-paste">
-                <p className="sub">
-                  Open the story on the site, select all of it, copy, and paste it here. It is kept on this device as the
-                  article&apos;s text, so highlights and quotes work as usual.
-                </p>
-                <div
-                  ref={pasteBox}
-                  className="reader-paste-box prose"
-                  contentEditable
-                  suppressContentEditableWarning
-                  data-placeholder="Paste the article here…"
-                  onPaste={(event) => {
-                    // Formatting is kept but cleaned; plain text becomes paragraphs.
-                    event.preventDefault();
-                    const html = event.clipboardData.getData("text/html");
-                    const text = event.clipboardData.getData("text/plain");
-                    const clean = html
-                      ? sanitizeRichText(cleanPastedHtml(html))
-                      : text.split(/\n\s*\n|\n/).map((l) => l.trim()).filter(Boolean)
-                          .map((l) => `<p>${l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>`).join("");
-                    document.execCommand("insertHTML", false, clean);
-                  }}
-                />
-                <div className="reader-error-actions">
-                  <button className="btn small" onClick={keepPasted}>Use this text</button>
-                  <button className="btn ghost small" onClick={() => setPasting(false)}>Cancel</button>
-                </div>
-              </div>
-            )}
+            {pastePanel}
           </div>
         )}
 

@@ -226,6 +226,11 @@ async function readPage() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !/^https?:/.test(tab.url || "")) throw new Error("This page can't be saved — open an article first.");
   await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["vendor/Readability.js", "extract.js"] });
+  // On a YouTube video, the transcript is what gets saved, when it has one.
+  if (/(^|\.)youtube\.com$/.test(new URL(tab.url).hostname)) {
+    const [{ result: video }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => window.__superReaderYoutube() });
+    if (video) return video;
+  }
   const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => window.__superReaderExtract() });
   return result;
 }

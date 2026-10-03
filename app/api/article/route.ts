@@ -205,15 +205,15 @@ export async function GET(request: Request) {
     decodeKeysHeader(request.headers.get(KEYS_HEADER)),
   );
 
-  // A YouTube video has no prose for the extractor to find; straight to its
-  // own description and transcript (lib/youtube.ts).
+  // A YouTube video has no prose for the extractor to find (and its page is
+  // a bot check to a server): straight to its oEmbed preview. The transcript
+  // comes from the reader's browser — lib/youtube.ts.
   if (youtubeId(target.toString())) {
     try {
       const video = await previewFromMetadata(target.toString(), Math.min(12_000, remaining()));
       if (video) {
         return NextResponse.json(video, {
-          // A transcript changes rarely; a video without one may get captions later.
-          headers: { "cache-control": video.transcript ? "public, max-age=86400" : "public, max-age=600" },
+          headers: { "cache-control": "public, max-age=600" },
         });
       }
     } catch {

@@ -1,17 +1,14 @@
 /**
- * A YouTube video's transcript — the captions YouTube itself shows under
- * "Show transcript" on the watch page.
+ * YouTube transcripts — the captions YouTube itself shows under "Show
+ * transcript" on the watch page.
  *
- * The watch page carries the video's player response, and in it the list of
- * caption tracks with the address of each. We read that list from the page as
- * any visitor gets it, pick the best track (the uploader's own captions in
- * English before automatic ones, then whatever there is), and fetch it as
- * timed text. If YouTube answers with a bot check, or the video has no
- * captions, there is no transcript — we do not try to get round a refusal
- * (docs/COLLECTION.md §8).
+ * YouTube answers this app's server with a bot check (measured 3 Oct 2026,
+ * docs/COLLECTION.md §8), so the server never fetches them. They come from
+ * the reader's own browser instead: the extension reads them off the page
+ * (extension/extract.js), or the reader pastes the panel's text in. This
+ * module turns either into the article's text.
  */
 
-import { fetchText } from "./feed";
 
 export type TranscriptLine = { start: number; text: string };
 export type VideoTranscript = { language: string; auto: boolean; lines: TranscriptLine[] };
@@ -112,28 +109,52 @@ export function paragraphs(lines: TranscriptLine[]): TranscriptLine[] {
   return out;
 }
 
-export async function fetchYoutubeTranscript(link: string, timeoutMs = 9000): Promise<VideoTranscript | null> {
-  const id = youtubeId(link);
-  if (!id) return null;
-  const deadline = Date.now() + timeoutMs;
-  const { body } = await fetchText(`https://www.youtube.com/watch?v=${id}&hl=en`, timeoutMs, { "accept-language": "en-US,en;q=0.9" });
-  const track = pickTrack(captionTracks(body));
-  if (!track) return null;
-  const left = Math.max(2000, deadline - Date.now());
-  const url = new URL(decode(track.baseUrl).replace(/\\u0026/g, "&"));
-  url.searchParams.set("fmt", "json3");
-  let lines: TranscriptLine[] = [];
-  try {
-    const { body: timed } = await fetchText(url.toString(), left);
-    lines = parseTimedText(timed);
-  } catch {
-    /* fall through to the XML shape */
+
+const pad = (n: number) => String(n).padStart(2, "0");
+/** Seconds as a transcript time: 75 → "1:15", 3725 → "1:02:05". */
+export function stamp(t: number): string {
+  const s = Math.floor(t);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`;
+}
+
+/** A transcript as article HTML: each paragraph opens with its time, linked to that moment in the video. */
+export function transcriptArticleHtml(id: string | null, lines: TranscriptLine[], auto = false): string {
+  const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return (
+    `<h2>Transcript${auto ? " (auto-generated)" : ""}</h2>` +
+    paragraphs(lines)
+      .map((p) => {
+        const time = Number.isFinite(p.start) && p.start >= 0 ? stamp(p.start) : "";
+        const link = id && time ? `<a href="https://www.youtube.com/watch?v=${id}&amp;t=${Math.floor(p.start)}s">${time}</a> ` : time ? `${time} ` : "";
+        return `<p>${link}${esc(p.text)}</p>`;
+      })
+      .join("")
+  );
+}
+
+/**
+ * A transcript copied from YouTube's "Show transcript" panel (or anywhere
+ * that puts a time before each line): "0:00\nText\n0:04\nMore", or
+ * "0:00 Text" on one line. Text with no times at all is kept as one block
+ * per line, timed at -1 so no time is shown.
+ */
+export function parsePastedTranscript(text: string): TranscriptLine[] {
+  const TIME = /^(?:(\d{1,2}):)?(\d{1,2}):(\d{2})(?:\s+(.*))?$/;
+  const out: TranscriptLine[] = [];
+  let timed = false;
+  for (const raw of text.replace(/\r/g, "").split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(TIME);
+    if (m) {
+      timed = true;
+      const start = Number(m[1] ?? 0) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+      out.push({ start, text: (m[4] ?? "").trim() });
+    } else if (timed && out.length && !out[out.length - 1].text) out[out.length - 1].text = line;
+    else if (timed && out.length) out[out.length - 1].text += ` ${line}`;
+    else out.push({ start: -1, text: line });
   }
-  if (lines.length === 0) {
-    url.searchParams.delete("fmt");
-    const { body: timed } = await fetchText(url.toString(), Math.max(2000, deadline - Date.now()));
-    lines = parseTimedText(timed);
-  }
-  if (lines.length === 0) return null;
-  return { language: track.languageCode, auto: track.kind === "asr", lines };
+  return out.filter((l) => l.text);
 }
