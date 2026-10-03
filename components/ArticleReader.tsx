@@ -7,6 +7,8 @@ import { Icon } from "./icons";
 import { downloadUrlFor } from "@/lib/download";
 import { EXTRACT_VERSION, readCached, writeCached } from "@/lib/offline";
 import { loadSyncCode } from "@/lib/store";
+import { sanitizeRichText } from "@/lib/subjects";
+import { cleanPastedHtml } from "@/lib/paste";
 import { timeAgo, hostOf } from "./format";
 import QuoteToNote from "./QuoteToNote";
 import { findQuoteRange } from "@/lib/highlight";
@@ -116,6 +118,28 @@ export default function ArticleReader({
   const [showAllSubjects, setShowAllSubjects] = useState(false);
   const [article, setArticle] = useState<ReadableArticle | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** The article's text pasted in by hand, for a site that will not give it to us. */
+  const [pasting, setPasting] = useState(false);
+  const pasteBox = useRef<HTMLDivElement | null>(null);
+  const keepPasted = () => {
+    const box = pasteBox.current;
+    const words = (box?.innerText ?? "").trim().split(/\s+/).filter(Boolean).length;
+    if (!box || words < 5) return;
+    const html = sanitizeRichText(box.innerHTML);
+    const pasted: ReadableArticle = {
+      via: "page",
+      url,
+      title: article?.title || fallbackTitle || hostOf(url),
+      siteName: hostOf(url),
+      html,
+      wordCount: words,
+      truncated: false,
+    };
+    setArticle(pasted);
+    setError(null);
+    setPasting(false);
+    void writeCached(pasted, url);
+  };
   const [fromCache, setFromCache] = useState(false);
   /** Set when a fetch is taking long enough that silence looks like a bug. */
   const [slow, setSlow] = useState(false);
@@ -677,6 +701,9 @@ export default function ArticleReader({
               >
                 Scan it in yourself
               </a>
+              <button className="btn ghost small" onClick={() => setPasting((v) => !v)}>
+                Paste the text
+              </button>
               <a
                 className="btn ghost small"
                 href={url}
@@ -694,6 +721,36 @@ export default function ArticleReader({
                 </button>
               )}
             </div>
+            {pasting && (
+              <div className="reader-paste">
+                <p className="sub">
+                  Open the story on the site, select all of it, copy, and paste it here. It is kept on this device as the
+                  article&apos;s text, so highlights and quotes work as usual.
+                </p>
+                <div
+                  ref={pasteBox}
+                  className="reader-paste-box prose"
+                  contentEditable
+                  suppressContentEditableWarning
+                  data-placeholder="Paste the article here…"
+                  onPaste={(event) => {
+                    // Formatting is kept but cleaned; plain text becomes paragraphs.
+                    event.preventDefault();
+                    const html = event.clipboardData.getData("text/html");
+                    const text = event.clipboardData.getData("text/plain");
+                    const clean = html
+                      ? sanitizeRichText(cleanPastedHtml(html))
+                      : text.split(/\n\s*\n|\n/).map((l) => l.trim()).filter(Boolean)
+                          .map((l) => `<p>${l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>`).join("");
+                    document.execCommand("insertHTML", false, clean);
+                  }}
+                />
+                <div className="reader-error-actions">
+                  <button className="btn small" onClick={keepPasted}>Use this text</button>
+                  <button className="btn ghost small" onClick={() => setPasting(false)}>Cancel</button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
