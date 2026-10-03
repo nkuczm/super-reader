@@ -1,3 +1,4 @@
+import { youtubeId } from "@/lib/youtube";
 import { NextResponse } from "next/server";
 import {
   extractArticle,
@@ -203,6 +204,22 @@ export async function GET(request: Request) {
     target.toString(),
     decodeKeysHeader(request.headers.get(KEYS_HEADER)),
   );
+
+  // A YouTube video has no prose for the extractor to find; straight to its
+  // own description and transcript (lib/youtube.ts).
+  if (youtubeId(target.toString())) {
+    try {
+      const video = await previewFromMetadata(target.toString(), Math.min(12_000, remaining()));
+      if (video) {
+        return NextResponse.json(video, {
+          // A transcript changes rarely; a video without one may get captions later.
+          headers: { "cache-control": video.transcript ? "public, max-age=86400" : "public, max-age=600" },
+        });
+      }
+    } catch {
+      /* fall through to the general path */
+    }
+  }
 
   try {
     const article = await extractArticle(
