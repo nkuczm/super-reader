@@ -124,6 +124,12 @@ const INSIGHT_LABEL: Record<InsightItem["type"], string> = {
 const NEW_TABLE = () => [["", "", ""], ["", "", ""], ["", "", ""]];
 
 /** Blocks copied on the whiteboard, as the clipboard carries them between subjects. */
+/** The first picture on a clipboard, if there is one. */
+function clipboardPicture(e: ClipboardEvent): File | null {
+  const item = [...(e.clipboardData?.items ?? [])].find((i) => i.kind === "file" && i.type.startsWith("image/"));
+  return item?.getAsFile() ?? null;
+}
+
 /** A heading in a tab's outline: a section label (n = -1) or the nth heading in a text box. */
 type OutlineEntry = { id: string; n: number; level: number; text: string };
 
@@ -1144,6 +1150,19 @@ function DocumentView(
     event.preventDefault();
     setMenu({ left: Math.min(event.clientX, window.innerWidth - 200), top: Math.min(event.clientY, window.innerHeight - 200) });
   };
+  // A picture pasted while nothing is being typed in joins the page as its own box.
+  useEffect(() => {
+    const paste = (e: ClipboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.("input, textarea, [contenteditable]")) return;
+      const picture = clipboardPicture(e);
+      if (!picture) return;
+      e.preventDefault();
+      void shrinkImage(picture).then((image) => shared.addBox(undefined, { image, caption: "" })).catch(() => {});
+    };
+    document.addEventListener("paste", paste);
+    return () => document.removeEventListener("paste", paste);
+  });
   const pick = (run: () => void) => () => {
     run();
     setMenu(null);
@@ -1664,6 +1683,15 @@ function Whiteboard(
     };
     const paste = (e: ClipboardEvent) => {
       if (typing(e)) return;
+      // A picture on the clipboard lands where the pointer is, as its own box.
+      const picture = clipboardPicture(e);
+      if (picture) {
+        e.preventDefault();
+        const rect = canvas.current?.getBoundingClientRect();
+        const at = pointer.current ?? toBoard((rect?.left ?? 0) + 80, (rect?.top ?? 0) + 80);
+        void shrinkImage(picture).then((image) => shared.addBox(at, { image, caption: "" })).catch(() => {});
+        return;
+      }
       const json = e.clipboardData?.getData(BLOCKS_TYPE) || (e.clipboardData?.getData("text/plain") ? null : blockClipboard);
       const blocks = readBlocks(json ?? blockClipboard);
       if (!blocks) return;

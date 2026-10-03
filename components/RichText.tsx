@@ -429,6 +429,31 @@ export default function RichText({
           // highlight — translated from Google Docs' clipboard shape and
           // cleaned (lib/paste.ts). Plain text when that is all there is.
           event.preventDefault();
+          // A picture on the clipboard — a screenshot, an image copied from a
+          // page — is set into the text at the caret, as a dropped one is.
+          const pictures = onDropImage
+            ? [...event.clipboardData.items].filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile()).filter((f): f is File => !!f)
+            : [];
+          if (pictures.length > 0) {
+            const node = el.current;
+            const at = window.getSelection()?.rangeCount ? window.getSelection()!.getRangeAt(0).cloneRange() : null;
+            void (async () => {
+              const ids: string[] = [];
+              for (const file of pictures.slice(0, 6)) {
+                const id = await onDropImage!(file);
+                if (id) ids.push(id);
+              }
+              if (!node || ids.length === 0) return;
+              node.focus();
+              const selection = window.getSelection();
+              selection?.removeAllRanges();
+              if (at && node.contains(at.startContainer)) selection?.addRange(at);
+              document.execCommand("insertHTML", false, ids.map((id) => `<p><img data-embed="${id}"></p>`).join("") + "<p><br></p>");
+              fillEmbeds();
+              changed();
+            })();
+            return;
+          }
           // An address pasted over selected words links them, as in a Doc.
           const plain = event.clipboardData.getData("text/plain").trim();
           const selected = window.getSelection();
