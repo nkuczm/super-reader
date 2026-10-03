@@ -2172,3 +2172,9 @@
 .outline-flash { animation: outline-flash 1.4s ease-out; }
 @keyframes outline-flash { 0%, 30% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 10px; } 100% { box-shadow: 0 0 0 3px transparent; } }
 .tab-rail-anchor { position: sticky; top: 0; height: 0; z-index: 20; }
+
+/* ---------- a video's thumbnail on its story card ---------- */
+.subject-card-thumb { position: relative; display: block; width: 100%; padding: 0; margin: 6px 0 4px; border: 0; border-radius: 8px; overflow: hidden; background: #000; cursor: pointer; aspect-ratio: 16 / 9; }
+.subject-card-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.subject-card-play { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 46px; height: 32px; border-radius: 8px; background: rgba(220, 38, 38, 0.92); color: #fff; font-size: 14px; display: grid; place-items: center; }
+.subject-card-thumb:hover .subject-card-play { background: #dc2626; }

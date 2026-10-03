@@ -1189,3 +1189,23 @@ export function safeHref(raw: string | undefined): string | null {
     return null;
   }
 }
+
+/**
+ * A YouTube video's thumbnail, from the video's id in its link — youtube.com
+ * watch, shorts, live and embed links and youtu.be — or null for anything else.
+ */
+export function youtubeThumbnail(link: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(link);
+  } catch {
+    return null;
+  }
+  const host = url.hostname.replace(/^(www\.|m\.|music\.)/, "");
+  let id: string | null = null;
+  if (host === "youtu.be") id = url.pathname.slice(1).split("/")[0];
+  else if (host === "youtube.com" || host === "youtube-nocookie.com") {
+    id = url.searchParams.get("v") ?? url.pathname.match(/^\/(?:shorts|live|embed|v)\/([^/?#]+)/)?.[1] ?? null;
+  }
+  return id && /^[A-Za-z0-9_-]{6,20}$/.test(id) ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null;
+}

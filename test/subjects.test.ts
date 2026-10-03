@@ -273,3 +273,14 @@ test("sanitizeRichText keeps a checklist and its ticks, nothing else", async () 
     `<ul data-check=""><li data-checked="true">done</li><li>todo</li></ul>`,
   );
 });
+
+test("youtubeThumbnail reads the video id from every link shape", async () => {
+  const { youtubeThumbnail } = await import("../lib/subjects");
+  const t = "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg";
+  assert.equal(youtubeThumbnail("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=30s"), t);
+  assert.equal(youtubeThumbnail("https://youtu.be/dQw4w9WgXcQ?si=x"), t);
+  assert.equal(youtubeThumbnail("https://m.youtube.com/shorts/dQw4w9WgXcQ"), t);
+  assert.equal(youtubeThumbnail("https://www.youtube.com/embed/dQw4w9WgXcQ"), t);
+  assert.equal(youtubeThumbnail("https://www.youtube.com/channel/UC123"), null);
+  assert.equal(youtubeThumbnail("https://example.com/watch?v=dQw4w9WgXcQ"), null);
+});
