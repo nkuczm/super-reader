@@ -2237,3 +2237,5 @@
 }
 .wb-node { transition: filter 0.35s ease, opacity 0.35s ease; }
 .wb-far-title { transition: opacity 0.35s ease; }
+/* Touch devices: no per-card transitions on the board — each would be its own compositing layer. */
+@media (pointer: coarse) { .wb-node { transition: none; } }
