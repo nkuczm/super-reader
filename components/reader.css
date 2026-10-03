@@ -2184,3 +2184,10 @@
 .wb-line:hover path:not(.wb-line-hit) { stroke: #dc2626; }
 .wb-line:hover .wb-unlink circle { stroke: #dc2626; }
 @media (hover: none) { .wb-unlink { opacity: 0.85; } }
+
+/* ---------- pasting a walled article's text in by hand ---------- */
+.reader-paste { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.reader-paste .sub { margin: 0; font-size: 13px; color: var(--text-dim); }
+.reader-paste-box { min-height: 160px; max-height: 50vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--bg); color: var(--text); outline: none; }
+.reader-paste-box:focus { border-color: var(--accent); }
+.reader-paste-box:empty::before { content: attr(data-placeholder); color: var(--text-dim); }
