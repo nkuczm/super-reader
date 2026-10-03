@@ -2197,3 +2197,15 @@
 ::highlight(transcript-find) { background-color: rgba(250, 204, 21, 0.45); }
 ::highlight(transcript-find-on) { background-color: rgba(245, 158, 11, 0.9); color: #000; }
 .wb-menu button:disabled { color: var(--text-dim); cursor: default; background: none; }
+
+/* ---------- whiteboard minimap, while zooming ---------- */
+.wb-minimap {
+  position: absolute; right: 14px; bottom: 14px; z-index: 16; cursor: pointer;
+  background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(6px);
+  border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  animation: mm-in 0.15s ease-out;
+}
+@keyframes mm-in { from { opacity: 0; } to { opacity: 1; } }
+.wb-minimap .mm-node { fill: color-mix(in srgb, var(--text-dim) 35%, transparent); }
+.wb-minimap .mm-label { fill: color-mix(in srgb, var(--accent) 55%, transparent); }
+.wb-minimap .mm-view { fill: rgba(250, 204, 21, 0.12); stroke: #eab308; stroke-width: 1.5; }
