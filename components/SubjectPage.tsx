@@ -1553,6 +1553,17 @@ function Whiteboard(
       const h = sizes[id]?.h ?? 56;
       if (x >= rect.x && x <= rect.x + rect.w && y >= rect.y - 20 && y <= rect.y + h + 20) return id;
     }
+    // Dropped on a card already in a section — of any kind — joins that section.
+    for (const item of live(board)) {
+      if (item.kind !== "link") continue;
+      const l = item as LinkItem;
+      const [label, member] = labelIds.has(l.from) ? [l.from, l.to] : labelIds.has(l.to) ? [l.to, l.from] : [null, null];
+      if (!label || !member || member === except || label === except) continue;
+      const rect = positions.get(member);
+      if (!rect) continue;
+      const h = sizes[member]?.h ?? 160;
+      if (x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + h) return label;
+    }
     return null;
   };
 
@@ -2046,7 +2057,17 @@ function Whiteboard(
    * it becomes a soft patch of the label's colour in the shape of its blocks,
    * with only the header written over it.
    */
-  const far = view.zoom < 0.35;
+  // A gradual change, not a switch: from FAR_START down to FAR_END the
+  // colour comes in first, then a light blur settles it. Above FAR_START
+  // everything stays sharp, however small, while it can still be read.
+  const FAR_START = 0.28;
+  const FAR_END = 0.14;
+  const farT = Math.min(1, Math.max(0, (FAR_START - view.zoom) / (FAR_START - FAR_END)));
+  const tint = Math.min(1, farT / 0.5);
+  const haze = Math.min(1, Math.max(0, (farT - 0.45) / 0.55));
+  /** Blur in screen pixels at full haze: enough to settle the colour, not to erase the shapes. */
+  const blurPx = 2.5 * haze;
+  const far = farT > 0;
   const sections = far
     ? shared.boxes
         .filter((b) => b.label && positions.has(b.id))
@@ -2262,10 +2283,12 @@ function Whiteboard(
           {sections.map((sec) => (
             <div key={`far-${sec.id}`} className="wb-far" aria-hidden="true">
               {sec.rects.map((r) => (
-                <div key={r.id} className="wb-far-blob" style={{ left: r.x, top: r.y, width: r.w, height: r.h, background: sec.color, filter: `blur(${Math.min(40, 6 / view.zoom)}px)` }} />
+                <div key={r.id} className="wb-far-blob"
+                  style={{ left: r.x, top: r.y, width: r.w, height: r.h, background: sec.color, opacity: 0.5 * tint, filter: `blur(${(blurPx * 2) / view.zoom}px)` }} />
               ))}
               <div className="wb-far-title"
                 style={{
+                  opacity: Math.min(1, haze * 1.4),
                   left: sec.box.x0, top: sec.box.y0, width: sec.box.x1 - sec.box.x0, height: sec.box.y1 - sec.box.y0,
                   // As big as reads at a glance, but each word fits the patch's width.
                   fontSize: Math.min(
@@ -2286,8 +2309,12 @@ function Whiteboard(
                   if (el) nodeEls.current.set(node.id, el);
                   else nodeEls.current.delete(node.id);
                 }}
-                className={`wb-node kind-${node.kind}${connecting === node.id ? " picked" : ""}${drag?.id === node.id || drag?.group.has(node.id) ? " dragging" : ""}${selected.has(node.id) ? " selected" : ""}${grouped.has(node.id) ? " far-hidden" : ""}`}
-                style={{ left: pos.x, top: pos.y, width: pos.w }}
+                className={`wb-node kind-${node.kind}${connecting === node.id ? " picked" : ""}${drag?.id === node.id || drag?.group.has(node.id) ? " dragging" : ""}${selected.has(node.id) ? " selected" : ""}`}
+                style={{
+                  left: pos.x, top: pos.y, width: pos.w,
+                  // Every card blurs as the board zooms out; a section's cards also fade under its colour.
+                  ...(haze > 0 ? { filter: `blur(${blurPx / view.zoom}px)`, opacity: grouped.has(node.id) ? 1 - 0.35 * haze : 1 } : {}),
+                }}
                 onContextMenu={(event) => {
                   // Typing keeps the browser's own menu (spelling, copy and paste).
                   if ((event.target as HTMLElement).closest(".rich-body, input, textarea")) return;
