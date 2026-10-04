@@ -12,7 +12,7 @@ export const EMBED_TYPE = "application/x-super-reader-box";
 const ARROWS: [string, string][] = [["<-->", "↔"], ["←>", "↔"], ["-->", "→"], ["<--", "←"]];
 
 /** The height of Safari's floating form bar (✓ and arrows) above an iPhone keyboard, with a little air. */
-const IOS_ACCESSORY_BAR = 52;
+const IOS_ACCESSORY_BAR = 50;
 
 function caretRangeAt(x: number, y: number): Range | null {
   const doc = document as Document & {
@@ -389,7 +389,8 @@ export default function RichText({
       <button type="button" title="Link (⌘K)" onClick={startLink}>Link</button>
       {docked && (
         <button type="button" className="rich-done" title="Done — close the keyboard"
-          onClick={() => { (document.activeElement as HTMLElement | null)?.blur?.(); setDocked(false); }}>Done</button>
+          aria-label="Done — close the keyboard"
+            onClick={() => { (document.activeElement as HTMLElement | null)?.blur?.(); setDocked(false); }}>✓</button>
       )}
     </div>
   );
