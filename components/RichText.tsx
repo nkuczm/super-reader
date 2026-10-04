@@ -11,9 +11,6 @@ export const EMBED_TYPE = "application/x-super-reader-box";
 /** Arrows typed out, and what they become. */
 const ARROWS: [string, string][] = [["<-->", "↔"], ["←>", "↔"], ["-->", "→"], ["<--", "←"]];
 
-/** The height of Safari's floating form bar (✓ and arrows) above an iPhone keyboard, with a little air. */
-const IOS_ACCESSORY_BAR = 50;
-
 function caretRangeAt(x: number, y: number): Range | null {
   const doc = document as Document & {
     caretRangeFromPoint?: (x: number, y: number) => Range | null;
@@ -266,31 +263,26 @@ export default function RichText({
    */
   const tools = useRef<HTMLDivElement | null>(null);
   const [docked, setDocked] = useState(false);
-  const [kbBottom, setKbBottom] = useState(0);
+  const [vvTop, setVvTop] = useState(0);
   useEffect(() => {
     if (!docked) return;
     const vv = window.visualViewport;
     const scroller = wrap.current?.closest<HTMLElement>(".main") ?? null;
-    // Safari on iPhone floats its own ✓ / arrows bar over the page just above
-    // the keyboard, inside what it reports as visible — so the toolbar would
-    // sit behind it. With the keyboard up, it goes above that bar instead.
-    const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    // Pinned to the TOP of what is visible. The bottom edge on an iPhone is
+    // a moving target — the keyboard, Safari's own ✓ / arrows bar, and
+    // whether iOS shrinks the page or overlays it all vary from one moment to
+    // the next — and a toolbar tracking it kept ending up behind that bar.
+    // The top of the visual viewport is where the reader's eyes already are.
     const place = () => {
-      const keyboard = vv ? Math.max(0, window.innerHeight - (vv.offsetTop + vv.height)) : 0;
-      // Docked means typing, so the keyboard and Safari's bar are up — lift
-      // always. Whether iOS has shrunk the page to the keyboard (keyboard
-      // measures ~0) or overlaid it (keyboard measures its height) varies
-      // from one moment to the next; the bar is above the keyboard in both.
-      const bottom = keyboard + (ios ? IOS_ACCESSORY_BAR : 0);
-      setKbBottom(bottom);
-      // The caret's line stays above the toolbar.
+      setVvTop(vv ? vv.offsetTop : 0);
+      // The caret's line stays below the toolbar.
       const sel = window.getSelection();
       const bar = tools.current?.getBoundingClientRect();
       if (!sel?.rangeCount || !bar || !scroller) return;
       const r = sel.getRangeAt(0).getBoundingClientRect();
-      if (r.height && r.bottom > bar.top - 8) scroller.scrollBy({ top: r.bottom - bar.top + 16 });
+      if (r.height && r.top < bar.bottom + 8) scroller.scrollBy({ top: r.top - bar.bottom - 24 });
     };
-    if (scroller) scroller.style.scrollPaddingBottom = "64px";
+    if (scroller) scroller.style.scrollPaddingTop = "64px";
     place();
     // The keyboard slides in after focus, and iOS reports its size late.
     const later = [120, 350, 700].map((ms) => setTimeout(place, ms));
@@ -301,7 +293,7 @@ export default function RichText({
       vv?.removeEventListener("resize", place);
       vv?.removeEventListener("scroll", place);
       document.removeEventListener("selectionchange", place);
-      if (scroller) scroller.style.scrollPaddingBottom = "";
+      if (scroller) scroller.style.scrollPaddingTop = "";
       later.forEach(clearTimeout);
     };
   }, [docked]);
@@ -374,7 +366,7 @@ export default function RichText({
   }
 
   const toolbar = (
-    <div ref={tools} className={`rich-tools${docked ? " docked" : ""}`} style={docked ? { bottom: kbBottom } : undefined}
+    <div ref={tools} className={`rich-tools${docked ? " docked" : ""}`} style={docked ? { top: vvTop } : undefined}
       onMouseDown={(event) => event.preventDefault()}>
       {docked && (
         <>
