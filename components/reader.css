@@ -2254,3 +2254,4 @@
 .rich-tools.docked .rich-undo + .rich-undo { margin-right: 6px; }
 /* Holding a card or the board opens our menu, not the phone's own callout. */
 .wb-canvas, .subject-doc { -webkit-touch-callout: none; }
+.rich-tools.docked .rich-done { margin-left: auto; font-weight: 600; color: var(--accent); }

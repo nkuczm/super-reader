@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { sanitizeRichText } from "@/lib/subjects";
 import { cleanPastedHtml } from "@/lib/paste";
 
@@ -357,6 +358,31 @@ export default function RichText({
     changed();
   }
 
+  const toolbar = (
+    <div ref={tools} className={`rich-tools${docked ? " docked" : ""}`} style={docked ? { bottom: kbBottom } : undefined}
+      onMouseDown={(event) => event.preventDefault()}>
+      {docked && (
+        <>
+          <button type="button" className="rich-undo" title="Undo" aria-label="Undo" onClick={() => format("undo")}>↶</button>
+          <button type="button" className="rich-undo" title="Redo" aria-label="Redo" onClick={() => format("redo")}>↷</button>
+        </>
+      )}
+      <button type="button" title="Bold (⌘B)" onClick={() => format("bold")}><b>B</b></button>
+      <button type="button" title="Italic (⌘I)" onClick={() => format("italic")}><i>I</i></button>
+      <button type="button" title="Highlight (again to remove)" onClick={toggleHighlight}>
+        <mark>H</mark>
+      </button>
+      <button type="button" title="Bulleted list (⌘⇧8)" onClick={() => format("insertUnorderedList")}>• List</button>
+      <button type="button" title="Checklist (⌘⇧9)" onClick={toggleChecklist}>☐ Check</button>
+      <button type="button" title="Heading" onClick={() => format("formatBlock", "h3")}>H3</button>
+      <button type="button" title="Link (⌘K)" onClick={startLink}>Link</button>
+      {docked && (
+        <button type="button" className="rich-done" title="Done — close the keyboard"
+          onClick={() => { (document.activeElement as HTMLElement | null)?.blur?.(); setDocked(false); }}>Done</button>
+      )}
+    </div>
+  );
+
   return (
     <div className={`rich ${className ?? ""}`} ref={wrap} onMouseLeave={() => setPinFor(null)}
       onFocus={() => coarse() && setDocked(true)}
@@ -385,24 +411,9 @@ export default function RichText({
           ↗ Go to passage
         </button>
       )}
-      <div ref={tools} className={`rich-tools${docked ? " docked" : ""}`} style={docked ? { bottom: kbBottom } : undefined}
-        onMouseDown={(event) => event.preventDefault()}>
-        {docked && (
-          <>
-            <button type="button" className="rich-undo" title="Undo" aria-label="Undo" onClick={() => format("undo")}>↶</button>
-            <button type="button" className="rich-undo" title="Redo" aria-label="Redo" onClick={() => format("redo")}>↷</button>
-          </>
-        )}
-        <button type="button" title="Bold (⌘B)" onClick={() => format("bold")}><b>B</b></button>
-        <button type="button" title="Italic (⌘I)" onClick={() => format("italic")}><i>I</i></button>
-        <button type="button" title="Highlight (again to remove)" onClick={toggleHighlight}>
-          <mark>H</mark>
-        </button>
-        <button type="button" title="Bulleted list (⌘⇧8)" onClick={() => format("insertUnorderedList")}>• List</button>
-        <button type="button" title="Checklist (⌘⇧9)" onClick={toggleChecklist}>☐ Check</button>
-        <button type="button" title="Heading" onClick={() => format("formatBlock", "h3")}>H3</button>
-        <button type="button" title="Link (⌘K)" onClick={startLink}>Link</button>
-      </div>
+      {/* Docked, the toolbar lives at the top of the page: inside a scaled
+          whiteboard, "fixed" would mean fixed to the board, not the screen. */}
+      {docked && typeof document !== "undefined" ? createPortal(toolbar, document.body) : toolbar}
       {linking && (
         <form
           className="rich-link-field"
