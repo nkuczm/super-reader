@@ -216,6 +216,18 @@ holds real paragraphs — other hidden content, modals included, stays hidden.
 The same story then reads as 771 words. `EXTRACT_VERSION` went to 3 so the
 truncated copies on devices and at the edge are fetched again.
 
+### A help-centre article whose list vanished (4 Oct 2026)
+
+A support.claude.com article (an Intercom help centre) read with its intro and
+closing paragraphs but none of the six-item list between them, plus the
+site's breadcrumbs and "Related Articles". Measured from the deployment: the
+list is an ordinary `<ul>`, wrapped in `div.intercom-interblocks-unordered-nested-list`.
+Readability scores any class containing `com-` as a comment block, and
+"intercom-" contains it, so the list was discarded as comments.
+`tidyForReadability()` in `lib/article.ts` now takes the `intercom-` prefix
+off class names before scoring and removes breadcrumb trails and
+related-articles lists. `EXTRACT_VERSION` went to 6 to drop the cached copies.
+
 ### What those numbers mean
 
 **No ordering of routes wins everywhere.** Sitemaps-first loses stories at the
