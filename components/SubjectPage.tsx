@@ -1335,9 +1335,17 @@ function Whiteboard(
     return startView();
   });
   useEffect(() => {
-    const zoomed = lastZoom.current !== null && Math.abs(lastZoom.current - view.zoom) > 0.0005;
+    // Only zooming out brings the map up; zooming back in puts it away.
+    const delta = lastZoom.current === null ? 0 : view.zoom - lastZoom.current;
     lastZoom.current = view.zoom;
-    if (!zoomed && !mapShownRef.current) return;
+    if (delta > 0.0005) {
+      if (mapTimer.current) clearTimeout(mapTimer.current);
+      mapShownRef.current = false;
+      setMapShown(false);
+      return;
+    }
+    const zoomedOut = delta < -0.0005;
+    if (!zoomedOut && !mapShownRef.current) return;
     mapShownRef.current = true;
     setMapShown(true);
     if (mapTimer.current) clearTimeout(mapTimer.current);
