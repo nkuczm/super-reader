@@ -277,7 +277,11 @@ export default function RichText({
     const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
     const place = () => {
       const keyboard = vv ? Math.max(0, window.innerHeight - (vv.offsetTop + vv.height)) : 0;
-      const bottom = keyboard + (ios && keyboard > 80 ? IOS_ACCESSORY_BAR : 0);
+      // Docked means typing, so the keyboard and Safari's bar are up — lift
+      // always. Whether iOS has shrunk the page to the keyboard (keyboard
+      // measures ~0) or overlaid it (keyboard measures its height) varies
+      // from one moment to the next; the bar is above the keyboard in both.
+      const bottom = keyboard + (ios ? IOS_ACCESSORY_BAR : 0);
       setKbBottom(bottom);
       // The caret's line stays above the toolbar.
       const sel = window.getSelection();
