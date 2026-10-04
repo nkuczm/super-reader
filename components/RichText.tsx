@@ -11,6 +11,9 @@ export const EMBED_TYPE = "application/x-super-reader-box";
 /** Arrows typed out, and what they become. */
 const ARROWS: [string, string][] = [["<-->", "↔"], ["←>", "↔"], ["-->", "→"], ["<--", "←"]];
 
+/** The height of Safari's floating form bar (✓ and arrows) above an iPhone keyboard, with a little air. */
+const IOS_ACCESSORY_BAR = 52;
+
 function caretRangeAt(x: number, y: number): Range | null {
   const doc = document as Document & {
     caretRangeFromPoint?: (x: number, y: number) => Range | null;
@@ -268,8 +271,13 @@ export default function RichText({
     if (!docked) return;
     const vv = window.visualViewport;
     const scroller = wrap.current?.closest<HTMLElement>(".main") ?? null;
+    // Safari on iPhone floats its own ✓ / arrows bar over the page just above
+    // the keyboard, inside what it reports as visible — so the toolbar would
+    // sit behind it. With the keyboard up, it goes above that bar instead.
+    const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
     const place = () => {
-      const bottom = vv ? Math.max(0, window.innerHeight - (vv.offsetTop + vv.height)) : 0;
+      const keyboard = vv ? Math.max(0, window.innerHeight - (vv.offsetTop + vv.height)) : 0;
+      const bottom = keyboard + (ios && keyboard > 80 ? IOS_ACCESSORY_BAR : 0);
       setKbBottom(bottom);
       // The caret's line stays above the toolbar.
       const sel = window.getSelection();
@@ -280,6 +288,8 @@ export default function RichText({
     };
     if (scroller) scroller.style.scrollPaddingBottom = "64px";
     place();
+    // The keyboard slides in after focus, and iOS reports its size late.
+    const later = [120, 350, 700].map((ms) => setTimeout(place, ms));
     vv?.addEventListener("resize", place);
     vv?.addEventListener("scroll", place);
     document.addEventListener("selectionchange", place);
@@ -288,6 +298,7 @@ export default function RichText({
       vv?.removeEventListener("scroll", place);
       document.removeEventListener("selectionchange", place);
       if (scroller) scroller.style.scrollPaddingBottom = "";
+      later.forEach(clearTimeout);
     };
   }, [docked]);
   const coarse = () => typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
