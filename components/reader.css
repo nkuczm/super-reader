@@ -2243,9 +2243,9 @@
 /* ---------- phone: the text toolbar rides just above the keyboard ---------- */
 .rich-tools.docked {
   position: fixed; left: 0; right: 0; z-index: 95; height: auto; opacity: 1; margin: 0;
-  padding: 3px 6px; gap: 2px; align-items: center;
+  padding: calc(3px + env(safe-area-inset-top, 0px)) 6px 3px; gap: 2px; align-items: center;
   background: color-mix(in srgb, var(--bg) 96%, transparent); backdrop-filter: blur(8px);
-  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
   overflow-x: auto; overflow-y: hidden; scrollbar-width: none; flex-wrap: nowrap;
 }
 .rich-tools.docked::-webkit-scrollbar { display: none; }
