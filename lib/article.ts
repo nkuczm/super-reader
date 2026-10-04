@@ -222,6 +222,37 @@ function hoistLazyImages(doc: Document) {
  */
 const FOLDED = /read-?more|readmore|story-?continues|continue-?reading|collapsed|truncat|expandable|show-?more|article-?rest|rest-of/i;
 
+/**
+ * Help-centre pages and the like, made ready for Readability.
+ *
+ * Readability scores any class containing "com-" as a comment section. Every
+ * Intercom help centre names its blocks "intercom-interblocks-…", so a whole
+ * list of an article's steps was thrown away as comments
+ * (support.claude.com, 4 Oct 2026). The prefix is taken off before scoring.
+ * Breadcrumb trails and "Related articles" lists are page furniture, not the
+ * article, and are removed outright.
+ */
+export function tidyForReadability(doc: Document) {
+  for (const el of doc.querySelectorAll<HTMLElement>("[class*='intercom-']")) {
+    el.className = el.className.replace(/\bintercom-/g, "");
+  }
+  // A list item whose text sits in a wrapper box around a single paragraph:
+  // Readability judges the box on its own, and one that opens with a long
+  // link reads as a link list and is dropped. The paragraph needs no box.
+  for (const box of doc.querySelectorAll("li > div")) {
+    const only = box.children.length === 1 ? box.children[0] : null;
+    if (only?.tagName === "P" && !(box.textContent ?? "").replace(only.textContent ?? "", "").trim()) box.replaceWith(only);
+  }
+  for (const el of doc.querySelectorAll("[class*='breadcrumb' i], [id*='breadcrumb' i], [aria-label*='breadcrumb' i]")) el.remove();
+  for (const el of doc.querySelectorAll("[class*='related_articles' i], [class*='related-articles' i], [class*='relatedarticles' i]")) el.remove();
+  for (const h of doc.querySelectorAll("h2, h3, h4")) {
+    if (!/^\s*related (articles|posts|stories|reading)\s*$/i.test(h.textContent ?? "")) continue;
+    const next = h.nextElementSibling;
+    if (next && /^(UL|OL)$/.test(next.tagName)) next.remove();
+    h.remove();
+  }
+}
+
 export function unfoldReadMore(doc: Document) {
   for (const el of Array.from(doc.querySelectorAll<HTMLElement>("[style], [hidden], [aria-hidden]"))) {
     const style = el.getAttribute("style") ?? "";
@@ -513,6 +544,7 @@ export async function extractArticle(
   hoistLazyImages(dom.window.document);
   unfoldReadMore(dom.window.document);
   stripDiscussion(dom.window.document);
+  tidyForReadability(dom.window.document);
 
   // charThreshold defaults to 500, which makes Readability discard a genuinely
   // short post and fall back to scraping the whole page. Short posts are

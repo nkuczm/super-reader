@@ -24,7 +24,7 @@ const META = "meta";
  */
 // 3: articles folded behind "Read more" are read whole (lib/article.ts
 // unfoldReadMore). Copies from before were cut off at the button.
-export const EXTRACT_VERSION = 5;
+export const EXTRACT_VERSION = 6;
 
 export type CachedArticle = ReadableArticle & {
   cachedAt: number;
