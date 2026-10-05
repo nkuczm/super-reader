@@ -2024,14 +2024,44 @@
 .tbl-scroll { overflow-x: auto; }
 .tbl table { border-collapse: collapse; table-layout: fixed; }
 .tbl td, .tbl th { position: relative; border: 1px solid var(--border); padding: 0; overflow: hidden; }
-/* Cells keep the size they are given: text that does not fit scrolls inside. */
-.tbl-doc td { vertical-align: top; }
-.tbl-cell {
-  display: block; width: 100%; height: 100%; box-sizing: border-box; resize: none; border: 0; margin: 0;
-  padding: 6px 8px; font: inherit; font-size: 15px; line-height: 1.45; background: transparent; color: var(--text);
-  overflow: auto; outline: none;
+/* A document table: black rules (the text colour, so they show in dark mode too), cells written in like a text box. */
+.tbl-doc td { border-color: var(--text); vertical-align: top; overflow: visible; }
+.tbl-doc .tbl-scroll { padding: 16px 0 4px 16px; position: relative; }
+.tbl-doc td.picked { box-shadow: inset 0 0 0 999px color-mix(in srgb, var(--accent, #2563eb) 16%, transparent); }
+.tbl-rich { height: 100%; }
+.tbl-rich .rich-body {
+  height: 100%; box-sizing: border-box; overflow: auto; padding: 5px 8px; min-height: 0; margin: 0;
+  font-size: 15px; line-height: 1.45; outline: none;
 }
-.tbl-doc td:focus-within { outline: 2px solid var(--accent, #2563eb); outline-offset: -2px; }
+.tbl-rich .rich-body > :first-child { margin-top: 0; }
+.tbl-rich .rich-body > :last-child { margin-bottom: 0; }
+/* The formatting tools float above the cell being written in rather than taking room inside it. */
+.tbl-rich .rich-tools:not(.docked) {
+  position: absolute; left: -1px; bottom: calc(100% + 2px); z-index: 40; width: max-content; max-width: 520px; flex-wrap: wrap;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 2px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  height: auto; opacity: 0; pointer-events: none; margin: 0;
+}
+.tbl-rich:focus-within .rich-tools:not(.docked) { opacity: 1; pointer-events: auto; }
+.tbl-doc td:focus-within { outline: 2px solid var(--accent, #2563eb); outline-offset: -2px; z-index: 3; }
+.tbl-grip {
+  position: absolute; z-index: 4; font-size: 11px; line-height: 1; color: var(--text-dim); cursor: grab; user-select: none;
+  touch-action: none; opacity: 0; transition: opacity 0.12s; padding: 2px; border-radius: 4px;
+}
+.tbl-grip:hover { background: var(--bg-hover); color: var(--text); }
+.tbl-doc .tbl-grip-row { left: -16px; top: 50%; transform: translateY(-50%); writing-mode: vertical-lr; letter-spacing: -3px; }
+.tbl-doc .tbl-grip-col { top: -16px; left: 50%; transform: translateX(-50%); }
+.tbl-doc tr:hover .tbl-grip-row, .tbl-doc td:hover .tbl-grip-col { opacity: 1; }
+.sheet th .tbl-grip-row { left: 1px; top: 50%; transform: translateY(-50%); writing-mode: vertical-lr; letter-spacing: -3px; }
+.sheet th .tbl-grip-col { left: 2px; top: 50%; transform: translateY(-50%); }
+.sheet th:hover .tbl-grip { opacity: 1; }
+@media (hover: none) { .tbl-grip { opacity: 0.6; } }
+.tbl-move-mark { position: absolute; background: var(--accent, #2563eb); border-radius: 2px; pointer-events: none; z-index: 10; }
+.sheet .tbl-scroll { position: relative; }
+.tbl-swatches { display: flex; gap: 4px; padding: 6px 8px 4px; flex-wrap: wrap; }
+.wb-menu .tbl-swatch { width: 20px; height: 20px; min-height: 0; padding: 0; border-radius: 50%; border: 1px solid var(--border); flex: none; font-size: 12px; justify-content: center; }
+.wb-menu .tbl-swatch.none { background: var(--bg); color: var(--text-dim); }
+/* A table's card is as wide as its table. */
+.subject-doc .subject-box.table-box { width: fit-content; max-width: 100%; min-width: 280px; }
 .tbl-col-handle { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize; z-index: 2; touch-action: none; }
 .tbl-row-handle { position: absolute; left: 0; bottom: -3px; height: 7px; width: 100%; cursor: row-resize; z-index: 2; touch-action: none; }
 .tbl-col-handle:hover, .tbl-row-handle:hover { background: var(--accent, #2563eb); opacity: 0.5; }
@@ -2290,3 +2320,7 @@
   max-height: calc(100dvh - 160px); overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch; touch-action: pan-y;
 }
+/* The tools under a table wrap to its width rather than widening its card. */
+.subject-box.table-box .sheet-tools, .subject-box.table-box .sheet-bar { width: 0; min-width: 100%; box-sizing: border-box; }
+.tbl-cell-box { overflow: hidden; }
+.tbl-doc .tbl-rich { position: static; }

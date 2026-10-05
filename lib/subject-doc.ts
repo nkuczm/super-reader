@@ -7,7 +7,7 @@
  * tomorrow, this document alone would hold the work.
  */
 
-import { display, evaluate, safeGrid } from "./sheet";
+import { cellKey, coveredCells, display, evaluate, safeGrid, safeMetas } from "./sheet";
 import { safeTranscript } from "./transcript";
 import type { Note } from "./notes";
 import {
@@ -66,7 +66,7 @@ export function subjectHtml(note: Note, board: Board | undefined, now = new Date
       const image = safeImage(box.image);
       if (image) parts.push(`<p><img src="${image}" alt="" style="max-width:100%"></p>${box.caption ? `<p><i>${escapeHtml(box.caption)}</i></p>` : ""}`);
       else if (box.transcript) parts.push(transcriptHtml(box.transcript, box.transcriptTabs));
-      else if (box.table) parts.push(tableHtml(box.table, box.tableMode));
+      else if (box.table) parts.push(tableHtml(box.table, box.tableMode, box.tableCells));
       else if (box.drawing) parts.push("<p><i>[A drawing — open the subject in Super Reader to see it]</i></p>");
       else parts.push(unlinkQuotes(box.html, board));
     }
@@ -104,11 +104,20 @@ export function subjectSignature(note: Note, board: Board | undefined): string {
 }
 
 /** A table as its worked-out values, for the exported copy. */
-export function tableHtml(table: unknown, mode?: "doc" | "sheet"): string {
+export function tableHtml(table: unknown, mode?: "doc" | "sheet", cells?: unknown): string {
   const grid = safeGrid(table);
-  // A document table is text as typed; only a spreadsheet works out formulas.
-  const values = mode === "doc" ? grid : evaluate(grid);
-  const rows = values.map((row) => `<tr>${row.map((v) => `<td style="border:1px solid #ccc;padding:2px 6px;vertical-align:top">${escapeHtml(display(v)).replace(/\n/g, "<br>")}</td>`).join("")}</tr>`);
+  const metas = safeMetas(cells, grid.length, grid[0].length);
+  const covered = coveredCells(metas);
+  // A document table holds formatted text; only a spreadsheet works out formulas.
+  const values = mode === "doc" ? null : evaluate(grid);
+  const border = mode === "doc" ? "#000" : "#ccc";
+  const rows = grid.map((row, r) => `<tr>${row.map((raw, c) => {
+    if (covered.has(cellKey(r, c))) return "";
+    const m = metas[cellKey(r, c)];
+    const span = `${m?.rs ? ` rowspan="${m.rs}"` : ""}${m?.cs ? ` colspan="${m.cs}"` : ""}`;
+    const text = values ? escapeHtml(display(values[r][c])) : /[<&]/.test(raw) ? sanitizeRichText(raw) : escapeHtml(raw).replace(/\n/g, "<br>");
+    return `<td${span} style="border:1px solid ${border};padding:2px 6px;vertical-align:top${m?.bg ? `;background:${m.bg}` : ""}">${text}</td>`;
+  }).join("")}</tr>`);
   return `<table style="border-collapse:collapse">${rows.join("")}</table>`;
 }
 

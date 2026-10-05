@@ -44,7 +44,10 @@ export default function RichText({
   resolveEmbed,
   onEmbed,
   onDropImage,
+  onTab,
 }: {
+  /** Tab outside a list goes here instead of indenting (a table cell moves to the next cell). */
+  onTab?: (back: boolean) => void;
   /** A picture file dropped on the text: keep it, and say which box holds it. */
   onDropImage?: (file: File) => Promise<string | null>;
   /** The picture for a drawing or image set into the text, by its box id. */
@@ -646,6 +649,14 @@ export default function RichText({
           // level (and changes its style); elsewhere it indents the line.
           if (event.key === "Tab" && !event.metaKey && !event.ctrlKey && !event.altKey) {
             event.preventDefault();
+            const anchor = window.getSelection()?.anchorNode;
+            const inList = (anchor instanceof Element ? anchor : anchor?.parentElement)?.closest("li");
+            if (onTab && !inList) {
+              event.stopPropagation();
+              flush();
+              onTab(event.shiftKey);
+              return;
+            }
             format(event.shiftKey ? "outdent" : "indent");
             event.stopPropagation();
             return;

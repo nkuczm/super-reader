@@ -28,3 +28,26 @@ test("pasting grows the table to fit", () => {
 test("sizes are clamped and missing ones left to the default", () => {
   assert.deepEqual(safeSizes([10, 200, "x"], 4, 36, 800), [36, 200, null, null]);
 });
+
+test("merges move and stretch with inserted and deleted rows", async () => {
+  const { shiftMetas, mergeRange, safeMetas, coveredCells } = await import("../lib/sheet");
+  const m = mergeRange({}, 1, 0, 2, 1);
+  assert.deepEqual(m, { "1,0": { rs: 2, cs: 2 } });
+  assert.deepEqual(shiftMetas(m, "row", 0, 1), { "2,0": { rs: 2, cs: 2 } });
+  assert.deepEqual(shiftMetas(m, "row", 2, 1), { "1,0": { rs: 3, cs: 2 } });
+  assert.deepEqual(shiftMetas(m, "row", 1, -1), { "1,0": { cs: 2 } });
+  assert.deepEqual(shiftMetas({ "0,0": { bg: "#ffeeaa" } }, "col", 0, -1), {});
+  assert.deepEqual([...coveredCells(m).keys()].sort(), ["1,1", "2,0", "2,1"]);
+  assert.deepEqual(safeMetas({ "0,0": { cs: 9, bg: "red" }, "0,1": { bg: "#AABBCC" } }, 2, 2), { "0,0": { rs: 1, cs: 2 } });
+});
+
+test("moving a row takes its cells, size and colour with it", async () => {
+  const { moveLine } = await import("../lib/sheet");
+  const out = moveLine([["a"], ["b"], ["c"]], [10, 20, 30], { "0,0": { bg: "#ffeeaa" } }, "row", 0, 2);
+  assert.deepEqual(out.grid, [["b"], ["c"], ["a"]]);
+  assert.deepEqual(out.sizes, [20, 30, 10]);
+  assert.deepEqual(out.metas, { "2,0": { bg: "#ffeeaa" } });
+  const torn = moveLine([["a", "b", "c"]], [1, 2, 3], { "0,0": { cs: 2 } }, "col", 1, 2);
+  assert.deepEqual(torn.grid, [["a", "c", "b"]]);
+  assert.deepEqual(torn.metas, {});
+});

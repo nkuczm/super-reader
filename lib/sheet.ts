@@ -12,7 +12,7 @@ export type Value = number | string;
 
 export const MAX_ROWS = 100;
 export const MAX_COLS = 26;
-const MAX_CELL = 1000;
+const MAX_CELL = 10_000;
 
 /** A table as stored: strings only, within bounds, rows of equal length. */
 export function safeGrid(input: unknown): Grid {
@@ -406,4 +406,136 @@ export function pasteBlock(grid: Grid, r: number, c: number, block: string[][]):
     if (r + i < rows && c + j < cols) out[r + i][c + j] = v.slice(0, MAX_CELL);
   }));
   return out;
+}
+
+/* ---------- cell colours and merged cells ---------- */
+
+/** Per-cell extras, keyed "row,col": a background colour, and how many rows and columns a merged cell spans. */
+export type CellMeta = { bg?: string; rs?: number; cs?: number };
+export type CellMetas = Record<string, CellMeta>;
+export const cellKey = (r: number, c: number) => `${r},${c}`;
+
+const COLOR = /^#[0-9a-f]{6}$/i;
+
+/** Cell extras as stored: real colours, spans that stay inside the grid and never overlap. */
+export function safeMetas(input: unknown, rows: number, cols: number): CellMetas {
+  const out: CellMetas = {};
+  if (!input || typeof input !== "object") return out;
+  const covered = new Set<string>();
+  const entries = Object.entries(input as Record<string, unknown>)
+    .map(([k, v]) => {
+      const [r, c] = k.split(",").map(Number);
+      return { r, c, v: (v && typeof v === "object" ? v : {}) as CellMeta };
+    })
+    .filter(({ r, c }) => Number.isInteger(r) && Number.isInteger(c) && r >= 0 && c >= 0 && r < rows && c < cols)
+    .sort((a, b) => a.r - b.r || a.c - b.c);
+  for (const { r, c, v } of entries) {
+    if (covered.has(cellKey(r, c))) continue;
+    const meta: CellMeta = {};
+    if (typeof v.bg === "string" && COLOR.test(v.bg)) meta.bg = v.bg.toLowerCase();
+    const rs = Math.min(rows - r, Math.max(1, Math.floor(Number(v.rs) || 1)));
+    const cs = Math.min(cols - c, Math.max(1, Math.floor(Number(v.cs) || 1)));
+    let clash = false;
+    for (let i = r; i < r + rs; i++) for (let j = c; j < c + cs; j++) if ((i !== r || j !== c) && covered.has(cellKey(i, j))) clash = true;
+    if (!clash && (rs > 1 || cs > 1)) {
+      meta.rs = rs;
+      meta.cs = cs;
+      for (let i = r; i < r + rs; i++) for (let j = c; j < c + cs; j++) if (i !== r || j !== c) covered.add(cellKey(i, j));
+    }
+    if (Object.keys(meta).length) out[cellKey(r, c)] = meta;
+  }
+  return out;
+}
+
+/** The cells hidden under a merge, each pointing at the cell that covers it. */
+export function coveredCells(metas: CellMetas): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [k, m] of Object.entries(metas)) {
+    const [r, c] = k.split(",").map(Number);
+    for (let i = r; i < r + (m.rs ?? 1); i++) for (let j = c; j < c + (m.cs ?? 1); j++) if (i !== r || j !== c) out.set(cellKey(i, j), k);
+  }
+  return out;
+}
+
+/**
+ * Cell extras after rows (or columns) were inserted (`delta` > 0) or
+ * deleted (`delta` < 0) at `at`: later cells move with their line, a merge
+ * across the change grows or shrinks, and a deleted line's own extras go.
+ */
+export function shiftMetas(metas: CellMetas, axis: "row" | "col", at: number, delta: number): CellMetas {
+  const out: CellMetas = {};
+  for (const [k, m] of Object.entries(metas)) {
+    let [r, c] = k.split(",").map(Number);
+    const meta = { ...m };
+    const pos = axis === "row" ? r : c;
+    const span = (axis === "row" ? meta.rs : meta.cs) ?? 1;
+    let nextPos = pos;
+    let nextSpan = span;
+    if (delta > 0) {
+      if (pos >= at) nextPos = pos + delta;
+      else if (pos + span > at) nextSpan = span + delta;
+    } else {
+      const n = -delta;
+      const end = at + n;
+      if (pos >= end) nextPos = pos - n;
+      else if (pos >= at) {
+        // Its anchor was deleted: what is left of the merge starts where the deletion did.
+        const left = pos + span - end;
+        if (left <= 0) continue;
+        nextPos = at;
+        nextSpan = left;
+      } else if (pos + span > at) nextSpan = span - Math.min(n, pos + span - at);
+    }
+    if (axis === "row") { r = nextPos; meta.rs = nextSpan; } else { c = nextPos; meta.cs = nextSpan; }
+    if (meta.rs === 1) delete meta.rs;
+    if (meta.cs === 1) delete meta.cs;
+    if (Object.keys(meta).length) out[cellKey(r, c)] = meta;
+  }
+  return out;
+}
+
+/** A rectangle merged into its top-left cell, swallowing any merges inside it. */
+export function mergeRange(metas: CellMetas, r0: number, c0: number, r1: number, c1: number): CellMetas {
+  const out: CellMetas = {};
+  for (const [k, m] of Object.entries(metas)) {
+    const [r, c] = k.split(",").map(Number);
+    if (r >= r0 && r <= r1 && c >= c0 && c <= c1) {
+      if (r === r0 && c === c0 && m.bg) out[k] = { bg: m.bg };
+      continue;
+    }
+    out[k] = m;
+  }
+  if (r1 > r0 || c1 > c0) out[cellKey(r0, c0)] = { ...out[cellKey(r0, c0)], rs: r1 - r0 + 1, cs: c1 - c0 + 1 };
+  return out;
+}
+
+/**
+ * Line `from` (a row or a column) moved to sit at `to`, counted before the
+ * move. Its cells, size and colours go with it; a merge that the move would
+ * tear apart is undone rather than stretched over the wrong cells.
+ */
+export function moveLine<S>(grid: Grid, sizes: S[], metas: CellMetas, axis: "row" | "col", from: number, to: number) {
+  const n = axis === "row" ? grid.length : grid[0].length;
+  const order = Array.from({ length: n }, (_, i) => i);
+  order.splice(from, 1);
+  order.splice(Math.max(0, Math.min(n - 1, to)), 0, from);
+  const where = new Map(order.map((old, i) => [old, i]));
+  const nextGrid = axis === "row" ? order.map((i) => grid[i]) : grid.map((row) => order.map((i) => row[i]));
+  const nextSizes = order.map((i) => sizes[i]);
+  const nextMetas: CellMetas = {};
+  for (const [k, m] of Object.entries(metas)) {
+    const [r, c] = k.split(",").map(Number);
+    const pos = axis === "row" ? r : c;
+    const span = (axis === "row" ? m.rs : m.cs) ?? 1;
+    const meta = { ...m };
+    // A merge across lines survives only if its lines are still side by side, in order.
+    if (span > 1) {
+      const ok = Array.from({ length: span }, (_, i) => where.get(pos + i)!).every((p, i, all) => i === 0 || p === all[i - 1] + 1);
+      if (!ok) { delete meta.rs; delete meta.cs; }
+    }
+    const np = where.get(pos)!;
+    const key = axis === "row" ? cellKey(np, c) : cellKey(r, np);
+    if (Object.keys(meta).length) nextMetas[key] = meta;
+  }
+  return { grid: nextGrid, sizes: nextSizes, metas: nextMetas };
 }

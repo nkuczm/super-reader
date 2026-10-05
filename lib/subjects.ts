@@ -73,6 +73,8 @@ export type BoxItem = Base & {
   /** Column widths and row heights in pixels, as dragged; missing ones take the mode's default. */
   tableCols?: (number | null)[];
   tableRows?: (number | null)[];
+  /** Cell colours and merges, keyed "row,col" (see lib/sheet.ts). */
+  tableCells?: Record<string, { bg?: string; rs?: number; cs?: number }>;
   /** An interview transcript, split into who said what. */
   transcript?: Transcript;
   /** More transcripts in the same block, shown as tabs after the first. */
