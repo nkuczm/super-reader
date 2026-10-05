@@ -2355,3 +2355,4 @@
 .transcript-pop-row { display: flex; justify-content: flex-end; gap: 4px; margin-top: 4px; }
 .transcript-pop-row button.on { background: var(--accent, #2563eb); color: #fff; }
 .transcript-pop-note { margin: 2px 4px 4px; font-size: 13px; white-space: pre-wrap; }
+.transcript:focus { outline: none; }

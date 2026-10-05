@@ -488,7 +488,20 @@ export function TranscriptBox({ box, onChange, onComment }: {
   };
 
   return (
-    <div ref={shell} className={`transcript${dragging ? " dragging" : ""}`} onPointerDown={(e) => e.stopPropagation()} {...drop}>
+    <div ref={shell} tabIndex={-1} className={`transcript${dragging ? " dragging" : ""}`} onPointerDown={(e) => e.stopPropagation()} {...drop}
+      // ⌘F / Ctrl+F after clicking in a transcript searches the transcript, not the page.
+      onKeyDown={(e) => {
+        if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "f" && turns.length > 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          setSearching(true);
+          setTimeout(() => {
+            const input = shell.current?.querySelector<HTMLInputElement>(".transcript-find input");
+            input?.focus();
+            input?.select();
+          }, 0);
+        }
+      }}>
       <div className="transcript-head">
         <span className="transcript-kind">Transcript</span>
         <input
