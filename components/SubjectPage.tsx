@@ -674,6 +674,11 @@ export default function SubjectPage(props: Props) {
         return put(current, { ...base, ...change, at: Date.now() });
       }),
     removeBox: (box: BoxItem) => onBoard((current) => remove(remove(current, box.id), posId(box.id))),
+    replaceEmbed: (id: string, image: string) =>
+      onBoard((current) => {
+        const held = current?.[id];
+        return held && held.kind === "box" ? put(current, { ...held, image, at: Date.now() }) : current ?? {};
+      }),
     aiSearch: (async (turns, query) => {
       if (!hasAiKey) throw new Error(`Add your ${PROVIDER_NAME[ai.provider]} key in Settings → API keys to search by meaning.`);
       const headers = new Headers(keyHeaders());
@@ -1028,6 +1033,8 @@ type Shared = {
   removeBox: (box: BoxItem) => void;
   /** A comment on a transcript, added as a bullet to the notes card beside it. */
   noteTranscript: (box: BoxItem, itemHtml: string) => void;
+  /** A picture set into text, cropped: its box keeps the new picture. */
+  replaceEmbed: (id: string, image: string) => void;
   /** Search a transcript by meaning, with the same AI key and model as insights. */
   aiSearch: AiSearch;
 };
@@ -1171,14 +1178,14 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
       ) : box.transcript ? (
         <TranscriptBox box={box} onChange={(change) => shared.updateBox(box, change)} onComment={(html) => shared.noteTranscript(box, html)} aiSearch={shared.aiSearch} />
       ) : box.table ? (
-        <TableBox box={box} onChange={(change) => shared.updateBox(box, change)} media={{ dropImage: shared.dropImage, resolveEmbed: shared.resolveEmbed }} />
+        <TableBox box={box} onChange={(change) => shared.updateBox(box, change)} media={{ dropImage: shared.dropImage, resolveEmbed: shared.resolveEmbed, replaceEmbed: shared.replaceEmbed }} />
       ) : box.drawing ? (
         <DrawingPad box={box} onChange={(change) => shared.updateBox(box, change)} />
       ) : box.image !== undefined || box.caption !== undefined ? (
         <ImageView box={box} onChange={(change) => shared.updateBox(box, change)} />
       ) : (
         <RichText html={box.html} placeholder="Write anything…" autoFocus={shared.focusBox === box.id}
-          resolveEmbed={shared.resolveEmbed} onEmbed={shared.embedBox} onDropImage={shared.dropImage}
+          resolveEmbed={shared.resolveEmbed} onEmbed={shared.embedBox} onDropImage={shared.dropImage} onReplaceEmbed={shared.replaceEmbed}
           onChange={(html) => shared.setBox(box, html)} />
       )}
     </div>

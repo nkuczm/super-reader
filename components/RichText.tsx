@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import CropDialog, { copyPicture } from "./CropDialog";
 import { sanitizeRichText } from "@/lib/subjects";
 import { cleanPastedHtml } from "@/lib/paste";
 
@@ -46,7 +47,10 @@ export default function RichText({
   onDropImage,
   onTab,
   onFormat,
+  onReplaceEmbed,
 }: {
+  /** A picture set into the text was cropped: its box takes the new picture. */
+  onReplaceEmbed?: (id: string, image: string) => void;
   /** A formatting command about to run; return true to say it was handled elsewhere (several table cells at once). */
   onFormat?: (command: string, value?: string) => boolean;
   /** Tab outside a list goes here instead of indenting (a table cell moves to the next cell). */
@@ -83,6 +87,31 @@ export default function RichText({
   /** A picture in the text under the pointer, and where its corner pin goes. */
   const [pinFor, setPinFor] = useState<{ img: HTMLImageElement; left: number; top: number } | null>(null);
   const wrap = useRef<HTMLDivElement | null>(null);
+  /** A picture clicked on: outlined, its corner handle kept showing, and ⌘C / Delete act on it. */
+  const [pickedImg, setPickedImg] = useState<HTMLImageElement | null>(null);
+  const [imgMenu, setImgMenu] = useState<{ img: HTMLImageElement; left: number; top: number } | null>(null);
+  const [cropping, setCropping] = useState<HTMLImageElement | null>(null);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!pickedImg) return;
+    pickedImg.classList.add("rt-picked");
+    const away = (e: PointerEvent) => {
+      const t = e.target as Element | null;
+      if (t === pickedImg || t?.closest?.(".embed-size-pin, .rt-img-menu")) return;
+      setPickedImg(null);
+      setImgMenu(null);
+    };
+    window.addEventListener("pointerdown", away, true);
+    return () => {
+      pickedImg.classList.remove("rt-picked");
+      window.removeEventListener("pointerdown", away, true);
+    };
+  }, [pickedImg]);
+  const copyImg = async (img: HTMLImageElement) => {
+    const ok = await copyPicture(img.src);
+    setCopied(ok);
+    if (ok) setTimeout(() => setCopied(false), 1400);
+  };
 
   function placePin(img: HTMLImageElement | null) {
     const box = wrap.current?.getBoundingClientRect();
@@ -451,7 +480,7 @@ export default function RichText({
   );
 
   return (
-    <div className={`rich ${className ?? ""}`} ref={wrap} onMouseLeave={() => setPinFor(null)}
+    <div className={`rich ${className ?? ""}`} ref={wrap} onMouseLeave={() => !pickedImg && setPinFor(null)}
       onFocus={() => { setFocused(true); if (coarse()) setDocked(true); }}
       onBlur={() => setTimeout(() => {
         if (!wrap.current?.contains(document.activeElement)) { setDocked(false); setFocused(false); }
@@ -466,6 +495,26 @@ export default function RichText({
           onPointerDown={startSizing}
           onMouseDown={(e) => e.preventDefault()}
         />
+      )}
+      {imgMenu && (
+        <div className="rt-img-menu" style={{ left: imgMenu.left, top: imgMenu.top }} onMouseDown={(e) => e.preventDefault()}>
+          {onReplaceEmbed && imgMenu.img.dataset.embed && (
+            <button type="button" onClick={() => { setCropping(imgMenu.img); setImgMenu(null); }}>Crop</button>
+          )}
+          <button type="button" onClick={() => { void copyImg(imgMenu.img); setImgMenu(null); }}>Copy</button>
+          <button type="button" onClick={() => { imgMenu.img.remove(); setImgMenu(null); setPickedImg(null); setPinFor(null); changed(); }}>Remove</button>
+        </div>
+      )}
+      {copied && <span className="rt-img-copied">Picture copied</span>}
+      {cropping && (
+        <CropDialog src={cropping.src} onCancel={() => setCropping(null)}
+          onDone={(image) => {
+            const id = cropping.dataset.embed;
+            if (id) onReplaceEmbed?.(id, image);
+            cropping.setAttribute("src", image);
+            setCropping(null);
+            requestAnimationFrame(() => placePin(cropping));
+          }} />
       )}
       {inQuote && onOpenQuote && (
         <button
@@ -555,7 +604,22 @@ export default function RichText({
           timer.current = null;
           flush();
         }}
+        onDoubleClick={(event) => {
+          const img = (event.target as HTMLElement).closest?.("img.rt-embed") as HTMLImageElement | null;
+          const box = wrap.current?.getBoundingClientRect();
+          if (!img || !box) return;
+          event.preventDefault();
+          setPickedImg(img);
+          setImgMenu({ img, left: event.clientX - box.left, top: event.clientY - box.top + 8 });
+        }}
         onClick={(event) => {
+          // A click on a picture picks it: its corner handle stays to resize it.
+          const picture = (event.target as HTMLElement).closest?.("img.rt-embed") as HTMLImageElement | null;
+          if (picture) {
+            setPickedImg(picture);
+            placePin(picture);
+            return;
+          }
           // A click on a checklist item's box ticks it.
           const item = (event.target as HTMLElement).closest<HTMLLIElement>("ul[data-check] > li");
           if (item && event.clientX < item.getBoundingClientRect().left) {
@@ -630,6 +694,7 @@ export default function RichText({
         onMouseMove={(event) => {
           const img = (event.target as HTMLElement).closest?.("img.rt-embed") as HTMLImageElement | null;
           if (img) placePin(img);
+          else if (pickedImg) placePin(pickedImg);
         }}
         onDragOver={(event) => {
           if (onDropImage && event.dataTransfer.types.includes("Files")) {
@@ -701,6 +766,25 @@ export default function RichText({
           changed();
         }}
         onKeyDown={(event) => {
+          // With a picture picked, ⌘C copies the picture and Delete removes it.
+          if (pickedImg && el.current?.contains(pickedImg)) {
+            if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "c" && window.getSelection()?.isCollapsed !== false) {
+              event.preventDefault();
+              event.stopPropagation();
+              void copyImg(pickedImg);
+              return;
+            }
+            if (event.key === "Backspace" || event.key === "Delete") {
+              event.preventDefault();
+              event.stopPropagation();
+              pickedImg.remove();
+              setPickedImg(null);
+              setPinFor(null);
+              changed();
+              return;
+            }
+            if (event.key === "Escape") { setPickedImg(null); setImgMenu(null); }
+          }
           // Tab indents, Shift+Tab outdents: in a list that nests the bullet a
           // level (and changes its style); elsewhere it indents the line.
           if (event.key === "Tab" && !event.metaKey && !event.ctrlKey && !event.altKey) {
