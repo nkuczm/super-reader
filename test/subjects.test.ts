@@ -305,3 +305,15 @@ test("text pasted from Google Docs keeps its bold, not a highlight", async () =>
   const docs = '<meta charset="utf-8"><b style="font-weight:normal;" id="docs-internal-guid-1"><p dir="ltr"><span style="font-size:11pt;background-color:transparent;font-weight:700;">Name</span><span style="background-color:transparent;font-weight:400;"> plain</span><span style="background-color:#ffff00;"> lit</span></p></b>';
   assert.equal(sanitizeRichText(docs), "<p><b>Name</b> plain<mark> lit</mark></p>");
 });
+
+test("transcript comments collect as bullets on one linked card beside it", async () => {
+  const { addTranscriptNote, live } = await import("../lib/subjects");
+  const start = { "pos:t1": { id: "pos:t1", kind: "pos", target: "t1", x: 100, y: 50, w: 400, at: 1 } } as never;
+  const one = addTranscriptNote(start, "t1", "<i>“hello”</i> — first", "n1", 2);
+  const two = addTranscriptNote(one, "t1", "<i>“bye”</i> — second", "n2", 3);
+  const notes = live(two).filter((i) => i.kind === "box");
+  assert.equal(notes.length, 1);
+  assert.equal((notes[0] as { html: string }).html, "<ul><li><i>“hello”</i> — first</li><li><i>“bye”</i> — second</li></ul>");
+  assert.ok(live(two).some((i) => i.kind === "link"));
+  assert.deepEqual([(two as Record<string, { x: number }>)["pos:n1"].x], [560]);
+});

@@ -18,7 +18,12 @@ export type Turn = {
   x: string;
 };
 
-export type Transcript = { title: string; turns: Turn[] };
+/** A point in a transcript: turn, paragraph within it, character within that. */
+export type TPoint = { t: number; p: number; o: number };
+/** A highlighted passage, with what was said about it. */
+export type TMark = { id: string; from: TPoint; to: TPoint; comment?: string };
+
+export type Transcript = { title: string; turns: Turn[]; marks?: TMark[] };
 
 export const MAX_TRANSCRIPT_CHARS = 200_000;
 const MAX_TURNS = 5000;
@@ -130,7 +135,20 @@ export function safeTranscript(input: unknown): Transcript {
       x: t.x.slice(0, 20_000),
     }];
   });
-  return { title: typeof value.title === "string" ? value.title.slice(0, 200) : "", turns };
+  const point = (v: unknown): TPoint | null => {
+    const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+    const n = (k: string) => (typeof o[k] === "number" && Number.isInteger(o[k]) && (o[k] as number) >= 0 ? (o[k] as number) : null);
+    const t = n("t"), p = n("p"), off = n("o");
+    return t === null || p === null || off === null || t >= turns.length ? null : { t, p, o: off };
+  };
+  const marks = (Array.isArray(value.marks) ? value.marks : []).slice(0, 2000).flatMap((m): TMark[] => {
+    if (!m || typeof m !== "object" || typeof m.id !== "string") return [];
+    const from = point(m.from);
+    const to = point(m.to);
+    if (!from || !to) return [];
+    return [{ id: m.id.slice(0, 40), from, to, ...(typeof m.comment === "string" && m.comment.trim() ? { comment: m.comment.slice(0, 4000) } : {}) }];
+  });
+  return { title: typeof value.title === "string" ? value.title.slice(0, 200) : "", turns, ...(marks.length ? { marks } : {}) };
 }
 
 /** A title from a file name: "eric-nathan.txt" → "eric nathan". */

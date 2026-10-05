@@ -11,7 +11,7 @@ import { DrawingPad, ImageView, TableBox, TranscriptBox, shrinkImage, DRAWING_HE
 import { tableHtml, transcriptHtml } from "@/lib/subject-doc";
 import type { Writing } from "./useAccount";
 import type { Note, NoteEntry } from "@/lib/notes";
-import { documentOrder, LABEL_COLORS, labelColorOf, safeHref, youtubeThumbnail, type StoryItem } from "@/lib/subjects";
+import { addTranscriptNote, documentOrder, LABEL_COLORS, labelColorOf, safeHref, youtubeThumbnail, type StoryItem } from "@/lib/subjects";
 import { titleFromUrl } from "@/lib/manual";
 import {
   addStory,
@@ -666,6 +666,8 @@ export default function SubjectPage(props: Props) {
         return put(current, { ...base, ...change, at: Date.now() });
       }),
     removeBox: (box: BoxItem) => onBoard((current) => remove(remove(current, box.id), posId(box.id))),
+    noteTranscript: (box: BoxItem, itemHtml: string) =>
+      onBoard((current) => addTranscriptNote(current, box.id, itemHtml, newItemId("box"))),
   };
 
   /**
@@ -1002,6 +1004,8 @@ type Shared = {
   dropImage: (file: File) => Promise<string | null>;
   updateBox: (box: BoxItem, change: Partial<BoxItem>) => void;
   removeBox: (box: BoxItem) => void;
+  /** A comment on a transcript, added as a bullet to the notes card beside it. */
+  noteTranscript: (box: BoxItem, itemHtml: string) => void;
 };
 
 /* ---------------------------------------------------------------------- */
@@ -1141,7 +1145,7 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
           onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
         />
       ) : box.transcript ? (
-        <TranscriptBox box={box} onChange={(change) => shared.updateBox(box, change)} />
+        <TranscriptBox box={box} onChange={(change) => shared.updateBox(box, change)} onComment={(html) => shared.noteTranscript(box, html)} />
       ) : box.table ? (
         <TableBox box={box} onChange={(change) => shared.updateBox(box, change)} />
       ) : box.drawing ? (

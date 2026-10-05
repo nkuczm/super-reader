@@ -2339,3 +2339,19 @@
   border-radius: 10px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
 }
 .rich-tools.side button { justify-content: flex-start; white-space: nowrap; }
+/* ---------- highlights and comments in a transcript ---------- */
+.transcript { position: relative; }
+::highlight(transcript-mark) { background-color: rgba(250, 204, 21, 0.45); }
+::highlight(transcript-mark-noted) { background-color: rgba(250, 204, 21, 0.45); text-decoration: underline 2px rgba(217, 119, 6, 0.9); text-underline-offset: 3px; }
+.transcript-pop {
+  position: absolute; z-index: 30; display: flex; flex-direction: column; gap: 4px; padding: 6px; min-width: 150px; max-width: 260px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+}
+.transcript-pop > button, .transcript-pop-row button {
+  font: inherit; font-size: 13px; text-align: left; background: none; border: 0; border-radius: 6px; padding: 5px 8px; cursor: pointer; color: var(--text);
+}
+.transcript-pop > button:hover, .transcript-pop-row button:hover { background: var(--bg-hover); }
+.transcript-pop textarea { width: 230px; font: inherit; font-size: 13px; border: 1px solid var(--border); border-radius: 6px; padding: 6px; background: var(--bg); color: var(--text); resize: vertical; }
+.transcript-pop-row { display: flex; justify-content: flex-end; gap: 4px; margin-top: 4px; }
+.transcript-pop-row button.on { background: var(--accent, #2563eb); color: #fff; }
+.transcript-pop-note { margin: 2px 4px 4px; font-size: 13px; white-space: pre-wrap; }

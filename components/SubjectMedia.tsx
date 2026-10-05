@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { DEFAULT_DRAWING_HEIGHT, DRAWING_WIDTH, safeImage, safeStrokes, type BoxItem, type Stroke } from "@/lib/subjects";
+import { DEFAULT_DRAWING_HEIGHT, DRAWING_WIDTH, escapeHtml, newItemId, safeImage, safeStrokes, type BoxItem, type Stroke } from "@/lib/subjects";
 import { EMBED_TYPE } from "./RichText";
-import { parseTranscript, safeTranscript, speakersOf, titleFromFile, type Transcript } from "@/lib/transcript";
+import { parseTranscript, safeTranscript, speakersOf, titleFromFile, type TMark, type TPoint, type Transcript } from "@/lib/transcript";
 
 const COLORS = ["#111111", "#2563eb", "#dc2626", "#16a34a", "#f59e0b"];
 const PEN_SIZES = [2, 5];
@@ -277,7 +277,59 @@ const SPEAKER_COLORS = ["#2563eb", "#c2410c", "#15803d", "#7c3aed", "#be185d", "
  * it or paste the text; Riverside, Otter, Zoom and "Name: text" exports are
  * split into speakers. The magnifying glass searches within.
  */
-export function TranscriptBox({ box, onChange }: { box: BoxItem; onChange: (next: Partial<BoxItem>) => void }) {
+/* ---------- highlights in a transcript ---------- */
+
+type Registry = Map<string, unknown> | undefined;
+/** Every transcript's highlighted ranges, painted through two shared CSS highlights. */
+const painted = new Map<string, { plain: Range[]; noted: Range[] }>();
+function repaint() {
+  const registry = (globalThis.CSS as unknown as { highlights?: Registry } | undefined)?.highlights;
+  const Ctor = (globalThis as unknown as { Highlight?: new (...r: Range[]) => unknown }).Highlight;
+  if (!registry || !Ctor) return;
+  const all = [...painted.values()];
+  registry.set("transcript-mark", new Ctor(...all.flatMap((x) => x.plain)));
+  registry.set("transcript-mark-noted", new Ctor(...all.flatMap((x) => x.noted)));
+}
+
+/** The DOM spot for a transcript point: inside paragraph `t:p`, `o` characters in. */
+function domAt(host: HTMLElement, pt: TPoint): { node: Node; offset: number } | null {
+  const para = host.querySelector(`[data-tp="${pt.t}:${pt.p}"]`);
+  if (!para) return null;
+  const walker = document.createTreeWalker(para, NodeFilter.SHOW_TEXT);
+  let left = pt.o;
+  let last: Text | null = null;
+  for (let n = walker.nextNode() as Text | null; n; n = walker.nextNode() as Text | null) {
+    if (left <= n.length) return { node: n, offset: left };
+    left -= n.length;
+    last = n;
+  }
+  return last ? { node: last, offset: last.length } : { node: para, offset: 0 };
+}
+
+/** The transcript point for a DOM spot, if it is in a paragraph of this transcript. */
+function pointAt(node: Node, offset: number): TPoint | null {
+  const el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+  const para = el?.closest<HTMLElement>("[data-tp]");
+  if (!para) return null;
+  const [t, p] = para.dataset.tp!.split(":").map(Number);
+  const range = document.createRange();
+  range.setStart(para, 0);
+  try {
+    range.setEnd(node, offset);
+  } catch {
+    return null;
+  }
+  return { t, p, o: range.toString().length };
+}
+
+const before = (a: TPoint, b: TPoint) => a.t - b.t || a.p - b.p || a.o - b.o;
+
+export function TranscriptBox({ box, onChange, onComment }: {
+  box: BoxItem;
+  onChange: (next: Partial<BoxItem>) => void;
+  /** A comment made on a passage, as a line for the notes card beside the transcript. */
+  onComment?: (itemHtml: string) => void;
+}) {
   // One block can hold several transcripts — one per person — as tabs.
   const tabs = [box.transcript, ...(box.transcriptTabs ?? [])].map(safeTranscript);
   const [active, setActive] = useState(0);
@@ -297,7 +349,7 @@ export function TranscriptBox({ box, onChange }: { box: BoxItem; onChange: (next
     const next = parseTranscript(text);
     if (next.length === 0) return setProblem("There was no text in that.");
     setProblem(null);
-    writeTab({ title: title || (name ? titleFromFile(name) : ""), turns: next });
+    writeTab({ title: title || (name ? titleFromFile(name) : ""), turns: next }); // new text: old highlights no longer line up
   };
   const readFile = async (file: File) => {
     if (!/^text\/|\/(json|x-subrip)$/.test(file.type) && !/\.(txt|vtt|srt|md|text)$/i.test(file.name))
@@ -337,6 +389,85 @@ export function TranscriptBox({ box, onChange }: { box: BoxItem; onChange: (next
   };
   const colorOf = (s?: string) => (s ? SPEAKER_COLORS[speakers.indexOf(s) % SPEAKER_COLORS.length] : undefined);
 
+  /* Highlights and comments, kept with the transcript they mark. */
+  const marks = tabs[tab].marks ?? [];
+  const setMarks = (next: TMark[]) => writeTab({ ...tabs[tab], marks: next });
+  const [pop, setPop] = useState<{ left: number; top: number; quote?: string; from?: TPoint; to?: TPoint; mark?: TMark; writing?: string } | null>(null);
+  const shell = useRef<HTMLDivElement | null>(null);
+
+  // Paint the highlights over the text whenever it is drawn.
+  useEffect(() => {
+    const host = scroller.current;
+    const key = box.id;
+    if (!host) { painted.delete(key); repaint(); return; }
+    const plain: Range[] = [];
+    const noted: Range[] = [];
+    for (const m of marks) {
+      const a = domAt(host, m.from);
+      const b = domAt(host, m.to);
+      if (!a || !b) continue;
+      try {
+        const r = document.createRange();
+        r.setStart(a.node, a.offset);
+        r.setEnd(b.node, b.offset);
+        (m.comment ? noted : plain).push(r);
+      } catch { /* the text changed under it */ }
+    }
+    painted.set(key, { plain, noted });
+    repaint();
+    return () => { painted.delete(key); repaint(); };
+  });
+
+  // A press anywhere else puts the popover away.
+  useEffect(() => {
+    if (!pop) return;
+    const away = (e: PointerEvent) => !(e.target as Element | null)?.closest?.(".transcript-pop, .transcript-body") && setPop(null);
+    window.addEventListener("pointerdown", away, true);
+    return () => window.removeEventListener("pointerdown", away, true);
+  }, [pop]);
+
+  /** Where on the transcript a screen rectangle is, for the popover (the board may be zoomed). */
+  const placeOf = (rect: DOMRect) => {
+    const host = shell.current!;
+    const h = host.getBoundingClientRect();
+    const scale = h.width / (host.offsetWidth || 1) || 1;
+    return { left: Math.max(0, Math.min(host.offsetWidth - 240, (rect.left - h.left) / scale)), top: (rect.bottom - h.top) / scale + 6 };
+  };
+
+  /** A selection becomes a choice of highlight or comment; a click on a highlight offers to take it off. */
+  function pickPassage() {
+    const sel = window.getSelection();
+    const host = scroller.current;
+    if (!sel || !host || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    if (!host.contains(range.commonAncestorContainer)) return;
+    if (sel.isCollapsed) {
+      const here = pointAt(range.startContainer, range.startOffset);
+      const hit = here && marks.find((m) => before(m.from, here) <= 0 && before(here, m.to) <= 0);
+      setPop(hit ? { ...placeOf(range.getBoundingClientRect()), mark: hit } : null);
+      return;
+    }
+    const from = pointAt(range.startContainer, range.startOffset);
+    const to = pointAt(range.endContainer, range.endOffset);
+    if (!from || !to || before(from, to) >= 0) return;
+    setPop({ ...placeOf(range.getBoundingClientRect()), from, to, quote: range.toString().trim() });
+  }
+
+  function saveMark(comment?: string) {
+    if (!pop?.from || !pop.to) return;
+    const text = comment?.trim();
+    const mark: TMark = { id: newItemId("tm"), from: pop.from, to: pop.to, ...(text ? { comment: text } : {}) };
+    setMarks([...marks, mark]);
+    if (text && onComment) {
+      const quote = pop.quote ?? "";
+      const turn = turns[pop.from.t];
+      const who = [turn?.s, turn?.t].filter(Boolean).join(", ");
+      onComment(`<i>“${escapeHtml(quote.slice(0, 600))}”</i>${who ? ` (${escapeHtml(who)})` : ""} — ${escapeHtml(text)}`);
+    }
+    window.getSelection()?.removeAllRanges();
+    setPop(null);
+  }
+
   const drop = {
     onDragOver: (e: React.DragEvent) => {
       if (!e.dataTransfer.types.includes("Files")) return;
@@ -357,7 +488,7 @@ export function TranscriptBox({ box, onChange }: { box: BoxItem; onChange: (next
   };
 
   return (
-    <div className={`transcript${dragging ? " dragging" : ""}`} onPointerDown={(e) => e.stopPropagation()} {...drop}>
+    <div ref={shell} className={`transcript${dragging ? " dragging" : ""}`} onPointerDown={(e) => e.stopPropagation()} {...drop}>
       <div className="transcript-head">
         <span className="transcript-kind">Transcript</span>
         <input
@@ -365,7 +496,7 @@ export function TranscriptBox({ box, onChange }: { box: BoxItem; onChange: (next
           placeholder="Interview with…"
           key={tab}
           defaultValue={title}
-          onBlur={(e) => e.target.value !== title && writeTab({ title: e.target.value.slice(0, 200), turns })}
+          onBlur={(e) => e.target.value !== title && writeTab({ ...tabs[tab], title: e.target.value.slice(0, 200) })}
         />
         {turns.length > 0 && (
           <button className={`transcript-search-btn${searching ? " on" : ""}`} title="Search this transcript" aria-label="Search this transcript"
@@ -434,7 +565,8 @@ export function TranscriptBox({ box, onChange }: { box: BoxItem; onChange: (next
           </label>
         </div>
       ) : (
-        <div className="transcript-body" ref={scroller} onWheel={(e) => e.stopPropagation()}>
+        <div className="transcript-body" ref={scroller} onWheel={(e) => e.stopPropagation()} onMouseUp={pickPassage}
+          onKeyUp={(e) => e.shiftKey && pickPassage()}>
           {turns.map((turn, i) => {
             const same = i > 0 && turns[i - 1].s === turn.s;
             return (
@@ -445,10 +577,39 @@ export function TranscriptBox({ box, onChange }: { box: BoxItem; onChange: (next
                     {turn.t && <span className="transcript-time">{turn.t}</span>}
                   </div>
                 )}
-                {turn.x.split("\n\n").map((para, j) => <p key={j}>{marked(para)}</p>)}
+                {turn.x.split("\n\n").map((para, j) => <p key={j} data-tp={`${i}:${j}`}>{marked(para)}</p>)}
               </div>
             );
           })}
+        </div>
+      )}
+      {pop && (
+        <div className="transcript-pop" style={{ left: pop.left, top: pop.top }} onMouseDown={(e) => e.target instanceof HTMLTextAreaElement || e.preventDefault()}>
+          {pop.mark ? (
+            <>
+              {pop.mark.comment && <p className="transcript-pop-note">{pop.mark.comment}</p>}
+              <button onClick={() => { setMarks(marks.filter((m) => m.id !== pop.mark!.id)); setPop(null); }}>Remove highlight</button>
+            </>
+          ) : pop.writing !== undefined ? (
+            <form onSubmit={(e) => { e.preventDefault(); saveMark(pop.writing ?? ""); }}>
+              <textarea autoFocus rows={3} placeholder="Comment… (added to the notes beside this transcript)" value={pop.writing}
+                onChange={(e) => setPop({ ...pop, writing: e.target.value })}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey || !e.shiftKey)) { e.preventDefault(); saveMark(pop.writing ?? ""); }
+                  if (e.key === "Escape") setPop(null);
+                }} />
+              <div className="transcript-pop-row">
+                <button type="button" onClick={() => setPop(null)}>Cancel</button>
+                <button type="submit" className="on">Comment</button>
+              </div>
+            </form>
+          ) : (
+            <>
+              <button onClick={() => saveMark()}>Highlight</button>
+              <button onClick={() => setPop({ ...pop, writing: "" })}>Comment</button>
+            </>
+          )}
         </div>
       )}
       {problem && <p className="transcript-problem">{problem}</p>}
