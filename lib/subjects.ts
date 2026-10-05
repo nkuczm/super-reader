@@ -1220,3 +1220,40 @@ export const LABEL_COLORS = ["#2563eb", "#7c3aed", "#db2777", "#dc2626", "#ea580
 export function labelColorOf(box: { labelColor?: string }): string {
   return box.labelColor && LABEL_COLORS.includes(box.labelColor) ? box.labelColor : "var(--accent)";
 }
+
+/**
+ * The document's reading order: each section label followed by what is
+ * linked to it on the whiteboard (top to bottom, as placed there), and
+ * everything else where it was added. Without this the document listed
+ * blocks by when they were made, so a header's content could sit pages
+ * away from it.
+ */
+export function documentOrder(entries: { id: string; at: number; label?: boolean }[], board: Board | undefined): string[] {
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  const pos = new Map<string, { x: number; y: number }>();
+  const links: LinkItem[] = [];
+  for (const item of live(board)) {
+    if (item.kind === "pos") pos.set((item as PosItem).target, item as PosItem);
+    else if (item.kind === "link") links.push(item as LinkItem);
+  }
+  const sorted = [...entries].sort((a, b) => a.at - b.at);
+  const owner = new Map<string, string>();
+  for (const label of sorted) {
+    if (!label.label) continue;
+    for (const l of links) {
+      const other = l.from === label.id ? l.to : l.to === label.id ? l.from : null;
+      if (other && byId.has(other) && !byId.get(other)!.label && !owner.has(other)) owner.set(other, label.id);
+    }
+  }
+  const place = (id: string) => pos.get(id) ?? { x: Infinity, y: Infinity };
+  const out: string[] = [];
+  for (const entry of sorted) {
+    if (owner.has(entry.id)) continue;
+    out.push(entry.id);
+    if (!entry.label) continue;
+    const members = sorted.filter((e) => owner.get(e.id) === entry.id);
+    members.sort((a, b) => place(a.id).y - place(b.id).y || place(a.id).x - place(b.id).x || a.at - b.at);
+    out.push(...members.map((m) => m.id));
+  }
+  return out;
+}

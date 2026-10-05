@@ -284,3 +284,18 @@ test("youtubeThumbnail reads the video id from every link shape", async () => {
   assert.equal(youtubeThumbnail("https://www.youtube.com/channel/UC123"), null);
   assert.equal(youtubeThumbnail("https://example.com/watch?v=dQw4w9WgXcQ"), null);
 });
+
+test("documentOrder puts each section's linked blocks under its header", async () => {
+  const { documentOrder } = await import("../lib/subjects");
+  const board = {
+    p1: { id: "p1", kind: "pos", target: "b", x: 0, y: 300, w: 300, at: 1 },
+    p2: { id: "p2", kind: "pos", target: "a", x: 0, y: 100, w: 300, at: 1 },
+    l1: { id: "l1", kind: "link", from: "H", to: "a", at: 1 },
+    l2: { id: "l2", kind: "link", from: "b", to: "H", at: 1 },
+  } as never;
+  const order = documentOrder(
+    [{ id: "a", at: 1 }, { id: "b", at: 2 }, { id: "x", at: 3 }, { id: "H", at: 4, label: true }],
+    board,
+  );
+  assert.deepEqual(order, ["x", "H", "a", "b"]);
+});

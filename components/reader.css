@@ -2259,3 +2259,9 @@
 }
 /* Holding a card or the board opens our menu, not the phone's own callout. */
 .wb-canvas, .subject-doc { -webkit-touch-callout: none; }
+/* The outline scrolls on its own on a phone: sized to the visible screen
+   (100vh runs under Safari's toolbar), and a swipe in it stays in it. */
+.tab-rail.open {
+  max-height: calc(100dvh - 160px); overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch; touch-action: pan-y;
+}
