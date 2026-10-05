@@ -714,9 +714,20 @@ const ALLOWED_TAGS = new Set([
  * sync, so it is treated as untrusted every time it is shown: tags outside a
  * short list are unwrapped, and no attribute survives except a highlight.
  */
+/** Whether a span's style paints a real background — not transparent, not white. */
+function isHighlight(style: string): boolean {
+  const value = style.match(/background(?:-color)?\s*:\s*([^;"']+)/i)?.[1]?.trim().toLowerCase();
+  if (!value) return false;
+  if (/^(transparent|none|inherit|initial|unset|white|#fff|#ffffff)\b/.test(value)) return false;
+  if (/^rgba?\(\s*255\s*,\s*255\s*,\s*255\s*(,\s*[\d.]+\s*)?\)/.test(value)) return false;
+  if (/^rgba\([^)]*,\s*0(\.0*)?\s*\)/.test(value)) return false;
+  return true;
+}
+
 export function sanitizeRichText(html: string): string {
   const out: string[] = [];
   const stack: string[] = [];
+  const spanClosers: string[] = [];
   const pattern = /<\/?([a-zA-Z0-9]+)([^>]*)>|([^<]+)/g;
   let match: RegExpExecArray | null;
   const source = String(html ?? "")
@@ -729,6 +740,8 @@ export function sanitizeRichText(html: string): string {
       return id ? `<img data-embed="${id}"${w >= 40 && w <= 2000 ? ` data-w="${w}"` : ""}>` : "";
     })
     .slice(0, MAX_HTML)
+    // Google Docs wraps everything it copies in a <b style="font-weight:normal">: not bold.
+    .replace(/^([\s\S]*?)<b\b[^>]*docs-internal-guid[^>]*>([\s\S]*)<\/b>/i, "$1$2")
     .replace(/<(script|style|iframe|object|embed|template)[\s\S]*?<\/\1>/gi, "")
     .replace(/<!--[\s\S]*?-->/g, "");
   while ((match = pattern.exec(source))) {
@@ -743,18 +756,27 @@ export function sanitizeRichText(html: string): string {
     if (!ALLOWED_TAGS.has(tag)) continue;
     // A highlight from execCommand arrives as a coloured span; keep it as a
     // <mark> and drop everything else a span might carry.
+    // Text pasted from Google Docs is all spans: bold and italic come as
+    // styles, and every span declares a transparent background — which is
+    // not a highlight.
     if (tag === "span") {
       if (closing) {
         const index = stack.lastIndexOf("span");
         if (index >= 0) {
           stack.splice(index, 1);
-          out.push("</mark>");
+          out.push(spanClosers.pop() ?? "");
         }
         continue;
       }
-      if (/background/i.test(match[2])) {
+      const style = match[2].match(/style\s*=\s*("[^"]*"|'[^']*')/i)?.[1] ?? "";
+      const tags: string[] = [];
+      if (isHighlight(style)) tags.push("mark");
+      if (/font-weight\s*:\s*(bold|[6-9]00)/i.test(style)) tags.push("b");
+      if (/font-style\s*:\s*italic/i.test(style)) tags.push("i");
+      if (tags.length) {
         stack.push("span");
-        out.push("<mark>");
+        spanClosers.push(tags.map((t) => `</${t}>`).reverse().join(""));
+        out.push(tags.map((t) => `<${t}>`).join(""));
       }
       continue;
     }

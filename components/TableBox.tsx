@@ -85,6 +85,47 @@ function hexColor(css: string): string {
 }
 
 /**
+ * Cells as an HTML table that Google Docs, Word and other editors paste as a
+ * real table: black rules, colours and merges kept. `cells` holds each
+ * cell's HTML.
+ */
+export function rangeHtml(cells: string[][], metas: CellMetas, g: Range, widths?: number[]): string {
+  const covered = coveredCells(metas);
+  const rowsHtml: string[] = [];
+  for (let r = g.r0; r <= g.r1; r++) {
+    const tds: string[] = [];
+    for (let c = g.c0; c <= g.c1; c++) {
+      if (covered.has(cellKey(r, c))) continue;
+      const m = metas[cellKey(r, c)];
+      const rs = Math.min(m?.rs ?? 1, g.r1 - r + 1);
+      const cs = Math.min(m?.cs ?? 1, g.c1 - c + 1);
+      const width = widths && cs === 1 ? `;width:${Math.round(widths[c] * 0.75)}pt` : "";
+      tds.push(`<td${rs > 1 ? ` rowspan="${rs}"` : ""}${cs > 1 ? ` colspan="${cs}"` : ""} style="border:1px solid #000000;padding:5px;vertical-align:top${m?.bg ? `;background-color:${m.bg}` : ""}${width}">${cells[r]?.[c] || "<br>"}</td>`);
+    }
+    rowsHtml.push(`<tr>${tds.join("")}</tr>`);
+  }
+  return `<table style="border-collapse:collapse;border:1px solid #000000"><tbody>${rowsHtml.join("")}</tbody></table>`;
+}
+
+/** Put a table on the clipboard as both a real table and tab-separated text. */
+async function copyTable(html: string, text: string) {
+  try {
+    await navigator.clipboard.write([new ClipboardItem({
+      "text/html": new Blob([html], { type: "text/html" }),
+      "text/plain": new Blob([text], { type: "text/plain" }),
+    })]);
+    return true;
+  } catch {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+/**
  * A table in one of two modes, switched from its tools:
  *
  *  - **Table**, like a table in Google Docs: no row numbers or column
@@ -99,7 +140,59 @@ function hexColor(css: string): string {
  * Both can colour cells and merge them, and both take a table pasted from
  * Google Docs, Word or a web page.
  */
-export function TableBox({ box, onChange }: { box: BoxItem; onChange: (next: Change) => void }) {
+export function TableBox({ box, onChange: apply }: { box: BoxItem; onChange: (next: Change) => void }) {
+  /**
+   * Undo and redo for everything done to the table — text, colours, rows,
+   * merges, moves — as snapshots of the table's fields, so each step puts
+   * back exactly what was there.
+   */
+  const past = useRef<Change[]>([]);
+  const future = useRef<Change[]>([]);
+  const [, setSteps] = useState(0);
+  const shell = useRef<HTMLDivElement | null>(null);
+  const latest = useRef(box);
+  latest.current = box;
+  const snapshot = (): Change => {
+    const b = latest.current;
+    return { table: b.table, tableMode: b.tableMode, tableCols: b.tableCols, tableRows: b.tableRows, tableCells: b.tableCells };
+  };
+  const onChange = (next: Change) => {
+    past.current.push(snapshot());
+    if (past.current.length > 100) past.current.shift();
+    future.current = [];
+    setSteps((n) => n + 1);
+    apply(next);
+  };
+  const travel = (back: boolean) => {
+    // Leave the cell being typed in first, so what was typed is saved as a
+    // step of its own — and is then the step undone.
+    const active = document.activeElement as HTMLElement | null;
+    if (active?.closest?.(".tbl .rich-body")) {
+      active.blur();
+      // Keep the keyboard on the table, so the next ⌘Z still lands here.
+      shell.current?.focus({ preventScroll: true });
+    }
+    setTimeout(() => {
+      const from = back ? past : future;
+      const to = back ? future : past;
+      const step = from.current.pop();
+      if (!step) return;
+      to.current.push(snapshot());
+      setSteps((n) => n + 1);
+      apply(step);
+    }, 0);
+  };
+  const onUndoKey = (e: React.KeyboardEvent) => {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+    const key = e.key.toLowerCase();
+    const redo = (key === "z" && e.shiftKey) || key === "y";
+    if (key !== "z" && key !== "y") return;
+    // Typing in a cell of a sheet undoes its own letters first.
+    if ((e.target as HTMLElement).tagName === "INPUT") return;
+    e.preventDefault();
+    e.stopPropagation();
+    travel(!redo);
+  };
   const mode = box.tableMode ?? "sheet";
   const grid = safeGrid(box.table);
   const rows = grid.length;
@@ -120,7 +213,9 @@ export function TableBox({ box, onChange }: { box: BoxItem; onChange: (next: Cha
     e.preventDefault();
     e.stopPropagation();
     const from = axis === "col" ? e.clientX : e.clientY;
-    const base = axis === "col" ? widths[i] : heights[i];
+    // A row may have grown past its set height with what is written in it: start from what is shown.
+    const tr = axis === "row" ? (e.currentTarget as HTMLElement).closest("table")?.querySelectorAll("tbody tr")[i] as HTMLElement | undefined : undefined;
+    const base = axis === "col" ? widths[i] : Math.max(heights[i], tr?.offsetHeight ?? 0);
     const [min, max] = axis === "col" ? [MIN_COL, MAX_COL] : [def.minRow, MAX_ROW];
     // The board may be zoomed: a screen pixel is not a table pixel.
     const el = e.currentTarget as HTMLElement;
@@ -192,10 +287,39 @@ export function TableBox({ box, onChange }: { box: BoxItem; onChange: (next: Cha
     });
 
   const ops: Ops = {
-    insertRow: (at) => rows < MAX_ROWS && reshape(insertRow(grid, at), colSizes, insertAt(rowSizes, at, null), shiftMetas(metas, "row", at, 1)),
-    deleteRow: (at) => rows > 1 && reshape(deleteRow(grid, at), colSizes, removeAt(rowSizes, at), shiftMetas(metas, "row", at, -1)),
-    insertCol: (at) => cols < MAX_COLS && reshape(insertCol(grid, at), insertAt(colSizes, at, null), rowSizes, shiftMetas(metas, "col", at, 1)),
-    deleteCol: (at) => cols > 1 && reshape(deleteCol(grid, at), removeAt(colSizes, at), rowSizes, shiftMetas(metas, "col", at, -1)),
+    // `n` lines at once: as many as are selected.
+    insertRow: (at, n = 1) => {
+      const k = Math.min(n, MAX_ROWS - rows);
+      if (k < 1) return;
+      let g = grid;
+      let sz = rowSizes;
+      for (let i = 0; i < k; i++) { g = insertRow(g, at); sz = insertAt(sz, at, null); }
+      reshape(g, colSizes, sz, shiftMetas(metas, "row", at, k));
+    },
+    deleteRow: (at, n = 1) => {
+      const k = Math.min(n, rows - 1, rows - at);
+      if (k < 1) return;
+      let g = grid;
+      let sz = rowSizes;
+      for (let i = 0; i < k; i++) { g = deleteRow(g, at); sz = removeAt(sz, at); }
+      reshape(g, colSizes, sz, shiftMetas(metas, "row", at, -k));
+    },
+    insertCol: (at, n = 1) => {
+      const k = Math.min(n, MAX_COLS - cols);
+      if (k < 1) return;
+      let g = grid;
+      let sz = colSizes;
+      for (let i = 0; i < k; i++) { g = insertCol(g, at); sz = insertAt(sz, at, null); }
+      reshape(g, sz, rowSizes, shiftMetas(metas, "col", at, k));
+    },
+    deleteCol: (at, n = 1) => {
+      const k = Math.min(n, cols - 1, cols - at);
+      if (k < 1) return;
+      let g = grid;
+      let sz = colSizes;
+      for (let i = 0; i < k; i++) { g = deleteCol(g, at); sz = removeAt(sz, at); }
+      reshape(g, sz, rowSizes, shiftMetas(metas, "col", at, -k));
+    },
     merge: (g) => onChange({ tableCells: safeMetas(mergeRange(metas, g.r0, g.c0, g.r1, g.c1), rows, cols) }),
     unmerge: (r, c) => {
       const next = { ...metas };
@@ -235,7 +359,7 @@ export function TableBox({ box, onChange }: { box: BoxItem; onChange: (next: Cha
 
   const props: Inner = { grid, metas, widths: shownW, heights: shownH, startResize, startMove, moving, onChange, ops, reshape, colSizes, rowSizes };
   return (
-    <div className={`tbl tbl-${mode}`} onPointerDown={(e) => e.stopPropagation()}>
+    <div ref={shell} tabIndex={-1} className={`tbl tbl-${mode}`} onPointerDown={(e) => e.stopPropagation()} onKeyDownCapture={onUndoKey}>
       {mode === "doc" ? <DocTable {...props} /> : <SheetTable {...props} />}
       <div className="sheet-tools">
         <span className="tbl-mode" role="group" aria-label="Table style">
@@ -244,10 +368,21 @@ export function TableBox({ box, onChange }: { box: BoxItem; onChange: (next: Cha
           <button className={mode === "sheet" ? "on" : ""} aria-pressed={mode === "sheet"} onClick={() => switchTo("sheet")}
             title="A spreadsheet, with formulas">Sheet</button>
         </span>
+        <button className="tbl-undo" disabled={!past.current.length} onMouseDown={(e) => e.preventDefault()} onClick={() => travel(true)}
+          title="Undo (⌘Z)" aria-label="Undo">↶</button>
+        <button className="tbl-undo" disabled={!future.current.length} onMouseDown={(e) => e.preventDefault()} onClick={() => travel(false)}
+          title="Redo (⌘⇧Z)" aria-label="Redo">↷</button>
         <button disabled={rows >= MAX_ROWS} onClick={() => ops.insertRow(rows)}>+ Row</button>
         <button disabled={cols >= MAX_COLS} onClick={() => ops.insertCol(cols)}>+ Column</button>
         <button disabled={rows <= 1} onClick={() => ops.deleteRow(rows - 1)}>− Row</button>
         <button disabled={cols <= 1} onClick={() => ops.deleteCol(cols - 1)}>− Column</button>
+        <CopyTableButton onCopy={() => {
+          const all = { r0: 0, c0: 0, r1: rows - 1, c1: cols - 1 };
+          const values = mode === "doc" ? null : evaluate(grid);
+          const cells = grid.map((row, r) => row.map((v, c) => (values ? escapeHtml(display(values[r][c])) : asHtml(v))));
+          const text = values ? values.map((row) => row.map(display).join("\t")).join("\n") : grid.map((row) => row.map((v) => textOf(asHtml(v)).replace(/\s*\n\s*/g, " ")).join("\t")).join("\n");
+          return copyTable(rangeHtml(cells, metas, all, widths), text);
+        }} />
         <span className="sheet-hint">
           {mode === "sheet" ? "=SUM(A1:A5), =AVG(B:B)… · " : "Shift-click to pick cells · "}right-click for colour, merge and more
         </span>
@@ -256,11 +391,22 @@ export function TableBox({ box, onChange }: { box: BoxItem; onChange: (next: Cha
   );
 }
 
+/** "Copy table", which says so when it has. */
+function CopyTableButton({ onCopy }: { onCopy: () => Promise<boolean> }) {
+  const [done, setDone] = useState<"" | "ok" | "no">("");
+  return (
+    <button onClick={async () => { setDone((await onCopy()) ? "ok" : "no"); setTimeout(() => setDone(""), 1600); }}
+      title="Copy the whole table, to paste into Google Docs, Word or a spreadsheet">
+      {done === "ok" ? "Copied ✓" : done === "no" ? "Couldn't copy" : "Copy table"}
+    </button>
+  );
+}
+
 type Ops = {
-  insertRow: (at: number) => unknown;
-  deleteRow: (at: number) => unknown;
-  insertCol: (at: number) => unknown;
-  deleteCol: (at: number) => unknown;
+  insertRow: (at: number, n?: number) => void;
+  deleteRow: (at: number, n?: number) => void;
+  insertCol: (at: number, n?: number) => void;
+  deleteCol: (at: number, n?: number) => void;
   merge: (g: Range) => void;
   unmerge: (r: number, c: number) => void;
   color: (g: Range, bg: string | null) => void;
@@ -305,6 +451,35 @@ function MoveMark({ moving }: { moving: Inner["moving"] }) {
 /** A cell's height and width, summed across what it spans. */
 const span = (list: number[], from: number, n: number) => list.slice(from, from + n).reduce((a, b) => a + b, 0);
 
+/** Insert and delete, as many rows or columns as are selected. */
+function LineItems({ range, ops, close, rows, cols, sheet }: { range: Range; ops: Ops; close: () => void; rows?: boolean; cols?: boolean; sheet?: boolean }) {
+  const nr = range.r1 - range.r0 + 1;
+  const nc = range.c1 - range.c0 + 1;
+  const plural = (n: number, one: string) => (n === 1 ? `1 ${one}` : `${n} ${one}s`);
+  const rowName = nr === 1 ? `row ${range.r0 + 1}` : `rows ${range.r0 + 1}–${range.r1 + 1}`;
+  const colLabel = (c: number) => (sheet ? colName(c) : String(c + 1));
+  const colNameText = nc === 1 ? `column ${colLabel(range.c0)}` : `columns ${colLabel(range.c0)}–${colLabel(range.c1)}`;
+  const run = (f: () => void) => () => { f(); close(); };
+  return (
+    <>
+      {rows && (
+        <>
+          <button role="menuitem" onClick={run(() => ops.insertRow(range.r0, nr))}>Insert {plural(nr, "row")} above</button>
+          <button role="menuitem" onClick={run(() => ops.insertRow(range.r1 + 1, nr))}>Insert {plural(nr, "row")} below</button>
+        </>
+      )}
+      {cols && (
+        <>
+          <button role="menuitem" onClick={run(() => ops.insertCol(range.c0, nc))}>Insert {plural(nc, "column")} left</button>
+          <button role="menuitem" onClick={run(() => ops.insertCol(range.c1 + 1, nc))}>Insert {plural(nc, "column")} right</button>
+        </>
+      )}
+      {rows && <button role="menuitem" onClick={run(() => ops.deleteRow(range.r0, nr))}>Delete {rowName}</button>}
+      {cols && <button role="menuitem" onClick={run(() => ops.deleteCol(range.c0, nc))}>Delete {colNameText}</button>}
+    </>
+  );
+}
+
 /** The menu items both modes share: merging and colouring. */
 function CellMenuExtras({ range, metas, ops, close }: { range: Range; metas: CellMetas; ops: Ops; close: () => void }) {
   const many = range.r1 > range.r0 || range.c1 > range.c0;
@@ -340,7 +515,73 @@ function DocTable({ grid, metas, widths, heights, startResize, startMove, moving
   const [menu, setMenu] = useState<{ range: Range; x: number; y: number } | null>(null);
   useMenuClose(menu, () => setMenu(null));
 
+  /** While one command runs over several cells, their own saves wait for the one save of them all. */
+  const batching = useRef(false);
+  const dragFrom = useRef<{ r: number; c: number } | null>(null);
+  const many = !!picked && (picked.r1 > picked.r0 || picked.c1 > picked.c0);
+  useEffect(() => {
+    const up = () => (dragFrom.current = null);
+    window.addEventListener("pointerup", up);
+    return () => window.removeEventListener("pointerup", up);
+  }, []);
+  const pickedCells = () => {
+    const out: { r: number; c: number; el: HTMLElement }[] = [];
+    if (!picked) return out;
+    for (let r = picked.r0; r <= picked.r1; r++) for (let c = picked.c0; c <= picked.c1; c++) {
+      if (covered.has(cellKey(r, c))) continue;
+      const el = host.current?.querySelector<HTMLElement>(`[data-cell="${r}-${c}"] .rich-body`);
+      if (el) out.push({ r, c, el });
+    }
+    return out;
+  };
+  /** The cells' HTML as it now stands, saved as one change (one undo step). */
+  const saveCells = (cells: { r: number; c: number; html: string }[]) => {
+    const next = grid.map((row) => [...row]);
+    for (const { r, c, html } of cells) next[r][c] = html;
+    onChange({ table: next });
+  };
+  /** A formatting command over every picked cell, the way Google Docs applies one across a table selection. */
+  const formatAcross = (command: string, value?: string) => {
+    if (!many) return false;
+    const cells = pickedCells();
+    batching.current = true;
+    try {
+      const sel = window.getSelection();
+      const lit = command === "highlight" && cells.every(({ el }) => !el.textContent?.trim() || el.querySelector("mark, span[style*='background']"));
+      for (const { el } of cells) {
+        el.focus();
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+        if (command === "highlight") {
+          if (lit) el.querySelectorAll("mark, span[style*='background']").forEach((n) => n.replaceWith(...n.childNodes));
+          else document.execCommand("hiliteColor", false, "#fde68a");
+        } else if (command === "checklist") {
+          if (!el.querySelector("ul")) document.execCommand("insertUnorderedList");
+          el.querySelector("ul")?.setAttribute("data-check", "");
+        } else document.execCommand(command, false, value);
+      }
+      sel?.removeAllRanges();
+      saveCells(cells.map(({ r, c, el }) => ({ r, c, html: sanitizeRichText(el.innerHTML) })));
+    } finally {
+      setTimeout(() => (batching.current = false), 0);
+    }
+    return true;
+  };
+  const clearPicked = () => saveCells(pickedCells().map(({ r, c }) => ({ r, c, html: "" })));
+  const copyPicked = (e: React.ClipboardEvent, cut: boolean) => {
+    if (!many || !picked) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const cells = grid.map((row) => row.map(asHtml));
+    e.clipboardData.setData("text/html", rangeHtml(cells, metas, picked, widths));
+    e.clipboardData.setData("text/plain", toTsv(grid.map((row) => row.map((v) => textOf(asHtml(v)))), picked.r0, picked.c0, picked.r1, picked.c1));
+    if (cut) clearPicked();
+  };
+
   const save = (r: number, c: number, html: string) => {
+    if (batching.current) return;
     if (html === grid[r][c]) return;
     onChange({ table: grid.map((row, i) => (i === r ? row.map((v, j) => (j === c ? html : v)) : row)) });
   };
@@ -361,7 +602,15 @@ function DocTable({ grid, metas, widths, heights, startResize, startMove, moving
   const width = widths.reduce((a, b) => a + b, 0);
 
   return (
-    <div className="tbl-scroll"
+    <div className={`tbl-scroll${many ? " picking" : ""}`}
+      onCopyCapture={(e) => copyPicked(e, false)}
+      onCutCapture={(e) => copyPicked(e, true)}
+      onKeyDownCapture={(e) => {
+        if (!many) return;
+        if (e.key === "Backspace" || e.key === "Delete") { e.preventDefault(); e.stopPropagation(); clearPicked(); }
+        else if (e.key === "Escape") setPicked(null);
+        else if (!e.metaKey && !e.ctrlKey && !e.altKey && e.key.length === 1) setPicked(null); // typing goes to the cell
+      }}
       // A table copied from Google Docs, Word or the web fills cells from the one being typed in.
       onPasteCapture={(e) => {
         const parsed = tableFromClipboard(e.clipboardData);
@@ -385,7 +634,14 @@ function DocTable({ grid, metas, widths, heights, startResize, startMove, moving
                   <td key={c} data-cell={`${r}-${c}`} rowSpan={rs} colSpan={cs}
                     className={inPicked(r, c) ? "picked" : undefined}
                     style={{ height: span(heights, r, rs), background: m?.bg }}
-                    onFocusCapture={() => setFocus({ r, c })}
+                    onFocusCapture={(e) => {
+                      setFocus({ r, c });
+                      // The text tools stay in one place above the table, whichever cell is being written in.
+                      const cellEl = e.currentTarget as HTMLElement;
+                      const tableEl = cellEl.closest("table") as HTMLElement | null;
+                      cellEl.style.setProperty("--above", `${cellEl.offsetTop - (tableEl?.offsetTop ?? 0)}px`);
+                      cellEl.style.setProperty("--aside", `${cellEl.offsetLeft - (tableEl?.offsetLeft ?? 0)}px`);
+                    }}
                     // Capture: the text inside keeps its own presses to itself.
                     onPointerDownCapture={(e) => {
                       if (e.shiftKey) {
@@ -393,7 +649,17 @@ function DocTable({ grid, metas, widths, heights, startResize, startMove, moving
                         const a = { r: Math.min(focus.r, r), c: Math.min(focus.c, c) };
                         const b = { r: Math.max(focus.r, r + rs - 1), c: Math.max(focus.c, c + cs - 1) };
                         setPicked({ r0: a.r, c0: a.c, r1: b.r, c1: b.c });
-                      } else if (e.button === 0) setPicked(null);
+                      } else if (e.button === 0) {
+                        setPicked(null);
+                        dragFrom.current = { r, c };
+                      }
+                    }}
+                    // Dragging from one cell into another selects whole cells, as in Google Docs.
+                    onPointerEnter={(e) => {
+                      const from = dragFrom.current;
+                      if (!from || !(e.buttons & 1) || (from.r === r && from.c === c)) return;
+                      window.getSelection()?.removeAllRanges();
+                      setPicked({ r0: Math.min(from.r, r), c0: Math.min(from.c, c), r1: Math.max(from.r, r + rs - 1), c1: Math.max(from.c, c + cs - 1) });
                     }}
                     onContextMenu={(e) => {
                       if (window.getSelection()?.toString()) return; // keep the browser's menu for copying text
@@ -402,9 +668,9 @@ function DocTable({ grid, metas, widths, heights, startResize, startMove, moving
                       const range = picked && inPicked(r, c) ? picked : { r0: r, c0: c, r1: r + rs - 1, c1: c + cs - 1 };
                       setMenu({ range, x: e.clientX, y: e.clientY });
                     }}>
-                    {/* A fixed box: a table row would otherwise stretch to whatever is written in it. */}
-                    <div className="tbl-cell-box" style={{ height: span(heights, r, rs) - 1 }}>
-                    <RichText className="tbl-rich" html={asHtml(html)} onChange={(next) => save(r, c, next)}
+                    {/* At least the height set for the row; taller when more is written. */}
+                    <div className="tbl-cell-box" style={{ minHeight: span(heights, r, rs) - 1 }}>
+                    <RichText className="tbl-rich" html={asHtml(html)} onChange={(next) => save(r, c, next)} onFormat={formatAcross}
                       onTab={(back) => {
                         const next = step(r, c, back);
                         if (!next) return;
@@ -412,8 +678,9 @@ function DocTable({ grid, metas, widths, heights, startResize, startMove, moving
                         focusCell(next.r, next.c);
                       }} />
                     </div>
-                    {r === 0 && <span className="tbl-col-handle" style={{ right: -3 }} onPointerDown={startResize("col", c + cs - 1)} aria-hidden />}
-                    {c === 0 && <span className="tbl-row-handle" onPointerDown={startResize("row", r + rs - 1)} aria-hidden />}
+                    {/* Every cell edge is a handle, so a line can be dragged anywhere along it. */}
+                    <span className="tbl-col-handle" onPointerDown={startResize("col", c + cs - 1)} aria-hidden />
+                    <span className="tbl-row-handle" onPointerDown={startResize("row", r + rs - 1)} aria-hidden />
                     {c === 0 && rs === 1 && <Grip axis="row" onPointerDown={startMove("row", r)} />}
                     {r === 0 && cs === 1 && <Grip axis="col" onPointerDown={startMove("col", c)} />}
                   </td>
@@ -427,12 +694,7 @@ function DocTable({ grid, metas, widths, heights, startResize, startMove, moving
       {menu && createPortal(
         <div className="wb-menu tbl-menu" role="menu" style={{ left: Math.min(menu.x, innerWidth - 220), top: Math.min(menu.y, innerHeight - 320) }}
           onPointerDown={(e) => e.stopPropagation()}>
-          <button role="menuitem" onClick={() => { ops.insertRow(menu.range.r0); setMenu(null); }}>Insert row above</button>
-          <button role="menuitem" onClick={() => { ops.insertRow(menu.range.r1 + 1); setMenu(null); }}>Insert row below</button>
-          <button role="menuitem" onClick={() => { ops.insertCol(menu.range.c0); setMenu(null); }}>Insert column left</button>
-          <button role="menuitem" onClick={() => { ops.insertCol(menu.range.c1 + 1); setMenu(null); }}>Insert column right</button>
-          <button role="menuitem" onClick={() => { ops.deleteRow(menu.range.r0); setMenu(null); }}>Delete row</button>
-          <button role="menuitem" onClick={() => { ops.deleteCol(menu.range.c0); setMenu(null); }}>Delete column</button>
+          <LineItems range={menu.range} ops={ops} close={() => { setMenu(null); setPicked(null); }} rows cols />
           <CellMenuExtras range={menu.range} metas={metas} ops={ops} close={() => { setMenu(null); setPicked(null); }} />
         </div>,
         document.body,
@@ -547,6 +809,8 @@ function SheetTable({ grid, metas, widths, heights, startResize, startMove, movi
     e.preventDefault();
     e.stopPropagation();
     e.clipboardData.setData("text/plain", toTsv(grid, r0, c0, r1, c1));
+    // Shown values as a real table too, for pasting into Google Docs or Word.
+    e.clipboardData.setData("text/html", rangeHtml(values.map((row) => row.map((v) => escapeHtml(display(v)))), metas, { r0, c0, r1, c1 }, widths));
     if (cut) clearRange();
   };
   const onPaste = (e: React.ClipboardEvent) => {
@@ -677,6 +941,8 @@ function SheetTable({ grid, metas, widths, heights, startResize, startMove, movi
                         setMenu({ kind: "cell", i: 0, x: e.clientX, y: e.clientY });
                       }}
                     >
+                      <span className="tbl-col-handle" onPointerDown={startResize("col", c + (m?.cs ?? 1) - 1)} aria-hidden />
+                      <span className="tbl-row-handle" onPointerDown={startResize("row", r + (m?.rs ?? 1) - 1)} aria-hidden />
                       {typing ? (
                         <input
                           autoFocus
@@ -713,18 +979,15 @@ function SheetTable({ grid, metas, widths, heights, startResize, startMove, movi
       {menu && createPortal(
         <div className="wb-menu tbl-menu" role="menu" style={{ left: Math.min(menu.x, innerWidth - 220), top: Math.min(menu.y, innerHeight - 360) }}
           onPointerDown={(e) => e.stopPropagation()}>
-          {(menu.kind === "row" || menu.kind === "cell") && (
-            <>
-              <button role="menuitem" onClick={() => { ops.insertRow(menu.kind === "row" ? menu.i : r0); setMenu(null); }}>Insert row above</button>
-              <button role="menuitem" onClick={() => { ops.insertRow((menu.kind === "row" ? menu.i : r1) + 1); setMenu(null); }}>Insert row below</button>
-              <button role="menuitem" onClick={() => { ops.deleteRow(menu.kind === "row" ? menu.i : r0); setMenu(null); }}>Delete row {(menu.kind === "row" ? menu.i : r0) + 1}</button>
-            </>
-          )}
+          <LineItems
+            range={
+              menu.kind === "row" ? (menu.i >= r0 && menu.i <= r1 ? { r0, c0, r1, c1 } : { r0: menu.i, c0: 0, r1: menu.i, c1: 0 })
+              : menu.kind === "col" ? (menu.i >= c0 && menu.i <= c1 ? { r0, c0, r1, c1 } : { r0: 0, c0: menu.i, r1: 0, c1: menu.i })
+              : { r0, c0, r1, c1 }
+            }
+            ops={ops} close={() => setMenu(null)} rows={menu.kind !== "col"} cols={menu.kind !== "row"} sheet />
           {(menu.kind === "col" || menu.kind === "cell") && (
             <>
-              <button role="menuitem" onClick={() => { ops.insertCol(menu.kind === "col" ? menu.i : c0); setMenu(null); }}>Insert column left</button>
-              <button role="menuitem" onClick={() => { ops.insertCol((menu.kind === "col" ? menu.i : c1) + 1); setMenu(null); }}>Insert column right</button>
-              <button role="menuitem" onClick={() => { ops.deleteCol(menu.kind === "col" ? menu.i : c0); setMenu(null); }}>Delete column {colName(menu.kind === "col" ? menu.i : c0)}</button>
               <button role="menuitem" onClick={() => { sort(menu.kind === "col" ? menu.i : c0, false); setMenu(null); }}>Sort A → Z</button>
               <button role="menuitem" onClick={() => { sort(menu.kind === "col" ? menu.i : c0, true); setMenu(null); }}>Sort Z → A</button>
             </>
