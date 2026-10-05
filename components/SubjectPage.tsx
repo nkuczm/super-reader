@@ -304,6 +304,14 @@ export default function SubjectPage(props: Props) {
   const meta = metaOf(board);
   const [historyOpen, setHistoryOpen] = useState(false);
   useClickToType();
+  // The browser tab is named for the subject while it is open.
+  useEffect(() => {
+    const before = document.title;
+    document.title = note.name ? `${note.name} · Super Reader` : before;
+    return () => {
+      document.title = before;
+    };
+  }, [note.name]);
 
   // Drawings and pictures set into text: shown from their own box, which
   // leaves the page's layout once it has been dropped in.
