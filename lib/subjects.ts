@@ -79,6 +79,8 @@ export type BoxItem = Base & {
   transcript?: Transcript;
   /** More transcripts in the same block, shown as tabs after the first. */
   transcriptTabs?: Transcript[];
+  /** Set on the card that collects a transcript's comments, naming the transcript's box. */
+  notesFor?: string;
 };
 
 export const DRAWING_WIDTH = 600;
@@ -1285,4 +1287,23 @@ export function documentOrder(entries: { id: string; at: number; label?: boolean
     out.push(...members.map((m) => m.id));
   }
   return out;
+}
+
+/**
+ * A comment on a transcript, as a bullet on the card beside it that
+ * collects them. The first comment makes that card: placed to the
+ * transcript's right on the whiteboard and linked to it.
+ */
+export function addTranscriptNote(board: Board | undefined, transcriptId: string, itemHtml: string, newId: string, now = Date.now()): Board {
+  let next: Board = board ?? {};
+  const li = `<li>${itemHtml}</li>`;
+  const held = live(next).find((item): item is BoxItem => item.kind === "box" && (item as BoxItem).notesFor === transcriptId);
+  if (held) {
+    const html = /<\/ul>\s*$/.test(held.html) ? held.html.replace(/<\/ul>\s*$/, `${li}</ul>`) : `${held.html}<ul>${li}</ul>`;
+    return put(next, { ...held, html: sanitizeRichText(html), at: now });
+  }
+  next = put(next, { id: newId, kind: "box", html: sanitizeRichText(`<ul>${li}</ul>`), notesFor: transcriptId, at: now });
+  const pos = next[posId(transcriptId)] as PosItem | undefined;
+  if (pos && !pos.deleted) next = put(next, { id: posId(newId), kind: "pos", target: newId, x: pos.x + pos.w + 60, y: pos.y, w: 300, at: now });
+  return put(next, { id: `link:${transcriptId}|${newId}`, kind: "link", from: transcriptId, to: newId, at: now });
 }
