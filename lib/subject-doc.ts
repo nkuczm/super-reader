@@ -66,7 +66,7 @@ export function subjectHtml(note: Note, board: Board | undefined, now = new Date
       const image = safeImage(box.image);
       if (image) parts.push(`<p><img src="${image}" alt="" style="max-width:100%"></p>${box.caption ? `<p><i>${escapeHtml(box.caption)}</i></p>` : ""}`);
       else if (box.transcript) parts.push(transcriptHtml(box.transcript, box.transcriptTabs));
-      else if (box.table) parts.push(tableHtml(box.table));
+      else if (box.table) parts.push(tableHtml(box.table, box.tableMode));
       else if (box.drawing) parts.push("<p><i>[A drawing — open the subject in Super Reader to see it]</i></p>");
       else parts.push(unlinkQuotes(box.html, board));
     }
@@ -104,10 +104,11 @@ export function subjectSignature(note: Note, board: Board | undefined): string {
 }
 
 /** A table as its worked-out values, for the exported copy. */
-export function tableHtml(table: unknown): string {
+export function tableHtml(table: unknown, mode?: "doc" | "sheet"): string {
   const grid = safeGrid(table);
-  const values = evaluate(grid);
-  const rows = values.map((row) => `<tr>${row.map((v) => `<td style="border:1px solid #ccc;padding:2px 6px">${escapeHtml(display(v))}</td>`).join("")}</tr>`);
+  // A document table is text as typed; only a spreadsheet works out formulas.
+  const values = mode === "doc" ? grid : evaluate(grid);
+  const rows = values.map((row) => `<tr>${row.map((v) => `<td style="border:1px solid #ccc;padding:2px 6px;vertical-align:top">${escapeHtml(display(v)).replace(/\n/g, "<br>")}</td>`).join("")}</tr>`);
   return `<table style="border-collapse:collapse">${rows.join("")}</table>`;
 }
 

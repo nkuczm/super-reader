@@ -133,7 +133,8 @@ export default function ArticleReader({
       registry?.delete("transcript-find");
       registry?.delete("transcript-find-on");
     };
-    const needle = find.trim().toLowerCase();
+    // Spaces count: " meth" finds a word starting "meth", not "something".
+    const needle = find.trim() ? find.toLowerCase() : "";
     const root = bodyRef.current?.querySelector(".prose") ?? bodyRef.current;
     if (!needle || !root) {
       clear();
