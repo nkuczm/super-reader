@@ -299,3 +299,9 @@ test("documentOrder puts each section's linked blocks under its header", async (
   );
   assert.deepEqual(order, ["x", "H", "a", "b"]);
 });
+
+test("text pasted from Google Docs keeps its bold, not a highlight", async () => {
+  const { sanitizeRichText } = await import("../lib/subjects");
+  const docs = '<meta charset="utf-8"><b style="font-weight:normal;" id="docs-internal-guid-1"><p dir="ltr"><span style="font-size:11pt;background-color:transparent;font-weight:700;">Name</span><span style="background-color:transparent;font-weight:400;"> plain</span><span style="background-color:#ffff00;"> lit</span></p></b>';
+  assert.equal(sanitizeRichText(docs), "<p><b>Name</b> plain<mark> lit</mark></p>");
+});

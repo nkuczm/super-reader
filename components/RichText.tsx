@@ -45,7 +45,10 @@ export default function RichText({
   onEmbed,
   onDropImage,
   onTab,
+  onFormat,
 }: {
+  /** A formatting command about to run; return true to say it was handled elsewhere (several table cells at once). */
+  onFormat?: (command: string, value?: string) => boolean;
   /** Tab outside a list goes here instead of indenting (a table cell moves to the next cell). */
   onTab?: (back: boolean) => void;
   /** A picture file dropped on the text: keep it, and say which box holds it. */
@@ -312,6 +315,7 @@ export default function RichText({
 
   /** Lines into a checklist, or a checklist back into plain lines. */
   function toggleChecklist() {
+    if (onFormat?.("checklist")) return;
     el.current?.focus();
     const list = listAtCaret();
     if (list?.hasAttribute("data-check")) {
@@ -328,6 +332,7 @@ export default function RichText({
    * highlight off; anywhere else it puts one on.
    */
   function toggleHighlight() {
+    if (onFormat?.("highlight")) return;
     const root = el.current;
     const sel = window.getSelection();
     if (!root || !sel || sel.rangeCount === 0) return format("hiliteColor", "#fde68a");
@@ -363,6 +368,7 @@ export default function RichText({
   }
 
   function format(command: string, value?: string) {
+    if (command !== "undo" && command !== "redo" && onFormat?.(command, value)) return;
     el.current?.focus();
     document.execCommand(command, false, value);
     changed();
