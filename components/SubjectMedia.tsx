@@ -324,7 +324,16 @@ function pointAt(node: Node, offset: number): TPoint | null {
 
 const before = (a: TPoint, b: TPoint) => a.t - b.t || a.p - b.p || a.o - b.o;
 
-export function TranscriptBox({ box, onChange, onComment }: {
+/** A passage the AI search found: a run of turns, and why it fits. */
+export type AiMatch = { from: number; to: number; why: string };
+export type AiSearch = (turns: { s?: string; t?: string; x: string }[], query: string) => Promise<AiMatch[]>;
+
+/** A passage longer than this opens in the transcript rather than in its card. */
+const LONG_QUOTE = 1500;
+
+export function TranscriptBox({ box, onChange, onComment, aiSearch }: {
+  /** Search by meaning; absent where no AI is set up. */
+  aiSearch?: AiSearch;
   box: BoxItem;
   onChange: (next: Partial<BoxItem>) => void;
   /** A comment made on a passage, as a line for the notes card beside the transcript. */
@@ -340,6 +349,10 @@ export function TranscriptBox({ box, onChange, onComment }: {
   const speakers = speakersOf(turns);
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
+  /** Search by meaning instead of by the letters typed. */
+  const [aiMode, setAiMode] = useState(false);
+  const [ai, setAi] = useState<{ state: "running" | "done" | "error"; query: string; matches: AiMatch[]; message?: string; shown: boolean } | null>(null);
+  const [opened, setOpened] = useState<Set<number>>(new Set());
   const [hit, setHit] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -359,7 +372,7 @@ export function TranscriptBox({ box, onChange, onComment }: {
   };
 
   // Spaces count: " meth" finds a word starting "meth", not "something".
-  const needle = query.trim() ? query.toLowerCase() : "";
+  const needle = !aiMode && query.trim() ? query.toLowerCase() : "";
   const pattern = needle ? new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi") : null;
   const total = pattern ? turns.reduce((n, t) => n + (t.x.match(pattern)?.length ?? 0) + (t.s?.match(pattern)?.length ?? 0), 0) : 0;
   const current = total ? ((hit % total) + total) % total : 0;
@@ -388,6 +401,38 @@ export function TranscriptBox({ box, onChange, onComment }: {
     return out;
   };
   const colorOf = (s?: string) => (s ? SPEAKER_COLORS[speakers.indexOf(s) % SPEAKER_COLORS.length] : undefined);
+
+  /** Ask the AI for passages that fit the description, and show them in place of the transcript. */
+  async function runAi() {
+    const q = query.trim();
+    if (!q || !aiSearch || ai?.state === "running") {
+      if (!aiSearch) setAi({ state: "error", query: q, matches: [], message: "Search by meaning needs an AI key — add one in Settings → API keys.", shown: true });
+      return;
+    }
+    setOpened(new Set());
+    setAi({ state: "running", query: q, matches: [], shown: true });
+    try {
+      const matches = await aiSearch(turns, q);
+      setAi({ state: "done", query: q, matches, shown: true });
+    } catch (error) {
+      setAi({ state: "error", query: q, matches: [], message: error instanceof Error ? error.message : "The search failed.", shown: true });
+    }
+  }
+
+  /** Back to the transcript, at the passage, which flashes so the eye finds it. */
+  function goToTurn(t: number) {
+    if (ai) setAi({ ...ai, shown: false });
+    setTimeout(() => {
+      const host = scroller.current;
+      const para = host?.querySelector<HTMLElement>(`[data-tp="${t}:0"]`);
+      const turnEl = para?.closest<HTMLElement>(".transcript-turn");
+      if (!host || !turnEl) return;
+      host.scrollTo({ top: turnEl.offsetTop - host.offsetTop - 12, behavior: "smooth" });
+      turnEl.classList.remove("flash");
+      void turnEl.offsetWidth;
+      turnEl.classList.add("flash");
+    }, 30);
+  }
 
   /* Highlights and comments, kept with the transcript they mark. */
   const marks = tabs[tab].marks ?? [];
@@ -542,19 +587,37 @@ export function TranscriptBox({ box, onChange, onComment }: {
       </div>
       {searching && (
         <div className="transcript-find">
+          <button className={`transcript-ai-toggle${aiMode ? " on" : ""}`} aria-pressed={aiMode}
+            title={aiMode ? "Searching by meaning — click to search for exact words" : "Search by meaning, with AI"}
+            onClick={() => { setAiMode((v) => !v); setHit(0); }}>✦ AI</button>
           <input
             autoFocus
-            placeholder="Find in transcript"
+            placeholder={aiMode ? "Describe what to find… e.g. where they declined to answer" : "Find in transcript"}
             value={query}
             onChange={(e) => { setQuery(e.target.value); setHit(0); }}
             onKeyDown={(e) => {
-              if (e.key === "Enter") { e.preventDefault(); setHit((h) => h + (e.shiftKey ? -1 : 1)); }
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (aiMode) void runAi();
+                else setHit((h) => h + (e.shiftKey ? -1 : 1));
+              }
               if (e.key === "Escape") { setSearching(false); setQuery(""); }
             }}
           />
-          <span className="transcript-count">{needle ? (total ? `${current + 1} of ${total}` : "No matches") : ""}</span>
-          <button disabled={!total} aria-label="Previous match" onClick={() => setHit((h) => h - 1)}>↑</button>
-          <button disabled={!total} aria-label="Next match" onClick={() => setHit((h) => h + 1)}>↓</button>
+          {aiMode ? (
+            <>
+              {ai && !ai.shown && ai.state === "done" && (
+                <button className="transcript-ai-back" onClick={() => setAi({ ...ai, shown: true })}>Results ({ai.matches.length})</button>
+              )}
+              <button className="transcript-ai-go" disabled={!query.trim() || ai?.state === "running"} onClick={() => void runAi()}>Search</button>
+            </>
+          ) : (
+            <>
+              <span className="transcript-count">{needle ? (total ? `${current + 1} of ${total}` : "No matches") : ""}</span>
+              <button disabled={!total} aria-label="Previous match" onClick={() => setHit((h) => h - 1)}>↑</button>
+              <button disabled={!total} aria-label="Next match" onClick={() => setHit((h) => h + 1)}>↓</button>
+            </>
+          )}
         </div>
       )}
       {turns.length === 0 ? (
@@ -578,6 +641,58 @@ export function TranscriptBox({ box, onChange, onComment }: {
           </label>
         </div>
       ) : (
+        ai?.shown ? (
+          <div className="transcript-results" onWheel={(e) => e.stopPropagation()}>
+            <div className="transcript-results-head">
+              <button className="link-btn" onClick={() => setAi({ ...ai, shown: false })}>← Transcript</button>
+              <span>
+                {ai.state === "running" ? <>Reading the transcript for “{ai.query}”…</>
+                  : ai.state === "error" ? ai.message
+                  : ai.matches.length ? <>✦ {ai.matches.length} passage{ai.matches.length === 1 ? "" : "s"} for “{ai.query}”</>
+                  : <>Nothing in this transcript fits “{ai.query}”.</>}
+              </span>
+            </div>
+            {ai.state === "running" && [0, 1, 2].map((i) => <div key={i} className="transcript-result skeleton" style={{ animationDelay: `${i * 120}ms` }} />)}
+            {ai.state === "done" && ai.matches.map((m, i) => {
+              const run = turns.slice(m.from, m.to + 1);
+              const first = run[0];
+              if (!first) return null;
+              const firstPara = first.x.split("\n\n")[0];
+              const whole = run.reduce((n, t) => n + t.x.length, 0);
+              const more = run.length > 1 || first.x.length > firstPara.length;
+              const isOpen = opened.has(i);
+              return (
+                <div key={`${m.from}-${m.to}`} className="transcript-result" style={{ animationDelay: `${i * 70}ms` }}>
+                  <div className="transcript-who">
+                    {first.s && <b style={{ color: colorOf(first.s) }}>{first.s}</b>}
+                    {first.t && <span className="transcript-time">{first.t}</span>}
+                  </div>
+                  {isOpen ? (
+                    run.map((t, k) => (
+                      <div key={k} className="transcript-result-turn">
+                        {k > 0 && t.s && <b style={{ color: colorOf(t.s) }}>{t.s} </b>}
+                        {t.x.split("\n\n").map((para, j) => <p key={j}>{para}</p>)}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="transcript-result-text">{firstPara}{more ? " …" : ""}</p>
+                  )}
+                  <p className="transcript-result-why">{m.why}</p>
+                  <div className="transcript-result-tools">
+                    {more && whole <= LONG_QUOTE && (
+                      <button className="link-btn" onClick={() => setOpened((o) => { const n = new Set(o); if (n.has(i)) n.delete(i); else n.add(i); return n; })}>
+                        {isOpen ? "Show less" : "Show whole quote"}
+                      </button>
+                    )}
+                    <button className="link-btn" onClick={() => goToTurn(m.from)}>
+                      {more && whole > LONG_QUOTE ? "Read the whole quote in the transcript →" : "Go to it in the transcript →"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
         <div className="transcript-body" ref={scroller} onWheel={(e) => e.stopPropagation()} onMouseUp={pickPassage}
           onKeyUp={(e) => e.shiftKey && pickPassage()}>
           {turns.map((turn, i) => {
@@ -595,6 +710,7 @@ export function TranscriptBox({ box, onChange, onComment }: {
             );
           })}
         </div>
+        )
       )}
       {pop && (
         <div className="transcript-pop" style={{ left: pop.left, top: pop.top }} onMouseDown={(e) => e.target instanceof HTMLTextAreaElement || e.preventDefault()}>

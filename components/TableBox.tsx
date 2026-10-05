@@ -140,7 +140,13 @@ async function copyTable(html: string, text: string) {
  * Both can colour cells and merge them, and both take a table pasted from
  * Google Docs, Word or a web page.
  */
-export function TableBox({ box, onChange: apply }: { box: BoxItem; onChange: (next: Change) => void }) {
+/** What lets a cell hold pictures: keep a dropped or pasted file, and show a kept one. */
+export type CellMedia = {
+  dropImage: (file: File) => Promise<string | null>;
+  resolveEmbed: (id: string) => string | undefined;
+};
+
+export function TableBox({ box, onChange: apply, media }: { box: BoxItem; onChange: (next: Change) => void; media?: CellMedia }) {
   /**
    * Undo and redo for everything done to the table — text, colours, rows,
    * merges, moves — as snapshots of the table's fields, so each step puts
@@ -357,7 +363,7 @@ export function TableBox({ box, onChange: apply }: { box: BoxItem; onChange: (ne
     onChange({ tableMode: next, table });
   };
 
-  const props: Inner = { grid, metas, widths: shownW, heights: shownH, startResize, startMove, moving, onChange, ops, reshape, colSizes, rowSizes };
+  const props: Inner = { media, grid, metas, widths: shownW, heights: shownH, startResize, startMove, moving, onChange, ops, reshape, colSizes, rowSizes };
   return (
     <div ref={shell} tabIndex={-1} className={`tbl tbl-${mode}`} onPointerDown={(e) => e.stopPropagation()} onKeyDownCapture={onUndoKey}>
       {mode === "doc" ? <DocTable {...props} /> : <SheetTable {...props} />}
@@ -414,6 +420,7 @@ type Ops = {
 };
 
 type Inner = {
+  media?: CellMedia;
   grid: Grid;
   metas: CellMetas;
   widths: number[];
@@ -504,7 +511,7 @@ function CellMenuExtras({ range, metas, ops, close }: { range: Range; metas: Cel
 /* Table: written in like a document                                       */
 /* ---------------------------------------------------------------------- */
 
-function DocTable({ grid, metas, widths, heights, startResize, startMove, moving, onChange, ops }: Inner) {
+function DocTable({ media, grid, metas, widths, heights, startResize, startMove, moving, onChange, ops }: Inner) {
   const host = useRef<HTMLTableElement | null>(null);
   const rows = grid.length;
   const cols = grid[0].length;
@@ -671,6 +678,7 @@ function DocTable({ grid, metas, widths, heights, startResize, startMove, moving
                     {/* At least the height set for the row; taller when more is written. */}
                     <div className="tbl-cell-box" style={{ minHeight: span(heights, r, rs) - 1 }}>
                     <RichText className="tbl-rich" html={asHtml(html)} onChange={(next) => save(r, c, next)} onFormat={formatAcross}
+                      onDropImage={media?.dropImage} resolveEmbed={media?.resolveEmbed}
                       onTab={(back) => {
                         const next = step(r, c, back);
                         if (!next) return;

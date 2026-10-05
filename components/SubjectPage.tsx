@@ -7,7 +7,7 @@ import SubjectHistory from "./SubjectHistory";
 import { EXTRACT_VERSION } from "@/lib/offline";
 import SubjectContacts from "./SubjectContacts";
 import { tableWidth } from "./TableBox";
-import { DrawingPad, ImageView, TableBox, TranscriptBox, shrinkImage, DRAWING_HEIGHT } from "./SubjectMedia";
+import { DrawingPad, ImageView, TableBox, TranscriptBox, shrinkImage, DRAWING_HEIGHT, type AiSearch } from "./SubjectMedia";
 import { tableHtml, transcriptHtml } from "@/lib/subject-doc";
 import type { Writing } from "./useAccount";
 import type { Note, NoteEntry } from "@/lib/notes";
@@ -666,6 +666,20 @@ export default function SubjectPage(props: Props) {
         return put(current, { ...base, ...change, at: Date.now() });
       }),
     removeBox: (box: BoxItem) => onBoard((current) => remove(remove(current, box.id), posId(box.id))),
+    aiSearch: (async (turns, query) => {
+      if (!hasAiKey) throw new Error(`Add your ${PROVIDER_NAME[ai.provider]} key in Settings → API keys to search by meaning.`);
+      const headers = new Headers(keyHeaders());
+      headers.set("content-type", "application/json");
+      const res = await fetch("/api/subjects/transcript-search", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ turns, query, provider: ai.provider, model: ai.model }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "The search failed.");
+      if (data.usage) shareSpend(loadSyncCode(), recordSpend(data.usage, note.name));
+      return data.matches ?? [];
+    }) as AiSearch,
     noteTranscript: (box: BoxItem, itemHtml: string) =>
       onBoard((current) => addTranscriptNote(current, box.id, itemHtml, newItemId("box"))),
   };
@@ -1006,6 +1020,8 @@ type Shared = {
   removeBox: (box: BoxItem) => void;
   /** A comment on a transcript, added as a bullet to the notes card beside it. */
   noteTranscript: (box: BoxItem, itemHtml: string) => void;
+  /** Search a transcript by meaning, with the same AI key and model as insights. */
+  aiSearch: AiSearch;
 };
 
 /* ---------------------------------------------------------------------- */
@@ -1145,9 +1161,9 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
           onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
         />
       ) : box.transcript ? (
-        <TranscriptBox box={box} onChange={(change) => shared.updateBox(box, change)} onComment={(html) => shared.noteTranscript(box, html)} />
+        <TranscriptBox box={box} onChange={(change) => shared.updateBox(box, change)} onComment={(html) => shared.noteTranscript(box, html)} aiSearch={shared.aiSearch} />
       ) : box.table ? (
-        <TableBox box={box} onChange={(change) => shared.updateBox(box, change)} />
+        <TableBox box={box} onChange={(change) => shared.updateBox(box, change)} media={{ dropImage: shared.dropImage, resolveEmbed: shared.resolveEmbed }} />
       ) : box.drawing ? (
         <DrawingPad box={box} onChange={(change) => shared.updateBox(box, change)} />
       ) : box.image !== undefined || box.caption !== undefined ? (
