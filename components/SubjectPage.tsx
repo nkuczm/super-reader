@@ -245,10 +245,65 @@ function scrollsItself(target: Element | null, stop: Element, deltaY: number): "
   return found;
 }
 
+/** Things in a card a click is meant for, which never move the caret. */
+const NOT_TEXT = "button, a, input, textarea, select, label, [contenteditable], img, svg, canvas, .drawing, .transcript, .sheet, .wb-menu, .embed-grip, .subject-box-head, .subject-card-head, .tbl-col-handle, .tbl-row-handle, .tbl-grip, .sheet-tools";
+
+/**
+ * A click anywhere in a text box, a story's notes or a table cell — not
+ * just on the line of text — starts typing there: the caret goes to the
+ * nearest place in that text. A press that became a drag does nothing.
+ */
+function useClickToType() {
+  useEffect(() => {
+    let down: { x: number; y: number } | null = null;
+    const press = (e: PointerEvent) => (down = { x: e.clientX, y: e.clientY });
+    const click = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target || !down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return;
+      if (target.closest(NOT_TEXT)) return;
+      const holder = target.closest<HTMLElement>("td[data-cell], .subject-box, .subject-card");
+      if (!holder || !holder.closest(".subject-doc, .wb-canvas")) return;
+      const body = holder.querySelector<HTMLElement>(".rich-body");
+      if (!body) return;
+      body.focus({ preventScroll: true });
+      // The nearest point of the text to where the click landed.
+      const r = body.getBoundingClientRect();
+      const x = Math.min(r.right - 2, Math.max(r.left + 2, e.clientX));
+      const y = Math.min(r.bottom - 2, Math.max(r.top + 2, e.clientY));
+      const doc = document as Document & { caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null };
+      let range: Range | null = null;
+      const pos = doc.caretPositionFromPoint?.(x, y);
+      if (pos && body.contains(pos.offsetNode)) {
+        range = document.createRange();
+        range.setStart(pos.offsetNode, pos.offset);
+      } else {
+        const hit = document.caretRangeFromPoint?.(x, y);
+        if (hit && body.contains(hit.startContainer)) range = hit;
+      }
+      if (!range) {
+        range = document.createRange();
+        range.selectNodeContents(body);
+        range.collapse(false);
+      }
+      range.collapse(true);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    };
+    document.addEventListener("pointerdown", press, true);
+    document.addEventListener("click", click);
+    return () => {
+      document.removeEventListener("pointerdown", press, true);
+      document.removeEventListener("click", click);
+    };
+  }, []);
+}
+
 export default function SubjectPage(props: Props) {
   const { note, board, onBoard, keyHeaders, hasAiKey, ai } = props;
   const meta = metaOf(board);
   const [historyOpen, setHistoryOpen] = useState(false);
+  useClickToType();
 
   // Drawings and pictures set into text: shown from their own box, which
   // leaves the page's layout once it has been dropped in.
