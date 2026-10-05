@@ -10,7 +10,7 @@ import { DrawingPad, ImageView, TableBox, TranscriptBox, shrinkImage, DRAWING_HE
 import { tableHtml, transcriptHtml } from "@/lib/subject-doc";
 import type { Writing } from "./useAccount";
 import type { Note, NoteEntry } from "@/lib/notes";
-import { LABEL_COLORS, labelColorOf, safeHref, youtubeThumbnail, type StoryItem } from "@/lib/subjects";
+import { documentOrder, LABEL_COLORS, labelColorOf, safeHref, youtubeThumbnail, type StoryItem } from "@/lib/subjects";
 import { titleFromUrl } from "@/lib/manual";
 import {
   addStory,
@@ -868,7 +868,7 @@ export default function SubjectPage(props: Props) {
       {meta.view === "board" ? (
         <Whiteboard {...shared} placeKey={placeKey} board={board} onBoard={onBoard} addBox={addBox} pickImage={pickImage} boxWidth={props.boxWidth ?? 0} />
       ) : (
-        <DocumentView {...shared} addBox={addBox} pickImage={pickImage} />
+        <DocumentView {...shared} board={board} addBox={addBox} pickImage={pickImage} />
       )}
       </div>
       {contactsOpen && (
@@ -1162,6 +1162,7 @@ function DocumentView(
   shared: Shared & {
     addBox: (at?: { x: number; y: number }, extra?: Partial<BoxItem>) => void;
     pickImage: (at?: { x: number; y: number }) => void;
+    board: Board | undefined;
   },
 ) {
   const { inside, apart } = splitInsights(shared.insights);
@@ -1203,10 +1204,13 @@ function DocumentView(
     run();
     setMenu(null);
   };
-  const stack = [
-    ...shared.cards.map((card) => ({ at: card.at, key: card.id, node: <StoryCard card={card} own={inside.get(card.id) ?? []} shared={shared} /> })),
-    ...shared.boxes.map((box) => ({ at: box.at, key: box.id, node: <TextBox box={box} shared={shared} /> })),
-  ].sort((a, b) => a.at - b.at);
+  const entries = [
+    ...shared.cards.map((card) => ({ id: card.id, at: card.at, key: card.id, node: <StoryCard card={card} own={inside.get(card.id) ?? []} shared={shared} /> })),
+    ...shared.boxes.map((box) => ({ id: box.id, at: box.at, label: box.label, key: box.id, node: <TextBox box={box} shared={shared} /> })),
+  ];
+  // Sections read as they do on the whiteboard: each header, then what is linked to it.
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  const stack = documentOrder(entries, shared.board).map((id) => byId.get(id)!);
 
   return (
     <div className="subject-doc" onContextMenu={open} onDoubleClick={open}
