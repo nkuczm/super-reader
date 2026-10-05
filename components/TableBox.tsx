@@ -144,6 +144,7 @@ async function copyTable(html: string, text: string) {
 export type CellMedia = {
   dropImage: (file: File) => Promise<string | null>;
   resolveEmbed: (id: string) => string | undefined;
+  replaceEmbed?: (id: string, image: string) => void;
 };
 
 export function TableBox({ box, onChange: apply, media }: { box: BoxItem; onChange: (next: Change) => void; media?: CellMedia }) {
@@ -678,7 +679,7 @@ function DocTable({ media, grid, metas, widths, heights, startResize, startMove,
                     {/* At least the height set for the row; taller when more is written. */}
                     <div className="tbl-cell-box" style={{ minHeight: span(heights, r, rs) - 1 }}>
                     <RichText className="tbl-rich" html={asHtml(html)} onChange={(next) => save(r, c, next)} onFormat={formatAcross}
-                      onDropImage={media?.dropImage} resolveEmbed={media?.resolveEmbed}
+                      onDropImage={media?.dropImage} resolveEmbed={media?.resolveEmbed} onReplaceEmbed={media?.replaceEmbed}
                       onTab={(back) => {
                         const next = step(r, c, back);
                         if (!next) return;
