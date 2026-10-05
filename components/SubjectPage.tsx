@@ -484,7 +484,7 @@ export default function SubjectPage(props: Props) {
       if (bylineOf(card)) parts.push(`<p><i>${escapeHtml(bylineOf(card))}</i></p>`);
       parts.push(unlinkQuotes(composeCardDoc(card.note, card.quotes)));
     }
-    for (const box of boxes) parts.push(box.transcript ? transcriptHtml(box.transcript, box.transcriptTabs) : box.table ? tableHtml(box.table) : unlinkQuotes(box.html));
+    for (const box of boxes) parts.push(box.transcript ? transcriptHtml(box.transcript, box.transcriptTabs) : box.table ? tableHtml(box.table, box.tableMode) : unlinkQuotes(box.html));
     if (insights.length > 0) {
       parts.push("<h3>Insights</h3><ul>");
       for (const insight of insights) parts.push(`<li><b>${INSIGHT_LABEL[insight.type]}:</b> ${escapeHtml(insight.text)}</li>`);
@@ -774,7 +774,7 @@ export default function SubjectPage(props: Props) {
                       ["¶", "Text box", () => addBox()],
                       ["✎", "Drawing", () => addBox(undefined, { drawing: [], height: DRAWING_HEIGHT })],
                       ["▣", "Image", () => imageInput.current?.click()],
-                      ["▦", "Table", () => addBox(undefined, { table: NEW_TABLE() })],
+                      ["▦", "Table", () => addBox(undefined, { table: NEW_TABLE(), tableMode: "doc" })],
                       ["❝", "Transcript", () => addBox(undefined, { transcript: { title: "", turns: [] } })],
                     ] as const
                   ).map(([icon, label, run]) => (
@@ -1239,7 +1239,7 @@ function DocumentView(
             <span className="wb-menu-icon">✎</span> Drawing
           </button>
           <button role="menuitem" onClick={pick(() => shared.pickImage())}><span className="wb-menu-icon">▣</span> Image…</button>
-          <button role="menuitem" onClick={pick(() => shared.addBox(undefined, { table: NEW_TABLE() }))}>
+          <button role="menuitem" onClick={pick(() => shared.addBox(undefined, { table: NEW_TABLE(), tableMode: "doc" }))}>
             <span className="wb-menu-icon">▦</span> Table
           </button>
           <button role="menuitem" onClick={pick(() => shared.addBox(undefined, { transcript: { title: "", turns: [] } }))}>
@@ -2283,7 +2283,7 @@ function Whiteboard(
           <button role="menuitem" onClick={() => { shared.pickImage(menu.at); setMenu(null); }}>
             <span className="wb-menu-icon">▣</span> Image…
           </button>
-          <button role="menuitem" onClick={() => { shared.addBox(menu.at, { table: NEW_TABLE() }); setMenu(null); }}>
+          <button role="menuitem" onClick={() => { shared.addBox(menu.at, { table: NEW_TABLE(), tableMode: "doc" }); setMenu(null); }}>
             <span className="wb-menu-icon">▦</span> Table
           </button>
           <button role="menuitem" onClick={() => { shared.addBox(menu.at, { transcript: { title: "", turns: [] } }); setMenu(null); }}>

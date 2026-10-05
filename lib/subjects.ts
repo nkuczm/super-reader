@@ -68,6 +68,11 @@ export type BoxItem = Base & {
   labelStyle?: "underline" | "fill";
   /** A little spreadsheet: what was typed in each cell, formulas included. */
   table?: string[][];
+  /** "doc" for a plain table typed into like text; "sheet" (the default for older tables) for a spreadsheet. */
+  tableMode?: "doc" | "sheet";
+  /** Column widths and row heights in pixels, as dragged; missing ones take the mode's default. */
+  tableCols?: (number | null)[];
+  tableRows?: (number | null)[];
   /** An interview transcript, split into who said what. */
   transcript?: Transcript;
   /** More transcripts in the same block, shown as tabs after the first. */

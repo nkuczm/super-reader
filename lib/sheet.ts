@@ -296,3 +296,114 @@ export function display(v: Value): string {
   }
   return v;
 }
+
+/* ---------- editing a table's shape ---------- */
+
+/** Column widths and row heights, in pixels, kept within reason. */
+export const MIN_COL = 36;
+export const MAX_COL = 800;
+export const MIN_ROW = 20;
+export const MAX_ROW = 600;
+export function safeSizes(input: unknown, count: number, min: number, max: number): (number | null)[] {
+  const list = Array.isArray(input) ? input : [];
+  return Array.from({ length: count }, (_, i) => {
+    const n = list[i];
+    return typeof n === "number" && Number.isFinite(n) ? Math.round(Math.min(max, Math.max(min, n))) : null;
+  });
+}
+
+/** An array with an item put in at `at` (sizes and rows alike). */
+export function insertAt<T>(list: T[], at: number, item: T): T[] {
+  return [...list.slice(0, at), item, ...list.slice(at)];
+}
+export function removeAt<T>(list: T[], at: number): T[] {
+  return list.filter((_, i) => i !== at);
+}
+
+export function insertRow(grid: Grid, at: number): Grid {
+  if (grid.length >= MAX_ROWS) return grid;
+  return insertAt(grid, at, Array(grid[0]?.length ?? 1).fill(""));
+}
+export function deleteRow(grid: Grid, at: number): Grid {
+  return grid.length <= 1 ? grid : removeAt(grid, at);
+}
+export function insertCol(grid: Grid, at: number): Grid {
+  if ((grid[0]?.length ?? 0) >= MAX_COLS) return grid;
+  return grid.map((row) => insertAt(row, at, ""));
+}
+export function deleteCol(grid: Grid, at: number): Grid {
+  return (grid[0]?.length ?? 0) <= 1 ? grid : grid.map((row) => removeAt(row, at));
+}
+
+/**
+ * Rows ordered by one column's shown value: numbers before text, numbers
+ * by size, text alphabetically, blanks always last. The first row stays
+ * put when `header` is set.
+ */
+export function sortRows(grid: Grid, col: number, descending = false, header = false): Grid {
+  const values = evaluate(grid);
+  const order = grid.map((_, i) => i).slice(header ? 1 : 0);
+  const key = (i: number) => values[i][col];
+  order.sort((a, b) => {
+    const x = key(a);
+    const y = key(b);
+    const blankX = x === "";
+    const blankY = y === "";
+    if (blankX || blankY) return blankX === blankY ? a - b : blankX ? 1 : -1;
+    let d: number;
+    if (typeof x === "number" && typeof y === "number") d = x - y;
+    else if (typeof x === "number") d = -1;
+    else if (typeof y === "number") d = 1;
+    else d = String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: "base" });
+    return (descending ? -d : d) || a - b;
+  });
+  return [...(header ? [grid[0]] : []), ...order.map((i) => grid[i])];
+}
+
+/** A block of cells as tab-separated text, the way spreadsheets copy. */
+export function toTsv(grid: Grid, r0: number, c0: number, r1: number, c1: number): string {
+  const lines: string[] = [];
+  for (let r = r0; r <= r1; r++) {
+    const cells: string[] = [];
+    for (let c = c0; c <= c1; c++) {
+      const v = grid[r]?.[c] ?? "";
+      cells.push(/[\t\n"]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+    }
+    lines.push(cells.join("\t"));
+  }
+  return lines.join("\n");
+}
+
+/** Tab-separated text (from a spreadsheet, or a table copied anywhere) as rows of cells. */
+export function fromTsv(text: string): string[][] {
+  const src = text.replace(/\r\n?/g, "\n").replace(/\n$/, "");
+  const rows: string[][] = [[]];
+  let cell = "";
+  let i = 0;
+  let quoted = false;
+  while (i < src.length) {
+    const ch = src[i];
+    if (quoted) {
+      if (ch === '"' && src[i + 1] === '"') { cell += '"'; i += 2; continue; }
+      if (ch === '"') { quoted = false; i++; continue; }
+      cell += ch; i++; continue;
+    }
+    if (ch === '"' && cell === "") { quoted = true; i++; continue; }
+    if (ch === "\t") { rows[rows.length - 1].push(cell); cell = ""; i++; continue; }
+    if (ch === "\n") { rows[rows.length - 1].push(cell); rows.push([]); cell = ""; i++; continue; }
+    cell += ch; i++;
+  }
+  rows[rows.length - 1].push(cell);
+  return rows;
+}
+
+/** `block` written into `grid` at (r, c), growing the grid as needed within its limits. */
+export function pasteBlock(grid: Grid, r: number, c: number, block: string[][]): Grid {
+  const rows = Math.min(MAX_ROWS, Math.max(grid.length, r + block.length));
+  const cols = Math.min(MAX_COLS, Math.max(grid[0]?.length ?? 1, c + Math.max(...block.map((b) => b.length))));
+  const out: Grid = Array.from({ length: rows }, (_, i) => Array.from({ length: cols }, (_, j) => grid[i]?.[j] ?? ""));
+  block.forEach((line, i) => line.forEach((v, j) => {
+    if (r + i < rows && c + j < cols) out[r + i][c + j] = v.slice(0, MAX_CELL);
+  }));
+  return out;
+}
