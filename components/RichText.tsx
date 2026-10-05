@@ -305,6 +305,55 @@ export default function RichText({
   }, [docked]);
   const coarse = () => typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
 
+  /**
+   * Once the toolbar's own place has scrolled (or panned) off the screen,
+   * it stands beside the card instead, upright, centred on what is still
+   * visible of the card — so the tools are always within reach of the text
+   * being written.
+   */
+  const [focused, setFocused] = useState(false);
+  const [side, setSide] = useState<{ left: number; top: number } | null>(null);
+  useEffect(() => {
+    if (!focused || docked) {
+      setSide(null);
+      return;
+    }
+    let frame = 0;
+    let last = "";
+    const tick = () => {
+      frame = requestAnimationFrame(tick);
+      const host = wrap.current;
+      if (!host) return;
+      const card = host.closest<HTMLElement>(".subject-box, .subject-card") ?? host;
+      const anchor = (host.closest("table") as HTMLElement | null) ?? host;
+      const a = anchor.getBoundingClientRect();
+      const c = card.getBoundingClientRect();
+      const vh = window.innerHeight;
+      const vw = window.innerWidth;
+      // Where the toolbar would sit: just above the text (or its table).
+      const off = a.top - 40 < 0 || a.top > vh - 20;
+      const visible = c.bottom > 40 && c.top < vh - 40;
+      let next: { left: number; top: number } | null = null;
+      if (off && visible) {
+        const h = tools.current?.offsetHeight || 280;
+        const w = tools.current?.offsetWidth || 40;
+        let left = c.left - w - 8;
+        if (left < 4) left = c.right + 8;
+        if (left + w > vw - 4) left = Math.max(4, vw - w - 4);
+        const middle = (Math.max(c.top, 8) + Math.min(c.bottom, vh - 8)) / 2;
+        const top = Math.min(vh - h - 8, Math.max(8, middle - h / 2));
+        next = { left: Math.round(left), top: Math.round(top) };
+      }
+      const key = next ? `${next.left},${next.top}` : "";
+      if (key !== last) {
+        last = key;
+        setSide(next);
+      }
+    };
+    tick();
+    return () => cancelAnimationFrame(frame);
+  }, [focused, docked]);
+
   /** The list the caret is in, if any. */
   function listAtCaret(): HTMLUListElement | null {
     const node = window.getSelection()?.anchorNode;
@@ -375,7 +424,8 @@ export default function RichText({
   }
 
   const toolbar = (
-    <div ref={tools} className={`rich-tools${docked ? " docked" : ""}`} style={docked ? { top: vvTop } : undefined}
+    <div ref={tools} className={`rich-tools${docked ? " docked" : side ? " side" : ""}`}
+      style={docked ? { top: vvTop } : side ? { left: side.left, top: side.top } : undefined}
       onMouseDown={(event) => event.preventDefault()}>
       {docked && (
         <>
@@ -402,9 +452,9 @@ export default function RichText({
 
   return (
     <div className={`rich ${className ?? ""}`} ref={wrap} onMouseLeave={() => setPinFor(null)}
-      onFocus={() => coarse() && setDocked(true)}
+      onFocus={() => { setFocused(true); if (coarse()) setDocked(true); }}
       onBlur={() => setTimeout(() => {
-        if (!wrap.current?.contains(document.activeElement)) setDocked(false);
+        if (!wrap.current?.contains(document.activeElement)) { setDocked(false); setFocused(false); }
       }, 0)}>
       {pinFor && (
         <span
@@ -430,7 +480,7 @@ export default function RichText({
       )}
       {/* Docked, the toolbar lives at the top of the page: inside a scaled
           whiteboard, "fixed" would mean fixed to the board, not the screen. */}
-      {docked && typeof document !== "undefined" ? createPortal(toolbar, document.body) : toolbar}
+      {(docked || side) && typeof document !== "undefined" ? createPortal(toolbar, document.body) : toolbar}
       {linking && (
         <form
           className="rich-link-field"
