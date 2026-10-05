@@ -225,17 +225,24 @@ function readBlocks(json: string | null | undefined): CopiedBlocks | null {
   }
 }
 
-/** Whether the wheel, over `target`, should scroll a box inside `stop` rather than the board. */
-function scrollsItself(target: Element | null, stop: Element, deltaY: number) {
+/**
+ * What the wheel, over `target`, does to a box inside `stop` with its own
+ * scroll: "scroll" while it has further to go, "end" once it is at its top
+ * or bottom — where it stops, rather than handing the scroll on to pan the
+ * board — and null over anything else.
+ */
+function scrollsItself(target: Element | null, stop: Element, deltaY: number): "scroll" | "end" | null {
+  let found: "end" | null = null;
   for (let node = target; node && node !== stop; node = node.parentElement) {
     const { overflowY } = getComputedStyle(node);
     if ((overflowY === "auto" || overflowY === "scroll") && node.scrollHeight > node.clientHeight + 1) {
       const atTop = node.scrollTop <= 0;
       const atBottom = node.scrollTop + node.clientHeight >= node.scrollHeight - 1;
-      if ((deltaY < 0 && !atTop) || (deltaY > 0 && !atBottom)) return true;
+      if ((deltaY < 0 && !atTop) || (deltaY > 0 && !atBottom)) return "scroll";
+      found = "end";
     }
   }
-  return false;
+  return found;
 }
 
 export default function SubjectPage(props: Props) {
@@ -1986,7 +1993,11 @@ function Whiteboard(
     if (!el) return;
     const onWheel = (event: WheelEvent) => {
       // Something with its own scroll — a transcript — scrolls itself.
-      if (!event.ctrlKey && !event.metaKey && scrollsItself(event.target as Element | null, el, event.deltaY)) return;
+      const own = !event.ctrlKey && !event.metaKey && Math.abs(event.deltaY) >= Math.abs(event.deltaX)
+        ? scrollsItself(event.target as Element | null, el, event.deltaY) : null;
+      if (own === "scroll") return;
+      // At its end, the box just stops: the board stays where it is.
+      if (own === "end") { event.preventDefault(); return; }
       event.preventDefault();
       const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
       if (event.ctrlKey || event.metaKey) {
