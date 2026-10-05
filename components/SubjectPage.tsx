@@ -6,6 +6,7 @@ import RichText from "./RichText";
 import SubjectHistory from "./SubjectHistory";
 import { EXTRACT_VERSION } from "@/lib/offline";
 import SubjectContacts from "./SubjectContacts";
+import { tableWidth } from "./TableBox";
 import { DrawingPad, ImageView, TableBox, TranscriptBox, shrinkImage, DRAWING_HEIGHT } from "./SubjectMedia";
 import { tableHtml, transcriptHtml } from "@/lib/subject-doc";
 import type { Writing } from "./useAccount";
@@ -484,7 +485,7 @@ export default function SubjectPage(props: Props) {
       if (bylineOf(card)) parts.push(`<p><i>${escapeHtml(bylineOf(card))}</i></p>`);
       parts.push(unlinkQuotes(composeCardDoc(card.note, card.quotes)));
     }
-    for (const box of boxes) parts.push(box.transcript ? transcriptHtml(box.transcript, box.transcriptTabs) : box.table ? tableHtml(box.table, box.tableMode) : unlinkQuotes(box.html));
+    for (const box of boxes) parts.push(box.transcript ? transcriptHtml(box.transcript, box.transcriptTabs) : box.table ? tableHtml(box.table, box.tableMode, box.tableCells) : unlinkQuotes(box.html));
     if (insights.length > 0) {
       parts.push("<h3>Insights</h3><ul>");
       for (const insight of insights) parts.push(`<li><b>${INSIGHT_LABEL[insight.type]}:</b> ${escapeHtml(insight.text)}</li>`);
@@ -1030,7 +1031,7 @@ function StoryCard({
 function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dragHandle?: (e: React.PointerEvent) => void }) {
   const [styling, setStyling] = useState(false);
   return (
-    <div className={`subject-box${box.label ? " label-box" : ""}${!box.label && !box.drawing && !box.table && !box.transcript && box.image === undefined && box.caption === undefined ? " text-box" : ""}`}>
+    <div className={`subject-box${box.table ? " table-box" : ""}${box.label ? " label-box" : ""}${!box.label && !box.drawing && !box.table && !box.transcript && box.image === undefined && box.caption === undefined ? " text-box" : ""}`}>
       <div className="subject-box-head" onPointerDown={dragHandle}>
         <span className="subject-box-grip" aria-hidden="true">⋮⋮</span>
         {box.label && (
@@ -1455,7 +1456,13 @@ function Whiteboard(
         .map((node) => {
           const h = sizes[node.id]?.h ?? 160;
           const saved = placed.get(node.id);
-          const width = resize?.id === node.id ? resize.w : resize?.others.has(node.id) ? clampW(resize.others.get(node.id)!.w + resize.dw) : (saved?.w ?? (node.kind === "box" && shared.boxWidth ? shared.boxWidth : CARD_W));
+          // A table's card is as wide as the table it holds.
+          const table = node.kind === "box" ? shared.boxes.find((b) => b.id === node.id && b.table) : undefined;
+          if (table) {
+            const w = tableWidth(table) + 26;
+            if (saved) return { id: node.id, placed: true, x: saved.x, y: saved.y, w, h };
+          }
+          const width = table ? tableWidth(table) + 26 : resize?.id === node.id ? resize.w : resize?.others.has(node.id) ? clampW(resize.others.get(node.id)!.w + resize.dw) : (saved?.w ?? (node.kind === "box" && shared.boxWidth ? shared.boxWidth : CARD_W));
           if (saved) return { id: node.id, placed: true, x: saved.x, y: saved.y, w: width, h };
           const n = counters[node.kind]++;
           const x =
