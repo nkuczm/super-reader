@@ -6,6 +6,7 @@ import { Icon } from "./icons";
 import { useEffect, useState } from "react";
 import { costAt, MODEL_CHOICES, monthlyUsage, TYPICAL_RUN } from "@/lib/models";
 import { formatDollars, loadSpend, type AiProvider } from "@/lib/spend";
+import { encodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import type { Settings, TeamFeed, ViewMode } from "@/lib/store";
 
 const VIEWS: { id: ViewMode; name: string; blurb: string }[] = [
@@ -350,6 +351,7 @@ export default function SettingsDialog({
                 provider={settings.aiProvider}
                 value={settings.aiProvider === "openai" ? settings.openaiModel : settings.anthropicModel}
                 onChange={(id) => onChange(settings.aiProvider === "openai" ? { ...settings, openaiModel: id } : { ...settings, anthropicModel: id })}
+                openaiKey={apiKeys.openai}
               />
               <p className="field-note">
                 {apiKeys[settings.aiProvider]
@@ -485,9 +487,25 @@ export default function SettingsDialog({
  * The model, chosen by what it is like rather than by its name, with what
  * each would cost a month at the pace this device has been using AI.
  */
-function ModelPicker({ provider, value, onChange }: { provider: AiProvider; value: string; onChange: (id: string) => void }) {
+function ModelPicker({ provider, value, onChange, openaiKey }: {
+  provider: AiProvider;
+  value: string;
+  onChange: (id: string) => void;
+  openaiKey?: string;
+}) {
   const [usage] = useState(() => monthlyUsage(loadSpend()));
-  const choices = MODEL_CHOICES[provider];
+  // What the reader's own OpenAI key can run, so newer models appear only when they will work.
+  const [available, setAvailable] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    if (provider !== "openai" || !openaiKey) return;
+    let live = true;
+    fetch("/api/subjects/models", { headers: { [KEYS_HEADER]: encodeKeysHeader({ openai: openaiKey }) } })
+      .then((r) => r.json())
+      .then((d: { models?: string[] | null }) => live && d.models && setAvailable(new Set(d.models)))
+      .catch(() => {});
+    return () => { live = false; };
+  }, [provider, openaiKey]);
+  const choices = MODEL_CHOICES[provider].filter((m) => !m.unconfirmed || available?.has(m.id) || m.id === value);
   const known = choices.some((m) => m.id === value);
   const [custom, setCustom] = useState(!known && provider === "openai");
   const basis = usage.runs > 0 ? usage : null;
