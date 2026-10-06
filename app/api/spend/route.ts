@@ -1,3 +1,4 @@
+import { meter } from "@/lib/db-usage";
 import { NextResponse } from "next/server";
 import { addSpend, listSpend } from "@/lib/spend-ledger";
 import { readSync } from "@/lib/sync";
@@ -15,6 +16,7 @@ async function codeFrom(value: unknown): Promise<string | null> {
 
 /** Every device's AI runs on this sync code. */
 export async function GET(request: Request) {
+  meter("spend");
   const code = await codeFrom(new URL(request.url).searchParams.get("code"));
   if (!code) return NextResponse.json({ error: "That sync code was not found." }, { status: 404, headers: PRIVATE });
   return NextResponse.json({ records: await listSpend(code) }, { headers: PRIVATE });
@@ -22,6 +24,7 @@ export async function GET(request: Request) {
 
 /** Runs from one device, new or already sent — each counts once. */
 export async function POST(request: Request) {
+  meter("spend");
   const text = await request.text();
   if (text.length > 1_500_000) return NextResponse.json({ error: "Too much at once" }, { status: 413, headers: PRIVATE });
   let body: { code?: unknown; records?: unknown };

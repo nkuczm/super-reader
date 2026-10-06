@@ -1,3 +1,4 @@
+import { meter } from "@/lib/db-usage";
 import { exportSubject } from "@/lib/backup";
 import { json, requireAccount } from "@/lib/session";
 
@@ -7,6 +8,7 @@ export const maxDuration = 60;
 
 /** A new Google Doc of one subject; its link comes back. */
 export async function POST(request: Request) {
+  meter("backup");
   const guard = await requireAccount(request, { write: true });
   if ("response" in guard) return guard.response;
   const body = await request.json().catch(() => ({}));

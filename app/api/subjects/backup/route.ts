@@ -1,3 +1,4 @@
+import { meter } from "@/lib/db-usage";
 import { backupSubjects } from "@/lib/backup";
 import { json, requireAccount } from "@/lib/session";
 
@@ -7,6 +8,7 @@ export const maxDuration = 60;
 
 /** Bring the Google Doc backups up to date with whatever changed. */
 export async function POST(request: Request) {
+  meter("backup");
   const guard = await requireAccount(request, { write: true });
   if ("response" in guard) return guard.response;
   try {

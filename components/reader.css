@@ -2675,3 +2675,7 @@
 .tbl-more-note { padding: 6px 10px; font-size: 12.5px; color: var(--text-dim); }
 .signin-note { font-size: 14px; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--text); }
 .storage-full { position: fixed; z-index: 500; top: 10px; left: 50%; transform: translateX(-50%); width: min(560px, calc(100vw - 32px)); box-shadow: 0 6px 18px rgba(0,0,0,.15); padding: 10px 12px; border-radius: 8px; font-size: 14px; background: color-mix(in srgb, var(--danger) 12%, var(--bg)); color: var(--text); border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent); }
+.db-meter { display: block !important; }
+.db-meter-bar { display: block; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; margin: 2px 0 4px; }
+.db-meter-bar > span { display: block; height: 100%; background: var(--accent); }
+.db-meter-bar > span.over { background: var(--danger); }

@@ -328,22 +328,48 @@ export async function inlineImages(accountId: string, doc: SubjectsDoc): Promise
   return { ...doc, boards };
 }
 
-/** The account's current copy, pictures as references. */
+/**
+ * The account's current copy, pictures as references: its latest snapshot
+ * with the changes after it replayed — or, for an account whose history
+ * began before changes were kept, the whole copy stored then.
+ */
 export async function readSubjects(accountId: string): Promise<{ doc: SubjectsDoc; updatedAt: string | null; cursor: string | null }> {
   await ensureAccountSchema();
   const sql = getSql();
-  const rows = await sql`SELECT payload, updated_at FROM subject_store WHERE account_id = ${accountId}`;
-  const last = await sql`SELECT max(id) AS id FROM subject_changes WHERE account_id = ${accountId}`;
-  const cursor = last[0]?.id != null ? String(last[0].id) : null;
-  if (!rows[0]) return { doc: EMPTY_DOC, updatedAt: null, cursor };
-  // A copy stored before pictures were kept apart still has them inline.
-  const stored = openJson<SubjectsDoc>(rows[0].payload);
-  const { doc, images } = splitImages(stored);
-  if (images.size) {
-    await storeImages(accountId, images);
-    await sql`UPDATE subject_store SET payload = ${sealJson(doc)} WHERE account_id = ${accountId}`;
+  const snap = await sql`
+    SELECT id, payload, saved_at FROM subject_changes
+    WHERE account_id = ${accountId} AND kind = 'snap'
+    ORDER BY id DESC LIMIT 1
+  `;
+  let doc: SubjectsDoc = EMPTY_DOC;
+  let updatedAt: string | null = null;
+  if (snap[0]) {
+    doc = openJson<SubjectsDoc>(snap[0].payload);
+    updatedAt = String(snap[0].saved_at);
+  } else {
+    const rows = await sql`SELECT payload, updated_at FROM subject_store WHERE account_id = ${accountId}`;
+    if (rows[0]) {
+      // Stored before pictures were kept apart: they move out now.
+      const split = splitImages(openJson<SubjectsDoc>(rows[0].payload));
+      if (split.images.size) {
+        await storeImages(accountId, split.images);
+        await sql`UPDATE subject_store SET payload = ${sealJson(split.doc)} WHERE account_id = ${accountId}`;
+      }
+      doc = split.doc;
+      updatedAt = String(rows[0].updated_at);
+    }
   }
-  return { doc, updatedAt: String(rows[0].updated_at), cursor };
+  const after = await sql`
+    SELECT id, payload, saved_at FROM subject_changes
+    WHERE account_id = ${accountId} AND kind = 'delta' AND id > ${snap[0]?.id ?? 0}
+    ORDER BY id
+  `;
+  for (const row of after) {
+    doc = mergeDocs(openJson<SubjectsDoc>(row.payload), doc, new Date(row.saved_at).getTime());
+    updatedAt = String(row.saved_at);
+  }
+  const last = await sql`SELECT max(id) AS id FROM subject_changes WHERE account_id = ${accountId}`;
+  return { doc, updatedAt, cursor: last[0]?.id != null ? String(last[0].id) : null };
 }
 
 export function mergeDocs(mine: SubjectsDoc, theirs: SubjectsDoc, now = Date.now()): SubjectsDoc {
@@ -374,19 +400,22 @@ export function diffDocs(before: SubjectsDoc, after: SubjectsDoc): SubjectsDoc {
 
 const isEmpty = (d: SubjectsDoc) => !d.notes.length && !d.noteRemovals.length && !Object.keys(d.boards).length;
 
-/** A snapshot is written after this many changes, or once the changes outweigh the document. */
+/** A snapshot is written after this many changes, or once the changes since the last add up to this much. */
 export const SNAPSHOT_EVERY = 300;
+export const SNAPSHOT_BYTES = 256 * 1024;
 
 /**
- * Merge a device's changes into the stored copy, save it, and record what
- * changed. A device sends only what it changed; a full copy works too, and
- * only the real difference is recorded either way. Every save is a version.
+ * Save a device's changes. A save is one small row appended: what the
+ * device changed, as it sent it — nothing is read back, and the whole
+ * document is never rewritten for an edit. Now and then a snapshot of the
+ * whole is written so the document can be rebuilt quickly. Every save is a
+ * version. A restore (`replace`) is written as a snapshot of its own.
  */
 export async function writeSubjects(
   accountId: string,
   incoming: SubjectsDoc,
   options: { reason?: string; replace?: boolean } = {},
-): Promise<{ doc: SubjectsDoc; changed: boolean; cursor: string | null }> {
+): Promise<{ doc: SubjectsDoc | null; changed: boolean; cursor: string | null }> {
   await ensureAccountSchema();
   const sql = getSql();
   const { doc: split, images, refs } = splitImages(incoming);
@@ -394,46 +423,48 @@ export async function writeSubjects(
   if (missing.length) throw new MissingImages(missing);
   await storeImages(accountId, images);
 
-  const { doc: stored, cursor } = await readSubjects(accountId);
-  // A restore replaces rather than merges; everything else merges.
-  const merged = options.replace ? split : mergeDocs(split, stored);
-  const change = diffDocs(stored, merged);
-  if (!options.replace && isEmpty(change)) return { doc: merged, changed: false, cursor };
+  if (options.replace) {
+    const id = await insertChange(accountId, "snap", split);
+    await compactChanges(accountId);
+    return { doc: split, changed: true, cursor: id };
+  }
+  const change: SubjectsDoc = {
+    notes: split.notes ?? [],
+    noteRemovals: split.noteRemovals ?? [],
+    boards: Object.fromEntries(Object.entries(split.boards ?? {}).filter(([, b]) => b && Object.keys(b).length)),
+  };
+  if (isEmpty(change)) return { doc: null, changed: false, cursor: null };
 
-  await sql`
-    INSERT INTO subject_store (account_id, payload, updated_at)
-    VALUES (${accountId}, ${sealJson(merged)}, now())
-    ON CONFLICT (account_id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = now()
-  `;
-  const id = await recordChange(accountId, merged, change, !!options.replace);
-  return { doc: merged, changed: true, cursor: id };
-}
-
-/**
- * Keep the change as a version. Most saves store only the difference; now
- * and then — after many changes, after a restore, or when the changes have
- * grown larger than the document — the whole document is stored instead, so
- * rebuilding any version reads one snapshot and the changes after it.
- */
-async function recordChange(accountId: string, merged: SubjectsDoc, change: SubjectsDoc, replace: boolean): Promise<string> {
-  const sql = getSql();
+  const hasSnap = await sql`SELECT 1 FROM subject_changes WHERE account_id = ${accountId} AND kind = 'snap' LIMIT 1`;
+  if (!hasSnap[0]) {
+    // The first save under changes: the whole document becomes the first snapshot.
+    const { doc: stored } = await readSubjects(accountId);
+    const id = await insertChange(accountId, "snap", mergeDocs(change, stored));
+    return { doc: null, changed: true, cursor: id };
+  }
+  const id = await insertChange(accountId, "delta", change);
   const since = await sql`
     SELECT count(*)::int AS n, coalesce(sum(length(payload)), 0)::bigint AS bytes
     FROM subject_changes
-    WHERE account_id = ${accountId}
-      AND id > coalesce((SELECT max(id) FROM subject_changes WHERE account_id = ${accountId} AND kind = 'snap'), 0)
+    WHERE account_id = ${accountId} AND kind = 'delta'
+      AND id > (SELECT max(id) FROM subject_changes WHERE account_id = ${accountId} AND kind = 'snap')
   `;
-  const hasSnap = await sql`SELECT 1 FROM subject_changes WHERE account_id = ${accountId} AND kind = 'snap' LIMIT 1`;
-  const whole = sealJson(merged);
-  const snap = replace || !hasSnap[0] || since[0].n >= SNAPSHOT_EVERY || Number(since[0].bytes) > Math.max(whole.length, 64 * 1024);
-  const rows = await sql`
+  if (since[0].n >= SNAPSHOT_EVERY || Number(since[0].bytes) > SNAPSHOT_BYTES) {
+    const { doc: whole } = await readSubjects(accountId);
+    await insertChange(accountId, "snap", whole);
+    await compactChanges(accountId);
+  } else {
+    await slimLegacyVersions(accountId, 5);
+  }
+  return { doc: null, changed: true, cursor: id };
+}
+
+async function insertChange(accountId: string, kind: "snap" | "delta", doc: SubjectsDoc): Promise<string> {
+  const rows = await getSql()`
     INSERT INTO subject_changes (account_id, kind, payload)
-    VALUES (${accountId}, ${snap ? "snap" : "delta"}, ${snap ? whole : sealJson(change)})
+    VALUES (${accountId}, ${kind}, ${sealJson(doc)})
     RETURNING id
   `;
-  // Compacting old history is only worth doing now and then; slimming old whole versions goes on until done.
-  if (snap) await compactChanges(accountId);
-  else await slimLegacyVersions(accountId, 10);
   return String(rows[0].id);
 }
 

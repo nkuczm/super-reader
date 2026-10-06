@@ -1,3 +1,4 @@
+import { meter } from "@/lib/db-usage";
 import { changesSince, MissingImages, readSubjects, writeSubjects, type SubjectsDoc } from "@/lib/accounts";
 import { json, requireAccount } from "@/lib/session";
 
@@ -12,6 +13,7 @@ const MAX_BYTES = 4 * 1024 * 1024;
  * not possible (`full: true`).
  */
 export async function GET(request: Request) {
+  meter("subjects");
   const guard = await requireAccount(request);
   if ("response" in guard) return guard.response;
   const since = new URL(request.url).searchParams.get("since");
@@ -25,6 +27,7 @@ export async function GET(request: Request) {
 
 /** Merge this device's changes in. Only what changed is sent, and nothing but the time comes back. */
 export async function PUT(request: Request) {
+  meter("subjects");
   const guard = await requireAccount(request, { write: true });
   if ("response" in guard) return guard.response;
   const text = await request.text();

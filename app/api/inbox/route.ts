@@ -1,3 +1,4 @@
+import { meter } from "@/lib/db-usage";
 import { NextResponse } from "next/server";
 import { sanitizeArticleHtml } from "@/lib/article";
 import { addInboxItem, clearInboxItems, readInbox, readPage, setSubjectIndex, type InboxItem } from "@/lib/inbox";
@@ -25,6 +26,7 @@ async function codeFrom(value: unknown): Promise<string | null> {
 
 /** The waiting items, and the subjects the extension may file into. */
 export async function GET(request: Request) {
+  meter("inbox");
   const params = new URL(request.url).searchParams;
   const code = await codeFrom(params.get("code"));
   if (!code) return reply({ error: "That sync code was not found." }, 404);
@@ -39,6 +41,7 @@ export async function GET(request: Request) {
 
 /** From the extension: one article read in the reader's own browser. */
 export async function POST(request: Request) {
+  meter("inbox");
   const text = await request.text();
   if (text.length > MAX_BODY) return reply({ error: "That page is too large to save." }, 413);
   let body: Record<string, unknown>;
@@ -104,6 +107,7 @@ export async function POST(request: Request) {
 
 /** From the app: the subjects to offer, by name. */
 export async function PUT(request: Request) {
+  meter("inbox");
   const body = await request.json().catch(() => ({}));
   const code = await codeFrom(body.code);
   if (!code) return reply({ error: "That sync code was not found." }, 404);
@@ -113,6 +117,7 @@ export async function PUT(request: Request) {
 
 /** From the app: items it has filed. */
 export async function DELETE(request: Request) {
+  meter("inbox");
   const body = await request.json().catch(() => ({}));
   const code = await codeFrom(body.code);
   if (!code) return reply({ error: "That sync code was not found." }, 404);
