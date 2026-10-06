@@ -42,10 +42,9 @@ export type SavedArticle = Article & {
 export type SavedRemoval = { link: string; at: number };
 
 /**
- * Bookmarks are small individually, but the synced document has a 512KB
- * ceiling that the feed list and read-marks also draw on — and a payload
- * over it is refused outright, which would break syncing altogether rather
- * than just losing a bookmark. 400 slimmed records is roughly 150KB.
+ * How many bookmarks the synced document carries — the newest. The rest stay
+ * on the device and, signed in, in the account's library (lib/library.ts),
+ * which has no cap. 400 slimmed records is roughly 150KB.
  */
 export const MAX_SAVED = 400;
 /** Long enough to recognise the article, short enough to sync hundreds. */
@@ -119,7 +118,9 @@ export function mergeSaved(
     .sort((a, b) => b.at - a.at)
     .slice(0, MAX_REMOVALS);
 
-  return { saved: saved.slice(0, MAX_SAVED), removals: keptRemovals };
+  // Every bookmark is kept; only the wire copy (slimForSync) is capped. The
+  // cap used to sit here, so the 401st save deleted the oldest everywhere.
+  return { saved, removals: keptRemovals };
 }
 
 /** Whether a merge produced anything the other side did not already have. */

@@ -10,6 +10,7 @@ function quickModel(provider: "anthropic" | "openai", value: unknown): string {
 import type { Article, SourceMeta } from "./types";
 import type { SavedArticle, SavedRemoval } from "./saved";
 import type { WatchMarks } from "./alerts";
+import { PARTS, type PartStamps } from "./sync-doc";
 
 export type Source = SourceMeta & {
   id: string;
@@ -89,6 +90,19 @@ export function unionFeeds(theirs: Feed[], mine: Feed[]): Feed[] {
     for (const source of feed.sources) if (!held.sources.some((s) => s.id === source.id)) held.sources.push(source);
   }
   return out;
+}
+
+/** Two team lists as one, for a device joining a sync code: theirs, then any only this device joined. */
+export function unionTeams(theirs: TeamFeed[], mine: TeamFeed[]): TeamFeed[] {
+  const out = [...theirs];
+  for (const team of mine) if (!out.some((t) => t.code === team.code)) out.push(team);
+  return out;
+}
+
+/** Two read lists as one, the most recent kept when there are too many. */
+export function unionRead(theirs: string[], mine: string[], max = 3000): string[] {
+  const seen = new Set(theirs);
+  return [...theirs, ...mine.filter((id) => !seen.has(id))].slice(-max);
 }
 
 export function saveFeeds(feeds: Feed[]) {
@@ -580,6 +594,35 @@ export function saveUpdatedAt(at: number) {
   }
 }
 
+const PART_STAMPS_KEY = "super-reader:part-stamps:v1";
+
+/**
+ * When this device last changed each part that sync replaces whole (the feed
+ * list, read marks, team list, vault). A device from before these existed
+ * dates every part at its one old stamp, which is what sync used to go by.
+ */
+export function loadPartStamps(): PartStamps {
+  if (typeof window === "undefined") return {};
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(PART_STAMPS_KEY) ?? "null");
+    if (parsed && typeof parsed === "object") {
+      return Object.fromEntries(PARTS.map((part) => [part, Number(parsed[part]) || 0]));
+    }
+  } catch {
+    /* fall through */
+  }
+  const legacy = loadUpdatedAt();
+  return Object.fromEntries(PARTS.map((part) => [part, legacy]));
+}
+
+export function savePartStamps(stamps: PartStamps) {
+  try {
+    window.localStorage.setItem(PART_STAMPS_KEY, JSON.stringify(stamps));
+  } catch {
+    /* sync falls back to the server's copy */
+  }
+}
+
 const READ_KEY = "super-reader:read:v1";
 
 export function loadRead(): Set<string> {
@@ -600,28 +643,4 @@ export function saveRead(read: Set<string>) {
   } catch {
     /* ignore */
   }
-}
-
-/**
- * What a device may take from a document it has just pulled.
- *
- * The stamp orders only the parts that are replaced wholesale — the feed
- * list, the read marks, the team list, the vault — because for those the
- * newest arrangement is the one wanted. It says nothing about bookmarks,
- * notes and watch marks: both devices write to those between syncs, so they
- * merge whichever way round the stamps are, and a merge cannot lose anything
- * by running when it did not need to.
- *
- * Dropping the whole document when its stamp was older was how a computer
- * came to show one saved article while another device held five: the
- * bookmarks were in the document it refused to read.
- */
-export function pullable(
-  remoteUpdatedAt: number,
-  localUpdatedAt: number,
-): { merge: true; replace: boolean } {
-  return {
-    merge: true,
-    replace: (Number(remoteUpdatedAt) || 0) >= (Number(localUpdatedAt) || 0),
-  };
 }

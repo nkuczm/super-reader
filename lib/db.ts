@@ -66,6 +66,19 @@ export function ensureSchema() {
           created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
       `;
+      // Earlier feed lists, kept before anything is taken away (lib/sync.ts).
+      await sql`
+        CREATE TABLE IF NOT EXISTS sync_versions (
+          id         BIGSERIAL PRIMARY KEY,
+          code_hash  TEXT NOT NULL,
+          saved_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+          folders    INT NOT NULL DEFAULT 0,
+          sources    INT NOT NULL DEFAULT 0,
+          teams      INT NOT NULL DEFAULT 0,
+          payload    JSONB NOT NULL
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS sync_versions_code ON sync_versions (code_hash, id DESC)`;
     })().catch((error) => {
       // Let the next request retry rather than caching a failure forever.
       ready = null;

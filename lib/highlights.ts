@@ -22,7 +22,8 @@ export type Highlight = {
 export type Highlights = Record<string, Highlight>;
 
 const KEY = "super-reader:highlights:v1";
-const MAX_HIGHLIGHTS = 2000;
+/** How much the synced document carries. */
+const SYNC_BUDGET_BYTES = 160 * 1024;
 const TOMBSTONE_TTL_MS = 60 * 24 * 60 * 60 * 1000;
 export const MAX_HIGHLIGHT_CHARS = 4000;
 
@@ -70,11 +71,24 @@ export function mergeHighlights(mine: Highlights, theirs: Highlights, now = Date
       if (!merged[id] || h.at > merged[id].at) merged[id] = h;
     }
   }
+  // Every live highlight is kept; only the wire copy is cut to a budget.
   const kept = Object.entries(merged)
     .filter(([, h]) => !(h.deleted && now - h.at > TOMBSTONE_TTL_MS))
-    .sort((a, b) => b[1].at - a[1].at)
-    .slice(0, MAX_HIGHLIGHTS);
+    .sort((a, b) => b[1].at - a[1].at);
   return Object.fromEntries(kept);
+}
+
+/** The copy the synced document carries: the newest, within a budget. The account's library keeps them all. */
+export function slimHighlightsForSync(highlights: Highlights, budget = SYNC_BUDGET_BYTES): Highlights {
+  const out: Highlights = {};
+  let size = 2;
+  for (const [id, h] of Object.entries(highlights ?? {}).sort((a, b) => b[1].at - a[1].at)) {
+    const cost = JSON.stringify(h).length + id.length + 4;
+    if (size + cost > budget) break;
+    out[id] = h;
+    size += cost;
+  }
+  return out;
 }
 
 export function sameHighlights(a: Highlights, b: Highlights) {
