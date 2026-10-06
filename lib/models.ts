@@ -18,8 +18,8 @@ export type Tier = "quick" | "deep";
 export const TIERS: Record<Tier, { name: string; blurb: string; activities: Activity[] }> = {
   deep: {
     name: "Deep analysis",
-    blurb: "Fact check and insights & connections across your sources — careful reasoning, where a stronger model is worth it.",
-    activities: ["fact-check", "insights"],
+    blurb: "Fact check, production prep and insights & connections across your sources — careful reasoning, where a stronger model is worth it.",
+    activities: ["fact-check", "production", "insights"],
   },
   quick: {
     name: "Quick tools",

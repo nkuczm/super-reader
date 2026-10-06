@@ -23,6 +23,8 @@ type DomRange = globalThis.Range;
 export type TableFacts = {
   /** Check one table (a card may hold several, as tabs); its result is written back with `write`. */
   run: (sheet: BoxItem, write: (change: Change) => void) => Promise<void>;
+  /** Break the script down into a shot list and production prep, set beside it. */
+  produce?: (sheet: BoxItem) => Promise<void>;
   open: (target: SourceTarget, quote: string) => void;
 };
 
@@ -324,18 +326,28 @@ function TableSheet({ box, onChange: apply, media, facts, header, isLatest = tru
   /** Whether this is the latest version: the only one the fact check runs on. */
   isLatest?: boolean;
 }) {
-  const [checking, setChecking] = useState<{ state: "running" | "error"; message?: string } | null>(null);
   const check = safeFactCheck(box.factCheck);
-  const runCheck = async () => {
+  const [checking, setChecking] = useState<{ state: "running" | "error"; job?: "check" | "produce"; message?: string } | null>(null);
+  const [menu, setMenu] = useState(false);
+  const runJob = async (job: "check" | "produce") => {
+    setMenu(false);
     if (!facts || checking?.state === "running") return;
-    setChecking({ state: "running" });
+    if (job === "produce" && !facts.produce) return;
+    setChecking({ state: "running", job });
     try {
-      await facts.run(box, apply);
+      if (job === "check") await facts.run(box, apply);
+      else await facts.produce!(box);
       setChecking(null);
     } catch (error) {
-      setChecking({ state: "error", message: error instanceof Error ? error.message : "The fact-check failed." });
+      setChecking({ state: "error", message: error instanceof Error ? error.message : job === "check" ? "The fact-check failed." : "Couldn't break down the script." });
     }
   };
+  useEffect(() => {
+    if (!menu) return;
+    const away = (e: PointerEvent) => (e.target as Element | null)?.closest?.(".tbl-more") || setMenu(false);
+    window.addEventListener("pointerdown", away, true);
+    return () => window.removeEventListener("pointerdown", away, true);
+  }, [menu]);
   /**
    * Undo and redo for everything done to the table — text, colours, rows,
    * merges, moves — as snapshots of the table's fields, so each step puts
@@ -577,7 +589,7 @@ function TableSheet({ box, onChange: apply, media, facts, header, isLatest = tru
         <div className={`fc-bar${checking?.state === "running" ? " running" : ""}`}>
           {header}
           {checking?.state === "running" ? (
-            <span className="fc-running">Checking the script against your research…</span>
+            <span className="fc-running">{checking.job === "produce" ? "Breaking the script down into shots and production needs…" : "Checking the script against your research…"}</span>
           ) : (
             <>
               {check && (
@@ -602,15 +614,32 @@ function TableSheet({ box, onChange: apply, media, facts, header, isLatest = tru
               <span className="fc-words" title="Words in the Words column, and about how long they take to say at 150 words a minute">
                 {wordCount.toLocaleString()} words · ~{Math.floor(wordCount / 150)}:{String(Math.round(((wordCount % 150) / 150) * 60)).padStart(2, "0")}
               </span>
-              {isLatest ? (
-                <button className="fc-run" onClick={() => void runCheck()}
-                  title="Check the Words column against this subject's stories, notes and transcripts">
-                  {check ? "Check again" : "✓ Fact check"}
-                </button>
-              ) : (
-                <span className="fc-old" title="An earlier version keeps the check it had; new checks run on the latest">Fact check runs on the latest version</span>
-              )}
               {checking?.state === "error" && <span className="fc-error">{checking.message}</span>}
+              {/* The script's tools, kept out of the way in the card's corner. */}
+              <span className="tbl-more">
+                <button className="tbl-more-btn" aria-label="Script tools" aria-haspopup="menu" aria-expanded={menu}
+                  title="Script tools — fact check, production prep" onClick={() => setMenu((v) => !v)}>⋯</button>
+                {menu && (
+                  <span className="tbl-more-menu" role="menu">
+                    {isLatest ? (
+                      <>
+                        <button role="menuitem" onClick={() => void runJob("check")}
+                          title="Check the Words column against this subject's stories, notes and transcripts">
+                          {check ? "Fact check again" : "Fact check"}
+                        </button>
+                        {facts.produce && (
+                          <button role="menuitem" onClick={() => void runJob("produce")}
+                            title="A shot list to tick off and a production prep list, made from the script and set beside it">
+                            Process to production
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <span className="tbl-more-note">These run on the latest version</span>
+                    )}
+                  </span>
+                )}
+              </span>
             </>
           )}
         </div>
