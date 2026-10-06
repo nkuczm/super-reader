@@ -73,6 +73,24 @@ export function loadFeeds(): Feed[] {
   }
 }
 
+/**
+ * Two feed lists as one: theirs in their order, with any feed or source only
+ * this device has added at the end. For a device joining a sync code, whose
+ * own list must never replace the one it is joining.
+ */
+export function unionFeeds(theirs: Feed[], mine: Feed[]): Feed[] {
+  const out = theirs.map((feed) => ({ ...feed, sources: [...feed.sources] }));
+  for (const feed of mine) {
+    const held = out.find((f) => f.id === feed.id);
+    if (!held) {
+      out.push(feed);
+      continue;
+    }
+    for (const source of feed.sources) if (!held.sources.some((s) => s.id === source.id)) held.sources.push(source);
+  }
+  return out;
+}
+
 export function saveFeeds(feeds: Feed[]) {
   try {
     window.localStorage.setItem(KEY, JSON.stringify(feeds));
