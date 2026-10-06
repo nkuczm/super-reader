@@ -162,38 +162,20 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
             <em className="badge ok">{Icon.check} saved</em>
           ) : null}
         </strong>
-        <span>
+        <details className="settings-more">
+          <summary>How keys are kept</summary>
           Encrypted with your passphrase in this browser before it syncs, so
           the server stores bytes it cannot read. A key is sent only with the
           request that calls that API, and is never stored on the server.
-        </span>
+        </details>
       </div>
 
-      {apis.map((api) => (
-        <label key={api.id} className="api-field" style={{ marginTop: 10 }}>
-          <span>
-            {api.name}
-            {keys[api.id] && <em className="badge">set</em>}
-          </span>
-          <input
-            className="input"
-            type="password"
-            autoComplete="off"
-            placeholder={api.ready && !api.keyNote ? "Set on the deployment" : "Paste your key"}
-            value={draft[api.id] ?? ""}
-            onChange={(event) =>
-              setDraft((current) => ({ ...current, [api.id]: event.target.value }))
-            }
-          />
-          <small>{api.keyNote}</small>
-        </label>
-      ))}
-
+      <p className="field-label reading-label">AI</p>
       {([
-        ["anthropic", "Anthropic (Subjects insights)"],
-        ["openai", "OpenAI (Subjects insights)"],
+        ["anthropic", "Anthropic (Claude)"],
+        ["openai", "OpenAI"],
       ] as const).map(([id, label]) => (
-        <label key={id} className="api-field" style={{ marginTop: 10 }}>
+        <label key={id} className="api-field" style={{ marginTop: 8 }}>
           <span>
             {label}
             {keys[id] && <em className="badge">set</em>}
@@ -210,23 +192,20 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
           />
         </label>
       ))}
-      <small className="field-note">
-        Used only when Subjects is on, by whichever AI you choose under Subjects in
-        Settings. Sent with those requests alone; your account with that provider is billed.
-      </small>
+      <small className="field-note">For the AI tools in subjects; your account with that provider is billed.</small>
 
       <p className="field-label reading-label">Subscriptions</p>
-      <div className="offline-status">
-        <span>
-          Outlets you pay for have no full-text feed: to anyone who is not
-          signed in they serve a headline and a wall. Paste the cookie your
-          browser holds for one and the reader signs in as you when it fetches
-          an article from that site — and only that site. It is encrypted with
-          the same passphrase, sent with the one request that needs it, and
-          never stored on the server or cached where anyone else could be
-          handed it.
-        </span>
-      </div>
+      <p className="field-note" style={{ marginTop: 0 }}>Read full articles from outlets you pay for.</p>
+      <details className="settings-more">
+        <summary>How subscriptions work</summary>
+        Outlets you pay for have no full-text feed: to anyone who is not
+        signed in they serve a headline and a wall. Paste the cookie your
+        browser holds for one and the reader signs in as you when it fetches
+        an article from that site — and only that site. It is encrypted with
+        the same passphrase, sent with the one request that needs it, and
+        never stored on the server or cached where anyone else could be
+        handed it.
+      </details>
 
       {subscriptionsIn(draft).map(({ host }) => (
         <label key={host} className="api-field" style={{ marginTop: 10 }}>
@@ -302,15 +281,41 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
         {knownRefusal(newSite) && (
           <small className="sub-warn">{knownRefusal(newSite)}</small>
         )}
-        <small>
+        <details className="settings-more">
+          <summary>Where to find the cookie</summary>
           In the outlet&rsquo;s tab while signed in, open dev tools →
           Application → Cookies and copy the whole row. Not{" "}
           <code>document.cookie</code> — the session cookie that carries a
           subscription is usually HttpOnly, which that leaves out. A sign-in
           expires after a few weeks; when an article says the subscription did
           not apply, paste a fresh one.
-        </small>
+        </details>
       </label>
+      {apis.length > 0 && (
+        <details className="settings-more settings-group" open={apis.some((api) => keys[api.id]) || undefined}>
+          <summary>Public data APIs{apis.some((api) => keys[api.id]) ? ` · ${apis.filter((api) => keys[api.id]).length} set` : ""}</summary>
+          <p className="field-note" style={{ marginTop: 0 }}>Optional keys that raise rate limits for court, regulation and government sources.</p>
+        {apis.map((api) => (
+          <label key={api.id} className="api-field" style={{ marginTop: 10 }}>
+            <span>
+              {api.name}
+              {keys[api.id] && <em className="badge">set</em>}
+            </span>
+            <input
+              className="input"
+              type="password"
+              autoComplete="off"
+              placeholder={api.ready && !api.keyNote ? "Set on the deployment" : "Paste your key"}
+              value={draft[api.id] ?? ""}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, [api.id]: event.target.value }))
+              }
+            />
+            <small>{api.keyNote}</small>
+          </label>
+        ))}
+        </details>
+      )}
 
       <label className="api-field">
         <span>Passphrase</span>
