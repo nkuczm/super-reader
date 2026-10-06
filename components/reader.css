@@ -2673,3 +2673,4 @@
 }
 .fc-bar .tbl-more-menu button:hover { background: var(--bg-hover); }
 .tbl-more-note { padding: 6px 10px; font-size: 12.5px; color: var(--text-dim); }
+.signin-note { font-size: 14px; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--text); }

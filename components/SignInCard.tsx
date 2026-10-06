@@ -16,7 +16,7 @@ export function signInHref() {
 }
 
 /** What stands in front of Subjects for someone not signed in. */
-export default function SignInCard({ onOpenMenu, failed }: { onOpenMenu: () => void; failed?: string | false }) {
+export default function SignInCard({ onOpenMenu, failed, movedToAccount }: { onOpenMenu: () => void; failed?: string | false; movedToAccount?: boolean }) {
   return (
     <section className="signin-page">
       <button className="icon-btn menu-btn signin-menu" onClick={onOpenMenu} aria-label="Open menu">
@@ -32,6 +32,12 @@ export default function SignInCard({ onOpenMenu, failed }: { onOpenMenu: () => v
           Signing in also ties this device&apos;s feeds and sync code to your account. Feeds, saved stories and reading
           work without signing in, as before.
         </p>
+        {movedToAccount && (
+          <p className="signin-note">
+            You signed in on another device, so your subjects now live in your Google account. Sign in here to see the
+            latest and keep saving — anything you wrote on this device is kept and merged in when you do.
+          </p>
+        )}
         {failed && <p className="signin-error">{failed}</p>}
         <a className="signin-btn" href={signInHref()}>
           {GOOGLE} Sign in with Google
