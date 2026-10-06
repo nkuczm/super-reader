@@ -14,6 +14,8 @@ import {
   changesSince,
   readAccountPrefs,
   writeAccountPrefs,
+  listPrefsVersions,
+  restorePrefsVersion,
   compactChanges,
   slimLegacyVersions,
   inlineImages,
@@ -232,4 +234,46 @@ test("the key vault is kept with the account, and a device without one never era
   const blank = await writeAccountPrefs("g-8", { keys: {}, keysAt: 0 });
   assert.deepEqual(blank.vault, vault);
   assert.equal(blank.keys?.openai, "sk");
+});
+
+test("a key typed into a cleared browser does not take the account's other keys away", async () => {
+  await upsertAccount({ id: "g-9", email: "nine@example.com" }, "r");
+  // The account, as an older device left it: three keys, settings chosen, all stamped as wholes.
+  await writeAccountPrefs("g-9", {
+    settings: { aiProvider: "openai", openaiModel: "gpt-6-sol", sort: "top" },
+    settingsAt: 1_000,
+    keys: { openai: "sk-o", anthropic: "sk-a", newsapi: "na" },
+    keysAt: 1_000,
+  });
+  // The cleared browser: the OpenAI key typed back in and one setting changed, before signing in.
+  const now = Date.now();
+  const got = await writeAccountPrefs("g-9", {
+    settings: { aiProvider: "anthropic", openaiModel: "gpt-5-mini", sort: "newest" },
+    settingStamps: { aiProvider: now },
+    keys: { openai: "sk-o2" },
+    keyStamps: { openai: now },
+  });
+  assert.deepEqual(got.keys, { openai: "sk-o2", anthropic: "sk-a", newsapi: "na" });
+  assert.equal(got.settings?.aiProvider, "anthropic", "the change made there wins");
+  assert.equal(got.settings?.openaiModel, "gpt-6-sol", "the rest stay the account's");
+  assert.equal(got.settings?.sort, "top");
+});
+
+test("removing a key is a change of its own, kept as a version and undoable", async () => {
+  await upsertAccount({ id: "g-10", email: "ten@example.com" }, "r");
+  await writeAccountPrefs("g-10", { keys: { openai: "sk-o", anthropic: "sk-a" }, keyStamps: { openai: 10, anthropic: 10 } });
+  const removed = await writeAccountPrefs("g-10", { keys: { openai: "sk-o" }, keyStamps: { openai: 10, anthropic: 20 } });
+  assert.deepEqual(removed.keys, { openai: "sk-o" });
+  // Another device that still holds the key, from before the removal, does not bring it back.
+  const stale = await writeAccountPrefs("g-10", { keys: { openai: "sk-o", anthropic: "sk-a" }, keyStamps: { openai: 10, anthropic: 10 } });
+  assert.deepEqual(stale.keys, { openai: "sk-o" });
+
+  const versions = await listPrefsVersions("g-10");
+  assert.ok(versions.length >= 1);
+  assert.deepEqual(versions[0].keys, ["anthropic", "openai"], "names only");
+  assert.doesNotMatch(JSON.stringify(versions), /sk-a/, "never the values");
+  const back = await restorePrefsVersion("g-10", versions[0].id);
+  assert.deepEqual(back?.restored, ["anthropic"]);
+  assert.equal((await readAccountPrefs("g-10"))?.keys?.anthropic, "sk-a");
+  assert.equal(await restorePrefsVersion("g-9", versions[0].id), null, "another account's copy is not reachable");
 });

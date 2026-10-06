@@ -18,6 +18,9 @@ const TABLE_NAME: Record<string, string> = {
   corpus_reddit: "News index — Reddit",
   corpus_sweeps: "News index — sweeps",
   account_prefs: "Settings & API keys",
+  account_prefs_versions: "Earlier copies of settings & keys",
+  account_items: "Library (saved, pasted, highlights)",
+  sync_versions: "Earlier feed lists",
   db_usage: "This usage count",
 };
 const dollars = (n: number) => (n < 0.01 ? (n === 0 ? "$0" : "<$0.01") : `$${n.toFixed(2)}`);

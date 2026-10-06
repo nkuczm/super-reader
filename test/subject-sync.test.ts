@@ -42,3 +42,41 @@ test("a reference coming back is filled from this device's own picture, or fetch
   const lost = await withPictures(remote, {}, async () => ({}), new Set());
   assert.equal(lost.boards.n.q, undefined, "never a reference in place of a picture");
 });
+
+test("a change too big for one request goes in pieces that together are the whole change", async () => {
+  const { splitWriting } = await import("../lib/subject-sync");
+  const big = "x".repeat(400_000);
+  const doc = {
+    notes: Array.from({ length: 12 }, (_, i) => ({ id: `n${i}`, name: `S${i}`, at: i, updatedAt: i, entries: [{ id: `e${i}`, kind: "text" as const, text: big, at: i }] })),
+    noteRemovals: [{ id: "gone", at: 1 }],
+    boards: { n0: Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`b${i}`, { kind: "box", at: i, html: big }])) },
+  } as never;
+  const pieces = splitWriting(doc, 3_000_000);
+  assert.ok(pieces.length > 1);
+  for (const piece of pieces) assert.ok(JSON.stringify(piece).length <= 3_000_000 + 500_000);
+  assert.equal(pieces.flatMap((p) => p.notes).length, 12);
+  assert.equal(pieces.reduce((n, p) => n + Object.keys(p.boards.n0 ?? {}).length, 0), 10);
+  assert.equal(pieces.flatMap((p) => p.noteRemovals).length, 1);
+});
+
+test("pictures go ahead in batches, a large one on its own", async () => {
+  const { pictureBatches } = await import("../lib/subject-sync");
+  const pics = new Map([["a", "d".repeat(1_000_000)], ["b", "d".repeat(1_000_000)], ["c", "d".repeat(3_000_000)], ["d", "d".repeat(10)]]);
+  const batches = pictureBatches(pics, 2_500_000);
+  assert.deepEqual(batches.map((b) => Object.keys(b)), [["a", "b"], ["c"], ["d"]]);
+});
+
+test("a whole copy in parts: every subject lands in one part, and they join back", async () => {
+  const { partOf, joinParts } = await import("../lib/subject-sync");
+  const doc = {
+    notes: Array.from({ length: 40 }, (_, i) => ({ id: `n${i}`, name: `S${i}`, at: i, updatedAt: i, entries: [] })),
+    noteRemovals: [{ id: "x", at: 1 }],
+    boards: Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`n${i}`, { a: { kind: "box", at: i } }])),
+  } as never;
+  const parts = [0, 1, 2].map((p) => partOf(doc, p, 3));
+  for (const part of parts) for (const note of part.notes) assert.ok(part.boards[note.id], "a subject's board travels with its note");
+  const joined = joinParts(parts);
+  assert.equal(joined.notes.length, 40);
+  assert.equal(Object.keys(joined.boards).length, 40);
+  assert.equal(joined.noteRemovals.length, 1);
+});

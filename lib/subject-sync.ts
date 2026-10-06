@@ -72,9 +72,14 @@ export async function pictureHash(data: string): Promise<string> {
 
 const isData = (v: unknown): v is string => typeof v === "string" && v.startsWith("data:");
 
-/** The change to send, with each picture the account already holds replaced by its reference. */
-export async function withRefs(change: Writing, onServer: Set<string>): Promise<{ doc: Writing; sent: string[] }> {
+/**
+ * The change to send, with each picture the account already holds replaced
+ * by its reference. `inline` is every picture still carried whole — the ones
+ * to send ahead, on their own, before the change itself.
+ */
+export async function withRefs(change: Writing, onServer: Set<string>): Promise<{ doc: Writing; sent: string[]; inline: Map<string, string> }> {
   const sent: string[] = [];
+  const inline = new Map<string, string>();
   const boards: Boards = {};
   for (const [subject, board] of Object.entries(change.boards)) {
     const next: Board = {};
@@ -83,12 +88,68 @@ export async function withRefs(change: Writing, onServer: Set<string>): Promise<
       if (isData(image)) {
         const hash = await pictureHash(image);
         sent.push(hash);
-        next[id] = onServer.has(hash) ? ({ ...item, image: IMAGE_REF + hash } as BoardItem) : item;
+        if (onServer.has(hash)) next[id] = { ...item, image: IMAGE_REF + hash } as BoardItem;
+        else {
+          next[id] = item;
+          inline.set(hash, image);
+        }
       } else next[id] = item;
     }
     boards[subject] = next;
   }
-  return { doc: { ...change, boards }, sent };
+  return { doc: { ...change, boards }, sent, inline };
+}
+
+/** Pictures grouped into requests of at most `maxBytes` each — one picture per request when it is larger. */
+export function pictureBatches(pictures: Map<string, string>, maxBytes = 2_500_000): Record<string, string>[] {
+  const batches: Record<string, string>[] = [];
+  let current: Record<string, string> = {};
+  let size = 0;
+  for (const [hash, data] of pictures) {
+    if (size > 0 && size + data.length > maxBytes) {
+      batches.push(current);
+      current = {};
+      size = 0;
+    }
+    current[hash] = data;
+    size += data.length;
+  }
+  if (size > 0) batches.push(current);
+  return batches;
+}
+
+/**
+ * A change cut into pieces that each fit in one request. Every piece is a
+ * document of its own — whole notes, whole board items — and the account
+ * merges each into what it holds, so they can arrive in any order.
+ */
+export function splitWriting(doc: Writing, maxBytes = 3_000_000): Writing[] {
+  const whole = JSON.stringify(doc).length;
+  if (whole <= maxBytes) return [doc];
+  const pieces: Writing[] = [];
+  let current: Writing = { notes: [], noteRemovals: [], boards: {} };
+  let size = 0;
+  const flush = () => {
+    if (!isEmpty(current)) pieces.push(current);
+    current = { notes: [], noteRemovals: [], boards: {} };
+    size = 0;
+  };
+  const add = (cost: number, put: () => void) => {
+    if (size > 0 && size + cost > maxBytes) flush();
+    put();
+    size += cost;
+  };
+  for (const removal of doc.noteRemovals ?? []) add(JSON.stringify(removal).length, () => current.noteRemovals.push(removal));
+  for (const note of doc.notes ?? []) add(JSON.stringify(note).length, () => current.notes.push(note));
+  for (const [subject, board] of Object.entries(doc.boards ?? {})) {
+    for (const [id, item] of Object.entries(board ?? {})) {
+      add(JSON.stringify(item).length + id.length, () => {
+        (current.boards[subject] ??= {})[id] = item;
+      });
+    }
+  }
+  flush();
+  return pieces;
 }
 
 /**
@@ -101,7 +162,7 @@ export async function withPictures(
   local: Boards,
   fetchImages: (hashes: string[]) => Promise<Record<string, string>>,
   onServer: Set<string>,
-): Promise<Writing> {
+): Promise<Writing & { leftOut?: number }> {
   const wanted = new Set<string>();
   for (const board of Object.values(doc.boards ?? {})) {
     for (const item of Object.values(board ?? {})) {
@@ -120,14 +181,26 @@ export async function withPictures(
       if (wanted.has(hash)) found.set(hash, image);
     }
   }
-  const missing = [...wanted].filter((h) => !found.has(h));
-  for (let i = 0; i < missing.length; i += 20) {
+  // Asked for a few at a time; each answer holds as many as fit, and what it
+  // left out is asked for again. A batch that brings none of its pictures is
+  // set aside (the account lacks them, or cannot answer), and the rest go on.
+  let queue = [...wanted].filter((h) => !found.has(h));
+  const missing: string[] = [];
+  while (queue.length) {
+    const batch = queue.slice(0, 8);
+    let got: Record<string, string>;
     try {
-      const got = await fetchImages(missing.slice(i, i + 20));
-      for (const [h, data] of Object.entries(got)) found.set(h, data);
+      got = await fetchImages(batch);
     } catch {
-      /* left out below, and fetched on a later load */
+      missing.push(...queue);
+      break;
     }
+    const arrived = Object.entries(got ?? {}).filter(([h, data]) => batch.includes(h) && typeof data === "string" && data.startsWith("data:"));
+    for (const [h, data] of arrived) found.set(h, data);
+    if (!arrived.length) {
+      missing.push(...batch);
+      queue = queue.slice(batch.length);
+    } else queue = queue.filter((h) => !found.has(h));
   }
   const boards: Boards = {};
   for (const [subject, board] of Object.entries(doc.boards ?? {})) {
@@ -141,5 +214,43 @@ export async function withPictures(
     }
     boards[subject] = next;
   }
-  return { ...doc, boards };
+  // Items whose picture could not be had are left out, and counted, so the caller can look again.
+  return { ...doc, boards, ...(missing.length ? { leftOut: missing.length } : {}) };
+}
+
+/* ---------- a whole copy too big for one answer ---------- */
+
+/** How much one answer carries before a whole copy is sent in parts. */
+export const PART_BYTES = 3_000_000;
+
+const bucket = (id: string, of: number) => {
+  let h = 5381;
+  for (let i = 0; i < id.length; i++) h = ((h << 5) + h + id.charCodeAt(i)) | 0;
+  return Math.abs(h) % of;
+};
+
+/** How many parts a whole copy goes in. */
+export const partsFor = (doc: Writing) => Math.max(1, Math.ceil(JSON.stringify(doc).length / PART_BYTES));
+
+/**
+ * One part of a whole copy. Each subject — its note and its board — always
+ * falls in the same part, whatever else changes between requests, so asking
+ * for the parts one by one cannot miss a subject that moved.
+ */
+export function partOf(doc: Writing, part: number, of: number): Writing {
+  if (of <= 1) return doc;
+  return {
+    notes: (doc.notes ?? []).filter((n) => bucket(n.id, of) === part),
+    noteRemovals: part === 0 ? (doc.noteRemovals ?? []) : [],
+    boards: Object.fromEntries(Object.entries(doc.boards ?? {}).filter(([id]) => bucket(id, of) === part)),
+  };
+}
+
+/** The parts of a whole copy, put back together. */
+export function joinParts(parts: Writing[]): Writing {
+  return {
+    notes: parts.flatMap((p) => p.notes ?? []),
+    noteRemovals: parts.flatMap((p) => p.noteRemovals ?? []),
+    boards: Object.assign({}, ...parts.map((p) => p.boards ?? {})),
+  };
 }

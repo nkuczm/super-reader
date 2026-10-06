@@ -25,6 +25,11 @@ type Props = {
   /** The keys in use on this device, empty when locked or unset. */
   keys: Secrets;
   onChange: (next: { vault: unknown | null; keys: Secrets }) => void;
+  /**
+   * Signed in with Google: the keys are kept with the account, encrypted, and
+   * reach every device that signs in — no passphrase is needed to save them.
+   */
+  signedIn?: boolean;
 };
 
 /**
@@ -35,7 +40,7 @@ type Props = {
  * uses once and keeps nothing of. That is what makes "my key" mean anything on
  * a deployment anyone can open.
  */
-export default function ApiKeys({ vault, keys, onChange }: Props) {
+export default function ApiKeys({ vault, keys, onChange, signedIn = false }: Props) {
   const [apis, setApis] = useState<ApiCatalogEntry[]>([]);
   const [draft, setDraft] = useState<Secrets>(keys);
   const [passphrase, setPassphrase] = useState("");
@@ -57,6 +62,13 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
   const dirty = JSON.stringify(trimmed) !== JSON.stringify(keys);
 
   const locked = isVaultBlob(vault) && Object.keys(keys).length === 0;
+
+  // Keys that arrive after this opened — from the account, or unlocked — fill
+  // the fields, unless something has been typed into them since.
+  const [touched, setTouched] = useState(false);
+  useEffect(() => {
+    if (!touched) setDraft(keys);
+  }, [keys, touched]);
 
   useEffect(() => {
     fetch("/api/apis")
@@ -87,6 +99,15 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
 
   async function save() {
     const first = !isVaultBlob(vault);
+    if (signedIn && !passphrase) {
+      // Saved to the Google account, encrypted there; the passphrase copy, if
+      // there is one, is left as it was for devices that sync without signing in.
+      onChange({ vault, keys: trimmed });
+      setTouched(false);
+      setSavedAt(Date.now());
+      setError(null);
+      return;
+    }
     if (!passphrase) {
       setError(
         first
@@ -110,6 +131,7 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
       // there is no separate "changed" list to fall out of step.
       const blob = await encryptVault(trimmed, passphrase);
       onChange({ vault: blob, keys: trimmed });
+      setTouched(false);
       setConfirmPassphrase("");
       setSavedAt(Date.now());
     } catch (err) {
@@ -125,8 +147,9 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
         <div className="offline-status">
           <strong>Keys and subscriptions are locked</strong>
           <span>
-            They synced from another device. Enter the passphrase to use them
-            here — it never leaves this browser.
+            {signedIn
+              ? "Keys saved to your Google account arrive here by themselves in a moment. Keys that were only ever protected with a passphrase unlock with it — it never leaves this browser."
+              : "They synced from another device. Enter the passphrase to use them here — it never leaves this browser."}
           </span>
         </div>
         <div className="row" style={{ marginTop: 11 }}>
@@ -164,9 +187,9 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
         </strong>
         <details className="settings-more">
           <summary>How keys are kept</summary>
-          Encrypted with your passphrase in this browser before it syncs, so
-          the server stores bytes it cannot read. A key is sent only with the
-          request that calls that API, and is never stored on the server.
+          {signedIn
+            ? "Kept with your Google account, encrypted, so every device you sign in on has them — no passphrase needed. A key is sent only with the request that calls that API."
+            : "Encrypted with your passphrase in this browser before it syncs, so the server stores bytes it cannot read. A key is sent only with the request that calls that API, and is never stored on the server."}
         </details>
       </div>
 
@@ -187,7 +210,7 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
             placeholder="Paste your key"
             value={draft[id] ?? ""}
             onChange={(event) =>
-              setDraft((current) => ({ ...current, [id]: event.target.value }))
+              { setTouched(true); setDraft((current) => ({ ...current, [id]: event.target.value })); }
             }
           />
         </label>
@@ -308,7 +331,7 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
               placeholder={api.ready && !api.keyNote ? "Set on the deployment" : "Paste your key"}
               value={draft[api.id] ?? ""}
               onChange={(event) =>
-                setDraft((current) => ({ ...current, [api.id]: event.target.value }))
+                { setTouched(true); setDraft((current) => ({ ...current, [api.id]: event.target.value })); }
               }
             />
             <small>{api.keyNote}</small>
@@ -317,6 +340,13 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
         </details>
       )}
 
+      {signedIn ? (
+        <small className="field-note">
+          Saved to your Google account, encrypted — no passphrase needed.
+          {isVaultBlob(vault) && " Your passphrase still works on devices that sync without signing in; enter it below to update their copy too."}
+        </small>
+      ) : null}
+      {(!signedIn || isVaultBlob(vault)) && (
       <label className="api-field">
         <span>Passphrase</span>
         <input
@@ -344,6 +374,7 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
             : "There is no way to recover this. Forgetting it means entering the keys again, which is the cost of the server not being able to read them."}
         </small>
       </label>
+      )}
 
       {error && <p className="error">{error}</p>}
 
@@ -353,6 +384,7 @@ export default function ApiKeys({ vault, keys, onChange }: Props) {
             className="link-btn danger"
             onClick={() => {
               setDraft({});
+              setTouched(false);
               onChange({ vault: null, keys: {} });
               setSavedAt(null);
             }}
