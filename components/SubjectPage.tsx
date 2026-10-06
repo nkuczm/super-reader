@@ -679,17 +679,43 @@ export default function SubjectPage(props: Props) {
     recordOp({ undo: putBack, redo: takeAway });
     onBoard(takeAway);
   };
+  /** One step back (or forward) through the subject's changes. */
+  const stepHistory = (redo: boolean) => {
+    const step = (redo ? history.current.future : history.current.past).pop();
+    if (!step) return false;
+    (redo ? history.current.past : history.current.future).push(step);
+    onBoard(redo ? step.redo : step.undo);
+    return true;
+  };
+  /**
+   * A change to a card that can be undone: what its fields were is kept
+   * with the step. Tables save through this, so their edits sit in the same
+   * history as moving and deleting cards — ⌘Z takes back whichever came last,
+   * and nothing is forgotten when a card is redrawn.
+   */
+  const updateBoxRecorded = (box: BoxItem, change: Partial<BoxItem>) => {
+    let recorded = false;
+    onBoard((current) => {
+      const held = current?.[box.id];
+      const base = (held && held.kind === "box" ? held : box) as BoxItem;
+      if (!recorded) {
+        recorded = true;
+        const before = Object.fromEntries(Object.keys(change).map((k) => [k, base[k as keyof BoxItem]])) as Partial<BoxItem>;
+        const write = (b: Board | undefined, values: Partial<BoxItem>) => {
+          const h = b?.[box.id];
+          return h && h.kind === "box" ? put(b, { ...h, ...values, at: Date.now() }) : b ?? {};
+        };
+        recordOp({ undo: (b) => write(b, before), redo: (b) => write(b, change) });
+      }
+      return put(current, { ...base, ...change, at: Date.now() });
+    });
+  };
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || (e.key.toLowerCase() !== "z" && e.key.toLowerCase() !== "y")) return;
-      // Typing has its own undo; so do tables and drawings.
+      // Typing has its own undo; so do tables (which share this history) and drawings.
       if ((e.target as HTMLElement).closest?.("input, textarea, [contenteditable], .drawing, .tbl, .sheet")) return;
-      const redo = e.shiftKey || e.key.toLowerCase() === "y";
-      const step = (redo ? history.current.future : history.current.past).pop();
-      if (!step) return;
-      e.preventDefault();
-      (redo ? history.current.past : history.current.future).push(step);
-      onBoard(redo ? step.redo : step.undo);
+      if (stepHistory(e.shiftKey || e.key.toLowerCase() === "y")) e.preventDefault();
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
@@ -723,6 +749,8 @@ export default function SubjectPage(props: Props) {
     removeBox: (box: BoxItem) => removeCards([box.id]),
     removeCards,
     recordOp,
+    stepHistory,
+    updateBoxRecorded,
     replaceEmbed: (id: string, image: string) =>
       onBoard((current) => {
         const held = current?.[id];
@@ -1130,6 +1158,8 @@ type Shared = {
   /** Whole-card changes, undoable: delete cards (with their places and links), and record any other change as a step. */
   removeCards: (ids: string[]) => void;
   recordOp: (op: BoardOp) => void;
+  stepHistory: (redo: boolean) => boolean;
+  updateBoxRecorded: (box: BoxItem, change: Partial<BoxItem>) => void;
   /** For flagging AI results: which subject, and which model produced them. */
   subjectName: string;
   aiModel: string;
@@ -1294,7 +1324,7 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
         <TranscriptBox box={box} onChange={(change) => shared.updateBox(box, change)} onComment={(html) => shared.noteTranscript(box, html)} aiSearch={shared.aiSearch}
           flagWith={{ subject: shared.subjectName, model: shared.aiQuickModel }} />
       ) : box.table ? (
-        <TableBox box={box} onChange={(change) => shared.updateBox(box, change)} media={{ dropImage: shared.dropImage, resolveEmbed: shared.resolveEmbed, replaceEmbed: shared.replaceEmbed }}
+        <TableBox box={box} onChange={(change) => shared.updateBoxRecorded(box, change)} history={shared.stepHistory} media={{ dropImage: shared.dropImage, resolveEmbed: shared.resolveEmbed, replaceEmbed: shared.replaceEmbed }}
           facts={{ run: (sheet, write) => shared.factCheck(box, sheet, write), open: shared.openSource }} />
       ) : box.drawing ? (
         <DrawingPad box={box} onChange={(change) => shared.updateBox(box, change)} />

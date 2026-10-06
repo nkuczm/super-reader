@@ -48,7 +48,10 @@ export default function RichText({
   onTab,
   onFormat,
   onReplaceEmbed,
+  toolsBeside,
 }: {
+  /** Keep the text tools beside the card always (as in a table, where they would otherwise move the table or cover it). */
+  toolsBeside?: boolean;
   /** A picture set into the text was cropped: its box takes the new picture. */
   onReplaceEmbed?: (id: string, image: string) => void;
   /** A formatting command about to run; return true to say it was handled elsewhere (several table cells at once). */
@@ -372,7 +375,7 @@ export default function RichText({
       const vh = window.innerHeight;
       const vw = window.innerWidth;
       // Where the toolbar would sit: just above the text (or its table).
-      const off = a.top - 40 < 0 || a.top > vh - 20;
+      const off = toolsBeside || a.top - 40 < 0 || a.top > vh - 20;
       const visible = c.bottom > 40 && c.top < vh - 40;
       let next: { left: number; top: number } | null = null;
       if (off && visible) {
@@ -494,9 +497,10 @@ export default function RichText({
   return (
     <div className={`rich ${className ?? ""}`} ref={wrap} onMouseLeave={() => !pickedImg && setPinFor(null)}
       onFocus={() => { setFocused(true); if (coarse()) setDocked(true); }}
+      // Beside a table, the tools wait a moment before going, so moving to the next cell does not flicker them.
       onBlur={() => setTimeout(() => {
         if (!wrap.current?.contains(document.activeElement)) { setDocked(false); setFocused(false); }
-      }, 0)}>
+      }, toolsBeside ? 160 : 0)}>
       {pinFor && (
         <span
           className="embed-size-pin"
