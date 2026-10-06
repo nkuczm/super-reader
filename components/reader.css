@@ -2532,7 +2532,10 @@
 .spend-activity .spend-tier td { font-weight: 600; background: var(--bg-hover); font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.03em; }
 .spend-activity .spend-indent { padding-left: 22px; }
 /* While a cell is being written in, the text tools get their own row under the fact-check bar rather than covering it. */
-.tbl-doc:has(> .fc-bar) .tbl-scroll { transition: padding-top 0.15s ease; }
+/* Closing waits a moment: moving between cells passes through "nothing focused" for an instant, and the
+   table should not jump for it. Opening is immediate. */
+.tbl-doc:has(> .fc-bar) .tbl-scroll { transition: padding-top 0.15s ease 0.35s; }
+.tbl-doc:has(> .fc-bar):has(.tbl-rich:focus-within) .tbl-scroll { transition-delay: 0s; }
 .tbl-doc:has(> .fc-bar):has(.tbl-rich:focus-within) .tbl-scroll { padding-top: 46px; }
 /* ---------- settings, in sections ---------- */
 .settings-tabs {
