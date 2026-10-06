@@ -23,7 +23,8 @@ export type SaveStatus = "idle" | "saving" | "saved" | "offline" | "error";
 const SAVE_DELAY_MS = 1500;
 /** Coming back to the tab looks for other devices' changes at most this often. */
 const LOAD_EVERY_MS = 3 * 60 * 1000;
-const BACKUP_DELAY_MS = 5 * 60 * 1000;
+/** Google Docs backups: at most this often. Each reads the changed subjects, pictures and all, from the database. */
+const BACKUP_DELAY_MS = 20 * 60 * 1000;
 
 export function useAccount(params: {
   ready: boolean;
@@ -57,6 +58,7 @@ export function useAccount(params: {
   writingRef.current = writing;
   const backupDue = useRef(false);
   const backupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastBackup = useRef(0);
   const applyRef = useRef(applyWriting);
   applyRef.current = applyWriting;
   const adoptRef = useRef(adoptCode);
@@ -164,6 +166,7 @@ export function useAccount(params: {
     backupTimer.current = null;
     if (!backupDue.current) return;
     backupDue.current = false;
+    lastBackup.current = Date.now();
     try {
       const res = await fetch("/api/subjects/backup", { method: "POST" });
       const data = await res.json().catch(() => ({}));
@@ -255,8 +258,11 @@ export function useAccount(params: {
       // Unsent changes go now, in a request the browser finishes even if the
       // tab is then closed — a moment after, once the last keystrokes are in.
       setTimeout(() => void flushNow(), 50);
-      if (!backupDue.current) return;
-      if (navigator.sendBeacon?.("/api/subjects/backup")) backupDue.current = false;
+      if (!backupDue.current || Date.now() - lastBackup.current < BACKUP_DELAY_MS) return;
+      if (navigator.sendBeacon?.("/api/subjects/backup")) {
+        backupDue.current = false;
+        lastBackup.current = Date.now();
+      }
     };
     const onOnline = () => {
       load().catch(() => {});

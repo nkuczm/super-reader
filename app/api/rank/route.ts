@@ -1,3 +1,4 @@
+import { meter } from "@/lib/db-usage";
 import { NextResponse, after } from "next/server";
 import { corpusAvailable, readPulse, WINDOW_HOURS } from "@/lib/corpus";
 import { rankAgainstPulse } from "@/lib/pulse";
@@ -20,6 +21,7 @@ const MAX_ARTICLES = 600;
  * touched simply has no entry.
  */
 export async function POST(request: Request) {
+  meter("pulse");
   if (!corpusAvailable()) {
     return NextResponse.json({
       available: false,

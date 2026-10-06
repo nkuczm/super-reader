@@ -1,3 +1,4 @@
+import { meter } from "@/lib/db-usage";
 import { NextResponse } from "next/server";
 import { corpusAvailable, lastSweeps } from "@/lib/corpus";
 import { sweepSlice, sliceCount, dueSlices, SWEEP_INTERVAL_MS } from "@/lib/sweep";
@@ -16,6 +17,7 @@ export const maxDuration = 60;
  * which the interval below does.
  */
 export async function GET(request: Request) {
+  meter("pulse");
   if (!corpusAvailable()) {
     return NextResponse.json({ error: "No database connected" }, { status: 503 });
   }

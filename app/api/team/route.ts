@@ -1,3 +1,4 @@
+import { meter } from "@/lib/db-usage";
 import { NextResponse } from "next/server";
 import { isConfigured } from "@/lib/db";
 import {
@@ -28,6 +29,7 @@ const badCode = () =>
 
 /** Everything on a team feed, for whoever holds the code. */
 export async function GET(request: Request) {
+  meter("team");
   if (!isConfigured()) return notConfigured();
 
   const code = new URL(request.url).searchParams.get("code") ?? "";
@@ -43,6 +45,7 @@ export async function GET(request: Request) {
 
 /** Start a team feed and get the code to hand out. */
 export async function POST(request: Request) {
+  meter("team");
   if (!isConfigured()) return notConfigured();
 
   let name = "";
@@ -67,6 +70,7 @@ export async function POST(request: Request) {
  * no read state and nothing identifying who sent it.
  */
 export async function PUT(request: Request) {
+  meter("team");
   if (!isConfigured()) return notConfigured();
 
   let body: { code?: string; article?: unknown };
@@ -97,6 +101,7 @@ export async function PUT(request: Request) {
 
 /** Take an article off the shared list. */
 export async function DELETE(request: Request) {
+  meter("team");
   if (!isConfigured()) return notConfigured();
 
   const params = new URL(request.url).searchParams;

@@ -10,6 +10,7 @@ import { encodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import { FLAGS_EVENT, loadFlags } from "@/lib/flags";
 import FlagsDialog from "./FlagsDialog";
 import StorageSection from "./StorageSection";
+import DbUsageSection from "./DbUsageSection";
 import type { Settings, TeamFeed, ViewMode } from "@/lib/store";
 
 const VIEWS: { id: ViewMode; name: string; blurb: string }[] = [
@@ -497,6 +498,9 @@ export default function SettingsDialog({
             <>
               <p className="field-label">Storage</p>
               <StorageSection />
+
+              <p className="field-label reading-label">Database usage</p>
+              <DbUsageSection />
 
             <p className="field-label reading-label">API keys &amp; subscriptions</p>
             <ApiKeys vault={vault} keys={apiKeys} onChange={onKeysChange} />

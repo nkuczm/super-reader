@@ -1,3 +1,4 @@
+import { meter } from "@/lib/db-usage";
 import { NextResponse } from "next/server";
 import { createSession, upsertAccount } from "@/lib/accounts";
 import { exchangeCode, googleConfig, redirectUri } from "@/lib/google";
@@ -9,6 +10,7 @@ export const dynamic = "force-dynamic";
 
 /** Back from Google: check the state, trade the code, and start a session. */
 export async function GET(request: Request) {
+  meter("auth");
   const fail = (reason: string) => {
     // Logged, so a failed sign-in can be diagnosed from the deployment's logs.
     console.warn(`sign-in failed: ${reason}`);

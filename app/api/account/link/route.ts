@@ -1,3 +1,4 @@
+import { meter } from "@/lib/db-usage";
 import { CodeTakenError, linkSyncCode, writeSubjects } from "@/lib/accounts";
 import { detachWriting } from "@/lib/sync";
 import { json, requireAccount } from "@/lib/session";
@@ -11,6 +12,7 @@ export const dynamic = "force-dynamic";
  * where the code alone can no longer read it.
  */
 export async function POST(request: Request) {
+  meter("subjects");
   const guard = await requireAccount(request, { write: true });
   if ("response" in guard) return guard.response;
   const body = await request.json().catch(() => ({}));

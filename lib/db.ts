@@ -1,4 +1,5 @@
 import { neon } from "@neondatabase/serverless";
+import { record } from "./db-meter";
 
 /** A minimal query interface so tests can run against a local Postgres. */
 export type Sql = (
@@ -35,7 +36,16 @@ export function getSql(): Sql {
       "Sync is not configured: this deployment has no database connected.",
     );
   }
-  return neon(url) as unknown as Sql;
+  const raw = neon(url) as unknown as Sql;
+  // Every query is counted (lib/db-meter.ts): what went in, what came back, how long it took.
+  return async (strings, ...values) => {
+    const start = Date.now();
+    const rows = await raw(strings, ...values);
+    let sent = strings.reduce((n, s) => n + s.length, 0);
+    for (const v of values) sent += typeof v === "string" ? v.length : JSON.stringify(v ?? null).length;
+    record(sent, JSON.stringify(rows).length, Date.now() - start);
+    return rows;
+  };
 }
 
 let ready: Promise<void> | null = null;

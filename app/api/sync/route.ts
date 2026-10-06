@@ -1,3 +1,4 @@
+import { meter } from "@/lib/db-usage";
 import { NextResponse } from "next/server";
 import { isConfigured } from "@/lib/db";
 import {
@@ -25,6 +26,7 @@ function notConfigured() {
 
 /** Fetch the feeds behind a sync code. */
 export async function GET(request: Request) {
+  meter("sync");
   if (!isConfigured()) return notConfigured();
 
   const code = new URL(request.url).searchParams.get("code") ?? "";
@@ -45,6 +47,7 @@ export async function GET(request: Request) {
 
 /** Start a new sync and get a fresh code. */
 export async function POST() {
+  meter("sync");
   if (!isConfigured()) return notConfigured();
   try {
     return NextResponse.json(await createSync());
@@ -55,6 +58,7 @@ export async function POST() {
 
 /** Save this device's feeds under an existing code. */
 export async function PUT(request: Request) {
+  meter("sync");
   if (!isConfigured()) return notConfigured();
 
   let body: {

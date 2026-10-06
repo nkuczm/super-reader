@@ -1,3 +1,4 @@
+import { meter } from "@/lib/db-usage";
 import { inlineImages, listVersions, readVersion } from "@/lib/accounts";
 import { json, requireAccount } from "@/lib/session";
 
@@ -6,6 +7,7 @@ export const dynamic = "force-dynamic";
 
 /** The saved versions, or one of them with ?id= (narrowed to one subject, pictures included, with &subject=). */
 export async function GET(request: Request) {
+  meter("history");
   const guard = await requireAccount(request);
   if ("response" in guard) return guard.response;
   const params = new URL(request.url).searchParams;

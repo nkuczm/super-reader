@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import { accountForSession, SESSION_COOKIE, SESSION_DAYS, type Account } from "./accounts";
 import { isConfigured as databaseConfigured } from "./db";
 import { googleConfig } from "./google";
+import { attribute } from "./db-meter";
 import { authSecret, cookieFrom, dataKey, sameOrigin } from "./secure";
 
 /** Sign-in works only with Google credentials, both secrets and a database. */
@@ -17,7 +18,9 @@ export function accountsEnabled() {
 export async function currentAccount(request: Request): Promise<Account | null> {
   if (!accountsEnabled()) return null;
   try {
-    return await accountForSession(cookieFrom(request, SESSION_COOKIE));
+    const account = await accountForSession(cookieFrom(request, SESSION_COOKIE));
+    if (account) attribute(account.id);
+    return account;
   } catch {
     return null;
   }

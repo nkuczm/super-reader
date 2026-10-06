@@ -1,3 +1,4 @@
+import { meter } from "@/lib/db-usage";
 import { NextResponse } from "next/server";
 import { after } from "next/server";
 import {
@@ -25,6 +26,7 @@ const TOP = 60;
  * stays current for whoever asks next without the reader waiting on it.
  */
 export async function GET(request: Request) {
+  meter("pulse");
   if (!corpusAvailable()) {
     return NextResponse.json(
       {

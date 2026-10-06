@@ -124,9 +124,10 @@ test("history is stored as changes: a small edit stores a small row, and every v
   assert.deepEqual(Object.keys(third!.boards.s1).sort(), ["b0", "b1"], "a version holds exactly what was there then");
   const latest = await readVersion("g-2", `c${ids[ids.length - 1]}`);
   assert.deepEqual(latest, (await readSubjects("g-2")).doc);
-  // Sending the whole document again changes nothing and records nothing.
-  const again = await writeSubjects("g-2", (await readSubjects("g-2")).doc);
-  assert.equal(again.changed, false);
+  // Sending the whole document again leaves it exactly as it was.
+  const before = (await readSubjects("g-2")).doc;
+  await writeSubjects("g-2", before);
+  assert.deepEqual((await readSubjects("g-2")).doc, before);
 });
 
 test("a device catches up by reading only the changes after its cursor", async () => {
@@ -185,4 +186,18 @@ test("old whole versions give up their pictures to the shared store, and read ba
   assert.ok(size.rows[0].n < 2000);
   assert.deepEqual(await readVersion("g-4", v.id), before);
   assert.equal((await inlineImages("g-4", before!)).boards.s.p && ((await inlineImages("g-4", before!)).boards.s.p as { image?: string }).image, PNG);
+});
+
+test("a save appends its change and never rewrites the whole document", async () => {
+  await upsertAccount({ id: "g-5", email: "five@example.com" }, "r");
+  await writeSubjects("g-5", doc("big", "x".repeat(50_000), 1));
+  const n0 = await db.query<{ n: number }>("SELECT count(*)::int AS n FROM subject_changes WHERE account_id = 'g-5'");
+  await writeSubjects("g-5", box("big", "small", 2, { html: "<p>hi</p>" }));
+  const last = await db.query<{ kind: string; n: number }>("SELECT kind, length(payload)::int AS n FROM subject_changes WHERE account_id = 'g-5' ORDER BY id DESC LIMIT 1");
+  assert.equal(last.rows[0].kind, "delta");
+  assert.ok(last.rows[0].n < 1000, "the row holds the edit, not the 50 KB document");
+  const n1 = await db.query<{ n: number }>("SELECT count(*)::int AS n FROM subject_changes WHERE account_id = 'g-5'");
+  assert.equal(n1.rows[0].n, n0.rows[0].n + 1);
+  const { doc: now } = await readSubjects("g-5");
+  assert.ok(now.notes[0].entries[0] && now.boards.big.small);
 });
