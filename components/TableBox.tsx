@@ -749,6 +749,74 @@ function DocTable({ facts, media, grid, metas, widths, heights, startResize, sta
     if (html === grid[r][c]) return;
     onChange({ table: grid.map((row, i) => (i === r ? row.map((v, j) => (j === c ? html : v)) : row)) });
   };
+  /**
+   * Arrow keys step to the next cell once the caret is at the edge of this
+   * one — Up on its first line, Down on its last, Left at its very start,
+   * Right at its very end — and otherwise move through the text as usual.
+   */
+  const moveByArrow = (e: React.KeyboardEvent): boolean => {
+    const dirs: Record<string, [number, number]> = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+    const dir = dirs[e.key];
+    if (!dir || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return false;
+    const body = (e.target as HTMLElement).closest?.<HTMLElement>(".rich-body");
+    const cell = body?.closest<HTMLElement>("td[data-cell]");
+    const sel = window.getSelection();
+    if (!body || !cell || !sel?.rangeCount || !sel.isCollapsed) return false;
+    const caret = sel.getRangeAt(0);
+    const before = document.createRange();
+    before.selectNodeContents(body);
+    before.setEnd(caret.startContainer, caret.startOffset);
+    const after = document.createRange();
+    after.selectNodeContents(body);
+    after.setStart(caret.endContainer, caret.endOffset);
+    const box = body.getBoundingClientRect();
+    const at = caret.getClientRects()[0] ?? caret.getBoundingClientRect();
+    const lineH = parseFloat(getComputedStyle(body).lineHeight) || 20;
+    const empty = !body.textContent?.trim();
+    const edge =
+      e.key === "ArrowLeft" ? before.toString().length === 0
+      : e.key === "ArrowRight" ? after.toString().length === 0
+      : e.key === "ArrowUp" ? empty || !at.height || at.top - box.top < lineH * 0.9 + 6
+      : empty || !at.height || box.bottom - at.bottom < lineH * 0.9 + 6;
+    if (!edge) return false;
+    const [r0, c0] = cell.dataset.cell!.split("-").map(Number);
+    const m = metas[cellKey(r0, c0)];
+    // Step off a merged cell from its far side, and land on whichever cell covers the one reached.
+    let r = dir[0] > 0 ? r0 + (m?.rs ?? 1) : r0 + dir[0];
+    let c = dir[1] > 0 ? c0 + (m?.cs ?? 1) : c0 + dir[1];
+    if (c < 0) { r -= 1; c = cols - 1; }
+    if (c >= cols) { r += 1; c = 0; }
+    if (r < 0 || r >= rows) return false;
+    const owner = covered.get(cellKey(r, c));
+    if (owner) [r, c] = owner.split(",").map(Number);
+    const target = host.current?.querySelector<HTMLElement>(`[data-cell="${r}-${c}"] .rich-body`);
+    if (!target) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    target.focus({ preventScroll: false });
+    const range = document.createRange();
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      // Keep the caret's column: the nearest point on the target's last (or first) line.
+      const t = target.getBoundingClientRect();
+      const x = Math.min(t.right - 2, Math.max(t.left + 2, at.left || t.left));
+      const y = e.key === "ArrowUp" ? t.bottom - 4 : t.top + 4;
+      const doc = document as Document & { caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null };
+      const pos = doc.caretPositionFromPoint?.(x, y);
+      if (pos && target.contains(pos.offsetNode)) range.setStart(pos.offsetNode, pos.offset);
+      else {
+        const hit = document.caretRangeFromPoint?.(x, y);
+        if (hit && target.contains(hit.startContainer)) range.setStart(hit.startContainer, hit.startOffset);
+        else { range.selectNodeContents(target); range.collapse(e.key === "ArrowDown"); }
+      }
+    } else {
+      range.selectNodeContents(target);
+      range.collapse(e.key === "ArrowRight");
+    }
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return true;
+  };
   const focusCell = (r: number, c: number) =>
     host.current?.querySelector<HTMLElement>(`[data-cell="${r}-${c}"] .rich-body`)?.focus();
   /** The next cell along that is not hidden under a merge. */
@@ -822,6 +890,7 @@ function DocTable({ facts, media, grid, metas, widths, heights, startResize, sta
       onCopyCapture={(e) => copyPicked(e, false)}
       onCutCapture={(e) => copyPicked(e, true)}
       onKeyDownCapture={(e) => {
+        if (!many && moveByArrow(e)) return;
         if (!many) return;
         if (e.key === "Backspace" || e.key === "Delete") { e.preventDefault(); e.stopPropagation(); clearPicked(); }
         else if (e.key === "Escape") setPicked(null);
