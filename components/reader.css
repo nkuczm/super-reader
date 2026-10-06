@@ -2536,7 +2536,7 @@
    table should not jump for it. Opening is immediate. */
 .tbl-doc:has(> .fc-bar) .tbl-scroll { transition: padding-top 0.15s ease 0.35s; }
 .tbl-doc:has(> .fc-bar):has(.tbl-rich:focus-within) .tbl-scroll { transition-delay: 0s; }
-.tbl-doc:has(> .fc-bar):has(.tbl-rich:focus-within) .tbl-scroll { padding-top: 46px; }
+
 /* ---------- settings, in sections ---------- */
 .settings-tabs {
   position: sticky; top: -1px; z-index: 2; display: flex; gap: 2px; padding: 3px; margin: 0 0 16px;
@@ -2634,3 +2634,7 @@
 }
 .cmp-overlay { align-items: center; padding: 24px 16px; }
 .cmp-pick { max-width: 160px; }
+
+/* The text tools of a table cell stand beside the card, so the table never moves to make room for them. */
+.tbl-doc .tbl-scroll { padding-top: 16px; }
+.tbl-doc:has(> .fc-bar) .tbl-scroll { padding-top: 14px; }

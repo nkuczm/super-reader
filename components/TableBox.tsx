@@ -216,7 +216,14 @@ const SHEET_FIELDS = ["table", "tableMode", "tableCols", "tableRows", "tableCell
  * a card with one; each further tab keeps its own table, sizes, colours and
  * fact-check. Double-click a tab to rename it.
  */
-export function TableBox({ box, onChange, media, facts }: { box: BoxItem; onChange: (next: Change) => void; media?: CellMedia; facts?: TableFacts }) {
+export function TableBox({ box, onChange, media, facts, history }: {
+  box: BoxItem;
+  onChange: (next: Change) => void;
+  media?: CellMedia;
+  facts?: TableFacts;
+  /** The subject's own undo history, which records every change made through onChange: step back (false) or forward (true). */
+  history?: (redo: boolean) => boolean;
+}) {
   const tabs = box.tableTabs ?? [];
   // Tabs are versions of the table: V1, V2… with the latest last, and open first.
   const names = [box.tableName || "V1", ...tabs.map((t, i) => t.name || `V${i + 2}`)];
@@ -301,12 +308,13 @@ export function TableBox({ box, onChange, media, facts }: { box: BoxItem; onChan
   );
   return (
     <div className="tbl-card">
-      <TableSheet key={at} box={sheet} onChange={write} media={media} facts={facts} header={strip} isLatest={at === names.length - 1} />
+      <TableSheet key={at} box={sheet} onChange={write} media={media} facts={facts} header={strip} isLatest={at === names.length - 1} history={history} />
     </div>
   );
 }
 
-function TableSheet({ box, onChange: apply, media, facts, header, isLatest = true }: {
+function TableSheet({ box, onChange: apply, media, facts, header, isLatest = true, history }: {
+  history?: (redo: boolean) => boolean;
   box: BoxItem;
   onChange: (next: Change) => void;
   media?: CellMedia;
@@ -344,6 +352,8 @@ function TableSheet({ box, onChange: apply, media, facts, header, isLatest = tru
     return { table: b.table, tableMode: b.tableMode, tableCols: b.tableCols, tableRows: b.tableRows, tableCells: b.tableCells };
   };
   const onChange = (next: Change) => {
+    // With the subject's history, every change is already recorded there.
+    if (history) return apply(next);
     past.current.push(snapshot());
     if (past.current.length > 100) past.current.shift();
     future.current = [];
@@ -360,6 +370,11 @@ function TableSheet({ box, onChange: apply, media, facts, header, isLatest = tru
       shell.current?.focus({ preventScroll: true });
     }
     setTimeout(() => {
+      if (history) {
+        history(!back);
+        setSteps((n) => n + 1);
+        return;
+      }
       const from = back ? past : future;
       const to = back ? future : past;
       const step = from.current.pop();
@@ -608,9 +623,9 @@ function TableSheet({ box, onChange: apply, media, facts, header, isLatest = tru
           <button className={mode === "sheet" ? "on" : ""} aria-pressed={mode === "sheet"} onClick={() => switchTo("sheet")}
             title="A spreadsheet, with formulas">Sheet</button>
         </span>
-        <button className="tbl-undo" disabled={!past.current.length} onMouseDown={(e) => e.preventDefault()} onClick={() => travel(true)}
+        <button className="tbl-undo" disabled={!history && !past.current.length} onMouseDown={(e) => e.preventDefault()} onClick={() => travel(true)}
           title="Undo (⌘Z)" aria-label="Undo">↶</button>
-        <button className="tbl-undo" disabled={!future.current.length} onMouseDown={(e) => e.preventDefault()} onClick={() => travel(false)}
+        <button className="tbl-undo" disabled={!history && !future.current.length} onMouseDown={(e) => e.preventDefault()} onClick={() => travel(false)}
           title="Redo (⌘⇧Z)" aria-label="Redo">↷</button>
         <button disabled={rows >= MAX_ROWS} onClick={() => ops.insertRow(rows)}>+ Row</button>
         <button disabled={cols >= MAX_COLS} onClick={() => ops.insertCol(cols)}>+ Column</button>
@@ -799,7 +814,13 @@ function DocTable({ facts, media, grid, metas, widths, heights, startResize, sta
   const covered = coveredCells(metas);
   const [focus, setFocus] = useState<{ r: number; c: number }>({ r: 0, c: 0 });
   /** Cells picked with Shift-click, for merging or colouring together. */
-  const [picked, setPicked] = useState<Range | null>(null);
+  const [picked, setPickedState] = useState<Range | null>(null);
+  // Kept in a ref as well, so a key pressed straight after a drag acts on what was just picked.
+  const pickedRef = useRef<Range | null>(null);
+  const setPicked = (g: Range | null) => {
+    pickedRef.current = g;
+    setPickedState(g);
+  };
   const [menu, setMenu] = useState<{ range: Range; x: number; y: number } | null>(null);
   useMenuClose(menu, () => setMenu(null));
 
@@ -807,6 +828,7 @@ function DocTable({ facts, media, grid, metas, widths, heights, startResize, sta
   const batching = useRef(false);
   const dragFrom = useRef<{ r: number; c: number } | null>(null);
   const many = !!picked && (picked.r1 > picked.r0 || picked.c1 > picked.c0);
+  const manyNow = () => { const g = pickedRef.current; return !!g && (g.r1 > g.r0 || g.c1 > g.c0); };
   useEffect(() => {
     const up = () => (dragFrom.current = null);
     window.addEventListener("pointerup", up);
@@ -814,6 +836,7 @@ function DocTable({ facts, media, grid, metas, widths, heights, startResize, sta
   }, []);
   const pickedCells = () => {
     const out: { r: number; c: number; el: HTMLElement }[] = [];
+    const picked = pickedRef.current;
     if (!picked) return out;
     for (let r = picked.r0; r <= picked.r1; r++) for (let c = picked.c0; c <= picked.c1; c++) {
       if (covered.has(cellKey(r, c))) continue;
@@ -830,7 +853,7 @@ function DocTable({ facts, media, grid, metas, widths, heights, startResize, sta
   };
   /** A formatting command over every picked cell, the way Google Docs applies one across a table selection. */
   const formatAcross = (command: string, value?: string) => {
-    if (!many) return false;
+    if (!manyNow()) return false;
     const cells = pickedCells();
     batching.current = true;
     try {
@@ -857,9 +880,34 @@ function DocTable({ facts, media, grid, metas, widths, heights, startResize, sta
     }
     return true;
   };
-  const clearPicked = () => saveCells(pickedCells().map(({ r, c }) => ({ r, c, html: "" })));
+  // Clear what is on screen too: the cell still being typed in would otherwise write its old text back when left.
+  const clearPicked = () => saveCells(pickedCells().map(({ r, c, el }) => { el.innerHTML = ""; return { r, c, html: "" }; }));
+  /**
+   * Dragging from one cell into another picks whole cells, as in Google Docs:
+   * the cell under the pointer is found on every move, so a quick diagonal
+   * drag still picks the full rectangle.
+   */
+  const dragPick = (e: React.PointerEvent) => {
+    const from = dragFrom.current;
+    if (!from || !(e.buttons & 1)) return;
+    const td = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest<HTMLElement>("td[data-cell]");
+    if (!td || !host.current?.contains(td)) return;
+    const [r, c] = td.dataset.cell!.split("-").map(Number);
+    if (r === from.r && c === from.c && !pickedRef.current) return;
+    const m = metas[cellKey(r, c)];
+    const fm = metas[cellKey(from.r, from.c)];
+    const g = {
+      r0: Math.min(from.r, r), c0: Math.min(from.c, c),
+      r1: Math.max(from.r + (fm?.rs ?? 1) - 1, r + (m?.rs ?? 1) - 1), c1: Math.max(from.c + (fm?.cs ?? 1) - 1, c + (m?.cs ?? 1) - 1),
+    };
+    const cur = pickedRef.current;
+    if (cur && cur.r0 === g.r0 && cur.c0 === g.c0 && cur.r1 === g.r1 && cur.c1 === g.c1) return;
+    window.getSelection()?.removeAllRanges();
+    setPicked(g.r0 === g.r1 && g.c0 === g.c1 ? null : g);
+  };
   const copyPicked = (e: React.ClipboardEvent, cut: boolean) => {
-    if (!many || !picked) return;
+    const picked = pickedRef.current;
+    if (!picked || !manyNow()) return;
     e.preventDefault();
     e.stopPropagation();
     const cells = grid.map((row) => row.map(asHtml));
@@ -999,6 +1047,7 @@ function DocTable({ facts, media, grid, metas, widths, heights, startResize, sta
 
   return (
     <div className={`tbl-scroll${many ? " picking" : ""}${facts ? " fact-view" : ""}`}
+      onPointerMove={dragPick}
       onMouseMove={(e) => {
         if (!facts || factPop?.pinned) return;
         const claim = claimAt(e.clientX, e.clientY);
@@ -1014,8 +1063,8 @@ function DocTable({ facts, media, grid, metas, widths, heights, startResize, sta
       onCopyCapture={(e) => copyPicked(e, false)}
       onCutCapture={(e) => copyPicked(e, true)}
       onKeyDownCapture={(e) => {
-        if (!many && moveByArrow(e)) return;
-        if (!many) return;
+        if (!manyNow() && moveByArrow(e)) return;
+        if (!manyNow()) return;
         if (e.key === "Backspace" || e.key === "Delete") { e.preventDefault(); e.stopPropagation(); clearPicked(); }
         else if (e.key === "Escape") setPicked(null);
         else if (!e.metaKey && !e.ctrlKey && !e.altKey && e.key.length === 1) setPicked(null); // typing goes to the cell
@@ -1063,13 +1112,6 @@ function DocTable({ facts, media, grid, metas, widths, heights, startResize, sta
                         dragFrom.current = { r, c };
                       }
                     }}
-                    // Dragging from one cell into another selects whole cells, as in Google Docs.
-                    onPointerEnter={(e) => {
-                      const from = dragFrom.current;
-                      if (!from || !(e.buttons & 1) || (from.r === r && from.c === c)) return;
-                      window.getSelection()?.removeAllRanges();
-                      setPicked({ r0: Math.min(from.r, r), c0: Math.min(from.c, c), r1: Math.max(from.r, r + rs - 1), c1: Math.max(from.c, c + cs - 1) });
-                    }}
                     onContextMenu={(e) => {
                       if (window.getSelection()?.toString()) return; // keep the browser's menu for copying text
                       e.preventDefault();
@@ -1080,7 +1122,7 @@ function DocTable({ facts, media, grid, metas, widths, heights, startResize, sta
                     {/* At least the height set for the row; taller when more is written. */}
                     <div className="tbl-cell-box" style={{ minHeight: span(heights, r, rs) - 1 }}>
                     <RichText className="tbl-rich" html={asHtml(html)} onChange={(next) => save(r, c, next)} onFormat={formatAcross}
-                      onDropImage={media?.dropImage} resolveEmbed={media?.resolveEmbed} onReplaceEmbed={media?.replaceEmbed}
+                      onDropImage={media?.dropImage} resolveEmbed={media?.resolveEmbed} onReplaceEmbed={media?.replaceEmbed} toolsBeside
                       onTab={(back) => {
                         const next = step(r, c, back);
                         if (!next) return;
