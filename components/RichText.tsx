@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import CropDialog, { copyPicture, pastedWidth } from "./CropDialog";
 import { sanitizeRichText } from "@/lib/subjects";
 import { cleanPastedHtml } from "@/lib/paste";
+import { CITE_OPEN_EVENT, CITE_TYPE, citeChipHtml, citeFor, citeTextHtml, type Cite } from "@/lib/cite";
 
 /** The drag type a drawing or image box carries, for dropping into text. */
 export const EMBED_TYPE = "application/x-super-reader-box";
@@ -24,6 +25,70 @@ function caretRangeAt(x: number, y: number): Range | null {
   range.setStart(pos.offsetNode, pos.offset);
   range.collapse(true);
   return range;
+}
+
+/** Put the caret where a point is, inside the field — or at its end. */
+function caretInto(node: HTMLElement, x: number, y: number) {
+  const range = caretRangeAt(x, y);
+  node.focus();
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  if (range && node.contains(range.startContainer)) selection?.addRange(range);
+  else {
+    const end = document.createRange();
+    end.selectNodeContents(node);
+    end.collapse(false);
+    selection?.addRange(end);
+  }
+}
+
+/** A citation chip at the caret, with a space after it so writing carries on past it. */
+function insertChip(cite: Cite) {
+  document.execCommand("insertHTML", false, citeChipHtml(cite));
+  stepPastChip();
+}
+
+/**
+ * The browser leaves the caret inside a chip it has just put in, where
+ * nothing can be typed: move it out past the chip, and put a space there so
+ * writing carries on.
+ */
+function stepPastChip() {
+  const selection = window.getSelection();
+  const at = selection?.anchorNode;
+  const chip = (at instanceof Element ? at : at?.parentElement)?.closest("a[data-cite=chip]");
+  if (!selection || !chip) return;
+  const after = document.createRange();
+  after.setStartAfter(chip);
+  after.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(after);
+  document.execCommand("insertText", false, "\u00a0");
+}
+
+/**
+ * A story card let go over some text (the whiteboard drags cards by pointer,
+ * not by the browser's drag and drop): its citation chip goes in where it
+ * landed. True when there was text there to take it.
+ */
+export function dropCiteAt(x: number, y: number, cite: Cite, except?: Element | null): boolean {
+  const node = document.elementsFromPoint(x, y)
+    .map((el) => el.closest<HTMLElement>(".rich-body"))
+    .find((el): el is HTMLElement => !!el && !except?.contains(el));
+  if (!node) return false;
+  caretInto(node, x, y);
+  insertChip(cite);
+  return true;
+}
+
+/** A click on a citation: its card, or the story itself with ⌘/Ctrl. True when handled. */
+export function followCite(target: EventTarget | null, event: { metaKey: boolean; ctrlKey: boolean; preventDefault: () => void }): boolean {
+  const cite = (target as HTMLElement | null)?.closest?.<HTMLAnchorElement>("a[data-cite]");
+  if (!cite) return false;
+  event.preventDefault();
+  if (event.metaKey || event.ctrlKey) window.open(cite.href, "_blank", "noopener,noreferrer");
+  else window.dispatchEvent(new CustomEvent(CITE_OPEN_EVENT, { detail: cite.href }));
+  return true;
 }
 
 /**
@@ -49,7 +114,10 @@ export default function RichText({
   onFormat,
   onReplaceEmbed,
   toolsBeside,
+  quoteSource,
 }: {
+  /** The story this text's quotes come from: copied out, they stay linked to it. */
+  quoteSource?: Cite;
   /** Keep the text tools beside the card always (as in a table, where they would otherwise move the table or cover it). */
   toolsBeside?: boolean;
   /** A picture set into the text was cropped: its box takes the new picture. */
@@ -179,6 +247,32 @@ export default function RichText({
     return () => document.removeEventListener("selectionchange", checkLink);
   }, []);
 
+  /**
+   * Quotes copied out of a story's notes keep their way back: a quote links
+   * to its passage by an id only this card knows, so on the clipboard it
+   * becomes the same words cited to the story.
+   */
+  function copyQuotes(event: React.ClipboardEvent, cut: boolean) {
+    const selection = window.getSelection();
+    if (!quoteSource || !selection || selection.isCollapsed || !selection.rangeCount) return;
+    const holder = document.createElement("div");
+    holder.appendChild(selection.getRangeAt(0).cloneContents());
+    // A selection inside one quote carries none of its link: the quote is around it.
+    const inside = (selection.anchorNode instanceof Element ? selection.anchorNode : selection.anchorNode?.parentElement)?.closest("a[data-quote]");
+    if (!holder.querySelector("a[data-quote]") && !inside) return;
+    holder.querySelectorAll("a[data-quote]").forEach((a) => {
+      a.outerHTML = citeTextHtml(quoteSource, a.textContent ?? "");
+    });
+    const html = inside && !holder.querySelector("a[data-cite]") ? citeTextHtml(quoteSource, holder.textContent ?? "") : holder.innerHTML;
+    event.preventDefault();
+    event.clipboardData.setData("text/html", html);
+    event.clipboardData.setData("text/plain", selection.toString());
+    if (cut) {
+      document.execCommand("delete");
+      changed();
+    }
+  }
+
   /** Open the address field for the selected text (or the link the caret is in). */
   function startLink() {
     const node = el.current;
@@ -209,6 +303,14 @@ export default function RichText({
     }
     const href = /^[a-z][a-z0-9+.-]*:/i.test(value) ? value : `https://${value}`;
     if (!/^https?:\/\//i.test(href)) return;
+    // A story in the subject: a citation, which goes to its card.
+    const cite = citeFor(href);
+    if (cite) {
+      if (target.range.collapsed) insertChip(cite);
+      else document.execCommand("insertHTML", false, citeTextHtml(cite, target.range.toString()));
+      changed();
+      return;
+    }
     if (target.range.collapsed) {
       const a = document.createElement("a");
       a.href = href;
@@ -646,6 +748,7 @@ export default function RichText({
             changed();
             return;
           }
+          if (followCite(event.target, event)) return;
           const web = (event.target as HTMLElement).closest<HTMLAnchorElement>("a[href]");
           if (web && (event.metaKey || event.ctrlKey)) {
             event.preventDefault();
@@ -658,6 +761,8 @@ export default function RichText({
             onOpenQuote(link.dataset.quote!);
           }
         }}
+        onCopy={(event) => quoteSource && copyQuotes(event, false)}
+        onCut={(event) => quoteSource && copyQuotes(event, true)}
         onPaste={(event) => {
           // Formatting comes with a paste — bullets, nesting, bold, italic,
           // highlight — translated from Google Docs' clipboard shape and
@@ -693,6 +798,14 @@ export default function RichText({
           // An address pasted over selected words links them, as in a Doc.
           const plain = event.clipboardData.getData("text/plain").trim();
           const selected = window.getSelection();
+          // The address of a story in the subject becomes its citation.
+          const cite = event.clipboardData.getData("text/html").includes("data-cite") ? null : citeFor(plain);
+          if (cite) {
+            if (selected && !selected.isCollapsed) document.execCommand("insertHTML", false, citeTextHtml(cite, selected.toString()));
+            else insertChip(cite);
+            changed();
+            return;
+          }
           if (selected && !selected.isCollapsed && /^https?:\/\/\S+$/i.test(plain)) {
             document.execCommand("createLink", false, plain);
             changed();
@@ -703,6 +816,8 @@ export default function RichText({
             const clean = cleanPastedHtml(html);
             if (clean.trim()) {
               document.execCommand("insertHTML", false, clean);
+              // Ending on a chip leaves the caret on it, where nothing can be typed.
+              stepPastChip();
               changed();
               return;
             }
@@ -724,9 +839,26 @@ export default function RichText({
           if (onEmbed && event.dataTransfer.types.includes(EMBED_TYPE)) {
             event.preventDefault();
             event.dataTransfer.dropEffect = "move";
+            return;
+          }
+          if (event.dataTransfer.types.includes(CITE_TYPE)) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "copy";
           }
         }}
         onDrop={(event) => {
+          // A story card dropped on the text: its citation, where it was let go.
+          const citing = event.dataTransfer.getData(CITE_TYPE);
+          if (citing && el.current) {
+            event.preventDefault();
+            event.stopPropagation();
+            try {
+              caretInto(el.current, event.clientX, event.clientY);
+              insertChip(JSON.parse(citing) as Cite);
+              changed();
+            } catch { /* not a citation after all */ }
+            return;
+          }
           // A photo from the desktop or another page: kept small, set in the
           // text where it was let go.
           const files = onDropImage ? [...event.dataTransfer.files].filter((f) => f.type.startsWith("image/")) : [];

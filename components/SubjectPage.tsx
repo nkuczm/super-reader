@@ -1,8 +1,10 @@
 "use client";
 
+import { createPortal } from "react-dom";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons";
-import RichText from "./RichText";
+import RichText, { dropCiteAt } from "./RichText";
+import { CITE_OPEN_EVENT, CITE_TYPE, citeChipHtml, setCiteSources } from "@/lib/cite";
 import FlagButton from "./FlagButton";
 import type { FlagInput } from "@/lib/flags";
 import SubjectHistory from "./SubjectHistory";
@@ -825,6 +827,16 @@ export default function SubjectPage(props: Props) {
         .map((m, n) => ({ id: box.id, n, level: Math.min(3, Number(m[1])), text: textOf(m[2]).trim() }))
         .filter((h) => h.text);
     });
+  // A citation clicked anywhere in the subject's writing goes to its story's card.
+  setCiteSources(allCards);
+  useEffect(() => {
+    const open = (event: Event) => {
+      const id = canonicalUrl((event as CustomEvent<string>).detail);
+      if (cards.some((c) => c.id === id)) goTo({ id, n: -1, level: 1, text: "" });
+    };
+    window.addEventListener(CITE_OPEN_EVENT, open);
+    return () => window.removeEventListener(CITE_OPEN_EVENT, open);
+  });
   /** Take the reader to an outline entry: scrolled to in the document, panned to on the whiteboard. */
   const goTo = (entry: OutlineEntry) => {
     if (window.innerWidth <= 900) setRailOpen(false);
@@ -1185,13 +1197,64 @@ function StoryCard({
   shared: Shared;
   dragHandle?: (event: React.PointerEvent) => void;
 }) {
+  const [citeMenu, setCiteMenu] = useState<{ x: number; y: number; copied?: boolean } | null>(null);
+  useEffect(() => {
+    if (!citeMenu) return;
+    const away = (e: PointerEvent) => (e.target as Element | null)?.closest?.(".cite-menu") || setCiteMenu(null);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setCiteMenu(null);
+    window.addEventListener("pointerdown", away, true);
+    window.addEventListener("keydown", esc);
+    return () => {
+      window.removeEventListener("pointerdown", away, true);
+      window.removeEventListener("keydown", esc);
+    };
+  }, [citeMenu]);
+  const cite = { link: card.link, title: card.title };
+  /** The citation on the clipboard: a chip where it is pasted in the subject, the story's address anywhere else. */
+  const copyCite = async () => {
+    const html = citeChipHtml(cite);
+    try {
+      await navigator.clipboard.write([new ClipboardItem({
+        "text/html": new Blob([html], { type: "text/html" }),
+        "text/plain": new Blob([card.link], { type: "text/plain" }),
+      })]);
+    } catch {
+      try { await navigator.clipboard.writeText(card.link); } catch { return; }
+    }
+    setCiteMenu((m) => (m ? { ...m, copied: true } : m));
+    setTimeout(() => setCiteMenu(null), 900);
+  };
   return (
     <div className="subject-card">
       <div className="subject-card-head" onPointerDown={dragHandle}>
         <button className="subject-card-title"
+          // In the document, the title drags out as a citation; on the whiteboard the card itself does.
+          draggable={!dragHandle}
+          onDragStart={(e) => {
+            e.dataTransfer.setData(CITE_TYPE, JSON.stringify(cite));
+            e.dataTransfer.setData("text/html", citeChipHtml(cite));
+            e.dataTransfer.setData("text/plain", card.link);
+            e.dataTransfer.effectAllowed = "copy";
+          }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setCiteMenu({ x: Math.min(e.clientX, window.innerWidth - 180), y: e.clientY });
+          }}
           onClick={() => shared.onOpenArticle(card.link, card.title, "")}>
           {card.title}
         </button>
+        {citeMenu && createPortal(
+          <div className="cite-menu" role="menu" style={{ left: citeMenu.x, top: citeMenu.y }}>
+            {citeMenu.copied ? <span className="cite-menu-done">Copied — paste it into any text</span> : (
+              <>
+                <button role="menuitem" onClick={() => void copyCite()}>Cite source</button>
+                <button role="menuitem" onClick={() => { setCiteMenu(null); shared.onOpenArticle(card.link, card.title, ""); }}>Open story</button>
+              </>
+            )}
+          </div>,
+          document.body,
+        )}
         {shared.tabs.length > 1 && (
           <select
             className="subject-card-tab"
@@ -1230,6 +1293,7 @@ function StoryCard({
           resolveEmbed={shared.resolveEmbed}
           onEmbed={shared.embedBox}
           onDropImage={shared.dropImage}
+          quoteSource={cite}
           placeholder="Add notes…"
           onOpenQuote={(id) => {
             const quote = card.quotes.find((q) => q.id === id);
@@ -1908,7 +1972,7 @@ function Whiteboard(
       last = { x: origin.x + (e.clientX - origin.px) / view.zoom, y: origin.y + (e.clientY - origin.py) / view.zoom };
       setDrag({ id, ...last, dx: last.x - origin.x, dy: last.y - origin.y, group });
     };
-    const up = () => {
+    const up = (e?: PointerEvent) => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
@@ -1922,6 +1986,9 @@ function Whiteboard(
         window.addEventListener("click", swallow, { capture: true, once: true });
         setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 0);
       }
+      // A story let go over some writing is cited there, and stays where it was.
+      const story = moved && e && group.size === 0 ? shared.cards.find((c) => c.id === id) : undefined;
+      if (story && dropCiteAt(e!.clientX, e!.clientY, { link: story.link, title: story.title }, nodeEls.current.get(id))) return;
       // Anything dropped onto a section label joins that section: it lines up
       // under the label, below the stories already there, and is connected
       // to it.

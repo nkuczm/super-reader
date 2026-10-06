@@ -804,6 +804,17 @@ export function sanitizeRichText(html: string): string {
         out.push(`<a data-quote="${id}">`);
         continue;
       }
+      // A story from the subject, cited: a headline chip, or words linked to it.
+      const cite = match[2].match(/data-cite=["']?(chip|text)/)?.[1];
+      const citeHref = cite ? safeHref(match[2].match(/href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i)?.slice(1).find(Boolean)) : null;
+      if (cite && citeHref) {
+        const title = (match[2].match(/title="([^"]*)"/)?.[1] ?? "").replace(/[<>"]/g, "").slice(0, 300);
+        stack.push("a");
+        out.push(cite === "chip"
+          ? `<a data-cite="chip" href="${citeHref}"${title ? ` title="${title}"` : ""} contenteditable="false" target="_blank" rel="noopener noreferrer">`
+          : `<a data-cite="text" href="${citeHref}" target="_blank" rel="noopener noreferrer">`);
+        continue;
+      }
       // A link the writer made: web addresses only, opened apart from the app.
       const href = safeHref(match[2].match(/href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i)?.slice(1).find(Boolean));
       if (!href) continue;
