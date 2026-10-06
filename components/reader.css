@@ -2594,3 +2594,43 @@
 .storage-table .num { text-align: right; white-space: nowrap; }
 .storage-name { font-weight: 600; }
 .storage-dim { color: var(--text-dim); font-size: 12px; }
+/* The version being worked on, in colour. */
+.tbl-tab.on { background: color-mix(in srgb, var(--accent, #2563eb) 14%, var(--bg)); color: var(--accent, #2563eb); border-color: color-mix(in srgb, var(--accent, #2563eb) 45%, transparent); }
+.tbl-compare { font: inherit; font-size: 12px; color: var(--text-dim); background: none; border: 0; padding: 3px 6px; cursor: pointer; border-radius: 6px; }
+.tbl-compare:hover { color: var(--text); background: var(--bg-hover); }
+
+/* ---------- comparing versions, as tracked changes ---------- */
+.cmp-overlay { z-index: 150; }
+.cmp-dialog {
+  background: var(--bg); border-radius: 14px; width: min(1400px, calc(100vw - 32px)); height: calc(100vh - 48px);
+  display: flex; flex-direction: column; box-shadow: 0 24px 70px rgba(0, 0, 0, 0.3); overflow: hidden;
+}
+.cmp-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.cmp-head > b { font-size: 15px; margin-right: 4px; }
+.cmp-pick { width: auto; padding: 4px 8px; font-size: 13px; }
+.cmp-arrow { color: var(--text-dim); }
+.cmp-summary { display: flex; flex-wrap: wrap; gap: 10px; margin-left: 12px; font-size: 12.5px; color: var(--text-dim); }
+.cmp-summary .cmp-ins, .cmp-summary .cmp-del { text-decoration: none; font-weight: 600; }
+.cmp-close { position: static; margin-left: auto; font-size: 20px; }
+.cmp-body { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 0; min-height: 0; }
+.cmp-side { overflow: auto; padding: 14px 16px 24px; }
+.cmp-side + .cmp-side { border-left: 1px solid var(--border); }
+.cmp-side h3 { margin: 0 0 10px; font-size: 14px; }
+.cmp-sub { font-weight: 400; color: var(--text-dim); font-size: 12px; margin-left: 6px; }
+.cmp-table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.5; table-layout: fixed; }
+.cmp-table td { border: 1px solid var(--text); padding: 6px 8px; vertical-align: top; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Suggestion colours, as in a document: added in green, removed struck through in red. */
+.cmp-ins { color: #15803d; text-decoration: underline; text-decoration-color: rgba(21, 128, 61, 0.5); background: rgba(34, 197, 94, 0.1); }
+.cmp-del { color: #b91c1c; text-decoration: line-through; text-decoration-color: #dc2626; text-decoration-thickness: 1.5px; background: rgba(239, 68, 68, 0.08); }
+.cmp-cell-added { box-shadow: inset 0 0 0 2px #22c55e; background: rgba(34, 197, 94, 0.07); }
+.cmp-cell-removed { box-shadow: inset 0 0 0 2px #ef4444; background: rgba(239, 68, 68, 0.06); }
+.cmp-cell-added .cmp-ins, .cmp-cell-removed .cmp-del { background: none; }
+@media (prefers-color-scheme: dark) {
+  .cmp-ins { color: #4ade80; } .cmp-del { color: #f87171; }
+}
+@media (max-width: 760px) {
+  .cmp-body { grid-template-columns: 1fr; }
+  .cmp-side + .cmp-side { border-left: 0; border-top: 1px solid var(--border); }
+}
+.cmp-overlay { align-items: center; padding: 24px 16px; }
+.cmp-pick { max-width: 160px; }

@@ -10,6 +10,7 @@ import {
   type CellMetas, type Grid,
 } from "@/lib/sheet";
 import RichText from "./RichText";
+import CompareVersions from "./CompareVersions";
 import FlagButton from "./FlagButton";
 import type { FlagInput } from "@/lib/flags";
 import { safeFactCheck, scriptColumns, scriptRows, sourceLabel, type FactCheck, type FactClaim, type SourceTarget } from "@/lib/factcheck";
@@ -222,6 +223,7 @@ export function TableBox({ box, onChange, media, facts }: { box: BoxItem; onChan
   const [active, setActive] = useState(() => tabs.length);
   const at = Math.min(active, names.length - 1);
   const [naming, setNaming] = useState<number | null>(null);
+  const [comparing, setComparing] = useState(false);
 
   // The table being shown, as a card of its own, and where its changes go.
   const sheet: BoxItem = at === 0 ? box : { ...box, ...Object.fromEntries(SHEET_FIELDS.map((k) => [k, tabs[at - 1][k]])) };
@@ -284,6 +286,17 @@ export function TableBox({ box, onChange, media, facts }: { box: BoxItem; onChan
           )
         ))}
         <button className="tbl-tab add" aria-label="New version" title="New version — a copy of the latest draft" onClick={addTab}>+</button>
+        {names.length > 1 && (
+          <button className="tbl-compare" title="Compare two versions side by side" onClick={() => setComparing(true)}>Compare</button>
+        )}
+        {comparing && (
+          <CompareVersions
+            versions={names.map((name, i) => ({ name, table: i === 0 ? box.table : tabs[i - 1].table }))}
+            from={Math.max(0, (at === 0 ? names.length - 1 : at) - 1)}
+            to={at === 0 ? names.length - 1 : at}
+            onClose={() => setComparing(false)}
+          />
+        )}
       </div>
   );
   return (
