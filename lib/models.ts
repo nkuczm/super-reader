@@ -13,6 +13,12 @@ export type ModelChoice = {
   name: string;
   /** One line on what it is good for, for someone who does not follow AI models. */
   blurb: string;
+  /**
+   * Offered only once the provider confirms the reader's key can run it —
+   * for models whose name and price come from coverage rather than the
+   * provider's own documentation.
+   */
+  unconfirmed?: boolean;
   /** US dollars per million tokens. */
   input: number;
   output: number;
@@ -29,8 +35,13 @@ export const MODEL_CHOICES: Record<AiProvider, ModelChoice[]> = {
     { id: "claude-fable-5-1", name: "Claude Fable 5.1", blurb: "The most capable. Slower and much more expensive — for work where every detail matters.", input: 10, output: 50 },
   ],
   openai: [
-    { id: "gpt-5", name: "GPT-5", blurb: "OpenAI's most capable model here. Thorough, and the priciest.", input: 1.25, output: 10 },
-    { id: "gpt-5-mini", name: "GPT-5 mini", blurb: "Good quality at a low price.", input: 0.25, output: 2, recommended: true },
+    // The GPT-6 family (Sep 2026): names and prices as reported, not yet read
+    // from OpenAI's own pages, so each is shown only when the key lists it.
+    { id: "gpt-6-sol", name: "GPT-6 Sol", blurb: "OpenAI's current mid-range model: strong reading at a moderate price.", input: 2, output: 10, unconfirmed: true },
+    { id: "gpt-6-luna", name: "GPT-6 Luna", blurb: "OpenAI's current low-cost model: newer than GPT-5 mini and cheaper.", input: 0.1, output: 0.5, unconfirmed: true },
+    { id: "gpt-6-astra", name: "GPT-6 Astra", blurb: "OpenAI's flagship. The most capable and by far the priciest.", input: 10, output: 50, unconfirmed: true },
+    { id: "gpt-5", name: "GPT-5", blurb: "The previous generation's most capable model.", input: 1.25, output: 10 },
+    { id: "gpt-5-mini", name: "GPT-5 mini", blurb: "Good quality at a low price. Works with any OpenAI key.", input: 0.25, output: 2, recommended: true },
     { id: "gpt-5-nano", name: "GPT-5 nano", blurb: "Cheapest and fastest; noticeably shallower.", input: 0.05, output: 0.4 },
     { id: "gpt-4.1", name: "GPT-4.1", blurb: "The previous generation; solid, with a large memory for long subjects.", input: 2, output: 8 },
   ],
