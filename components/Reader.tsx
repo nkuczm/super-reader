@@ -19,6 +19,7 @@ import {
   loadSyncCode,
   saveSyncCode,
   loadSettings,
+  unionFeeds,
   saveSettings,
   loadCollapsed,
   saveCollapsed,
@@ -853,7 +854,8 @@ export default function Reader() {
   }, []);
 
   const pull = useCallback(
-    async (code: string) => {
+    /** `joining`: this device is taking up a code it did not have — what the code holds wins. */
+    async (code: string, joining = false) => {
       const res = await fetch(`/api/sync?code=${encodeURIComponent(code)}`);
       const data = await res.json();
       // Even a failed pull opens the gate: a device that cannot read must not
@@ -871,6 +873,16 @@ export default function Reader() {
        * read marks, the team list and the vault are decided by the stamp —
        * so a stale pull is applied too, with the replaced parts held back.
        */
+      if (joining) {
+        // Joining a code (a new or cleared browser, or one signing in): the
+        // feeds, teams and vault the code holds are taken whatever this
+        // device's stamp says, with anything only this device has added kept
+        // alongside. A device that did one thing before joining otherwise
+        // looked newer and replaced the synced feed list with its own.
+        if (Array.isArray(remote.feeds)) remote.feeds = unionFeeds(cleanFeeds(remote.feeds), feedsRef.current);
+        applyRemote(remote, false);
+        return;
+      }
       applyRemote(remote, !pullable(theirs, loadUpdatedAt()).replace);
     },
     [applyRemote],
@@ -1140,7 +1152,7 @@ export default function Reader() {
     async (entered: string) => {
       setSyncState("working");
       try {
-        await pull(entered);
+        await pull(entered, entered !== loadSyncCode());
       } catch (error) {
         setSyncState("error");
         throw error;
