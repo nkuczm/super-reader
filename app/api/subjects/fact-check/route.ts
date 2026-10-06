@@ -93,8 +93,9 @@ const SYSTEM = `You fact-check a video script against the writer's own research.
 1. Find each checkable claim in the script: a fact, figure, date, name, event, characterisation of someone's position, or quotation. Skip opinion, framing and transitions. Copy each claim's "text" EXACTLY as it appears in that row — a contiguous span, character for character, usually a clause or sentence — so it can be found in the row.
 
 2. Judge each claim against the research only:
-   - "pass": the research clearly supports it. For a quotation attributed to someone, it passes only if a transcript or source has the same words (minor filler words aside).
-   - "verify": the research does not settle it — not mentioned, only partly supported, or a quotation that is close but not exact.
+   Read like a fair-minded editor, not a literalist. A script paraphrases, summarises and speaks plainly; judge whether a reasonable reader of the research would say the script's claim is a fair account of it — the substance, not the exact words. "Almost anything you want" is supported by "comply with pretty much any request"; a rounded figure is supported by the precise one; a fair summary of several sources is supported by them together.
+   - "pass": the research supports the substance of it, directly or as a fair reading. For a quotation attributed to someone, the words must be theirs (minor filler and an honest ellipsis aside).
+   - "verify": only for a specific point the research genuinely does not cover — a fact, figure, name or event that appears nowhere — or one it supports only in part in a way that changes the point. Do not use it for wording that differs from the source while meaning the same thing.
    - "contradicts": the research says otherwise, or a quotation materially misstates what was said.
    "why" is one plain sentence (at most 25 words) saying what the research shows; for a misquote, give the accurate wording.
    "sources": up to 5 that bear on it, most direct first, each with the source id ("S3", "N1", or a transcript turn like "T2#14") and a short verbatim excerpt (at most 30 words) from that source. Only ids that appear in <research>. Leave empty if nothing bears on it.

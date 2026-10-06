@@ -14,7 +14,7 @@ import { safeTranscript } from "./transcript";
 
 export type FactStatus = "pass" | "verify" | "contradicts";
 export type FactSource = { ref: string; quote: string };
-export type FactClaim = { row: number; text: string; status: FactStatus; why: string; sources: FactSource[] };
+export type FactClaim = { row: number; text: string; status: FactStatus; why: string; sources: FactSource[]; resolved?: boolean };
 export type FactOmission = { text: string; refs: string[] };
 export type FactCheckInput = {
   rows: { row: number; text: string; visual?: string }[];
@@ -172,7 +172,7 @@ export function safeFactCheck(input: unknown): FactCheck | null {
     const status: FactStatus = c.status === "pass" || c.status === "contradicts" ? c.status : "verify";
     const sources = (Array.isArray(c.sources) ? c.sources : []).slice(0, 5).flatMap((s): FactSource[] =>
       s && typeof s.ref === "string" ? [{ ref: s.ref.slice(0, 20), quote: typeof s.quote === "string" ? s.quote.slice(0, 400) : "" }] : []);
-    return [{ row: c.row, text: c.text.slice(0, 2000), status, why: typeof c.why === "string" ? c.why.slice(0, 400) : "", sources }];
+    return [{ row: c.row, text: c.text.slice(0, 2000), status, why: typeof c.why === "string" ? c.why.slice(0, 400) : "", sources, ...(c.resolved === true ? { resolved: true } : {}) }];
   });
   const targets: Record<string, SourceTarget> = {};
   for (const [k, t] of Object.entries(v.targets && typeof v.targets === "object" ? v.targets : {})) {
