@@ -430,8 +430,14 @@ export function TableBox({ box, onChange: apply, media, facts }: { box: BoxItem;
   };
 
   const factView = mode === "doc" && !!box.factView && !!check && checking?.state !== "running";
-  const counts = check ? { pass: 0, verify: 0, contradicts: 0, ...Object.fromEntries((["pass", "verify", "contradicts"] as const).map((k) => [k, check.claims.filter((c) => c.status === k).length])) } : null;
-  const props: Inner = { facts: factView && facts ? { check: check!, words: scriptColumns(grid).words, open: facts.open } : null, media, grid, metas, widths: shownW, heights: shownH, startResize, startMove, moving, onChange, ops, reshape, colSizes, rowSizes };
+  const counts = check ? { pass: 0, verify: 0, contradicts: 0, ...Object.fromEntries((["pass", "verify", "contradicts"] as const).map((k) => [k, check.claims.filter((c) => c.status === k && !c.resolved).length])) } : null;
+  const resolvedCount = check ? check.claims.filter((c) => c.resolved).length : 0;
+  /** A claim marked as dealt with: its colour goes, and the check remembers it. */
+  const resolveClaim = (claim: FactClaim, resolved: boolean) => {
+    if (!check) return;
+    apply({ factCheck: { ...check, claims: check.claims.map((c) => (c.row === claim.row && c.text === claim.text ? { ...c, resolved } : c)) } });
+  };
+  const props: Inner = { facts: factView && facts ? { check: check!, words: scriptColumns(grid).words, open: facts.open, resolve: resolveClaim } : null, media, grid, metas, widths: shownW, heights: shownH, startResize, startMove, moving, onChange, ops, reshape, colSizes, rowSizes };
   return (
     <div ref={shell} tabIndex={-1} className={`tbl tbl-${mode}`} onPointerDown={(e) => e.stopPropagation()} onKeyDownCapture={onUndoKey}>
       {facts && mode === "doc" && (
@@ -451,6 +457,12 @@ export function TableBox({ box, onChange: apply, media, facts }: { box: BoxItem;
                   <span className="fc-dot pass" />{counts.pass} supported
                   <span className="fc-dot verify" />{counts.verify} to verify
                   <span className="fc-dot contradicts" />{counts.contradicts} contradicted
+                  {resolvedCount > 0 && (
+                    <button className="fc-restore" title="Show the resolved ones again"
+                      onClick={() => apply({ factCheck: { ...check, claims: check.claims.map(({ resolved: _r, ...c }) => c) } })}>
+                      ✓ {resolvedCount} resolved · restore
+                    </button>
+                  )}
                 </span>
               )}
               <button className="fc-run" onClick={() => void runCheck()}
@@ -516,7 +528,7 @@ type Ops = {
 };
 
 type Inner = {
-  facts: { check: FactCheck; words: number; open: TableFacts["open"] } | null;
+  facts: { check: FactCheck; words: number; open: TableFacts["open"]; resolve: (claim: FactClaim, resolved: boolean) => void } | null;
   media?: CellMedia;
   grid: Grid;
   metas: CellMetas;
@@ -556,7 +568,8 @@ function MoveMark({ moving }: { moving: Inner["moving"] }) {
 const span = (list: number[], from: number, n: number) => list.slice(from, from + n).reduce((a, b) => a + b, 0);
 
 /** What the check found for one span of the script, and where it found it. */
-function FactCard({ claim, targets, open, x, y, onEnter, onClose }: {
+function FactCard({ claim, targets, open, x, y, onEnter, onClose, onResolve }: {
+  onResolve: () => void;
   claim: FactClaim;
   targets: Record<string, SourceTarget>;
   open: TableFacts["open"];
@@ -573,6 +586,7 @@ function FactCard({ claim, targets, open, x, y, onEnter, onClose }: {
       <div className="fc-pop-head">
         <span className={`fc-dot ${claim.status}`} />
         <b>{FACT_WORDS[claim.status]}</b>
+        <button className="fc-pop-resolve" aria-label="Resolve" title="Resolve — dealt with, stop highlighting it" onClick={onResolve}>✓</button>
         <button className="fc-pop-x" aria-label="Close" onClick={onClose}>×</button>
       </div>
       {claim.why && <p className="fc-why">{claim.why}</p>}
@@ -759,7 +773,7 @@ function DocTable({ facts, media, grid, metas, widths, heights, startResize, sta
       return;
     }
     const spans: { claim: FactClaim; range: DomRange }[] = [];
-    for (const claim of facts.check.claims) {
+    for (const claim of facts.check.claims.filter((c) => !c.resolved)) {
       const body = host.current.querySelector<HTMLElement>(`[data-cell="${claim.row}-${facts.words}"] .rich-body`);
       const range = body && rangeOfText(body, claim.text);
       if (range) spans.push({ claim, range });
@@ -892,6 +906,7 @@ function DocTable({ facts, media, grid, metas, widths, heights, startResize, sta
       <MoveMark moving={moving} />
       {facts && factPop && createPortal(
         <FactCard claim={factPop.claim} targets={facts.check.targets} open={facts.open} x={factPop.x} y={factPop.y}
+          onResolve={() => { facts.resolve(factPop.claim, true); setFactPop(null); }}
           onEnter={() => setFactPop((p) => (p ? { ...p, pinned: true } : p))} onClose={() => setFactPop(null)} />,
         document.body,
       )}
