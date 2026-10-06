@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons";
 import RichText from "./RichText";
+import FlagButton from "./FlagButton";
+import type { FlagInput } from "@/lib/flags";
 import SubjectHistory from "./SubjectHistory";
 import { EXTRACT_VERSION } from "@/lib/offline";
 import SubjectContacts from "./SubjectContacts";
@@ -700,7 +702,7 @@ export default function SubjectPage(props: Props) {
       onBoard((current) => {
         const held = current?.[box.id];
         const base = held && held.kind === "box" ? held : box;
-        const next = put(current, { ...base, factCheck: { at: Date.now(), claims: result.claims, targets }, factView: true, at: Date.now() });
+        const next = put(current, { ...base, factCheck: { at: Date.now(), claims: result.claims, targets, model: ai.model, subject: note.name }, factView: true, at: Date.now() });
         return putFactNotes(next, box.id, omissionsHtml(result, targets), newItemId("box"));
       });
     },
@@ -708,6 +710,9 @@ export default function SubjectPage(props: Props) {
       if (target.kind === "card") return props.onOpenArticle(target.link, target.title, quote);
       goTo({ id: target.id, n: -1, level: 1, text: "" });
     },
+    subjectName: note.name,
+    allCards,
+    aiModel: ai.model ?? (ai.provider === "anthropic" ? "claude-opus-5-5" : "gpt-5-mini"),
     aiSearch: (async (turns, query) => {
       if (!hasAiKey) throw new Error(`Add your ${PROVIDER_NAME[ai.provider]} key in Settings → API keys to search by meaning.`);
       const headers = new Headers(keyHeaders());
@@ -1068,6 +1073,10 @@ type Shared = {
   factCheck: (box: BoxItem) => Promise<void>;
   /** Open what a fact-check cited: the story at its passage, or the note or transcript on the page. */
   openSource: (target: SourceTarget, quote: string) => void;
+  /** For flagging AI results: which subject, and which model produced them. */
+  subjectName: string;
+  aiModel: string;
+  allCards: Card[];
   /** Search a transcript by meaning, with the same AI key and model as insights. */
   aiSearch: AiSearch;
 };
@@ -1149,6 +1158,7 @@ function StoryCard({
         {own.map((insight) => (
           <div key={insight.id} className="subject-inline-insight">
             <span className="ai-tag">✦ {INSIGHT_LABEL[insight.type]}</span> {insight.text}
+            <FlagButton make={() => insightFlag(insight, shared)} />
             <button className="insight-dismiss" aria-label="Dismiss" title="Dismiss"
               onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.dismissInsight(insight)}>×</button>
           </div>
@@ -1164,6 +1174,20 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
     <div className={`subject-box${box.table ? " table-box" : ""}${box.label ? " label-box" : ""}${!box.label && !box.drawing && !box.table && !box.transcript && box.image === undefined && box.caption === undefined ? " text-box" : ""}`}>
       <div className="subject-box-head" onPointerDown={dragHandle}>
         <span className="subject-box-grip" aria-hidden="true">⋮⋮</span>
+        {box.notesFor?.endsWith("#facts") && (
+          <FlagButton className="box-flag" make={() => {
+            const script = shared.boxes.find((b) => `${b.id}#facts` === box.notesFor);
+            const rows = script ? scriptRows(script.table) : [];
+            return {
+              kind: "omissions",
+              subject: shared.subjectName,
+              model: shared.aiModel,
+              output: textOf(box.html),
+              context: [{ label: "Script", text: rows.map((r) => r.text).join("\n").slice(0, 6000) }],
+              links: [...box.html.matchAll(/<a href="([^"]+)">([^<]*)<\/a>/g)].map((m) => ({ title: m[2] || m[1], url: m[1] })),
+            };
+          }} />
+        )}
         {box.label && (
           <span className="label-style-wrap" onPointerDown={(e) => e.stopPropagation()}>
             <button className="label-color-btn" style={{ background: labelColorOf(box) }} aria-label="Section colour"
@@ -1209,7 +1233,8 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
           onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
         />
       ) : box.transcript ? (
-        <TranscriptBox box={box} onChange={(change) => shared.updateBox(box, change)} onComment={(html) => shared.noteTranscript(box, html)} aiSearch={shared.aiSearch} />
+        <TranscriptBox box={box} onChange={(change) => shared.updateBox(box, change)} onComment={(html) => shared.noteTranscript(box, html)} aiSearch={shared.aiSearch}
+          flagWith={{ subject: shared.subjectName, model: shared.aiModel }} />
       ) : box.table ? (
         <TableBox box={box} onChange={(change) => shared.updateBox(box, change)} media={{ dropImage: shared.dropImage, resolveEmbed: shared.resolveEmbed, replaceEmbed: shared.replaceEmbed }}
           facts={{ run: () => shared.factCheck(box), open: shared.openSource }} />
@@ -1226,6 +1251,19 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
   );
 }
 
+/** An insight as a flag: what it said, and the stories it drew on. */
+function insightFlag(insight: InsightItem, shared: Shared): FlagInput {
+  const drawn = insight.refs.map((ref) => shared.allCards.find((card) => card.id === ref)).filter((c): c is Card => !!c);
+  return {
+    kind: "insight",
+    subject: shared.subjectName,
+    model: shared.aiModel,
+    output: insight.text,
+    context: [{ label: "Type", text: INSIGHT_LABEL[insight.type] }],
+    links: drawn.map((c) => ({ title: c.source ? `${c.source}: ${c.title}` : c.title, url: c.link })),
+  };
+}
+
 function InsightCard({ insight, cards, dragHandle, shared }: { insight: InsightItem; cards: Card[]; dragHandle?: (e: React.PointerEvent) => void; shared: Shared }) {
   const titles = insight.refs
     .map((ref) => cards.find((card) => card.id === ref)?.title)
@@ -1233,6 +1271,7 @@ function InsightCard({ insight, cards, dragHandle, shared }: { insight: InsightI
   return (
     <div className="subject-insight" onPointerDown={dragHandle}>
       <span className="ai-tag">✦ {INSIGHT_LABEL[insight.type]}</span>
+      <FlagButton make={() => insightFlag(insight, shared)} />
       <button className="insight-dismiss" aria-label="Dismiss" title="Dismiss"
               onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.dismissInsight(insight)}>×</button>
       <p>{insight.text}</p>
@@ -1252,6 +1291,12 @@ function SuggestionCard({ suggestion, shared, dragHandle }: { suggestion: Sugges
       <div className="subject-suggest-head">
         <span className="ai-tag">✦ Suggested reading</span>
         <div className="subject-suggest-decide" onPointerDown={(e) => e.stopPropagation()}>
+          <FlagButton make={() => ({
+            kind: "reading", subject: shared.subjectName, model: shared.aiModel,
+            output: suggestion.why,
+            context: [{ label: "Suggested story", text: suggestion.title }],
+            links: [{ title: suggestion.source ? `${suggestion.source}: ${suggestion.title}` : suggestion.title, url: suggestion.link }],
+          })} />
           <button className="decide accept" aria-label="Add to subject" title="Add to subject"
             onClick={() => shared.decide(suggestion, "accepted")}>
             {Icon.check}
@@ -1395,6 +1440,7 @@ function DocumentView(
             <div key={insight.id} className="subject-insight-row">
               <span className="ai-tag">{INSIGHT_LABEL[insight.type]}</span>
               <p>{insight.text}</p>
+              <FlagButton make={() => insightFlag(insight, shared)} />
               <button className="insight-dismiss" aria-label="Dismiss" title="Dismiss"
               onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.dismissInsight(insight)}>×</button>
             </div>
