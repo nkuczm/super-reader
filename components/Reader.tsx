@@ -3,6 +3,7 @@
 import { STORAGE_FULL_EVENT } from "@/lib/subjects";
 import { DEFAULT_ANTHROPIC_MODEL, DEFAULT_QUICK_MODEL } from "@/lib/models";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Article, Attachment, DiscoverResult } from "@/lib/types";
 import {
   cleanSharedPrefs,
@@ -1391,15 +1392,29 @@ export default function Reader() {
     window.addEventListener(STORAGE_FULL_EVENT, on);
     return () => window.removeEventListener(STORAGE_FULL_EVENT, on);
   }, []);
-  const fullWarning = storageFull && (
-    <div className="storage-full" role="alert">
-      This browser has run out of room for your subjects, so new changes are not being kept on this device.
-      {auth.account && auth.status !== "error" && auth.status !== "offline"
-        ? " They are being saved to your account — keep this tab open until it says saved."
-        : " They are not saved anywhere yet: keep this tab open, and sign in or reconnect so they can be saved to your account."}
-      {" "}Removing large pictures frees room.
-    </div>
-  );
+  // Put in <body>, not where it is written: inside the sidebar, which slides
+  // with a transform on a phone, "fixed" meant fixed to the sidebar, and the
+  // banner was pushed off the left of the screen and under the notch.
+  const [fullHidden, setFullHidden] = useState(false);
+  const fullWarning =
+    storageFull &&
+    !fullHidden &&
+    typeof document !== "undefined" &&
+    createPortal(
+      <div className="storage-full" role="alert">
+        <span>
+          This browser is out of room, so new changes to your subjects are not being kept on this device.
+          {auth.account && auth.status !== "error" && auth.status !== "offline"
+            ? " They are being saved to your account — keep this tab open until it says saved."
+            : " They are not saved anywhere yet: keep this tab open, and sign in or reconnect so they can be saved to your account."}
+          {" "}Removing large pictures frees room.
+        </span>
+        <button className="storage-full-close" aria-label="Hide this warning" onClick={() => setFullHidden(true)}>
+          {Icon.close}
+        </button>
+      </div>,
+      document.body,
+    );
   const accountStrip = auth.enabled && (
     <>
     {<AccountStrip
