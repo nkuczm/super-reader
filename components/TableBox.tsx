@@ -10,6 +10,8 @@ import {
   type CellMetas, type Grid,
 } from "@/lib/sheet";
 import RichText from "./RichText";
+import FlagButton from "./FlagButton";
+import type { FlagInput } from "@/lib/flags";
 import { safeFactCheck, scriptColumns, sourceLabel, type FactCheck, type FactClaim, type SourceTarget } from "@/lib/factcheck";
 
 /* ---------- a script's fact-check, painted over its words ---------- */
@@ -568,8 +570,9 @@ function MoveMark({ moving }: { moving: Inner["moving"] }) {
 const span = (list: number[], from: number, n: number) => list.slice(from, from + n).reduce((a, b) => a + b, 0);
 
 /** What the check found for one span of the script, and where it found it. */
-function FactCard({ claim, targets, open, x, y, onEnter, onClose, onResolve }: {
+function FactCard({ claim, targets, open, x, y, onEnter, onClose, onResolve, flag }: {
   onResolve: () => void;
+  flag: () => FlagInput;
   claim: FactClaim;
   targets: Record<string, SourceTarget>;
   open: TableFacts["open"];
@@ -586,6 +589,7 @@ function FactCard({ claim, targets, open, x, y, onEnter, onClose, onResolve }: {
       <div className="fc-pop-head">
         <span className={`fc-dot ${claim.status}`} />
         <b>{FACT_WORDS[claim.status]}</b>
+        <FlagButton make={flag} className="fc-pop-flag" />
         <button className="fc-pop-resolve" aria-label="Resolve" title="Resolve — dealt with, stop highlighting it" onClick={onResolve}>✓</button>
         <button className="fc-pop-x" aria-label="Close" onClick={onClose}>×</button>
       </div>
@@ -907,6 +911,29 @@ function DocTable({ facts, media, grid, metas, widths, heights, startResize, sta
       {facts && factPop && createPortal(
         <FactCard claim={factPop.claim} targets={facts.check.targets} open={facts.open} x={factPop.x} y={factPop.y}
           onResolve={() => { facts.resolve(factPop.claim, true); setFactPop(null); }}
+          flag={() => {
+            const c = factPop.claim;
+            const cell = (r: number, col: number | null) => (col === null || !grid[r] ? "" : textOf(grid[r][col] ?? "").trim());
+            const cols = scriptColumns(grid);
+            return {
+              kind: "fact-check" as const,
+              subject: facts.check.subject,
+              model: facts.check.model,
+              output: `${FACT_WORDS[c.status]}: ${c.why}`,
+              context: [
+                { label: "Highlighted", text: c.text },
+                { label: "Script line", text: cell(c.row, cols.words) },
+                ...(cell(c.row, cols.visuals) ? [{ label: "Visual", text: cell(c.row, cols.visuals) }] : []),
+                ...(cell(c.row - 1, cols.words) ? [{ label: "Line before", text: cell(c.row - 1, cols.words) }] : []),
+                ...(cell(c.row + 1, cols.words) ? [{ label: "Line after", text: cell(c.row + 1, cols.words) }] : []),
+                ...c.sources.map((src) => ({ label: `Source — ${sourceLabel(src.ref, facts.check.targets)}`, text: src.quote })),
+              ],
+              links: c.sources.map((src) => {
+                const t = facts.check.targets[src.ref] ?? facts.check.targets[src.ref.split("#")[0]];
+                return { title: sourceLabel(src.ref, facts.check.targets), ...(t?.kind === "card" ? { url: t.link } : {}) };
+              }),
+            };
+          }}
           onEnter={() => setFactPop((p) => (p ? { ...p, pinned: true } : p))} onClose={() => setFactPop(null)} />,
         document.body,
       )}

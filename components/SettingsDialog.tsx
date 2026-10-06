@@ -7,6 +7,8 @@ import { useEffect, useState } from "react";
 import { costAt, MODEL_CHOICES, monthlyUsage, TYPICAL_RUN } from "@/lib/models";
 import { formatDollars, loadSpend, type AiProvider } from "@/lib/spend";
 import { encodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
+import { FLAGS_EVENT, loadFlags } from "@/lib/flags";
+import FlagsDialog from "./FlagsDialog";
 import type { Settings, TeamFeed, ViewMode } from "@/lib/store";
 
 const VIEWS: { id: ViewMode; name: string; blurb: string }[] = [
@@ -121,9 +123,18 @@ export default function SettingsDialog({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+  const [flagsOpen, setFlagsOpen] = useState(false);
+  const [flagCount, setFlagCount] = useState(0);
+  useEffect(() => {
+    const count = () => setFlagCount(loadFlags().length);
+    count();
+    window.addEventListener(FLAGS_EVENT, count);
+    return () => window.removeEventListener(FLAGS_EVENT, count);
+  }, []);
 
   return (
-    <div className="overlay" onMouseDown={onClose}>
+    <div className="overlay" onMouseDown={() => !flagsOpen && onClose()}>
+      {flagsOpen && <FlagsDialog onClose={() => setFlagsOpen(false)} />}
       <div
         className="dialog"
         role="dialog"
@@ -368,6 +379,9 @@ export default function SettingsDialog({
             </button>
             <button className="btn ghost small" onClick={onOpenSpend}>
               AI spending
+            </button>
+            <button className="btn ghost small" onClick={() => setFlagsOpen(true)}>
+              Flagged AI results{flagCount ? ` (${flagCount})` : ""}
             </button>
             <a className="btn ghost small" href="/extension" target="_blank" rel="noopener">
               Chrome extension

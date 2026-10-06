@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { DEFAULT_DRAWING_HEIGHT, DRAWING_WIDTH, escapeHtml, newItemId, safeImage, safeStrokes, type BoxItem, type Stroke } from "@/lib/subjects";
 import { EMBED_TYPE } from "./RichText";
+import FlagButton from "./FlagButton";
 import { parseTranscript, safeTranscript, speakersOf, titleFromFile, type TMark, type TPoint, type Transcript } from "@/lib/transcript";
 
 const COLORS = ["#111111", "#2563eb", "#dc2626", "#16a34a", "#f59e0b"];
@@ -331,7 +332,9 @@ export type AiSearch = (turns: { s?: string; t?: string; x: string }[], query: s
 /** A passage longer than this opens in the transcript rather than in its card. */
 const LONG_QUOTE = 1500;
 
-export function TranscriptBox({ box, onChange, onComment, aiSearch }: {
+export function TranscriptBox({ box, onChange, onComment, aiSearch, flagWith }: {
+  /** Who and what to name when an AI search result is flagged. */
+  flagWith?: { subject: string; model: string };
   /** Search by meaning; absent where no AI is set up. */
   aiSearch?: AiSearch;
   box: BoxItem;
@@ -677,7 +680,20 @@ export function TranscriptBox({ box, onChange, onComment, aiSearch }: {
                   ) : (
                     <p className="transcript-result-text">{firstPara}{more ? " …" : ""}</p>
                   )}
-                  <p className="transcript-result-why">{m.why}</p>
+                  <p className="transcript-result-why">
+                    {m.why}
+                    <FlagButton make={() => ({
+                      kind: "transcript-search",
+                      subject: flagWith?.subject,
+                      model: flagWith?.model,
+                      output: m.why,
+                      context: [
+                        { label: "Search", text: ai.query },
+                        { label: "Transcript", text: title || `Transcript ${tab + 1}` },
+                        { label: "Passage", text: run.map((t) => `${t.s ? `${t.s}${t.t ? ` (${t.t})` : ""}: ` : ""}${t.x}`).join("\n") },
+                      ],
+                    })} />
+                  </p>
                   <div className="transcript-result-tools">
                     {more && whole <= LONG_QUOTE && (
                       <button className="link-btn" onClick={() => setOpened((o) => { const n = new Set(o); if (n.has(i)) n.delete(i); else n.add(i); return n; })}>

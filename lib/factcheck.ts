@@ -38,7 +38,7 @@ export type SourceTarget =
   | { kind: "transcript"; id: string; title: string };
 
 /** A finished check, kept on the script's table. */
-export type FactCheck = { at: number; claims: FactClaim[]; targets: Record<string, SourceTarget> };
+export type FactCheck = { at: number; claims: FactClaim[]; targets: Record<string, SourceTarget>; model?: string; subject?: string };
 
 /** Which column holds what: by the header row's words, else by position. */
 export function scriptColumns(table: unknown): { words: number; visuals: number | null; notes: number | null; header: boolean } {
@@ -180,7 +180,11 @@ export function safeFactCheck(input: unknown): FactCheck | null {
     const kind = (t as SourceTarget).kind;
     if (kind === "card" || kind === "note" || kind === "transcript") targets[k.slice(0, 20)] = t as SourceTarget;
   }
-  return { at: typeof v.at === "number" ? v.at : 0, claims, targets };
+  return {
+    at: typeof v.at === "number" ? v.at : 0, claims, targets,
+    ...(typeof v.model === "string" ? { model: v.model.slice(0, 80) } : {}),
+    ...(typeof v.subject === "string" ? { subject: v.subject.slice(0, 200) } : {}),
+  };
 }
 
 /* ---------- quotations from the people interviewed ---------- */
