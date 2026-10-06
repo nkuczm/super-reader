@@ -254,6 +254,15 @@ function withPastedStories(list: Loaded[], manual: ManualStories, following: Rea
 const VIEW_KEY = "super-reader:view";
 const SIDEBAR_KEY = "super-reader:subject-sidebar-hidden";
 const READING_KEY = "super-reader:reading";
+/** What went wrong signing in, in words, from the reason the callback gave. */
+function signInReason(reason: string | null): string {
+  if (!reason) return "Sign-in did not complete. Please try again.";
+  if (reason === "expired") return "The sign-in took too long or started in another tab or browser. Please try again from this page.";
+  if (reason === "access_denied") return "Google didn't grant access. If you were told the app isn't available to you, your Google account needs adding as a test user in the Google Cloud console.";
+  if (reason === "unavailable") return "Sign-in isn't set up on this address of the app.";
+  return `Sign-in did not complete (${reason}). Please try again.`;
+}
+
 const GRANDFATHER_KEY = "super-reader:subjects-before-signin";
 const SIGNIN_ERA_KEY = "super-reader:signin-era";
 const SUBJECT_USED_KEY = "super-reader:subject-used:v1";
@@ -1133,17 +1142,29 @@ export default function Reader() {
   );
 
   // Back from Google: tidy the address bar, and say so if it went wrong.
-  const [signInFailed, setSignInFailed] = useState(false);
+  const [signInFailed, setSignInFailed] = useState<string | false>(false);
+  const [cameBack, setCameBack] = useState(false);
   useEffect(() => {
     const url = new URL(window.location.href);
     if (!url.searchParams.has("signin") && !url.searchParams.has("signedin")) return;
-    if (url.searchParams.get("signin") === "failed") setSignInFailed(true);
-    if (url.searchParams.has("signedin")) setSelection({ type: "subjects" });
+    if (url.searchParams.get("signin") === "failed") setSignInFailed(signInReason(url.searchParams.get("reason")));
+    if (url.searchParams.get("signin") === "unavailable") setSignInFailed("Sign-in isn't set up on this address of the app.");
+    if (url.searchParams.has("signedin")) {
+      setSelection({ type: "subjects" });
+      setCameBack(true);
+    }
     url.searchParams.delete("signin");
     url.searchParams.delete("signedin");
     url.searchParams.delete("reason");
     window.history.replaceState(null, "", url.toString());
   }, []);
+  // Google said yes and the server started a session, yet this page has none:
+  // the cookie never reached this browser (blocked, or the sign-in finished in another one).
+  useEffect(() => {
+    if (cameBack && auth.checked && auth.enabled && !auth.account) {
+      setSignInFailed("Google signed you in, but this browser didn't keep the sign-in. If you opened Super Reader from your home screen, open it in your browser instead and sign in there; otherwise check that cookies aren't blocked for this site.");
+    }
+  }, [cameBack, auth.checked, auth.enabled, auth.account]);
 
   const stopSync = useCallback(() => {
     saveSyncCode(null);

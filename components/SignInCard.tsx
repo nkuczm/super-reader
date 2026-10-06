@@ -16,7 +16,7 @@ export function signInHref() {
 }
 
 /** What stands in front of Subjects for someone not signed in. */
-export default function SignInCard({ onOpenMenu, failed }: { onOpenMenu: () => void; failed?: boolean }) {
+export default function SignInCard({ onOpenMenu, failed }: { onOpenMenu: () => void; failed?: string | false }) {
   return (
     <section className="signin-page">
       <button className="icon-btn menu-btn signin-menu" onClick={onOpenMenu} aria-label="Open menu">
@@ -32,7 +32,7 @@ export default function SignInCard({ onOpenMenu, failed }: { onOpenMenu: () => v
           Signing in also ties this device&apos;s feeds and sync code to your account. Feeds, saved stories and reading
           work without signing in, as before.
         </p>
-        {failed && <p className="signin-error">Sign-in did not complete. Please try again.</p>}
+        {failed && <p className="signin-error">{failed}</p>}
         <a className="signin-btn" href={signInHref()}>
           {GOOGLE} Sign in with Google
         </a>
