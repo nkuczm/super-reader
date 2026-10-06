@@ -105,6 +105,13 @@ export function ensureAccountSchema() {
         )
       `;
       await sql`
+        CREATE TABLE IF NOT EXISTS account_prefs (
+          account_id  TEXT PRIMARY KEY,
+          payload     TEXT NOT NULL,
+          updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `;
+      await sql`
         CREATE TABLE IF NOT EXISTS subject_backups (
           account_id  TEXT NOT NULL,
           subject_id  TEXT NOT NULL,
@@ -613,6 +620,67 @@ export async function readVersion(accountId: string, id: string): Promise<Subjec
   if (!rows[0]) return null;
   const payload = String(rows[0].payload);
   return splitImages(openJson<SubjectsDoc>(payload.startsWith("slim:") ? payload.slice(5) : payload)).doc;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Settings and API keys, following the account                              */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Every setting, and the AI and data API keys, kept with the account so a
+ * new device signs in to find them. Encrypted at rest like the subjects.
+ * Each half carries when it was last changed; the more recent wins.
+ */
+export type AccountPrefs = {
+  settings?: Record<string, unknown>;
+  settingsAt?: number;
+  keys?: Record<string, string>;
+  keysAt?: number;
+  /** The passphrase-locked key vault (ciphertext only), kept with the keys. */
+  vault?: unknown;
+};
+
+export async function readAccountPrefs(accountId: string): Promise<AccountPrefs | null> {
+  await ensureAccountSchema();
+  const rows = await getSql()`SELECT payload FROM account_prefs WHERE account_id = ${accountId}`;
+  return rows[0] ? openJson<AccountPrefs>(rows[0].payload) : null;
+}
+
+const cleanKeys = (keys: unknown): Record<string, string> =>
+  keys && typeof keys === "object" && !Array.isArray(keys)
+    ? Object.fromEntries(Object.entries(keys as Record<string, unknown>).filter(([k, v]) => /^[a-z0-9_-]{1,40}$/i.test(k) && typeof v === "string" && v.length < 400).slice(0, 40)) as Record<string, string>
+    : {};
+
+const vaultOk = (v: unknown) => !!v && typeof v === "object" && JSON.stringify(v).length < 20_000;
+
+/** Merge a device's copy in: each half kept from whichever side changed it last. Returns what is now held. */
+export async function writeAccountPrefs(accountId: string, incoming: AccountPrefs): Promise<AccountPrefs> {
+  const held = (await readAccountPrefs(accountId)) ?? {};
+  const next: AccountPrefs = { ...held };
+  const inSettings = incoming.settings && typeof incoming.settings === "object" && !Array.isArray(incoming.settings);
+  if (inSettings && (held.settings === undefined || (incoming.settingsAt ?? 0) > (held.settingsAt ?? 0))) {
+    next.settings = incoming.settings;
+    next.settingsAt = incoming.settingsAt ?? 0;
+  }
+  if (incoming.keys) {
+    const keys = cleanKeys(incoming.keys);
+    if (held.keys === undefined || (incoming.keysAt ?? 0) > (held.keysAt ?? 0)) {
+      next.keys = keys;
+      next.keysAt = incoming.keysAt ?? 0;
+      if (vaultOk(incoming.vault)) next.vault = incoming.vault;
+    } else if (!(incoming.keysAt ?? 0) && !(held.keysAt ?? 0)) {
+      // Neither side has ever changed its keys here: a key either holds is better than none.
+      next.keys = { ...keys, ...held.keys };
+    }
+  }
+  // A vault is never dropped for want of one: a device without it keeps the held one.
+  if (next.vault === undefined && vaultOk(incoming.vault)) next.vault = incoming.vault;
+  if (JSON.stringify(next) === JSON.stringify(held)) return held;
+  await getSql()`
+    INSERT INTO account_prefs (account_id, payload, updated_at) VALUES (${accountId}, ${sealJson(next)}, now())
+    ON CONFLICT (account_id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = now()
+  `;
+  return next;
 }
 
 /* ------------------------------------------------------------------------ */

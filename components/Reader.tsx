@@ -279,6 +279,30 @@ function onFocusEvery(run: () => void, lastRun: { current: number }) {
   };
 }
 
+const SETTINGS_AT = "super-reader:settings-at:v1";
+const KEYS_AT = "super-reader:keys-at:v1";
+/**
+ * When this device last changed its settings or keys. A device from before
+ * these were stamped counts a real choice (anything but the defaults) as 1 —
+ * older than any change made since, newer than another device's defaults.
+ */
+function readStamp(key: string, chosen: () => boolean): number {
+  try {
+    const held = Number(localStorage.getItem(key));
+    if (held > 0) return held;
+  } catch {
+    /* fall through */
+  }
+  return chosen() ? 1 : 0;
+}
+function saveStamp(key: string, at: number) {
+  try {
+    localStorage.setItem(key, String(at));
+  } catch {
+    /* kept for this session */
+  }
+}
+
 const GRANDFATHER_KEY = "super-reader:subjects-before-signin";
 const SIGNIN_ERA_KEY = "super-reader:signin-era";
 const SUBJECT_USED_KEY = "super-reader:subject-used:v1";
@@ -2271,8 +2295,80 @@ export default function Reader() {
    */
   const keyHeaders = useMemo(() => keyHeadersFrom(apiKeys), [apiKeys]);
 
+  /*
+   * Settings and API keys follow the Google account: a new device, or one
+   * whose browser data was cleared, gets them back on signing in. Each half
+   * is stamped when changed here; the more recent copy wins.
+   */
+  const settingsAt = useRef(0);
+  const keysAt = useRef(0);
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const vaultRef = useRef<unknown>(null);
+  vaultRef.current = vault;
+  const prefsSynced = useRef(0);
+  useEffect(() => {
+    settingsAt.current = readStamp(SETTINGS_AT, () => JSON.stringify(loadSettings()) !== JSON.stringify(DEFAULT_SETTINGS));
+    keysAt.current = readStamp(KEYS_AT, () => Object.keys(loadUnlockedKeys()).length > 0);
+  }, []);
+  const syncAccountPrefs = useCallback(async () => {
+    prefsSynced.current = Date.now();
+    try {
+      const res = await fetch("/api/account/prefs", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ settings: settingsRef.current, settingsAt: settingsAt.current, keys: apiKeysRef.current, keysAt: keysAt.current, vault: vaultRef.current ?? undefined }),
+      });
+      if (!res.ok) return;
+      const { prefs } = (await res.json()) as { prefs?: { settings?: Settings; settingsAt?: number; keys?: Record<string, string>; keysAt?: number; vault?: unknown } };
+      if (!prefs) return;
+      // The vault comes back to a device that lost it, or takes a newer one.
+      if (prefs.vault && (!vaultRef.current || ((prefs.keysAt ?? 0) > keysAt.current && JSON.stringify(prefs.vault) !== JSON.stringify(vaultRef.current)))) {
+        vaultRef.current = prefs.vault;
+        setVault(prefs.vault);
+        saveVault(prefs.vault);
+      }
+      const newer = (theirs: number | undefined, mine: number, differ: boolean) => differ && ((theirs ?? 0) > mine || mine === 0);
+      if (prefs.settings && newer(prefs.settingsAt, settingsAt.current, JSON.stringify(prefs.settings) !== JSON.stringify(settingsRef.current))) {
+        const next = { ...DEFAULT_SETTINGS, ...prefs.settings };
+        setSettings(next);
+        saveSettings(next);
+        settingsAt.current = prefs.settingsAt ?? 0;
+        saveStamp(SETTINGS_AT, settingsAt.current);
+      }
+      if (prefs.keys && newer(prefs.keysAt, keysAt.current, JSON.stringify(prefs.keys) !== JSON.stringify(apiKeysRef.current))) {
+        setApiKeys(prefs.keys);
+        saveUnlockedKeys(prefs.keys);
+        keysAt.current = prefs.keysAt ?? 0;
+        saveStamp(KEYS_AT, keysAt.current);
+      }
+    } catch {
+      /* tried again on the next change or visit */
+    }
+  }, []);
+  // On signing in, after a change here, and on coming back to the tab (every few minutes at most).
+  useEffect(() => {
+    if (!ready || !auth.account) return;
+    void syncAccountPrefs();
+    const onFocus = () => Date.now() - prefsSynced.current > FOCUS_CHECK_MS && void syncAccountPrefs();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [ready, auth.account, syncAccountPrefs]);
+  const [prefsBump, setPrefsBump] = useState(0);
+  useEffect(() => {
+    if (!prefsBump || !auth.account) return;
+    const timer = setTimeout(() => void syncAccountPrefs(), 1000);
+    return () => clearTimeout(timer);
+  }, [prefsBump, auth.account, syncAccountPrefs]);
+  function stampPart(key: string, ref: { current: number }) {
+    ref.current = Math.max(Date.now(), ref.current + 1);
+    saveStamp(key, ref.current);
+    setPrefsBump((n) => n + 1);
+  }
+
   /** Keys changed: keep the device copy, the vault, and the feeds in step. */
   function updateKeys(next: { vault: unknown | null; keys: Record<string, string> }) {
+    stampPart(KEYS_AT, keysAt);
     setVault(next.vault);
     setApiKeys(next.keys);
     saveVault(next.vault);
@@ -2294,6 +2390,7 @@ export default function Reader() {
           anthropicQuickModel: prefsRef.current.anthropicQuickModel, openaiQuickModel: prefsRef.current.openaiQuickModel };
     setSettings(settled);
     saveSettings(settled);
+    stampPart(SETTINGS_AT, settingsAt);
     if (madeChoice) {
       const stamped = sharedPrefsOf(next, Math.max(Date.now(), prefsRef.current.at + 1));
       prefsRef.current = stamped;

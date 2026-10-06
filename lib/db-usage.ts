@@ -35,6 +35,7 @@ export const CATEGORY_NAME: Record<string, string> = {
   spend: "AI spending ledger",
   auth: "Sign-in & sessions",
   pulse: "News index (Pulse)",
+  settings: "Settings & API keys",
   usage: "This usage page",
 };
 
