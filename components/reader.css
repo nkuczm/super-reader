@@ -2572,3 +2572,4 @@
 .tbl-tab-x { font-weight: 400; color: var(--text-dim); padding: 0 2px; border-radius: 4px; }
 .tbl-tab-x:hover { color: #dc2626; }
 .tbl-tab-name { font: inherit; font-size: 12.5px; font-weight: 600; border: 1px solid var(--accent, #2563eb); border-radius: 999px; padding: 3px 10px; width: 140px; background: var(--bg); color: var(--text); outline: none; }
+.subject-image:focus { outline: none; } .subject-image:focus img { outline: 2px solid var(--accent, #2563eb); outline-offset: 2px; }
