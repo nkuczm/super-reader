@@ -384,6 +384,7 @@ export default function Reader() {
   const [boards, setBoards] = useState<Boards>({});
   /** This device had subjects before sign-in was required (see useAccount). */
   const [grandfathered, setGrandfathered] = useState(false);
+  const [writingInAccount, setWritingInAccount] = useState(false);
   /** The sidebar tucked away while working in a subject (desktop; remembered). */
   const [sidebarHidden, setSidebarHidden] = useState(false);
   /** Signed in: writing then syncs with the account, not the sync code. */
@@ -820,6 +821,8 @@ export default function Reader() {
       pulled.current = true;
       if (!res.ok) throw new Error(data.error ?? "Could not fetch synced feeds");
 
+      // Signed in on another device: the subjects moved to the account, and this copy is no longer kept up to date.
+      if (data.inAccount) setWritingInAccount(true);
       const remote = data.payload ?? {};
       const theirs = Number(remote.updatedAt ?? 0);
       /*
@@ -1127,7 +1130,7 @@ export default function Reader() {
   const auth = useAccount({ ready, syncCode, writing, applyWriting, adoptCode });
   signedInRef.current = Boolean(auth.account);
   /** Subjects need a Google sign-in, wherever sign-in is set up — except here before it was. */
-  const subjectsLocked = auth.enabled && auth.checked && !auth.account && !grandfathered;
+  const subjectsLocked = auth.enabled && auth.checked && !auth.account && (!grandfathered || writingInAccount);
 
   const accountStrip = auth.enabled && (
     <AccountStrip
@@ -3586,7 +3589,7 @@ export default function Reader() {
             onClose={() => setReading(null)}
           />
         ) : subjectsLocked && (selection.type === "subjects" || (openNote && settings.subjects)) ? (
-          <SignInCard onOpenMenu={() => setMenuOpen(true)} failed={signInFailed} />
+          <SignInCard onOpenMenu={() => setMenuOpen(true)} failed={signInFailed} movedToAccount={writingInAccount} />
         ) : selection.type === "subjects" ? (
           <SubjectsHome
             accountStrip={accountStrip}

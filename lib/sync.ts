@@ -79,6 +79,8 @@ export type SyncPayload = {
 export type SyncRecord = {
   payload: SyncPayload;
   updatedAt: string;
+  /** The code is tied to a Google account: subjects live there, and only a signed-in device sees them. */
+  inAccount?: boolean;
 };
 
 /** Keeps one device from filling the table with an oversized document. */
@@ -105,12 +107,12 @@ export async function readSync(code: string): Promise<SyncRecord | null> {
   `;
   if (rows.length === 0) return null;
   const payload = rows[0].payload as SyncPayload;
-  if (payload.notes?.length || payload.boards) {
-    if (await isLinkedCode(code)) withoutWriting(payload);
-  }
+  const inAccount = await isLinkedCode(code);
+  if (inAccount) withoutWriting(payload);
   return {
     payload,
     updatedAt: new Date(rows[0].updated_at).toISOString(),
+    ...(inAccount ? { inAccount: true } : {}),
   };
 }
 
