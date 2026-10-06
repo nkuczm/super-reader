@@ -64,12 +64,12 @@ function FeedHistory({ code, onRestore }: { code: string; onRestore: Props["onRe
 
   if (!versions) {
     return (
-      <>
+      <div className="feed-history">
         <button className="btn ghost small" onClick={load}>
           Earlier feed lists…
         </button>
         {error && <p className="error">{error}</p>}
-      </>
+      </div>
     );
   }
   return (

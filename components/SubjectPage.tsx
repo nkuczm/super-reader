@@ -994,8 +994,8 @@ export default function SubjectPage(props: Props) {
               onClick={() => setView("board")}>Whiteboard</button>
           </div>
           <button className="btn ghost small" disabled={!hasAiKey || allCards.length < 2 || run.state === "running"}
-            onClick={() => void synthesize()} title={insightsWhyNot ?? "Find connections and suggest reading now"}>
-            ✦ Insights
+            onClick={() => void synthesize()} title={insightsWhyNot ?? "Find connections and suggest reading now"} aria-label="Insights">
+            ✦ <span className="insights-label">Insights</span>
           </button>
           <button
             className={`btn ghost small subject-contacts-btn${contactsOpen ? " on" : ""}`}
