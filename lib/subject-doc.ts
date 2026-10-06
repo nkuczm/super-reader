@@ -66,7 +66,7 @@ export function subjectHtml(note: Note, board: Board | undefined, now = new Date
       const image = safeImage(box.image);
       if (image) parts.push(`<p><img src="${image}" alt="" style="max-width:100%"></p>${box.caption ? `<p><i>${escapeHtml(box.caption)}</i></p>` : ""}`);
       else if (box.transcript) parts.push(transcriptHtml(box.transcript, box.transcriptTabs));
-      else if (box.table) parts.push(tableHtml(box.table, box.tableMode, box.tableCells));
+      else if (box.table) parts.push(tableCardHtml(box));
       else if (box.drawing) parts.push("<p><i>[A drawing — open the subject in Super Reader to see it]</i></p>");
       else parts.push(unlinkQuotes(box.html, board));
     }
@@ -104,6 +104,15 @@ export function subjectSignature(note: Note, board: Board | undefined): string {
 }
 
 /** A table as its worked-out values, for the exported copy. */
+/** A table card, every tab of it, each under its name when there are several. */
+export function tableCardHtml(box: Pick<BoxItem, "table" | "tableMode" | "tableCells" | "tableName" | "tableTabs">): string {
+  const tabs = box.tableTabs ?? [];
+  if (!tabs.length) return tableHtml(box.table, box.tableMode, box.tableCells);
+  return [{ name: box.tableName || "Table 1", ...box }, ...tabs.map((t, i) => ({ ...t, name: t.name || `Table ${i + 2}` }))]
+    .map((t) => `<h4>${escapeHtml(t.name)}</h4>${tableHtml(t.table, t.tableMode, t.tableCells)}`)
+    .join("");
+}
+
 export function tableHtml(table: unknown, mode?: "doc" | "sheet", cells?: unknown): string {
   const grid = safeGrid(table);
   const metas = safeMetas(cells, grid.length, grid[0].length);

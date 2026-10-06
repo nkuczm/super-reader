@@ -20,7 +20,8 @@ type DomRange = globalThis.Range;
 
 /** What a script table needs to be fact-checked: a way to run the check, and to open a source. */
 export type TableFacts = {
-  run: () => Promise<void>;
+  /** Check one table (a card may hold several, as tabs); its result is written back with `write`. */
+  run: (sheet: BoxItem, write: (change: Change) => void) => Promise<void>;
   open: (target: SourceTarget, quote: string) => void;
 };
 
@@ -82,6 +83,9 @@ export const CELL_COLORS = ["#fde68a", "#fecaca", "#bbf7d0", "#bfdbfe", "#e9d5ff
 
 /** How wide a table draws, so the card holding it can be that wide. */
 export function tableWidth(box: BoxItem): number {
+  return Math.max(sheetWidth(box), ...(box.tableTabs ?? []).map((t) => sheetWidth({ ...box, ...t })));
+}
+function sheetWidth(box: BoxItem): number {
   const mode = box.tableMode ?? "sheet";
   const cols = safeGrid(box.table)[0].length;
   const widths = safeSizes(box.tableCols, cols, MIN_COL, MAX_COL).map((w) => w ?? DEFAULTS[mode].col);
@@ -202,14 +206,92 @@ export type CellMedia = {
   replaceEmbed?: (id: string, image: string) => void;
 };
 
-export function TableBox({ box, onChange: apply, media, facts }: { box: BoxItem; onChange: (next: Change) => void; media?: CellMedia; facts?: TableFacts }) {
+/** The fields that make one table: the card's own for the first tab, or a tab's. */
+const SHEET_FIELDS = ["table", "tableMode", "tableCols", "tableRows", "tableCells", "factCheck", "factView"] as const;
+
+/**
+ * A table card: one table, or several as named tabs along its top. The
+ * first tab is the card's own table, so a card from before tabs is simply
+ * a card with one; each further tab keeps its own table, sizes, colours and
+ * fact-check. Double-click a tab to rename it.
+ */
+export function TableBox({ box, onChange, media, facts }: { box: BoxItem; onChange: (next: Change) => void; media?: CellMedia; facts?: TableFacts }) {
+  const tabs = box.tableTabs ?? [];
+  const names = [box.tableName || "Table 1", ...tabs.map((t, i) => t.name || `Table ${i + 2}`)];
+  const [active, setActive] = useState(0);
+  const at = Math.min(active, names.length - 1);
+  const [naming, setNaming] = useState<number | null>(null);
+
+  // The table being shown, as a card of its own, and where its changes go.
+  const sheet: BoxItem = at === 0 ? box : { ...box, ...Object.fromEntries(SHEET_FIELDS.map((k) => [k, tabs[at - 1][k]])) };
+  const write = (change: Change) => {
+    if (at === 0) return onChange(change);
+    const picked = Object.fromEntries(Object.entries(change).filter(([k]) => (SHEET_FIELDS as readonly string[]).includes(k)));
+    onChange({ tableTabs: tabs.map((t, i) => (i === at - 1 ? { ...t, ...picked } : t)) });
+  };
+  const rename = (i: number, name: string) => {
+    const clean = name.trim().slice(0, 60);
+    if (i === 0) onChange({ tableName: clean || undefined });
+    else onChange({ tableTabs: tabs.map((t, j) => (j === i - 1 ? { ...t, name: clean } : t)) });
+    setNaming(null);
+  };
+  const addTab = () => {
+    // A new tab starts as the same kind of table, with the same columns, empty.
+    const cols = safeGrid(sheet.table)[0].length;
+    const fresh = { name: `Table ${names.length + 1}`, tableMode: sheet.tableMode ?? "doc", table: [Array(cols).fill(""), Array(cols).fill(""), Array(cols).fill("")], tableCols: sheet.tableCols };
+    onChange({ tableTabs: [...tabs, fresh] });
+    setActive(names.length);
+    setNaming(names.length);
+  };
+  const removeTab = (i: number) => {
+    if (names.length < 2 || !window.confirm(`Delete the tab “${names[i]}” and its table?`)) return;
+    if (i === 0) {
+      // The second tab becomes the card's own table.
+      const [next, ...rest] = tabs;
+      onChange({ ...Object.fromEntries(SHEET_FIELDS.map((k) => [k, next[k]])), tableName: next.name, tableTabs: rest });
+    } else onChange({ tableTabs: tabs.filter((_, j) => j !== i - 1) });
+    setActive(Math.max(0, i - 1));
+  };
+
+  return (
+    <div className="tbl-card">
+      <div className="tbl-tabs" role="tablist" aria-label="Tables in this card" onPointerDown={(e) => e.stopPropagation()}>
+        {names.map((name, i) => (
+          naming === i ? (
+            <input key={i} className="tbl-tab-name" autoFocus defaultValue={name} aria-label="Tab name"
+              onBlur={(e) => rename(i, e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") rename(i, (e.target as HTMLInputElement).value);
+                if (e.key === "Escape") setNaming(null);
+              }} />
+          ) : (
+            <button key={i} role="tab" aria-selected={i === at} className={`tbl-tab${i === at ? " on" : ""}`}
+              title="Double-click to rename"
+              onClick={() => setActive(i)} onDoubleClick={() => setNaming(i)}>
+              {name}
+              {i === at && names.length > 1 && (
+                <span className="tbl-tab-x" role="button" aria-label={`Delete ${name}`} title="Delete this tab"
+                  onClick={(e) => { e.stopPropagation(); removeTab(i); }}>×</span>
+              )}
+            </button>
+          )
+        ))}
+        <button className="tbl-tab add" aria-label="Add a table tab" title="Add a table tab" onClick={addTab}>+</button>
+      </div>
+      <TableSheet key={at} box={sheet} onChange={write} media={media} facts={facts} />
+    </div>
+  );
+}
+
+function TableSheet({ box, onChange: apply, media, facts }: { box: BoxItem; onChange: (next: Change) => void; media?: CellMedia; facts?: TableFacts }) {
   const [checking, setChecking] = useState<{ state: "running" | "error"; message?: string } | null>(null);
   const check = safeFactCheck(box.factCheck);
   const runCheck = async () => {
     if (!facts || checking?.state === "running") return;
     setChecking({ state: "running" });
     try {
-      await facts.run();
+      await facts.run(box, apply);
       setChecking(null);
     } catch (error) {
       setChecking({ state: "error", message: error instanceof Error ? error.message : "The fact-check failed." });

@@ -10,7 +10,7 @@ import { EXTRACT_VERSION } from "@/lib/offline";
 import SubjectContacts from "./SubjectContacts";
 import { tableWidth } from "./TableBox";
 import { DrawingPad, ImageView, TableBox, TranscriptBox, shrinkImage, DRAWING_HEIGHT, type AiSearch } from "./SubjectMedia";
-import { tableHtml, transcriptHtml } from "@/lib/subject-doc";
+import { tableCardHtml, transcriptHtml } from "@/lib/subject-doc";
 import type { Writing } from "./useAccount";
 import type { Note, NoteEntry } from "@/lib/notes";
 import { omissionsHtml, putFactNotes, researchOf, scriptQuotes, scriptRows, type FactCheckResult, type SourceTarget } from "@/lib/factcheck";
@@ -559,7 +559,7 @@ export default function SubjectPage(props: Props) {
       if (bylineOf(card)) parts.push(`<p><i>${escapeHtml(bylineOf(card))}</i></p>`);
       parts.push(unlinkQuotes(composeCardDoc(card.note, card.quotes)));
     }
-    for (const box of boxes) parts.push(box.transcript ? transcriptHtml(box.transcript, box.transcriptTabs) : box.table ? tableHtml(box.table, box.tableMode, box.tableCells) : unlinkQuotes(box.html));
+    for (const box of boxes) parts.push(box.transcript ? transcriptHtml(box.transcript, box.transcriptTabs) : box.table ? tableCardHtml(box) : unlinkQuotes(box.html));
     if (insights.length > 0) {
       parts.push("<h3>Insights</h3><ul>");
       for (const insight of insights) parts.push(`<li><b>${INSIGHT_LABEL[insight.type]}:</b> ${escapeHtml(insight.text)}</li>`);
@@ -684,9 +684,10 @@ export default function SubjectPage(props: Props) {
         const held = current?.[id];
         return held && held.kind === "box" ? put(current, { ...held, image, at: Date.now() }) : current ?? {};
       }),
-    factCheck: async (box: BoxItem) => {
+    // `sheet` is the tab being checked (the card's own table unless another tab is open); `write` saves onto it.
+    factCheck: async (box: BoxItem, sheet: BoxItem = box, write?: (change: Partial<BoxItem>) => void) => {
       if (!hasAiKey) throw new Error(`Add your ${PROVIDER_NAME[ai.provider]} key in Settings → API keys to fact-check.`);
-      const rows = scriptRows(box.table);
+      const rows = scriptRows(sheet.table);
       if (!rows.length) throw new Error("Write some words in the script first.");
       const allBoxes = live(board).filter((item): item is BoxItem => item.kind === "box");
       const { sources, targets } = researchOf(allCards, allBoxes, box.id);
@@ -701,10 +702,16 @@ export default function SubjectPage(props: Props) {
       if (!res.ok) throw new Error(data.error ?? "The fact-check failed.");
       for (const usage of data.usages ?? []) shareSpend(loadSyncCode(), recordSpend({ ...usage, activity: "fact-check" }, note.name));
       const result = { claims: data.claims ?? [], omissions: data.omissions ?? [], web: data.web ?? [] };
+      const factCheck = { at: Date.now(), claims: result.claims, targets, model: ai.model, subject: note.name };
+      if (write) {
+        write({ factCheck, factView: true });
+        onBoard((current) => putFactNotes(current, box.id, omissionsHtml(result, targets), newItemId("box")));
+        return;
+      }
       onBoard((current) => {
         const held = current?.[box.id];
         const base = held && held.kind === "box" ? held : box;
-        const next = put(current, { ...base, factCheck: { at: Date.now(), claims: result.claims, targets, model: ai.model, subject: note.name }, factView: true, at: Date.now() });
+        const next = put(current, { ...base, factCheck, factView: true, at: Date.now() });
         return putFactNotes(next, box.id, omissionsHtml(result, targets), newItemId("box"));
       });
     },
@@ -1073,7 +1080,7 @@ type Shared = {
   /** A picture set into text, cropped: its box keeps the new picture. */
   replaceEmbed: (id: string, image: string) => void;
   /** Fact-check a script table against the subject's research; its colours and the omissions card follow. */
-  factCheck: (box: BoxItem) => Promise<void>;
+  factCheck: (box: BoxItem, sheet?: BoxItem, write?: (change: Partial<BoxItem>) => void) => Promise<void>;
   /** Open what a fact-check cited: the story at its passage, or the note or transcript on the page. */
   openSource: (target: SourceTarget, quote: string) => void;
   /** For flagging AI results: which subject, and which model produced them. */
@@ -1241,7 +1248,7 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
           flagWith={{ subject: shared.subjectName, model: shared.aiQuickModel }} />
       ) : box.table ? (
         <TableBox box={box} onChange={(change) => shared.updateBox(box, change)} media={{ dropImage: shared.dropImage, resolveEmbed: shared.resolveEmbed, replaceEmbed: shared.replaceEmbed }}
-          facts={{ run: () => shared.factCheck(box), open: shared.openSource }} />
+          facts={{ run: (sheet, write) => shared.factCheck(box, sheet, write), open: shared.openSource }} />
       ) : box.drawing ? (
         <DrawingPad box={box} onChange={(change) => shared.updateBox(box, change)} />
       ) : box.image !== undefined || box.caption !== undefined ? (
