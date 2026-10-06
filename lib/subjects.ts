@@ -262,11 +262,23 @@ export function loadBoards(): Boards {
   }
 }
 
+/** Said when this device's storage stops (true) or starts again (false) taking the writing. */
+export const STORAGE_FULL_EVENT = "super-reader:storage-full";
+let full = false;
+/** Tell the app, once per change, whether the last write to this device's storage worked. */
+export function reportStored(ok: boolean) {
+  if (full === !ok || typeof window === "undefined") return;
+  full = !ok;
+  window.dispatchEvent(new CustomEvent(STORAGE_FULL_EVENT, { detail: full }));
+}
+
 export function saveBoards(boards: Boards) {
   try {
     window.localStorage.setItem(KEY, JSON.stringify(boards));
+    reportStored(true);
   } catch {
-    /* storage full; the board still holds for this session */
+    // Storage full: the board still holds for this session, and the reader is told.
+    reportStored(false);
   }
 }
 

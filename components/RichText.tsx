@@ -375,6 +375,25 @@ export default function RichText({
     if (autoFocus) el.current?.focus();
   }, [autoFocus]);
 
+  // Leaving the page — closing the tab, switching away — writes what was just
+  // typed at once, rather than after the short pause that batches keystrokes.
+  useEffect(() => {
+    const now = () => {
+      if (!timer.current) return;
+      clearTimeout(timer.current);
+      timer.current = null;
+      flush();
+    };
+    const onHide = () => document.visibilityState === "hidden" && now();
+    window.addEventListener("pagehide", now);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      window.removeEventListener("pagehide", now);
+      document.removeEventListener("visibilitychange", onHide);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(
     () => () => {
       if (timer.current) {

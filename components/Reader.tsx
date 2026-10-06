@@ -1,5 +1,6 @@
 "use client";
 
+import { STORAGE_FULL_EVENT } from "@/lib/subjects";
 import { DEFAULT_ANTHROPIC_MODEL, DEFAULT_QUICK_MODEL } from "@/lib/models";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Article, Attachment, DiscoverResult } from "@/lib/types";
@@ -941,20 +942,17 @@ export default function Reader() {
     if (applying.current || signedInRef.current) return;
     stampChange();
   }, [notes, noteRemovals, boards, ready, stampChange]);
-  // Reading positions change with every scroll: they go with the next sync, or at most two minutes later.
+  // A reading position is announced only when it settles — leaving the
+  // article, switching tabs, closing the page — so each one syncs straight away.
   const positionsSeen = useRef(false);
-  const positionsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!ready) return;
     if (!positionsSeen.current) {
       positionsSeen.current = true;
       return;
     }
-    if (applying.current || positionsTimer.current) return;
-    positionsTimer.current = setTimeout(() => {
-      positionsTimer.current = null;
-      stampChange();
-    }, 2 * 60 * 1000);
+    if (applying.current) return;
+    stampChange();
   }, [positions, ready, stampChange]);
 
   // Pull once the code is known, and again whenever the window regains focus,
@@ -1175,8 +1173,25 @@ export default function Reader() {
   /** Subjects need a Google sign-in, wherever sign-in is set up — except here before it was. */
   const subjectsLocked = auth.enabled && auth.checked && !auth.account && (!grandfathered || writingInAccount);
 
+  // This device's storage refusing the writing is the one failure that can lose work: say so plainly.
+  const [storageFull, setStorageFull] = useState(false);
+  useEffect(() => {
+    const on = (e: Event) => setStorageFull(Boolean((e as CustomEvent<boolean>).detail));
+    window.addEventListener(STORAGE_FULL_EVENT, on);
+    return () => window.removeEventListener(STORAGE_FULL_EVENT, on);
+  }, []);
+  const fullWarning = storageFull && (
+    <div className="storage-full" role="alert">
+      This browser has run out of room for your subjects, so new changes are not being kept on this device.
+      {auth.account && auth.status !== "error" && auth.status !== "offline"
+        ? " They are being saved to your account — keep this tab open until it says saved."
+        : " They are not saved anywhere yet: keep this tab open, and sign in or reconnect so they can be saved to your account."}
+      {" "}Removing large pictures frees room.
+    </div>
+  );
   const accountStrip = auth.enabled && (
-    <AccountStrip
+    <>
+    {<AccountStrip
       account={auth.account}
       enabled={auth.enabled}
       status={auth.status}
@@ -1184,7 +1199,8 @@ export default function Reader() {
       backedUpAt={auth.backedUpAt}
       backupProblem={auth.backupProblem}
       onSignOut={() => void auth.signOut()}
-    />
+    />}
+    </>
   );
 
   // Back from Google: tidy the address bar, and say so if it went wrong.
@@ -3188,6 +3204,7 @@ export default function Reader() {
           >
             {Icon.plus} Paste story
           </button>
+          {fullWarning}
           {pasteNotice && (
             <p className={`paste-notice ${pasteNotice.kind}`} role="status">
               {pasteNotice.text}

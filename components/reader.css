@@ -2674,3 +2674,4 @@
 .fc-bar .tbl-more-menu button:hover { background: var(--bg-hover); }
 .tbl-more-note { padding: 6px 10px; font-size: 12.5px; color: var(--text-dim); }
 .signin-note { font-size: 14px; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--text); }
+.storage-full { position: fixed; z-index: 500; top: 10px; left: 50%; transform: translateX(-50%); width: min(560px, calc(100vw - 32px)); box-shadow: 0 6px 18px rgba(0,0,0,.15); padding: 10px 12px; border-radius: 8px; font-size: 14px; background: color-mix(in srgb, var(--danger) 12%, var(--bg)); color: var(--text); border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent); }
