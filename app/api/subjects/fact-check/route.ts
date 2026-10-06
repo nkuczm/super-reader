@@ -1,6 +1,7 @@
 import { sameOrigin } from "@/lib/secure";
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { claudeModel, claudeOptions, claudeSearchTool } from "@/lib/claude-model";
 import { decodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import { DEFAULT_OPENAI_MODEL, PROVIDER_NAME, type AiProvider } from "@/lib/spend";
 import type { FactCheckInput, FactCheckResult, FactClaim, FactOmission } from "@/lib/factcheck";
@@ -10,7 +11,6 @@ export const dynamic = "force-dynamic";
 // Reading a whole subject against a script, then searching the web, takes a while.
 export const maxDuration = 300;
 
-const ANTHROPIC_MODEL = "claude-opus-5-5";
 const MAX_MATERIAL = 400_000;
 
 /**
@@ -139,7 +139,7 @@ export async function POST(request: Request) {
   try {
     const run = provider === "openai"
       ? await runOpenAI(apiKey, cleanModel(input.model) ?? DEFAULT_OPENAI_MODEL, material)
-      : await runAnthropic(apiKey, material);
+      : await runAnthropic(apiKey, claudeModel(input.model), material);
     parsed = run.parsed;
     usages.push(run.usage);
   } catch (error) {
@@ -171,7 +171,7 @@ export async function POST(request: Request) {
   let web: { text: string; url: string }[] = [];
   if (provider === "anthropic" && parsed.topic?.trim()) {
     try {
-      const found = await searchWeb(apiKey, parsed.topic.trim().slice(0, 800), omissions.map((o) => o.text));
+      const found = await searchWeb(apiKey, claudeModel(input.model), parsed.topic.trim().slice(0, 800), omissions.map((o) => o.text));
       web = found.points;
       usages.push(found.usage);
     } catch {
@@ -190,7 +190,7 @@ function cleanModel(model: unknown): string | null {
 
 const usageOf = (response: Anthropic.Beta.BetaMessage): Usage => ({
   provider: "anthropic",
-  model: response.model || ANTHROPIC_MODEL,
+  model: response.model,
   input: (response.usage.input_tokens ?? 0) + (response.usage.cache_creation_input_tokens ?? 0) + (response.usage.cache_read_input_tokens ?? 0),
   output: response.usage.output_tokens ?? 0,
 });
@@ -203,21 +203,20 @@ function rethrow(error: unknown): never {
   throw error;
 }
 
-async function runAnthropic(apiKey: string, material: string): Promise<{ parsed: Parsed; usage: Usage }> {
+async function runAnthropic(apiKey: string, model: string, material: string): Promise<{ parsed: Parsed; usage: Usage }> {
   const client = new Anthropic({ apiKey });
   try {
     // Streamed: a long script against a full subject can take a while to answer.
     const response = await client.beta.messages
       .stream({
-        model: ANTHROPIC_MODEL,
+        model,
         max_tokens: 32000,
         // Accuracy matters here more than in the background insights.
         output_config: {
-          effort: "medium",
+          ...claudeOptions(model, "medium").effort,
           format: { type: "json_schema", schema: SCHEMA as unknown as Record<string, unknown> },
         },
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default",
+        ...claudeOptions(model, "low").fallback,
         system: SYSTEM,
         messages: [{ role: "user", content: material }],
       })
@@ -235,26 +234,25 @@ async function runAnthropic(apiKey: string, material: string): Promise<{ parsed:
 }
 
 /** A web search for context the script may be missing, as "point | url" lines. */
-async function searchWeb(apiKey: string, topic: string, covered: string[]): Promise<{ points: { text: string; url: string }[]; usage: Usage }> {
+async function searchWeb(apiKey: string, model: string, topic: string, covered: string[]): Promise<{ points: { text: string; url: string }[]; usage: Usage }> {
   const client = new Anthropic({ apiKey });
   const messages: Anthropic.Beta.BetaMessageParam[] = [{
     role: "user",
     content: `<topic>${topic}</topic>\n\n<already_covered>\n${covered.map((c) => `- ${c}`).join("\n") || "(nothing)"}\n</already_covered>`,
   }];
-  const total: Usage = { provider: "anthropic", model: ANTHROPIC_MODEL, input: 0, output: 0 };
+  const total: Usage = { provider: "anthropic", model, input: 0, output: 0 };
   let response: Anthropic.Beta.BetaMessage | null = null;
   try {
     // A long search can pause its turn; it is picked up where it stopped, a few times at most.
     for (let i = 0; i < 3; i++) {
       response = await client.beta.messages
         .stream({
-          model: ANTHROPIC_MODEL,
+          model,
           max_tokens: 16000,
-          output_config: { effort: "low" },
-          betas: ["server-side-fallback-2026-07-01"],
-          fallbacks: "default",
+          output_config: { ...claudeOptions(model, "low").effort },
+          ...claudeOptions(model, "low").fallback,
           system: WEB_SYSTEM,
-          tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 5 }],
+          tools: [claudeSearchTool(model, 5)],
           messages,
         })
         .finalMessage();

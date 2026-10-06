@@ -3,7 +3,9 @@
 import ApiKeys from "./ApiKeys";
 import TeamFeeds from "./TeamFeeds";
 import { Icon } from "./icons";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { costAt, MODEL_CHOICES, monthlyUsage, TYPICAL_RUN } from "@/lib/models";
+import { formatDollars, loadSpend, type AiProvider } from "@/lib/spend";
 import type { Settings, TeamFeed, ViewMode } from "@/lib/store";
 
 const VIEWS: { id: ViewMode; name: string; blurb: string }[] = [
@@ -344,17 +346,11 @@ export default function SettingsDialog({
                   </button>
                 ))}
               </div>
-              {settings.aiProvider === "openai" && (
-                <label className="api-field" style={{ marginTop: 8 }}>
-                  <span>OpenAI model</span>
-                  <input
-                    className="input"
-                    value={settings.openaiModel}
-                    onChange={(event) => onChange({ ...settings, openaiModel: event.target.value })}
-                    placeholder="gpt-5-mini"
-                  />
-                </label>
-              )}
+              <ModelPicker
+                provider={settings.aiProvider}
+                value={settings.aiProvider === "openai" ? settings.openaiModel : settings.anthropicModel}
+                onChange={(id) => onChange(settings.aiProvider === "openai" ? { ...settings, openaiModel: id } : { ...settings, anthropicModel: id })}
+              />
               <p className="field-note">
                 {apiKeys[settings.aiProvider]
                   ? `Using your ${settings.aiProvider === "openai" ? "OpenAI" : "Anthropic"} key.`
@@ -481,6 +477,53 @@ export default function SettingsDialog({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The model, chosen by what it is like rather than by its name, with what
+ * each would cost a month at the pace this device has been using AI.
+ */
+function ModelPicker({ provider, value, onChange }: { provider: AiProvider; value: string; onChange: (id: string) => void }) {
+  const [usage] = useState(() => monthlyUsage(loadSpend()));
+  const choices = MODEL_CHOICES[provider];
+  const known = choices.some((m) => m.id === value);
+  const [custom, setCustom] = useState(!known && provider === "openai");
+  const basis = usage.runs > 0 ? usage : null;
+  return (
+    <div className="model-pick" role="radiogroup" aria-label="AI model">
+      {choices.map((m) => {
+        const on = !custom && (value === m.id || (!known && provider === "anthropic" && m.recommended));
+        const cost = basis ? costAt(m, basis) : costAt(m, TYPICAL_RUN);
+        return (
+          <button key={m.id} role="radio" aria-checked={on} className={`model-option${on ? " on" : ""}`}
+            onClick={() => { setCustom(false); onChange(m.id); }}>
+            <span className="model-name">{m.name}{m.recommended && <span className="model-tag">Recommended</span>}</span>
+            <span className="model-blurb">{m.blurb}</span>
+            <span className="model-cost">
+              <b>{basis ? `≈ ${formatDollars(cost)}/month` : `≈ ${formatDollars(cost)} per insights run`}</b>
+              <span>${m.input} in · ${m.output} out per million tokens</span>
+            </span>
+          </button>
+        );
+      })}
+      {provider === "openai" && (
+        custom ? (
+          <label className="api-field">
+            <span>Another OpenAI model, by name</span>
+            <input className="input" autoFocus value={known ? "" : value} placeholder="e.g. gpt-5-pro"
+              onChange={(e) => onChange(e.target.value)} />
+          </label>
+        ) : (
+          <button className="link-btn model-other" onClick={() => setCustom(true)}>Use another OpenAI model…</button>
+        )
+      )}
+      <p className="field-note model-basis">
+        {basis
+          ? `Estimates use your pace on this device: about ${basis.runs} AI run${basis.runs === 1 ? "" : "s"} a month${usage.days < 30 ? `, from ${Math.max(1, usage.days)} day${usage.days === 1 ? "" : "s"} of use` : ""}. Real bills vary with how long subjects and scripts are.`
+          : "No AI use recorded on this device yet, so costs are shown per insights run. Fact-checks of long scripts cost several times more."}
+      </p>
     </div>
   );
 }

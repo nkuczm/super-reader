@@ -1,5 +1,6 @@
 "use client";
 
+import { DEFAULT_ANTHROPIC_MODEL } from "@/lib/models";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Article, Attachment, DiscoverResult } from "@/lib/types";
 import {
@@ -384,7 +385,7 @@ export default function Reader() {
    */
   const [subjectUsed, setSubjectUsed] = useState<Record<string, number>>({});
   /** Settings that follow the person between devices, with when they changed. */
-  const [prefs, setPrefs] = useState<SharedPrefs>({ subjects: false, aiProvider: "anthropic", openaiModel: "gpt-5-mini", at: 0 });
+  const [prefs, setPrefs] = useState<SharedPrefs>({ subjects: false, aiProvider: "anthropic", openaiModel: "gpt-5-mini", anthropicModel: DEFAULT_ANTHROPIC_MODEL, at: 0 });
   const prefsRef = useRef<SharedPrefs>(prefs);
   /** Stories pasted in by hand (lib/manual.ts). */
   const [manual, setManual] = useState<ManualStories>({});
@@ -678,6 +679,7 @@ export default function Reader() {
           subjects: remotePrefs.subjects,
           aiProvider: remotePrefs.aiProvider,
           openaiModel: remotePrefs.openaiModel,
+          anthropicModel: remotePrefs.anthropicModel,
         };
         saveSettings(next);
         return next;
@@ -2201,7 +2203,7 @@ export default function Reader() {
     const madeChoice = !sameSharedPrefs(sharedPrefsOf(settings, 0), next);
     const settled = madeChoice
       ? next
-      : { ...next, subjects: prefsRef.current.subjects, aiProvider: prefsRef.current.aiProvider, openaiModel: prefsRef.current.openaiModel };
+      : { ...next, subjects: prefsRef.current.subjects, aiProvider: prefsRef.current.aiProvider, openaiModel: prefsRef.current.openaiModel, anthropicModel: prefsRef.current.anthropicModel };
     setSettings(settled);
     saveSettings(settled);
     if (madeChoice) {
@@ -3628,7 +3630,7 @@ export default function Reader() {
             hasAiKey={Boolean(apiKeys[settings.aiProvider])}
             ai={{
               provider: settings.aiProvider,
-              model: settings.aiProvider === "openai" ? settings.openaiModel : undefined,
+              model: settings.aiProvider === "openai" ? settings.openaiModel : settings.anthropicModel,
             }}
             onOpenMenu={() => setMenuOpen(true)}
             onOpenArticle={(link, title, quote) => setReading({ url: link, title, quote })}

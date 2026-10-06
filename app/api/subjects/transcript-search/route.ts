@@ -1,6 +1,7 @@
 import { sameOrigin } from "@/lib/secure";
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { claudeModel, claudeOptions } from "@/lib/claude-model";
 import { decodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import { DEFAULT_OPENAI_MODEL, PROVIDER_NAME, type AiProvider } from "@/lib/spend";
 import { MAX_TRANSCRIPT_CHARS } from "@/lib/transcript";
@@ -9,7 +10,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const ANTHROPIC_MODEL = "claude-opus-5-5";
 const MAX_MATCHES = 15;
 
 /**
@@ -96,7 +96,7 @@ export async function POST(request: Request) {
   try {
     ({ parsed, usage } = provider === "openai"
       ? await runOpenAI(apiKey, cleanModel(body.model) ?? DEFAULT_OPENAI_MODEL, material)
-      : await runAnthropic(apiKey, material));
+      : await runAnthropic(apiKey, claudeModel(body.model), material));
   } catch (error) {
     if (error instanceof RunError) return NextResponse.json({ error: error.message, needsKey: error.needsKey }, { status: error.status });
     return NextResponse.json({ error: "Could not read the model's answer." }, { status: 502 });
@@ -118,19 +118,18 @@ function cleanModel(model: unknown): string | null {
   return typeof model === "string" && /^[a-zA-Z0-9._:-]{2,64}$/.test(model.trim()) ? model.trim() : null;
 }
 
-async function runAnthropic(apiKey: string, material: string): Promise<{ parsed: Parsed; usage: Usage }> {
+async function runAnthropic(apiKey: string, model: string, material: string): Promise<{ parsed: Parsed; usage: Usage }> {
   const client = new Anthropic({ apiKey });
   try {
     const response = await client.beta.messages.create({
-      model: ANTHROPIC_MODEL,
+      model,
       max_tokens: 8000,
       // A search the reader is waiting on: kept quick.
       output_config: {
-        effort: "low",
+        ...claudeOptions(model, "low").effort,
         format: { type: "json_schema", schema: SCHEMA as unknown as Record<string, unknown> },
       },
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
+      ...claudeOptions(model, "low").fallback,
       system: SYSTEM,
       messages: [{ role: "user", content: material }],
     });
@@ -143,7 +142,7 @@ async function runAnthropic(apiKey: string, material: string): Promise<{ parsed:
       parsed: JSON.parse(text),
       usage: {
         provider: "anthropic",
-        model: response.model || ANTHROPIC_MODEL,
+        model: response.model || model,
         input: (response.usage.input_tokens ?? 0) + (response.usage.cache_creation_input_tokens ?? 0) + (response.usage.cache_read_input_tokens ?? 0),
         output: response.usage.output_tokens ?? 0,
       },

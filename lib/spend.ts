@@ -22,6 +22,9 @@ export const DEFAULT_OPENAI_MODEL = "gpt-5-mini";
 /** US dollars per million tokens, input then output. */
 export const PRICES: Record<string, { input: number; output: number }> = {
   "claude-opus-5-5": { input: 4, output: 20 },
+  "claude-sonnet-5-5": { input: 2, output: 10 },
+  "claude-haiku-4-5": { input: 1, output: 5 },
+  "claude-fable-5-1": { input: 10, output: 50 },
   "gpt-5": { input: 1.25, output: 10 },
   "gpt-5-mini": { input: 0.25, output: 2 },
   "gpt-5-nano": { input: 0.05, output: 0.4 },
