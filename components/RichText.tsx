@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import CropDialog, { copyPicture } from "./CropDialog";
+import CropDialog, { copyPicture, pastedWidth } from "./CropDialog";
 import { sanitizeRichText } from "@/lib/subjects";
 import { cleanPastedHtml } from "@/lib/paste";
 
@@ -108,8 +108,10 @@ export default function RichText({
     };
   }, [pickedImg]);
   /** Copy the picture, then take it out of the text — paste puts it back wherever it is wanted. */
+  /** The width a picture in the text is shown at, as set by its corner handle. */
+  const widthOf = (img: HTMLImageElement) => Number(img.getAttribute("data-w")) || undefined;
   const cutImg = async (img: HTMLImageElement) => {
-    const ok = await copyPicture(img.src);
+    const ok = await copyPicture(img.src, widthOf(img));
     if (!ok) return;
     img.remove();
     setPickedImg(null);
@@ -118,7 +120,7 @@ export default function RichText({
     changed();
   };
   const copyImg = async (img: HTMLImageElement) => {
-    const ok = await copyPicture(img.src);
+    const ok = await copyPicture(img.src, widthOf(img));
     setCopied(ok);
     if (ok) setTimeout(() => setCopied(false), 1400);
   };
@@ -666,17 +668,19 @@ export default function RichText({
             const node = el.current;
             const at = window.getSelection()?.rangeCount ? window.getSelection()!.getRangeAt(0).cloneRange() : null;
             void (async () => {
-              const ids: string[] = [];
+              const ids: { id: string; w: number | null }[] = [];
               for (const file of pictures.slice(0, 6)) {
+                // A picture copied from here comes back at the size it was copied at.
+                const w = await pastedWidth(file);
                 const id = await onDropImage!(file);
-                if (id) ids.push(id);
+                if (id) ids.push({ id, w });
               }
               if (!node || ids.length === 0) return;
               node.focus();
               const selection = window.getSelection();
               selection?.removeAllRanges();
               if (at && node.contains(at.startContainer)) selection?.addRange(at);
-              document.execCommand("insertHTML", false, ids.map((id) => `<p><img data-embed="${id}"></p>`).join("") + "<p><br></p>");
+              document.execCommand("insertHTML", false, ids.map(({ id, w }) => `<p><img data-embed="${id}"${w ? ` data-w="${w}"` : ""}></p>`).join("") + "<p><br></p>");
               fillEmbeds();
               changed();
             })();

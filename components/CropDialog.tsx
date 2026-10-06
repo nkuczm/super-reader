@@ -89,8 +89,29 @@ export default function CropDialog({ src, onDone, onCancel }: { src: string; onD
   );
 }
 
-/** A picture onto the clipboard as an image, so it pastes into documents and other apps. */
-export async function copyPicture(src: string): Promise<boolean> {
+/**
+ * The last picture copied here, with the width it was shown at. The
+ * clipboard carries only the image itself, so the width is remembered here
+ * and given back when that same picture is pasted — matched by its pixel
+ * size, within the hour.
+ */
+let lastCopied: { width: number; w: number; h: number; at: number } | null = null;
+
+/** The width to paste a picture at: the one it was copied at, if this is that picture. */
+export async function pastedWidth(file: File): Promise<number | null> {
+  if (!lastCopied || Date.now() - lastCopied.at > 3_600_000) return null;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const same = bitmap.width === lastCopied.w && bitmap.height === lastCopied.h;
+    bitmap.close();
+    return same ? lastCopied.width : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A picture onto the clipboard as an image, so it pastes into documents and other apps. `width` is the size it was shown at. */
+export async function copyPicture(src: string, width?: number): Promise<boolean> {
   try {
     const el = new Image();
     el.src = src;
@@ -102,6 +123,7 @@ export async function copyPicture(src: string): Promise<boolean> {
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
     if (!blob) return false;
     await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    lastCopied = width ? { width: Math.round(width), w: canvas.width, h: canvas.height, at: Date.now() } : null;
     return true;
   } catch {
     return false;
