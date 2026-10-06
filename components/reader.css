@@ -2573,3 +2573,11 @@
 .tbl-tab-x:hover { color: #dc2626; }
 .tbl-tab-name { font: inherit; font-size: 12.5px; font-weight: 600; border: 1px solid var(--accent, #2563eb); border-radius: 999px; padding: 3px 10px; width: 140px; background: var(--bg); color: var(--text); outline: none; }
 .subject-image:focus { outline: none; } .subject-image:focus img { outline: 2px solid var(--accent, #2563eb); outline-offset: 2px; }
+/* Versions sit on the fact-check line; the bar's own controls follow. */
+.fc-bar .tbl-tabs { margin: 0 6px 0 0; }
+.fc-bar .fc-words { margin-left: auto; color: var(--text-dim); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fc-bar .fc-run { margin-left: 0; }
+.fc-old { color: var(--text-dim); font-size: 12px; font-style: italic; }
+/* The text tools of the cell being left stay a moment, so moving between cells does not flicker them away and back. */
+.tbl-rich .rich-tools:not(.docked) { transition: opacity 0s linear 0.18s; }
+.tbl-rich:focus-within .rich-tools:not(.docked) { transition-delay: 0s; }

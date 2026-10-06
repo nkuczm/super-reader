@@ -12,7 +12,7 @@ import {
 import RichText from "./RichText";
 import FlagButton from "./FlagButton";
 import type { FlagInput } from "@/lib/flags";
-import { safeFactCheck, scriptColumns, sourceLabel, type FactCheck, type FactClaim, type SourceTarget } from "@/lib/factcheck";
+import { safeFactCheck, scriptColumns, scriptRows, sourceLabel, type FactCheck, type FactClaim, type SourceTarget } from "@/lib/factcheck";
 
 /* ---------- a script's fact-check, painted over its words ---------- */
 
@@ -217,8 +217,9 @@ const SHEET_FIELDS = ["table", "tableMode", "tableCols", "tableRows", "tableCell
  */
 export function TableBox({ box, onChange, media, facts }: { box: BoxItem; onChange: (next: Change) => void; media?: CellMedia; facts?: TableFacts }) {
   const tabs = box.tableTabs ?? [];
-  const names = [box.tableName || "Table 1", ...tabs.map((t, i) => t.name || `Table ${i + 2}`)];
-  const [active, setActive] = useState(0);
+  // Tabs are versions of the table: V1, V2… with the latest last, and open first.
+  const names = [box.tableName || "V1", ...tabs.map((t, i) => t.name || `V${i + 2}`)];
+  const [active, setActive] = useState(() => tabs.length);
   const at = Math.min(active, names.length - 1);
   const [naming, setNaming] = useState<number | null>(null);
 
@@ -236,15 +237,21 @@ export function TableBox({ box, onChange, media, facts }: { box: BoxItem; onChan
     setNaming(null);
   };
   const addTab = () => {
-    // A new tab starts as the same kind of table, with the same columns, empty.
-    const cols = safeGrid(sheet.table)[0].length;
-    const fresh = { name: `Table ${names.length + 1}`, tableMode: sheet.tableMode ?? "doc", table: [Array(cols).fill(""), Array(cols).fill(""), Array(cols).fill("")], tableCols: sheet.tableCols };
+    // A new version starts as a copy of the latest draft — its text, sizes, colours and merges, not its fact check.
+    const latest: BoxItem = tabs.length ? { ...box, ...tabs[tabs.length - 1] } : box;
+    const fresh = {
+      name: `V${names.length + 1}`,
+      tableMode: latest.tableMode ?? "doc",
+      table: safeGrid(latest.table).map((row) => [...row]),
+      tableCols: latest.tableCols,
+      tableRows: latest.tableRows,
+      tableCells: latest.tableCells,
+    };
     onChange({ tableTabs: [...tabs, fresh] });
     setActive(names.length);
-    setNaming(names.length);
   };
   const removeTab = (i: number) => {
-    if (names.length < 2 || !window.confirm(`Delete the tab “${names[i]}” and its table?`)) return;
+    if (names.length < 2 || !window.confirm(`Delete version “${names[i]}”?`)) return;
     if (i === 0) {
       // The second tab becomes the card's own table.
       const [next, ...rest] = tabs;
@@ -253,9 +260,8 @@ export function TableBox({ box, onChange, media, facts }: { box: BoxItem; onChan
     setActive(Math.max(0, i - 1));
   };
 
-  return (
-    <div className="tbl-card">
-      <div className="tbl-tabs" role="tablist" aria-label="Tables in this card" onPointerDown={(e) => e.stopPropagation()}>
+  const strip = (
+      <div className="tbl-tabs" role="tablist" aria-label="Versions" onPointerDown={(e) => e.stopPropagation()}>
         {names.map((name, i) => (
           naming === i ? (
             <input key={i} className="tbl-tab-name" autoFocus defaultValue={name} aria-label="Tab name"
@@ -271,20 +277,32 @@ export function TableBox({ box, onChange, media, facts }: { box: BoxItem; onChan
               onClick={() => setActive(i)} onDoubleClick={() => setNaming(i)}>
               {name}
               {i === at && names.length > 1 && (
-                <span className="tbl-tab-x" role="button" aria-label={`Delete ${name}`} title="Delete this tab"
+                <span className="tbl-tab-x" role="button" aria-label={`Delete ${name}`} title="Delete this version"
                   onClick={(e) => { e.stopPropagation(); removeTab(i); }}>×</span>
               )}
             </button>
           )
         ))}
-        <button className="tbl-tab add" aria-label="Add a table tab" title="Add a table tab" onClick={addTab}>+</button>
+        <button className="tbl-tab add" aria-label="New version" title="New version — a copy of the latest draft" onClick={addTab}>+</button>
       </div>
-      <TableSheet key={at} box={sheet} onChange={write} media={media} facts={facts} />
+  );
+  return (
+    <div className="tbl-card">
+      <TableSheet key={at} box={sheet} onChange={write} media={media} facts={facts} header={strip} isLatest={at === names.length - 1} />
     </div>
   );
 }
 
-function TableSheet({ box, onChange: apply, media, facts }: { box: BoxItem; onChange: (next: Change) => void; media?: CellMedia; facts?: TableFacts }) {
+function TableSheet({ box, onChange: apply, media, facts, header, isLatest = true }: {
+  box: BoxItem;
+  onChange: (next: Change) => void;
+  media?: CellMedia;
+  facts?: TableFacts;
+  /** The version tabs, set on the same line as the fact-check buttons. */
+  header?: React.ReactNode;
+  /** Whether this is the latest version: the only one the fact check runs on. */
+  isLatest?: boolean;
+}) {
   const [checking, setChecking] = useState<{ state: "running" | "error"; message?: string } | null>(null);
   const check = safeFactCheck(box.factCheck);
   const runCheck = async () => {
@@ -516,6 +534,8 @@ function TableSheet({ box, onChange: apply, media, facts }: { box: BoxItem; onCh
   const factView = mode === "doc" && !!box.factView && !!check && checking?.state !== "running";
   const counts = check ? { pass: 0, verify: 0, contradicts: 0, ...Object.fromEntries((["pass", "verify", "contradicts"] as const).map((k) => [k, check.claims.filter((c) => c.status === k && !c.resolved).length])) } : null;
   const resolvedCount = check ? check.claims.filter((c) => c.resolved).length : 0;
+  // The script's length: the words to be spoken, header row aside.
+  const wordCount = scriptRows(box.table).reduce((n, r) => n + (r.text.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu)?.length ?? 0), 0);
   /** A claim marked as dealt with: its colour goes, and the check remembers it. */
   const resolveClaim = (claim: FactClaim, resolved: boolean) => {
     if (!check) return;
@@ -524,8 +544,10 @@ function TableSheet({ box, onChange: apply, media, facts }: { box: BoxItem; onCh
   const props: Inner = { facts: factView && facts ? { check: check!, words: scriptColumns(grid).words, open: facts.open, resolve: resolveClaim } : null, media, grid, metas, widths: shownW, heights: shownH, startResize, startMove, moving, onChange, ops, reshape, colSizes, rowSizes };
   return (
     <div ref={shell} tabIndex={-1} className={`tbl tbl-${mode}`} onPointerDown={(e) => e.stopPropagation()} onKeyDownCapture={onUndoKey}>
+      {!(facts && mode === "doc") && header && <div className="fc-bar">{header}</div>}
       {facts && mode === "doc" && (
         <div className={`fc-bar${checking?.state === "running" ? " running" : ""}`}>
+          {header}
           {checking?.state === "running" ? (
             <span className="fc-running">Checking the script against your research…</span>
           ) : (
@@ -549,10 +571,17 @@ function TableSheet({ box, onChange: apply, media, facts }: { box: BoxItem; onCh
                   )}
                 </span>
               )}
-              <button className="fc-run" onClick={() => void runCheck()}
-                title="Check the Words column against this subject's stories, notes and transcripts">
-                {check ? "Check again" : "✓ Fact check"}
-              </button>
+              <span className="fc-words" title="Words in the Words column, and about how long they take to say at 150 words a minute">
+                {wordCount.toLocaleString()} words · ~{Math.floor(wordCount / 150)}:{String(Math.round(((wordCount % 150) / 150) * 60)).padStart(2, "0")}
+              </span>
+              {isLatest ? (
+                <button className="fc-run" onClick={() => void runCheck()}
+                  title="Check the Words column against this subject's stories, notes and transcripts">
+                  {check ? "Check again" : "✓ Fact check"}
+                </button>
+              ) : (
+                <span className="fc-old" title="An earlier version keeps the check it had; new checks run on the latest">Fact check runs on the latest version</span>
+              )}
               {checking?.state === "error" && <span className="fc-error">{checking.message}</span>}
             </>
           )}
