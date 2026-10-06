@@ -9,6 +9,7 @@ import { formatDollars, loadSpend, type AiProvider } from "@/lib/spend";
 import { encodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import { FLAGS_EVENT, loadFlags } from "@/lib/flags";
 import FlagsDialog from "./FlagsDialog";
+import StorageSection from "./StorageSection";
 import type { Settings, TeamFeed, ViewMode } from "@/lib/store";
 
 const VIEWS: { id: ViewMode; name: string; blurb: string }[] = [
@@ -494,7 +495,10 @@ export default function SettingsDialog({
 
           {tab === "account" && (
             <>
-            <p className="field-label">API keys &amp; subscriptions</p>
+              <p className="field-label">Storage</p>
+              <StorageSection />
+
+            <p className="field-label reading-label">API keys &amp; subscriptions</p>
             <ApiKeys vault={vault} keys={apiKeys} onChange={onKeysChange} />
 
             <p className="field-label reading-label">Team feeds</p>
