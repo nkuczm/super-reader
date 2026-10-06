@@ -11,6 +11,7 @@ import { DrawingPad, ImageView, TableBox, TranscriptBox, shrinkImage, DRAWING_HE
 import { tableHtml, transcriptHtml } from "@/lib/subject-doc";
 import type { Writing } from "./useAccount";
 import type { Note, NoteEntry } from "@/lib/notes";
+import { omissionsHtml, putFactNotes, researchOf, scriptRows, type FactCheckResult, type SourceTarget } from "@/lib/factcheck";
 import { addTranscriptNote, documentOrder, LABEL_COLORS, labelColorOf, safeHref, youtubeThumbnail, type StoryItem } from "@/lib/subjects";
 import { titleFromUrl } from "@/lib/manual";
 import {
@@ -679,6 +680,34 @@ export default function SubjectPage(props: Props) {
         const held = current?.[id];
         return held && held.kind === "box" ? put(current, { ...held, image, at: Date.now() }) : current ?? {};
       }),
+    factCheck: async (box: BoxItem) => {
+      if (!hasAiKey) throw new Error(`Add your ${PROVIDER_NAME[ai.provider]} key in Settings → API keys to fact-check.`);
+      const rows = scriptRows(box.table);
+      if (!rows.length) throw new Error("Write some words in the script first.");
+      const allBoxes = live(board).filter((item): item is BoxItem => item.kind === "box");
+      const { sources, targets } = researchOf(allCards, allBoxes, box.id);
+      const headers = new Headers(keyHeaders());
+      headers.set("content-type", "application/json");
+      const res = await fetch("/api/subjects/fact-check", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ rows, sources, provider: ai.provider, model: ai.model }),
+      });
+      const data = (await res.json().catch(() => ({}))) as Partial<FactCheckResult> & { error?: string };
+      if (!res.ok) throw new Error(data.error ?? "The fact-check failed.");
+      for (const usage of data.usages ?? []) shareSpend(loadSyncCode(), recordSpend(usage, note.name));
+      const result = { claims: data.claims ?? [], omissions: data.omissions ?? [], web: data.web ?? [] };
+      onBoard((current) => {
+        const held = current?.[box.id];
+        const base = held && held.kind === "box" ? held : box;
+        const next = put(current, { ...base, factCheck: { at: Date.now(), claims: result.claims, targets }, factView: true, at: Date.now() });
+        return putFactNotes(next, box.id, omissionsHtml(result, targets), newItemId("box"));
+      });
+    },
+    openSource: (target: SourceTarget, quote: string) => {
+      if (target.kind === "card") return props.onOpenArticle(target.link, target.title, quote);
+      goTo({ id: target.id, n: -1, level: 1, text: "" });
+    },
     aiSearch: (async (turns, query) => {
       if (!hasAiKey) throw new Error(`Add your ${PROVIDER_NAME[ai.provider]} key in Settings → API keys to search by meaning.`);
       const headers = new Headers(keyHeaders());
@@ -1035,6 +1064,10 @@ type Shared = {
   noteTranscript: (box: BoxItem, itemHtml: string) => void;
   /** A picture set into text, cropped: its box keeps the new picture. */
   replaceEmbed: (id: string, image: string) => void;
+  /** Fact-check a script table against the subject's research; its colours and the omissions card follow. */
+  factCheck: (box: BoxItem) => Promise<void>;
+  /** Open what a fact-check cited: the story at its passage, or the note or transcript on the page. */
+  openSource: (target: SourceTarget, quote: string) => void;
   /** Search a transcript by meaning, with the same AI key and model as insights. */
   aiSearch: AiSearch;
 };
@@ -1178,7 +1211,8 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
       ) : box.transcript ? (
         <TranscriptBox box={box} onChange={(change) => shared.updateBox(box, change)} onComment={(html) => shared.noteTranscript(box, html)} aiSearch={shared.aiSearch} />
       ) : box.table ? (
-        <TableBox box={box} onChange={(change) => shared.updateBox(box, change)} media={{ dropImage: shared.dropImage, resolveEmbed: shared.resolveEmbed, replaceEmbed: shared.replaceEmbed }} />
+        <TableBox box={box} onChange={(change) => shared.updateBox(box, change)} media={{ dropImage: shared.dropImage, resolveEmbed: shared.resolveEmbed, replaceEmbed: shared.replaceEmbed }}
+          facts={{ run: () => shared.factCheck(box), open: shared.openSource }} />
       ) : box.drawing ? (
         <DrawingPad box={box} onChange={(change) => shared.updateBox(box, change)} />
       ) : box.image !== undefined || box.caption !== undefined ? (

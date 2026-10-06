@@ -79,6 +79,9 @@ export type BoxItem = Base & {
   transcript?: Transcript;
   /** More transcripts in the same block, shown as tabs after the first. */
   transcriptTabs?: Transcript[];
+  /** A script table's last fact-check, and whether its colours are showing. */
+  factCheck?: import("./factcheck").FactCheck;
+  factView?: boolean;
   /** Set on the card that collects a transcript's comments, naming the transcript's box. */
   notesFor?: string;
 };

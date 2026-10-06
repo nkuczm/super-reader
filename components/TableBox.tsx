@@ -10,6 +10,59 @@ import {
   type CellMetas, type Grid,
 } from "@/lib/sheet";
 import RichText from "./RichText";
+import { safeFactCheck, scriptColumns, sourceLabel, type FactCheck, type FactClaim, type SourceTarget } from "@/lib/factcheck";
+
+/* ---------- a script's fact-check, painted over its words ---------- */
+
+type DomRange = globalThis.Range;
+
+/** What a script table needs to be fact-checked: a way to run the check, and to open a source. */
+export type TableFacts = {
+  run: () => Promise<void>;
+  open: (target: SourceTarget, quote: string) => void;
+};
+
+const FACT_NAMES = { pass: "fc-pass", verify: "fc-verify", contradicts: "fc-contra" } as const;
+const FACT_WORDS = { pass: "Supported", verify: "Needs verification", contradicts: "Contradicts the evidence" } as const;
+/** Every table's checked spans, painted through three shared CSS highlights. */
+const factPaint = new Map<string, { claim: FactClaim; range: DomRange }[]>();
+function repaintFacts() {
+  const registry = (globalThis.CSS as unknown as { highlights?: Map<string, unknown> } | undefined)?.highlights;
+  const Ctor = (globalThis as unknown as { Highlight?: new (...r: DomRange[]) => unknown }).Highlight;
+  if (!registry || !Ctor) return;
+  const all = [...factPaint.values()].flat();
+  for (const status of ["pass", "verify", "contradicts"] as const) {
+    registry.set(FACT_NAMES[status], new Ctor(...all.filter((x) => x.claim.status === status).map((x) => x.range)));
+  }
+}
+
+/**
+ * Where a claim's text sits in a cell, as a DOM range. Matched ignoring
+ * whitespace, since the check read the cell as plain text and the cell is
+ * paragraphs and line breaks.
+ */
+function rangeOfText(root: HTMLElement, text: string): DomRange | null {
+  const chars: { node: Text; i: number }[] = [];
+  let flat = "";
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode() as Text | null; n; n = walker.nextNode() as Text | null) {
+    const value = n.data;
+    for (let i = 0; i < value.length; i++) {
+      if (/\s/.test(value[i])) continue;
+      chars.push({ node: n, i });
+      flat += value[i];
+    }
+  }
+  const want = text.replace(/\s+/g, "");
+  const at = want ? flat.indexOf(want) : -1;
+  if (at < 0) return null;
+  const a = chars[at];
+  const b = chars[at + want.length - 1];
+  const range = document.createRange();
+  range.setStart(a.node, a.i);
+  range.setEnd(b.node, b.i + 1);
+  return range;
+}
 
 type Change = Partial<BoxItem>;
 type Sizes = (number | null)[];
@@ -147,7 +200,19 @@ export type CellMedia = {
   replaceEmbed?: (id: string, image: string) => void;
 };
 
-export function TableBox({ box, onChange: apply, media }: { box: BoxItem; onChange: (next: Change) => void; media?: CellMedia }) {
+export function TableBox({ box, onChange: apply, media, facts }: { box: BoxItem; onChange: (next: Change) => void; media?: CellMedia; facts?: TableFacts }) {
+  const [checking, setChecking] = useState<{ state: "running" | "error"; message?: string } | null>(null);
+  const check = safeFactCheck(box.factCheck);
+  const runCheck = async () => {
+    if (!facts || checking?.state === "running") return;
+    setChecking({ state: "running" });
+    try {
+      await facts.run();
+      setChecking(null);
+    } catch (error) {
+      setChecking({ state: "error", message: error instanceof Error ? error.message : "The fact-check failed." });
+    }
+  };
   /**
    * Undo and redo for everything done to the table — text, colours, rows,
    * merges, moves — as snapshots of the table's fields, so each step puts
@@ -364,9 +429,39 @@ export function TableBox({ box, onChange: apply, media }: { box: BoxItem; onChan
     onChange({ tableMode: next, table });
   };
 
-  const props: Inner = { media, grid, metas, widths: shownW, heights: shownH, startResize, startMove, moving, onChange, ops, reshape, colSizes, rowSizes };
+  const factView = mode === "doc" && !!box.factView && !!check && checking?.state !== "running";
+  const counts = check ? { pass: 0, verify: 0, contradicts: 0, ...Object.fromEntries((["pass", "verify", "contradicts"] as const).map((k) => [k, check.claims.filter((c) => c.status === k).length])) } : null;
+  const props: Inner = { facts: factView && facts ? { check: check!, words: scriptColumns(grid).words, open: facts.open } : null, media, grid, metas, widths: shownW, heights: shownH, startResize, startMove, moving, onChange, ops, reshape, colSizes, rowSizes };
   return (
     <div ref={shell} tabIndex={-1} className={`tbl tbl-${mode}`} onPointerDown={(e) => e.stopPropagation()} onKeyDownCapture={onUndoKey}>
+      {facts && mode === "doc" && (
+        <div className={`fc-bar${checking?.state === "running" ? " running" : ""}`}>
+          {checking?.state === "running" ? (
+            <span className="fc-running">Checking the script against your research…</span>
+          ) : (
+            <>
+              {check && (
+                <button className={`fc-toggle${box.factView ? " on" : ""}`} aria-pressed={!!box.factView}
+                  onClick={() => apply({ factView: !box.factView })}>
+                  View fact check
+                </button>
+              )}
+              {check && box.factView && counts && (
+                <span className="fc-counts" aria-label="Fact-check results">
+                  <span className="fc-dot pass" />{counts.pass} supported
+                  <span className="fc-dot verify" />{counts.verify} to verify
+                  <span className="fc-dot contradicts" />{counts.contradicts} contradicted
+                </span>
+              )}
+              <button className="fc-run" onClick={() => void runCheck()}
+                title="Check the Words column against this subject's stories, notes and transcripts">
+                {check ? "Check again" : "✓ Fact check"}
+              </button>
+              {checking?.state === "error" && <span className="fc-error">{checking.message}</span>}
+            </>
+          )}
+        </div>
+      )}
       {mode === "doc" ? <DocTable {...props} /> : <SheetTable {...props} />}
       <div className="sheet-tools">
         <span className="tbl-mode" role="group" aria-label="Table style">
@@ -421,6 +516,7 @@ type Ops = {
 };
 
 type Inner = {
+  facts: { check: FactCheck; words: number; open: TableFacts["open"] } | null;
   media?: CellMedia;
   grid: Grid;
   metas: CellMetas;
@@ -458,6 +554,48 @@ function MoveMark({ moving }: { moving: Inner["moving"] }) {
 
 /** A cell's height and width, summed across what it spans. */
 const span = (list: number[], from: number, n: number) => list.slice(from, from + n).reduce((a, b) => a + b, 0);
+
+/** What the check found for one span of the script, and where it found it. */
+function FactCard({ claim, targets, open, x, y, onEnter, onClose }: {
+  claim: FactClaim;
+  targets: Record<string, SourceTarget>;
+  open: TableFacts["open"];
+  x: number;
+  y: number;
+  onEnter: () => void;
+  onClose: () => void;
+}) {
+  const left = Math.max(8, Math.min(x - 20, window.innerWidth - 340));
+  const below = y + 18;
+  const style = below + 260 > window.innerHeight ? { left, bottom: window.innerHeight - y + 12 } : { left, top: below };
+  return (
+    <div className={`fc-pop ${claim.status}`} style={style} onMouseEnter={onEnter} role="dialog" aria-label={FACT_WORDS[claim.status]}>
+      <div className="fc-pop-head">
+        <span className={`fc-dot ${claim.status}`} />
+        <b>{FACT_WORDS[claim.status]}</b>
+        <button className="fc-pop-x" aria-label="Close" onClick={onClose}>×</button>
+      </div>
+      {claim.why && <p className="fc-why">{claim.why}</p>}
+      {claim.sources.length > 0 ? (
+        <ul className="fc-sources">
+          {claim.sources.map((s, i) => {
+            const target = targets[s.ref] ?? targets[s.ref.split("#")[0]];
+            return (
+              <li key={i}>
+                <button disabled={!target} onClick={() => { if (target) { open(target, s.quote); onClose(); } }}>
+                  <span className="fc-source-name">{sourceLabel(s.ref, targets)}</span>
+                  {s.quote && <span className="fc-source-quote">“{s.quote}”</span>}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="fc-none">Nothing in your research speaks to this yet.</p>
+      )}
+    </div>
+  );
+}
 
 /** Insert and delete, as many rows or columns as are selected. */
 function LineItems({ range, ops, close, rows, cols, sheet }: { range: Range; ops: Ops; close: () => void; rows?: boolean; cols?: boolean; sheet?: boolean }) {
@@ -512,7 +650,7 @@ function CellMenuExtras({ range, metas, ops, close }: { range: Range; metas: Cel
 /* Table: written in like a document                                       */
 /* ---------------------------------------------------------------------- */
 
-function DocTable({ media, grid, metas, widths, heights, startResize, startMove, moving, onChange, ops }: Inner) {
+function DocTable({ facts, media, grid, metas, widths, heights, startResize, startMove, moving, onChange, ops }: Inner) {
   const host = useRef<HTMLTableElement | null>(null);
   const rows = grid.length;
   const cols = grid[0].length;
@@ -609,8 +747,60 @@ function DocTable({ media, grid, metas, widths, heights, startResize, startMove,
   const inPicked = (r: number, c: number) => !!picked && r >= picked.r0 && r <= picked.r1 && c >= picked.c0 && c <= picked.c1;
   const width = widths.reduce((a, b) => a + b, 0);
 
+  // The fact-check, painted over the words it judged; redrawn as the cells are.
+  const paintKey = useRef(`fc-${Math.random().toString(36).slice(2)}`);
+  const painted = useRef<{ claim: FactClaim; range: DomRange }[]>([]);
+  useEffect(() => {
+    const key = paintKey.current;
+    if (!facts || !host.current) {
+      painted.current = [];
+      factPaint.delete(key);
+      repaintFacts();
+      return;
+    }
+    const spans: { claim: FactClaim; range: DomRange }[] = [];
+    for (const claim of facts.check.claims) {
+      const body = host.current.querySelector<HTMLElement>(`[data-cell="${claim.row}-${facts.words}"] .rich-body`);
+      const range = body && rangeOfText(body, claim.text);
+      if (range) spans.push({ claim, range });
+    }
+    painted.current = spans;
+    factPaint.set(key, spans);
+    repaintFacts();
+  });
+  useEffect(() => () => { factPaint.delete(paintKey.current); repaintFacts(); }, []);
+
+  /** The claim under the pointer: shown on hover, kept on a click. */
+  const [factPop, setFactPop] = useState<{ claim: FactClaim; x: number; y: number; pinned: boolean } | null>(null);
+  const claimAt = (x: number, y: number) => {
+    for (const { claim, range } of painted.current) {
+      for (const r of Array.from(range.getClientRects())) {
+        if (x >= r.left - 2 && x <= r.right + 2 && y >= r.top - 2 && y <= r.bottom + 2) return claim;
+      }
+    }
+    return null;
+  };
+  useEffect(() => {
+    if (!factPop?.pinned) return;
+    const away = (e: PointerEvent) => !(e.target as Element | null)?.closest?.(".fc-pop") && setFactPop(null);
+    window.addEventListener("pointerdown", away, true);
+    return () => window.removeEventListener("pointerdown", away, true);
+  }, [factPop?.pinned]);
+
   return (
-    <div className={`tbl-scroll${many ? " picking" : ""}`}
+    <div className={`tbl-scroll${many ? " picking" : ""}${facts ? " fact-view" : ""}`}
+      onMouseMove={(e) => {
+        if (!facts || factPop?.pinned) return;
+        const claim = claimAt(e.clientX, e.clientY);
+        if (!claim) { if (factPop) setFactPop(null); return; }
+        if (factPop?.claim !== claim) setFactPop({ claim, x: e.clientX, y: e.clientY, pinned: false });
+      }}
+      onMouseLeave={() => factPop && !factPop.pinned && setFactPop(null)}
+      onClickCapture={(e) => {
+        if (!facts) return;
+        const claim = claimAt(e.clientX, e.clientY);
+        if (claim) setFactPop({ claim, x: e.clientX, y: e.clientY, pinned: true });
+      }}
       onCopyCapture={(e) => copyPicked(e, false)}
       onCutCapture={(e) => copyPicked(e, true)}
       onKeyDownCapture={(e) => {
@@ -700,6 +890,11 @@ function DocTable({ media, grid, metas, widths, heights, startResize, startMove,
         </tbody>
       </table>
       <MoveMark moving={moving} />
+      {facts && factPop && createPortal(
+        <FactCard claim={factPop.claim} targets={facts.check.targets} open={facts.open} x={factPop.x} y={factPop.y}
+          onEnter={() => setFactPop((p) => (p ? { ...p, pinned: true } : p))} onClose={() => setFactPop(null)} />,
+        document.body,
+      )}
       {menu && createPortal(
         <div className="wb-menu tbl-menu" role="menu" style={{ left: Math.min(menu.x, innerWidth - 220), top: Math.min(menu.y, innerHeight - 320) }}
           onPointerDown={(e) => e.stopPropagation()}>
