@@ -10,6 +10,8 @@ export const dynamic = "force-dynamic";
 /** Back from Google: check the state, trade the code, and start a session. */
 export async function GET(request: Request) {
   const fail = (reason: string) => {
+    // Logged, so a failed sign-in can be diagnosed from the deployment's logs.
+    console.warn(`sign-in failed: ${reason}`);
     const response = NextResponse.redirect(new URL(`/?signin=failed&reason=${encodeURIComponent(reason)}`, request.url));
     response.cookies.delete({ name: "sr_oauth", path: "/api/auth" });
     return response;
