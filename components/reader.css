@@ -2559,3 +2559,16 @@
 .settings-group { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border); }
 .settings-group > summary { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); }
 .dialog-body .ai-choice { margin: 0; }
+/* ---------- tables as tabs in one card ---------- */
+.tbl-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: -2px 0 8px; }
+.tbl-tab {
+  display: inline-flex; align-items: center; gap: 4px; font: inherit; font-size: 12.5px; font-weight: 600;
+  color: var(--text-dim); background: none; border: 1px solid transparent; border-radius: 999px; padding: 3px 11px; cursor: pointer;
+  max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tbl-tab:hover { color: var(--text); background: var(--bg-hover); }
+.tbl-tab.on { color: var(--text); border-color: var(--border); background: var(--bg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); }
+.tbl-tab.add { padding: 3px 9px; font-weight: 500; }
+.tbl-tab-x { font-weight: 400; color: var(--text-dim); padding: 0 2px; border-radius: 4px; }
+.tbl-tab-x:hover { color: #dc2626; }
+.tbl-tab-name { font: inherit; font-size: 12.5px; font-weight: 600; border: 1px solid var(--accent, #2563eb); border-radius: 999px; padding: 3px 10px; width: 140px; background: var(--bg); color: var(--text); outline: none; }

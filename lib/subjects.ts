@@ -79,12 +79,19 @@ export type BoxItem = Base & {
   transcript?: Transcript;
   /** More transcripts in the same block, shown as tabs after the first. */
   transcriptTabs?: Transcript[];
+  /** The first table tab's name; the card's own table fields are that tab. */
+  tableName?: string;
+  /** More tables in the same card, each a tab after the first. */
+  tableTabs?: TableTab[];
   /** A script table's last fact-check, and whether its colours are showing. */
   factCheck?: import("./factcheck").FactCheck;
   factView?: boolean;
   /** Set on the card that collects a transcript's comments, naming the transcript's box. */
   notesFor?: string;
 };
+
+/** One more table in a table card: everything a table is, and its tab's name. */
+export type TableTab = Pick<BoxItem, "table" | "tableMode" | "tableCols" | "tableRows" | "tableCells" | "factCheck" | "factView"> & { name: string };
 
 export const DRAWING_WIDTH = 600;
 export const DEFAULT_DRAWING_HEIGHT = 300;
