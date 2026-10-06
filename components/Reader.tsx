@@ -1,6 +1,6 @@
 "use client";
 
-import { DEFAULT_ANTHROPIC_MODEL } from "@/lib/models";
+import { DEFAULT_ANTHROPIC_MODEL, DEFAULT_QUICK_MODEL } from "@/lib/models";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Article, Attachment, DiscoverResult } from "@/lib/types";
 import {
@@ -385,7 +385,8 @@ export default function Reader() {
    */
   const [subjectUsed, setSubjectUsed] = useState<Record<string, number>>({});
   /** Settings that follow the person between devices, with when they changed. */
-  const [prefs, setPrefs] = useState<SharedPrefs>({ subjects: false, aiProvider: "anthropic", openaiModel: "gpt-5-mini", anthropicModel: DEFAULT_ANTHROPIC_MODEL, at: 0 });
+  const [prefs, setPrefs] = useState<SharedPrefs>({ subjects: false, aiProvider: "anthropic", openaiModel: "gpt-5-mini", anthropicModel: DEFAULT_ANTHROPIC_MODEL,
+    anthropicQuickModel: DEFAULT_QUICK_MODEL.anthropic, openaiQuickModel: DEFAULT_QUICK_MODEL.openai, at: 0 });
   const prefsRef = useRef<SharedPrefs>(prefs);
   /** Stories pasted in by hand (lib/manual.ts). */
   const [manual, setManual] = useState<ManualStories>({});
@@ -680,6 +681,8 @@ export default function Reader() {
           aiProvider: remotePrefs.aiProvider,
           openaiModel: remotePrefs.openaiModel,
           anthropicModel: remotePrefs.anthropicModel,
+          anthropicQuickModel: remotePrefs.anthropicQuickModel,
+          openaiQuickModel: remotePrefs.openaiQuickModel,
         };
         saveSettings(next);
         return next;
@@ -2203,7 +2206,8 @@ export default function Reader() {
     const madeChoice = !sameSharedPrefs(sharedPrefsOf(settings, 0), next);
     const settled = madeChoice
       ? next
-      : { ...next, subjects: prefsRef.current.subjects, aiProvider: prefsRef.current.aiProvider, openaiModel: prefsRef.current.openaiModel, anthropicModel: prefsRef.current.anthropicModel };
+      : { ...next, subjects: prefsRef.current.subjects, aiProvider: prefsRef.current.aiProvider, openaiModel: prefsRef.current.openaiModel, anthropicModel: prefsRef.current.anthropicModel,
+          anthropicQuickModel: prefsRef.current.anthropicQuickModel, openaiQuickModel: prefsRef.current.openaiQuickModel };
     setSettings(settled);
     saveSettings(settled);
     if (madeChoice) {
@@ -3631,6 +3635,7 @@ export default function Reader() {
             ai={{
               provider: settings.aiProvider,
               model: settings.aiProvider === "openai" ? settings.openaiModel : settings.anthropicModel,
+              quickModel: settings.aiProvider === "openai" ? settings.openaiQuickModel : settings.anthropicQuickModel,
             }}
             onOpenMenu={() => setMenuOpen(true)}
             onOpenArticle={(link, title, quote) => setReading({ url: link, title, quote })}

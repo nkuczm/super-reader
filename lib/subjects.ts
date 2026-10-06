@@ -524,9 +524,10 @@ export function textOf(html: string): string {
 /* ------------------------------------------------------------------------ */
 
 export type SynthesisInput = {
-  /** Which AI to ask, and (for OpenAI) which model. */
+  /** Which AI to ask, and which model: the deep one for the analysis, the quick one for suggested reading. */
   provider?: "anthropic" | "openai";
   model?: string;
+  quickModel?: string;
   subject: string;
   cards: { id: string; title: string; source?: string; quotes: string[]; note: string }[];
   boxes: string[];
@@ -591,6 +592,8 @@ export type SynthesisResult = {
   suggestions: { link: string; title: string; source?: string; why: string }[];
   /** Tokens the provider reported, for the spending page. */
   usage?: { provider: "anthropic" | "openai"; model: string; input: number; output: number };
+  /** Each call's tokens, by the activity it was for. */
+  usages?: { provider: "anthropic" | "openai"; model: string; input: number; output: number; activity: "insights" | "reading" }[];
 };
 
 /**

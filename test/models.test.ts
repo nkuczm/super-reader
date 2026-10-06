@@ -34,3 +34,11 @@ test("only offered Claude models are used, with the options each accepts", () =>
   assert.equal(claudeSearchTool("claude-haiku-4-5", 3).type, "web_search_20250305");
   assert.equal(claudeSearchTool("claude-sonnet-5-5", 3).type, "web_search_20260209");
 });
+
+test("each tier's estimate counts only its own activities, older runs as deep analysis", () => {
+  const now = 100 * DAY;
+  const r = (activity: string | undefined, input: number) => ({ at: now - 10 * DAY, provider: "anthropic" as const, model: "m", input, output: 0, cost: null, ...(activity ? { activity } : {}) }) as never;
+  const records = [r("fact-check", 100), r("insights", 10), r(undefined, 1), r("transcript-search", 1000), r("reading", 10000)];
+  assert.equal(monthlyUsage(records, now, "deep").input, 111 * 3);
+  assert.equal(monthlyUsage(records, now, "quick").input, 11000 * 3);
+});

@@ -83,7 +83,8 @@ type Props = {
   keyHeaders: () => HeadersInit | undefined;
   hasAiKey: boolean;
   /** Which AI to ask, from Settings. */
-  ai: { provider: AiProvider; model?: string };
+  /** The models for deep analysis (fact check, insights) and quick tools (transcript search, suggested reading). */
+  ai: { provider: AiProvider; model?: string; quickModel?: string };
   /** Who is signed in and whether the work is saved (useAccount). */
   accountStrip?: React.ReactNode;
   /** History and export live with the Google account. */
@@ -611,14 +612,15 @@ export default function SubjectPage(props: Props) {
       const res = await fetch("/api/subjects/synthesize", {
         method: "POST",
         headers,
-        body: JSON.stringify({ ...given, provider: ai.provider, model: ai.model }),
+        body: JSON.stringify({ ...given, provider: ai.provider, model: ai.model, quickModel: ai.quickModel }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "The run failed.");
-      if ((data as SynthesisResult).usage) {
-        // Counted here, and in the account's shared ledger so every device's
-        // spending page includes it.
-        shareSpend(loadSyncCode(), recordSpend((data as SynthesisResult).usage!, note.name));
+      // Counted here, and in the account's shared ledger so every device's
+      // spending page includes it — the analysis and the reading separately.
+      const result = data as SynthesisResult;
+      for (const usage of result.usages ?? (result.usage ? [{ ...result.usage, activity: "insights" as const }] : [])) {
+        shareSpend(loadSyncCode(), recordSpend(usage, note.name));
       }
       onBoard((current) => applySynthesis(current, given, data as SynthesisResult));
       setRun({ state: "idle" });
@@ -697,7 +699,7 @@ export default function SubjectPage(props: Props) {
       });
       const data = (await res.json().catch(() => ({}))) as Partial<FactCheckResult> & { error?: string };
       if (!res.ok) throw new Error(data.error ?? "The fact-check failed.");
-      for (const usage of data.usages ?? []) shareSpend(loadSyncCode(), recordSpend(usage, note.name));
+      for (const usage of data.usages ?? []) shareSpend(loadSyncCode(), recordSpend({ ...usage, activity: "fact-check" }, note.name));
       const result = { claims: data.claims ?? [], omissions: data.omissions ?? [], web: data.web ?? [] };
       onBoard((current) => {
         const held = current?.[box.id];
@@ -713,6 +715,7 @@ export default function SubjectPage(props: Props) {
     subjectName: note.name,
     allCards,
     aiModel: ai.model ?? (ai.provider === "anthropic" ? "claude-opus-5-5" : "gpt-5-mini"),
+    aiQuickModel: ai.quickModel ?? ai.model ?? "",
     aiSearch: (async (turns, query) => {
       if (!hasAiKey) throw new Error(`Add your ${PROVIDER_NAME[ai.provider]} key in Settings → API keys to search by meaning.`);
       const headers = new Headers(keyHeaders());
@@ -720,11 +723,11 @@ export default function SubjectPage(props: Props) {
       const res = await fetch("/api/subjects/transcript-search", {
         method: "POST",
         headers,
-        body: JSON.stringify({ turns, query, provider: ai.provider, model: ai.model }),
+        body: JSON.stringify({ turns, query, provider: ai.provider, model: ai.quickModel ?? ai.model }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "The search failed.");
-      if (data.usage) shareSpend(loadSyncCode(), recordSpend(data.usage, note.name));
+      if (data.usage) shareSpend(loadSyncCode(), recordSpend({ ...data.usage, activity: "transcript-search" }, note.name));
       return data.matches ?? [];
     }) as AiSearch,
     noteTranscript: (box: BoxItem, itemHtml: string) =>
@@ -1076,6 +1079,7 @@ type Shared = {
   /** For flagging AI results: which subject, and which model produced them. */
   subjectName: string;
   aiModel: string;
+  aiQuickModel: string;
   allCards: Card[];
   /** Search a transcript by meaning, with the same AI key and model as insights. */
   aiSearch: AiSearch;
@@ -1234,7 +1238,7 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
         />
       ) : box.transcript ? (
         <TranscriptBox box={box} onChange={(change) => shared.updateBox(box, change)} onComment={(html) => shared.noteTranscript(box, html)} aiSearch={shared.aiSearch}
-          flagWith={{ subject: shared.subjectName, model: shared.aiModel }} />
+          flagWith={{ subject: shared.subjectName, model: shared.aiQuickModel }} />
       ) : box.table ? (
         <TableBox box={box} onChange={(change) => shared.updateBox(box, change)} media={{ dropImage: shared.dropImage, resolveEmbed: shared.resolveEmbed, replaceEmbed: shared.replaceEmbed }}
           facts={{ run: () => shared.factCheck(box), open: shared.openSource }} />
@@ -1292,7 +1296,7 @@ function SuggestionCard({ suggestion, shared, dragHandle }: { suggestion: Sugges
         <span className="ai-tag">✦ Suggested reading</span>
         <div className="subject-suggest-decide" onPointerDown={(e) => e.stopPropagation()}>
           <FlagButton make={() => ({
-            kind: "reading", subject: shared.subjectName, model: shared.aiModel,
+            kind: "reading", subject: shared.subjectName, model: shared.aiQuickModel,
             output: suggestion.why,
             context: [{ label: "Suggested story", text: suggestion.title }],
             links: [{ title: suggestion.source ? `${suggestion.source}: ${suggestion.title}` : suggestion.title, url: suggestion.link }],

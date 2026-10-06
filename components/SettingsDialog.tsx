@@ -4,7 +4,7 @@ import ApiKeys from "./ApiKeys";
 import TeamFeeds from "./TeamFeeds";
 import { Icon } from "./icons";
 import { useEffect, useState } from "react";
-import { costAt, MODEL_CHOICES, monthlyUsage, TYPICAL_RUN } from "@/lib/models";
+import { costAt, DEFAULT_QUICK_MODEL, MODEL_CHOICES, monthlyUsage, TIERS, TYPICAL_RUN, type Tier } from "@/lib/models";
 import { formatDollars, loadSpend, type AiProvider } from "@/lib/spend";
 import { encodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import { FLAGS_EVENT, loadFlags } from "@/lib/flags";
@@ -344,7 +344,7 @@ export default function SettingsDialog({
 
           {settings.subjects && (
             <div className="ai-choice">
-              <p className="field-note" style={{ marginTop: 0 }}>AI for insights and suggested reading</p>
+              <p className="field-note" style={{ marginTop: 0 }}>AI provider and models</p>
               <div className="seg" role="radiogroup" aria-label="AI provider">
                 {(["anthropic", "openai"] as const).map((provider) => (
                   <button
@@ -358,12 +358,18 @@ export default function SettingsDialog({
                   </button>
                 ))}
               </div>
-              <ModelPicker
-                provider={settings.aiProvider}
-                value={settings.aiProvider === "openai" ? settings.openaiModel : settings.anthropicModel}
-                onChange={(id) => onChange(settings.aiProvider === "openai" ? { ...settings, openaiModel: id } : { ...settings, anthropicModel: id })}
-                openaiKey={apiKeys.openai}
-              />
+              {(["deep", "quick"] as const).map((tier) => {
+                const openai = settings.aiProvider === "openai";
+                const key = tier === "deep" ? (openai ? "openaiModel" : "anthropicModel") : (openai ? "openaiQuickModel" : "anthropicQuickModel");
+                return (
+                  <ModelPicker key={`${tier}-${settings.aiProvider}`} tier={tier}
+                    provider={settings.aiProvider}
+                    value={settings[key]}
+                    onChange={(id) => onChange({ ...settings, [key]: id })}
+                    openaiKey={apiKeys.openai}
+                  />
+                );
+              })}
               <p className="field-note">
                 {apiKeys[settings.aiProvider]
                   ? `Using your ${settings.aiProvider === "openai" ? "OpenAI" : "Anthropic"} key.`
@@ -501,13 +507,16 @@ export default function SettingsDialog({
  * The model, chosen by what it is like rather than by its name, with what
  * each would cost a month at the pace this device has been using AI.
  */
-function ModelPicker({ provider, value, onChange, openaiKey }: {
+function ModelPicker({ tier, provider, value, onChange, openaiKey }: {
+  tier: Tier;
   provider: AiProvider;
   value: string;
   onChange: (id: string) => void;
   openaiKey?: string;
 }) {
-  const [usage] = useState(() => monthlyUsage(loadSpend()));
+  const [usage] = useState(() => monthlyUsage(loadSpend(), Date.now(), tier));
+  const [open, setOpen] = useState(false);
+  const defaultId = tier === "quick" ? DEFAULT_QUICK_MODEL[provider] : MODEL_CHOICES[provider].find((m) => m.recommended)?.id;
   // What the reader's own OpenAI key can run, so newer models appear only when they will work.
   const [available, setAvailable] = useState<Set<string> | null>(null);
   useEffect(() => {
@@ -519,28 +528,35 @@ function ModelPicker({ provider, value, onChange, openaiKey }: {
       .catch(() => {});
     return () => { live = false; };
   }, [provider, openaiKey]);
-  const choices = MODEL_CHOICES[provider].filter((m) => !m.unconfirmed || available?.has(m.id) || m.id === value);
+  const offered = MODEL_CHOICES[provider].filter((m) => !m.unconfirmed || available?.has(m.id) || m.id === value);
+  const current = offered.find((m) => m.id === value) ?? offered.find((m) => m.id === defaultId);
+  const choices = open ? offered : offered.filter((m) => m === current);
   const known = choices.some((m) => m.id === value);
   const [custom, setCustom] = useState(!known && provider === "openai");
   const basis = usage.runs > 0 ? usage : null;
   return (
-    <div className="model-pick" role="radiogroup" aria-label="AI model">
+    <div className="model-pick" role="radiogroup" aria-label={`${TIERS[tier].name} model`}>
+      <div className="model-tier">
+        <b>{TIERS[tier].name}</b>
+        <span>{TIERS[tier].blurb}</span>
+        <button className="link-btn" onClick={() => setOpen((v) => !v)}>{open ? "Done" : "Change"}</button>
+      </div>
       {choices.map((m) => {
-        const on = !custom && (value === m.id || (!known && provider === "anthropic" && m.recommended));
-        const cost = basis ? costAt(m, basis) : costAt(m, TYPICAL_RUN);
+        const on = !custom && m === current;
+        const cost = basis ? costAt(m, basis) : costAt(m, TYPICAL_RUN[tier]);
         return (
           <button key={m.id} role="radio" aria-checked={on} className={`model-option${on ? " on" : ""}`}
-            onClick={() => { setCustom(false); onChange(m.id); }}>
-            <span className="model-name">{m.name}{m.recommended && <span className="model-tag">Default</span>}</span>
+            onClick={() => { setCustom(false); onChange(m.id); setOpen(false); }}>
+            <span className="model-name">{m.name}{m.id === defaultId && <span className="model-tag">Default</span>}</span>
             <span className="model-blurb">{m.blurb}</span>
             <span className="model-cost">
-              <b>{basis ? `≈ ${formatDollars(cost)}/month` : `≈ ${formatDollars(cost)} per insights run`}</b>
+              <b>{basis ? `≈ ${formatDollars(cost)}/month` : `≈ ${formatDollars(cost)} per ${tier === "deep" ? "insights run" : "search"}`}</b>
               <span>${m.input} in · ${m.output} out per million tokens</span>
             </span>
           </button>
         );
       })}
-      {provider === "openai" && (
+      {provider === "openai" && (open || custom) && (
         custom ? (
           <label className="api-field">
             <span>Another OpenAI model, by name</span>
@@ -553,8 +569,8 @@ function ModelPicker({ provider, value, onChange, openaiKey }: {
       )}
       <p className="field-note model-basis">
         {basis
-          ? `Estimates use your pace on this device: about ${basis.runs} AI run${basis.runs === 1 ? "" : "s"} a month${usage.days < 30 ? `, from ${Math.max(1, usage.days)} day${usage.days === 1 ? "" : "s"} of use` : ""}. Real bills vary with how long subjects and scripts are.`
-          : "No AI use recorded on this device yet, so costs are shown per insights run. Fact-checks of long scripts cost several times more."}
+          ? `Estimates use your pace on this device for these tools: about ${basis.runs} run${basis.runs === 1 ? "" : "s"} a month${usage.days < 30 ? `, from ${Math.max(1, usage.days)} day${usage.days === 1 ? "" : "s"} of use` : ""}. Real bills vary with how long subjects and scripts are.`
+          : "No use of these tools recorded on this device yet, so costs are shown per typical run. Fact-checks of long scripts cost several times more."}
       </p>
     </div>
   );

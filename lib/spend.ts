@@ -19,6 +19,16 @@ export const PROVIDER_NAME: Record<AiProvider, string> = {
 
 export const DEFAULT_OPENAI_MODEL = "gpt-5-mini";
 
+/** What a run was for, as the spending page breaks it down. */
+export type Activity = "fact-check" | "insights" | "reading" | "transcript-search";
+export const ACTIVITY_NAME: Record<Activity, string> = {
+  "fact-check": "Fact check",
+  insights: "Insights & connections",
+  reading: "Suggested reading",
+  "transcript-search": "Transcript search",
+};
+export const isActivity = (v: unknown): v is Activity => typeof v === "string" && v in ACTIVITY_NAME;
+
 /** US dollars per million tokens, input then output. */
 export const PRICES: Record<string, { input: number; output: number }> = {
   "claude-opus-5-5": { input: 4, output: 20 },
@@ -51,6 +61,8 @@ export type SpendRecord = {
   cost: number | null;
   /** Which subject the run was for, by name. */
   subject?: string;
+  /** What it was for; runs from before this was kept have none. */
+  activity?: Activity;
 };
 
 const KEY = "super-reader:spend:v1";
@@ -81,7 +93,7 @@ export function loadSpend(): SpendRecord[] {
 }
 
 export function recordSpend(
-  usage: { provider: AiProvider; model: string; input: number; output: number },
+  usage: { provider: AiProvider; model: string; input: number; output: number; activity?: Activity },
   subject?: string,
   now = Date.now(),
 ) {
@@ -95,6 +107,7 @@ export function recordSpend(
     output: usage.output,
     cost: costOf(usage.model, usage.input, usage.output),
     subject,
+    ...(isActivity(usage.activity) ? { activity: usage.activity } : {}),
   };
   try {
     const next = [...loadSpend(), record].slice(-MAX_RECORDS);

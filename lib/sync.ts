@@ -48,7 +48,7 @@ export type SyncPayload = {
    */
   boards?: Boards;
   /** Settings that follow the person (lib/store.ts SharedPrefs); newest wins. */
-  prefs?: { subjects: boolean; aiProvider: string; openaiModel: string; anthropicModel?: string; at: number };
+  prefs?: { subjects: boolean; aiProvider: string; openaiModel: string; anthropicModel?: string; anthropicQuickModel?: string; openaiQuickModel?: string; at: number };
   /** Stories pasted in by hand (lib/manual.ts), merged per link. */
   manual?: ManualStories;
   /** Passages marked in articles (lib/highlights.ts), merged per highlight. */

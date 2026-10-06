@@ -1,9 +1,12 @@
 "use client";
 
 import { loadSyncCode } from "@/lib/store";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { TIERS } from "@/lib/models";
 import { Icon } from "./icons";
 import {
+  ACTIVITY_NAME,
+  type Activity,
   daily,
   formatDollars,
   loadSpend,
@@ -106,6 +109,17 @@ export default function SpendPage({ onOpenMenu, onBack }: { onOpenMenu?: () => v
       .sort((a, b) => b.cost - a.cost || b.runs - a.runs);
   }, [records]);
 
+  /** What the money went on: each tool, under its tier, and the runs from before activities were kept. */
+  const byActivity = useMemo(() => {
+    const of = (a: Activity | undefined) => records.filter((r) => r.activity === a);
+    const tiers = (["deep", "quick"] as const).map((tier) => ({
+      tier,
+      rows: TIERS[tier].activities.map((a) => ({ key: a, name: ACTIVITY_NAME[a], ...summarise(of(a)) })),
+    }));
+    const earlier = summarise(of(undefined));
+    return { tiers, earlier };
+  }, [records]);
+
   const bySubject = useMemo(() => {
     const map = new Map<string, SpendRecord[]>();
     for (const r of records) map.set(r.subject ?? "—", [...(map.get(r.subject ?? "—") ?? []), r]);
@@ -160,6 +174,40 @@ export default function SpendPage({ onOpenMenu, onBack }: { onOpenMenu?: () => v
           <p className="field-label" style={{ padding: "4px 20px 0" }}>Last 30 days</p>
           <div style={{ padding: "4px 20px 12px" }}>
             <DailyBars days={days} />
+          </div>
+
+          <div className="status-table-wrap">
+            <table className="status-table spend-activity">
+              <thead>
+                <tr><th>Activity</th><th className="num">Runs</th><th className="num">Tokens</th><th className="num">Est. cost</th></tr>
+              </thead>
+              <tbody>
+                {byActivity.tiers.map(({ tier, rows }) => {
+                  const total = rows.reduce((n, r) => n + r.cost, 0);
+                  return (
+                    <Fragment key={tier}>
+                      <tr className="spend-tier"><td colSpan={3}>{TIERS[tier].name}</td><td className="num">{formatDollars(total)}</td></tr>
+                      {rows.map((row) => (
+                        <tr key={row.key}>
+                          <td className="status-name spend-indent">{row.name}</td>
+                          <td className="num">{row.runs}</td>
+                          <td className="num">{tokens(row.input + row.output)}</td>
+                          <td className="num">{row.runs ? `${formatDollars(row.cost)}${floor(row)}` : "—"}</td>
+                        </tr>
+                      ))}
+                    </Fragment>
+                  );
+                })}
+                {byActivity.earlier.runs > 0 && (
+                  <tr>
+                    <td><div className="status-name">Earlier runs</div><div className="status-dim">From before activities were recorded — mostly insights</div></td>
+                    <td className="num">{byActivity.earlier.runs}</td>
+                    <td className="num">{tokens(byActivity.earlier.input + byActivity.earlier.output)}</td>
+                    <td className="num">{formatDollars(byActivity.earlier.cost)}{floor(byActivity.earlier)}</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
 
           <div className="status-table-wrap">
@@ -220,7 +268,7 @@ export default function SpendPage({ onOpenMenu, onBack }: { onOpenMenu?: () => v
       )}
       <p className="hint status-footnote">
         Your provider&apos;s dashboard is the bill; this is an estimate from list prices per million tokens
-        (Claude Opus 5.5 $4 in / $20 out; GPT-5 mini $0.25 / $2). A model this app does not know a price for is
+        (Claude Opus 5.5 $4 in / $20 out; Claude Sonnet 5.5 $2 / $10; GPT-5 mini $0.25 / $2). A model this app does not know a price for is
         counted in tokens and marked “price unknown”, and a total with such runs in it is shown with a “+”.
       </p>
     </div>
