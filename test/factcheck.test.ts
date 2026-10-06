@@ -45,3 +45,30 @@ test("a stored check is read back safely", () => {
   const check = safeFactCheck({ at: 5, claims: [{ row: 1, text: "x", status: "weird", why: 3, sources: [{ ref: "S1", quote: "q" }, null] }], targets: { S1: { kind: "card", id: "c", title: "t", link: "l" }, X: { kind: "bad", id: "y" } } });
   assert.deepEqual(check, { at: 5, claims: [{ row: 1, text: "x", status: "verify", why: "", sources: [{ ref: "S1", quote: "q" }] }], targets: { S1: { kind: "card", id: "c", title: "t", link: "l" } } });
 });
+
+test("quotes are found for transcript speakers by first name, and nobody else", async () => {
+  const { scriptQuotes } = await import("../lib/factcheck");
+  const sources = [{ id: "T1", title: "Interview", text: [
+    "[T1#0] Nathan: So when did it start?",
+    "[T1#1] Devon Smith: We started in 2004, honestly with no money at all.",
+    "[T1#2] Devon Smith: We sometimes cut corners, sure.",
+  ].join("\n") }];
+  const rows = [
+    { row: 1, text: "The firm began small." },
+    { row: 2, text: "DEVON: “We started in 2004.”\nNATHAN: That was brave.\nME: I asked again." },
+    { row: 3, text: "Devon: \"We never cut corners.\"" },
+    { row: 4, text: "MARIA: \"Hello\"" },
+  ];
+  const qs = scriptQuotes(rows, sources);
+  // Nathan only asks questions: he is the interviewer, so "NATHAN:" is not a quote to check.
+  assert.ok(!qs.some((q) => q.speaker === "Nathan"));
+  const devon = qs.filter((q) => q.speaker === "Devon Smith");
+  assert.equal(devon.length, 2);
+  assert.equal(devon[0].text, "“We started in 2004.”");
+  assert.equal(devon[0].match?.ref, "T1#1");
+  assert.equal(devon[0].match?.exact, true);
+  assert.equal(devon[1].match?.ref, "T1#2");
+  assert.equal(devon[1].match?.exact, false);
+  assert.match(devon[0].context, /began small/);
+  assert.ok(!qs.some((q) => /Hello|asked again/.test(q.text)), "ME and a name no transcript has are not checked");
+});

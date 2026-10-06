@@ -19,6 +19,8 @@ export type FactOmission = { text: string; refs: string[] };
 export type FactCheckInput = {
   rows: { row: number; text: string; visual?: string }[];
   sources: { id: string; title?: string; text: string }[];
+  /** Quotations of interviewees found in the script, each of which must be judged. */
+  quotes?: ScriptQuote[];
   provider?: string;
   model?: string;
 };
@@ -179,4 +181,107 @@ export function safeFactCheck(input: unknown): FactCheck | null {
     if (kind === "card" || kind === "note" || kind === "transcript") targets[k.slice(0, 20)] = t as SourceTarget;
   }
   return { at: typeof v.at === "number" ? v.at : 0, claims, targets };
+}
+
+/* ---------- quotations from the people interviewed ---------- */
+
+/** A line of the script that puts words in an interviewee's mouth: "DEVON: “We started in 2004.”" */
+export type ScriptQuote = {
+  id: string;
+  row: number;
+  speaker: string;
+  /** The quoted words exactly as the script has them (what gets painted). */
+  text: string;
+  /** The transcript turn that best matches it, by the speaker, and whether its words are there word for word. */
+  match: { ref: string; excerpt: string; exact: boolean } | null;
+  /** Script lines just before and after, for judging whether the quote is used fairly. */
+  context: string;
+};
+
+/** Labels that are the writer or the narration, never an interviewee. */
+const NOT_INTERVIEWEES = new Set(["me", "i", "narrator", "narration", "vo", "v.o", "v.o.", "voiceover", "host", "interviewer", "q", "a", "us", "we"]);
+
+const words = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[‘’']/g, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+
+/** A transcript's turns, read back from the research sources: [T1#4] Devon Smith: words. */
+function transcriptTurns(sources: FactCheckInput["sources"]) {
+  const turns: { ref: string; speaker: string; text: string }[] = [];
+  for (const s of sources) {
+    if (!/^T\d+$/.test(s.id)) continue;
+    for (const line of s.text.split("\n")) {
+      const m = line.match(/^\[(T\d+#\d+)\] ([^:]{1,80}): (.*)$/);
+      if (m) turns.push({ ref: m[1], speaker: m[2].trim(), text: m[3] });
+    }
+  }
+  return turns;
+}
+
+/**
+ * Every quotation in the script attributed to someone who speaks in one of
+ * the subject's transcripts — matched by first name, so "DEVON:" finds
+ * "Devon Smith". A label that is no transcript's speaker (the writer, the
+ * narration, "ME") is not a quotation to check. Each comes with the turn
+ * of that speaker that best matches it, and whether the words are there
+ * exactly, so the check never has to find the quote on its own.
+ */
+export function scriptQuotes(rows: FactCheckInput["rows"], sources: FactCheckInput["sources"]): ScriptQuote[] {
+  const turns = transcriptTurns(sources);
+  // Whoever mostly asks the questions is the interviewer — the writer's side, not a source to quote-check.
+  const asked = new Map<string, { q: number; n: number }>();
+  for (const t of turns) {
+    const c = asked.get(t.speaker) ?? { q: 0, n: 0 };
+    c.n++;
+    if (/\?\s*["”']?\s*$/.test(t.text)) c.q++;
+    asked.set(t.speaker, c);
+  }
+  const interviewer = (speaker: string) => {
+    const c = asked.get(speaker)!;
+    return c.q / c.n >= 0.5;
+  };
+  const firstNames = new Map<string, string[]>();
+  for (const t of turns) {
+    if (interviewer(t.speaker)) continue;
+    const first = words(t.speaker).split(" ")[0];
+    if (first) firstNames.set(first, [...new Set([...(firstNames.get(first) ?? []), t.speaker])]);
+  }
+  const out: ScriptQuote[] = [];
+  rows.forEach((row, i) => {
+    for (const line of row.text.split("\n")) {
+      const m = line.match(/^\s*([\p{L}][\p{L}.'’\- ]{0,40}?)\s*:\s*(.+?)\s*$/u);
+      if (!m) continue;
+      const label = words(m[1]);
+      if (!label || NOT_INTERVIEWEES.has(label)) continue;
+      const speakers = firstNames.get(label.split(" ")[0]);
+      if (!speakers) continue;
+      const text = m[2].trim();
+      const said = words(text.replace(/^["“”']+|["“”']+$/g, ""));
+      if (!said) continue;
+      // The speaker's turn sharing the most words with the quote.
+      const theirs = turns.filter((t) => speakers.includes(t.speaker));
+      const want = new Set(said.split(" "));
+      let best: (typeof theirs)[number] | null = null;
+      let bestScore = 0;
+      for (const t of theirs) {
+        const have = new Set(words(t.text).split(" "));
+        let shared = 0;
+        for (const w of want) if (have.has(w)) shared++;
+        const score = shared / want.size;
+        if (score > bestScore) { bestScore = score; best = t; }
+      }
+      const match = best && bestScore >= 0.3
+        ? { ref: best.ref, excerpt: excerptAround(best.text, said), exact: words(best.text).includes(said) }
+        : null;
+      const near = [rows[i - 1]?.text, rows[i + 1]?.text].filter(Boolean).map((t) => t!.replace(/\s+/g, " ").slice(0, 400));
+      out.push({ id: `Q${out.length + 1}`, row: row.row, speaker: speakers[0], text, match, context: near.join(" … ") });
+    }
+  });
+  return out;
+}
+
+/** About 60 words of a turn around where a quote's words begin. */
+function excerptAround(turn: string, said: string): string {
+  const all = turn.split(/\s+/);
+  const first = said.split(" ")[0];
+  const at = Math.max(0, all.findIndex((w) => words(w) === first));
+  return all.slice(Math.max(0, at - 15), at + 45).join(" ");
 }

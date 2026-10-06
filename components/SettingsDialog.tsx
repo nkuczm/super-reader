@@ -517,7 +517,7 @@ function ModelPicker({ provider, value, onChange, openaiKey }: {
         return (
           <button key={m.id} role="radio" aria-checked={on} className={`model-option${on ? " on" : ""}`}
             onClick={() => { setCustom(false); onChange(m.id); }}>
-            <span className="model-name">{m.name}{m.recommended && <span className="model-tag">Recommended</span>}</span>
+            <span className="model-name">{m.name}{m.recommended && <span className="model-tag">Default</span>}</span>
             <span className="model-blurb">{m.blurb}</span>
             <span className="model-cost">
               <b>{basis ? `≈ ${formatDollars(cost)}/month` : `≈ ${formatDollars(cost)} per insights run`}</b>
