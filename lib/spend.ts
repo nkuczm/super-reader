@@ -20,9 +20,10 @@ export const PROVIDER_NAME: Record<AiProvider, string> = {
 export const DEFAULT_OPENAI_MODEL = "gpt-5-mini";
 
 /** What a run was for, as the spending page breaks it down. */
-export type Activity = "fact-check" | "insights" | "reading" | "transcript-search";
+export type Activity = "fact-check" | "production" | "insights" | "reading" | "transcript-search";
 export const ACTIVITY_NAME: Record<Activity, string> = {
   "fact-check": "Fact check",
+  production: "Production prep",
   insights: "Insights & connections",
   reading: "Suggested reading",
   "transcript-search": "Transcript search",

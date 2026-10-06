@@ -8,7 +8,7 @@
  * the device; the Flagged page exports them.
  */
 
-export type FlagKind = "fact-check" | "omissions" | "insight" | "reading" | "transcript-search";
+export type FlagKind = "fact-check" | "production" | "omissions" | "insight" | "reading" | "transcript-search";
 
 export type Flag = {
   id: string;

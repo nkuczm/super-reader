@@ -53,6 +53,8 @@ import {
   type SynthesisResult,
 } from "@/lib/subjects";
 import { canonicalUrl } from "@/lib/url";
+import { safeGrid } from "@/lib/sheet";
+import { prepHtml, productionOf, putProduction, shotlistGrid, type ProductionResult } from "@/lib/production";
 import {
   activeTabOf,
   addTab,
@@ -789,6 +791,28 @@ export default function SubjectPage(props: Props) {
         return putFactNotes(next, box.id, omissionsHtml(result, targets), newItemId("box"));
       });
     },
+    // A script broken down into a shot list and a production prep list, beside it on the board.
+    produce: async (box: BoxItem, sheet: BoxItem = box) => {
+      if (!hasAiKey) throw new Error(`Add your ${PROVIDER_NAME[ai.provider]} key in Settings → API keys to plan production.`);
+      const rows = scriptRows(sheet.table);
+      if (!rows.length) throw new Error("Write some words in the script first.");
+      const allBoxes = live(board).filter((item): item is BoxItem => item.kind === "box");
+      const { sources } = researchOf(allCards, allBoxes, box.id);
+      const quotes = scriptQuotes(rows, sources).map(({ row, speaker, text }) => ({ row, speaker, text }));
+      const headers = new Headers(keyHeaders());
+      headers.set("content-type", "application/json");
+      const res = await fetch("/api/subjects/production", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ rows, quotes, provider: ai.provider, model: ai.model }),
+      });
+      const data = (await res.json().catch(() => ({}))) as Partial<ProductionResult> & { error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Couldn't break down the script.");
+      for (const usage of data.usages ?? []) shareSpend(loadSyncCode(), recordSpend({ ...usage, activity: "production" }, note.name));
+      const shots = shotlistGrid(data.shots ?? [], rows);
+      const prep = prepHtml(data.needs ?? [], note.name);
+      onBoard((current) => putProduction(current, box.id, shots, prep, () => newItemId("box")));
+    },
     openSource: (target: SourceTarget, quote: string) => {
       if (target.kind === "card") return props.onOpenArticle(target.link, target.title, quote);
       goTo({ id: target.id, n: -1, level: 1, text: "" });
@@ -1165,6 +1189,7 @@ type Shared = {
   replaceEmbed: (id: string, image: string) => void;
   /** Fact-check a script table against the subject's research; its colours and the omissions card follow. */
   factCheck: (box: BoxItem, sheet?: BoxItem, write?: (change: Partial<BoxItem>) => void) => Promise<void>;
+  produce: (box: BoxItem, sheet?: BoxItem) => Promise<void>;
   /** Open what a fact-check cited: the story at its passage, or the note or transcript on the page. */
   openSource: (target: SourceTarget, quote: string) => void;
   /** Whole-card changes, undoable: delete cards (with their places and links), and record any other change as a step. */
@@ -1326,6 +1351,21 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
     <div className={`subject-box${box.table ? " table-box" : ""}${box.label ? " label-box" : ""}${!box.label && !box.drawing && !box.table && !box.transcript && box.image === undefined && box.caption === undefined ? " text-box" : ""}`}>
       <div className="subject-box-head" onPointerDown={dragHandle}>
         <span className="subject-box-grip" aria-hidden="true">⋮⋮</span>
+        {productionOf(box) && (
+          <FlagButton className="box-flag" make={() => {
+            const script = shared.boxes.find((b) => box.notesFor === `${b.id}#${productionOf(box)}`);
+            const rows = script ? scriptRows(script.table) : [];
+            return {
+              kind: "production",
+              subject: shared.subjectName,
+              model: shared.aiModel,
+              output: box.table
+                ? safeGrid(box.table).map((r) => r.map((c) => textOf(c).replace(/\s+/g, " ").trim()).join(" | ")).join("\n")
+                : textOf(box.html),
+              context: [{ label: "Script", text: rows.map((r) => `[${r.row}] ${r.text}${r.visual ? ` (visuals: ${r.visual})` : ""}`).join("\n").slice(0, 6000) }],
+            };
+          }} />
+        )}
         {box.notesFor?.endsWith("#facts") && (
           <FlagButton className="box-flag" make={() => {
             const script = shared.boxes.find((b) => `${b.id}#facts` === box.notesFor);
@@ -1389,7 +1429,7 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
           flagWith={{ subject: shared.subjectName, model: shared.aiQuickModel }} />
       ) : box.table ? (
         <TableBox box={box} onChange={(change) => shared.updateBoxRecorded(box, change)} history={shared.stepHistory} media={{ dropImage: shared.dropImage, resolveEmbed: shared.resolveEmbed, replaceEmbed: shared.replaceEmbed }}
-          facts={{ run: (sheet, write) => shared.factCheck(box, sheet, write), open: shared.openSource }} />
+          facts={productionOf(box) ? undefined : { run: (sheet, write) => shared.factCheck(box, sheet, write), produce: (sheet) => shared.produce(box, sheet), open: shared.openSource }} />
       ) : box.drawing ? (
         <DrawingPad box={box} onChange={(change) => shared.updateBox(box, change)} />
       ) : box.image !== undefined || box.caption !== undefined ? (

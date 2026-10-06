@@ -7,6 +7,7 @@ import { Icon } from "./icons";
 
 const KIND: Record<Flag["kind"], string> = {
   "fact-check": "Fact check",
+  production: "Production prep",
   omissions: "Worth considering",
   insight: "Insight",
   reading: "Suggested reading",
