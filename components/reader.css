@@ -2524,3 +2524,10 @@
 .flag-output { background: var(--bg-hover); border-radius: 6px; padding: 6px 8px; }
 .flag-link + .flag-link::before { content: " · "; color: var(--text-dim); }
 .flag-note { width: 100%; margin-top: 4px; font-size: 13px; resize: vertical; }
+/* ---------- AI tiers ---------- */
+.model-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin-top: 8px; }
+.model-tier b { font-size: 14px; }
+.model-tier span { flex: 1 1 100%; order: 3; font-size: 12.5px; color: var(--text-dim); line-height: 1.4; }
+.model-tier .link-btn { margin-left: auto; font-size: 12.5px; }
+.spend-activity .spend-tier td { font-weight: 600; background: var(--bg-hover); font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+.spend-activity .spend-indent { padding-left: 22px; }

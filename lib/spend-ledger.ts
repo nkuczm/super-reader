@@ -7,7 +7,7 @@
 
 import { ensureSchema, getSql } from "./db";
 import { hashCode } from "./sync-code";
-import type { SpendRecord } from "./spend";
+import { isActivity, type SpendRecord } from "./spend";
 
 const MAX_KEPT = 5000;
 
@@ -47,6 +47,7 @@ function clean(r: Partial<SpendRecord>): SpendRecord | null {
     output: num(r.output),
     cost: typeof r.cost === "number" && Number.isFinite(r.cost) && r.cost >= 0 ? r.cost : null,
     subject: typeof r.subject === "string" ? r.subject.slice(0, 120) : undefined,
+    ...(isActivity(r.activity) ? { activity: r.activity } : {}),
   };
 }
 

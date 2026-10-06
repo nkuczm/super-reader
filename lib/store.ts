@@ -1,6 +1,12 @@
 "use client";
 
-import { DEFAULT_ANTHROPIC_MODEL, modelFor } from "./models";
+import { DEFAULT_ANTHROPIC_MODEL, DEFAULT_QUICK_MODEL, modelFor } from "./models";
+
+/** A quick-tools model as stored: an offered Claude model, or any named OpenAI one; else the default. */
+function quickModel(provider: "anthropic" | "openai", value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) return DEFAULT_QUICK_MODEL[provider];
+  return provider === "openai" ? value.trim() : modelFor("anthropic", value);
+}
 import type { Article, SourceMeta } from "./types";
 import type { SavedArticle, SavedRemoval } from "./saved";
 import type { WatchMarks } from "./alerts";
@@ -211,8 +217,11 @@ export type Settings = {
   aiProvider: "anthropic" | "openai";
   /** The OpenAI model, when that is the provider. */
   openaiModel: string;
-  /** The Claude model, when Anthropic is the provider. */
+  /** The Claude model, when Anthropic is the provider — for deep analysis. */
   anthropicModel: string;
+  /** The models for quick tools (transcript search, suggested reading), per provider. */
+  anthropicQuickModel: string;
+  openaiQuickModel: string;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -229,6 +238,8 @@ export const DEFAULT_SETTINGS: Settings = {
   aiProvider: "anthropic",
   openaiModel: "gpt-5-mini",
   anthropicModel: DEFAULT_ANTHROPIC_MODEL,
+  anthropicQuickModel: DEFAULT_QUICK_MODEL.anthropic,
+  openaiQuickModel: DEFAULT_QUICK_MODEL.openai,
 };
 
 const SETTINGS_KEY = "super-reader:settings:v1";
@@ -265,6 +276,8 @@ export function loadSettings(): Settings {
           ? parsed.openaiModel.trim()
           : DEFAULT_SETTINGS.openaiModel,
       anthropicModel: modelFor("anthropic", parsed.anthropicModel),
+      anthropicQuickModel: quickModel("anthropic", parsed.anthropicQuickModel),
+      openaiQuickModel: quickModel("openai", parsed.openaiQuickModel),
       showDownloadBar: Boolean(parsed.showDownloadBar),
       quoteToNote: parsed.quoteToNote !== false,
       openOnSite: Array.isArray(parsed.openOnSite)
@@ -298,6 +311,8 @@ export type SharedPrefs = {
   aiProvider: "anthropic" | "openai";
   openaiModel: string;
   anthropicModel: string;
+  anthropicQuickModel: string;
+  openaiQuickModel: string;
   /** When these last changed, on the device that changed them. 0 = never chosen. */
   at: number;
 };
@@ -305,11 +320,13 @@ export type SharedPrefs = {
 const PREFS_KEY = "super-reader:shared-prefs:v1";
 
 export function sharedPrefsOf(settings: Settings, at: number): SharedPrefs {
-  return { subjects: settings.subjects, aiProvider: settings.aiProvider, openaiModel: settings.openaiModel, anthropicModel: settings.anthropicModel, at };
+  return { subjects: settings.subjects, aiProvider: settings.aiProvider, openaiModel: settings.openaiModel, anthropicModel: settings.anthropicModel,
+    anthropicQuickModel: settings.anthropicQuickModel, openaiQuickModel: settings.openaiQuickModel, at };
 }
 
 export function sameSharedPrefs(a: SharedPrefs, b: Settings | SharedPrefs) {
-  return a.subjects === b.subjects && a.aiProvider === b.aiProvider && a.openaiModel === b.openaiModel && a.anthropicModel === b.anthropicModel;
+  return a.subjects === b.subjects && a.aiProvider === b.aiProvider && a.openaiModel === b.openaiModel && a.anthropicModel === b.anthropicModel
+    && a.anthropicQuickModel === b.anthropicQuickModel && a.openaiQuickModel === b.openaiQuickModel;
 }
 
 /**
@@ -351,6 +368,8 @@ export function cleanSharedPrefs(input: unknown): SharedPrefs | null {
     openaiModel: typeof p.openaiModel === "string" && p.openaiModel.trim() ? p.openaiModel.trim() : DEFAULT_SETTINGS.openaiModel,
     // A copy from before the Claude model could be chosen means the default.
     anthropicModel: modelFor("anthropic", p.anthropicModel),
+    anthropicQuickModel: quickModel("anthropic", p.anthropicQuickModel),
+    openaiQuickModel: quickModel("openai", p.openaiQuickModel),
     at: p.at,
   };
 }

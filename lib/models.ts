@@ -6,7 +6,28 @@
  * of 25 Sep 2026). A token is roughly three quarters of a word.
  */
 
-import type { AiProvider, SpendRecord } from "./spend";
+import type { Activity, AiProvider, SpendRecord } from "./spend";
+
+/**
+ * The AI tools in two tiers, each with its own model. Quick tools are
+ * lookups a small model does well; deep analysis — judging a script against
+ * the evidence, connecting sources — is where a stronger model's reading
+ * pays for itself.
+ */
+export type Tier = "quick" | "deep";
+export const TIERS: Record<Tier, { name: string; blurb: string; activities: Activity[] }> = {
+  deep: {
+    name: "Deep analysis",
+    blurb: "Fact check and insights & connections across your sources — careful reasoning, where a stronger model is worth it.",
+    activities: ["fact-check", "insights"],
+  },
+  quick: {
+    name: "Quick tools",
+    blurb: "AI transcript search and suggested reading — quick lookups a smaller, cheaper model does well.",
+    activities: ["transcript-search", "reading"],
+  },
+};
+export const DEFAULT_QUICK_MODEL: Record<AiProvider, string> = { anthropic: "claude-sonnet-5-5", openai: "gpt-5-mini" };
 
 export type ModelChoice = {
   id: string;
@@ -55,8 +76,11 @@ export function modelFor(provider: AiProvider, chosen: string | undefined): stri
   return list.some((m) => m.id === chosen) ? chosen! : DEFAULT_ANTHROPIC_MODEL;
 }
 
-/** Roughly what one insights run reads and writes, for a reader with no history yet. */
-export const TYPICAL_RUN = { input: 12_000, output: 2_500 };
+/** Roughly what one run reads and writes, for a reader with no history yet: an insights run, and a transcript search. */
+export const TYPICAL_RUN: Record<Tier, { input: number; output: number }> = {
+  deep: { input: 12_000, output: 2_500 },
+  quick: { input: 8_000, output: 600 },
+};
 
 export type UsageBasis = {
   /** Tokens a month at the reader's pace, read and written. */
@@ -72,9 +96,11 @@ export type UsageBasis = {
  * few days are scaled up to a month, but never from less than a week, so a
  * busy first afternoon does not read as a busy month.
  */
-export function monthlyUsage(records: SpendRecord[], now = Date.now()): UsageBasis {
+export function monthlyUsage(records: SpendRecord[], now = Date.now(), tier?: Tier): UsageBasis {
   const since = now - 30 * 86_400_000;
-  const recent = records.filter((r) => r.at >= since && r.at <= now);
+  // Runs from before activities were recorded were nearly all insights: deep analysis.
+  const inTier = (r: SpendRecord) => !tier || TIERS[tier].activities.includes(r.activity ?? "insights");
+  const recent = records.filter((r) => r.at >= since && r.at <= now && inTier(r));
   if (!recent.length) return { input: 0, output: 0, runs: 0, days: 0 };
   const first = Math.min(...records.map((r) => r.at));
   const days = Math.min(30, Math.max(7, (now - first) / 86_400_000));
