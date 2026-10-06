@@ -12,6 +12,8 @@ import {
   linkSyncCode,
   listVersions,
   changesSince,
+  readAccountPrefs,
+  writeAccountPrefs,
   compactChanges,
   slimLegacyVersions,
   inlineImages,
@@ -200,4 +202,34 @@ test("a save appends its change and never rewrites the whole document", async ()
   assert.equal(n1.rows[0].n, n0.rows[0].n + 1);
   const { doc: now } = await readSubjects("g-5");
   assert.ok(now.notes[0].entries[0] && now.boards.big.small);
+});
+
+test("settings and keys follow the account: the latest change wins, and no key is lost to a blank device", async () => {
+  await upsertAccount({ id: "g-6", email: "six@example.com" }, "r");
+  // The old computer, with its models and key chosen before stamps existed (1).
+  await writeAccountPrefs("g-6", { settings: { openaiModel: "gpt-6-sol" }, settingsAt: 1, keys: { openai: "sk-old" }, keysAt: 1 });
+  // A new computer with nothing: defaults, no keys, never changed (0).
+  const got = await writeAccountPrefs("g-6", { settings: { openaiModel: "gpt-5-mini" }, settingsAt: 0, keys: {}, keysAt: 0 });
+  assert.equal(got.settings?.openaiModel, "gpt-6-sol");
+  assert.equal(got.keys?.openai, "sk-old");
+  // A real change on the new computer wins.
+  const later = await writeAccountPrefs("g-6", { settings: { openaiModel: "gpt-6-luna" }, settingsAt: Date.now(), keys: { openai: "sk-new" }, keysAt: Date.now() });
+  assert.equal(later.settings?.openaiModel, "gpt-6-luna");
+  assert.equal(later.keys?.openai, "sk-new");
+  const raw = await db.query("SELECT payload FROM account_prefs WHERE account_id = 'g-6'");
+  assert.doesNotMatch(JSON.stringify(raw.rows), /sk-new/, "keys are encrypted at rest");
+  assert.equal((await readAccountPrefs("g-6"))?.keys?.openai, "sk-new");
+  // Two unstamped devices: a key either holds is kept.
+  await upsertAccount({ id: "g-7", email: "seven@example.com" }, "r");
+  await writeAccountPrefs("g-7", { keys: { anthropic: "sk-a" }, keysAt: 0 });
+  assert.deepEqual((await writeAccountPrefs("g-7", { keys: { openai: "sk-o" }, keysAt: 0 })).keys, { openai: "sk-o", anthropic: "sk-a" });
+});
+
+test("the key vault is kept with the account, and a device without one never erases it", async () => {
+  await upsertAccount({ id: "g-8", email: "eight@example.com" }, "r");
+  const vault = { v: 1, salt: "s", iv: "i", ct: "c" };
+  await writeAccountPrefs("g-8", { keys: { openai: "sk" }, keysAt: 5, vault });
+  const blank = await writeAccountPrefs("g-8", { keys: {}, keysAt: 0 });
+  assert.deepEqual(blank.vault, vault);
+  assert.equal(blank.keys?.openai, "sk");
 });
