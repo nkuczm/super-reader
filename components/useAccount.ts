@@ -222,12 +222,40 @@ export function useAccount(params: {
     return () => clearTimeout(timer);
   }, [account, writing, backup, nudge]);
 
+  const flushNow = useCallback(async () => {
+    if (!account || !loaded.current) return;
+    const change = delta(writingRef.current, base.current);
+    if (isEmpty(change)) return;
+    try {
+      const { doc: body, sent } = await withRefs(change, onServer.current);
+      const text = JSON.stringify(body);
+      const res = await fetch("/api/subjects", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: text,
+        // Browsers carry a request past the page's end only up to 64 KB.
+        keepalive: text.length < 60_000,
+      });
+      if (!res.ok) return;
+      remember(base.current, change);
+      for (const h of sent) onServer.current.add(h);
+      setSavedAt(Date.now());
+      setStatus("saved");
+    } catch {
+      /* the autosave, or the next visit, sends it */
+    }
+  }, [account]);
+
   // Putting the tab away is the moment work is most likely to be left: send
   // the backup then, in a request the browser finishes even as the page goes.
   useEffect(() => {
     if (!account) return;
     const onHide = () => {
-      if (document.visibilityState !== "hidden" || !backupDue.current) return;
+      if (document.visibilityState !== "hidden") return;
+      // Unsent changes go now, in a request the browser finishes even if the
+      // tab is then closed — a moment after, once the last keystrokes are in.
+      setTimeout(() => void flushNow(), 50);
+      if (!backupDue.current) return;
       if (navigator.sendBeacon?.("/api/subjects/backup")) backupDue.current = false;
     };
     const onOnline = () => {
@@ -239,7 +267,7 @@ export function useAccount(params: {
       document.removeEventListener("visibilitychange", onHide);
       window.removeEventListener("online", onOnline);
     };
-  }, [account, load]);
+  }, [account, load, flushNow]);
 
   const signOut = useCallback(async () => {
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});

@@ -364,7 +364,8 @@ export function saveNotes(notes: Note[]) {
   try {
     window.localStorage.setItem(KEY, JSON.stringify(notes));
   } catch {
-    /* storage unavailable; the notes just won't persist */
+    // Storage full or unavailable: the reader is told (lib/subjects.ts).
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("super-reader:storage-full", { detail: true }));
   }
 }
 
