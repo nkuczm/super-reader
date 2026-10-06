@@ -124,6 +124,18 @@ export default function SettingsDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   const [flagsOpen, setFlagsOpen] = useState(false);
+  const [tab, setTabState] = useState<SettingsTab>(() => {
+    try {
+      const held = localStorage.getItem(TAB_KEY) as SettingsTab | null;
+      return SETTINGS_TABS.some((t) => t.id === held) ? held! : "reading";
+    } catch {
+      return "reading";
+    }
+  });
+  const setTab = (next: SettingsTab) => {
+    setTabState(next);
+    try { localStorage.setItem(TAB_KEY, next); } catch { /* not remembered */ }
+  };
   const [flagCount, setFlagCount] = useState(0);
   useEffect(() => {
     const count = () => setFlagCount(loadFlags().length);
@@ -151,342 +163,355 @@ export default function SettingsDialog({
             {Icon.close}
           </button>
           <h2>Settings</h2>
-          <p>How your articles are laid out on this device.</p>
         </div>
 
         <div className="dialog-body">
-          <p className="field-label">View</p>
-          <div className="view-grid" role="radiogroup" aria-label="View">
-            {VIEWS.map((view) => (
-              <button
-                key={view.id}
-                role="radio"
-                aria-checked={settings.view === view.id}
-                className={`view-option ${settings.view === view.id ? "selected" : ""}`}
-                onClick={() => onChange({ ...settings, view: view.id })}
-              >
-                <Preview view={view.id} />
-                <strong>{view.name}</strong>
-                <span>{view.blurb}</span>
+          <div className="settings-tabs" role="tablist" aria-label="Settings sections">
+            {SETTINGS_TABS.map((t) => (
+              <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)}>
+                {t.name}
               </button>
             ))}
           </div>
 
-          <p className="field-label reading-label">Big stories</p>
-          <div
-            className="scope-switch metric-switch"
-            role="radiogroup"
-            aria-label="What the circle beside a big story shows"
-          >
-            <button
-              role="radio"
-              aria-checked={settings.bigStoryMetric === "score"}
-              className={settings.bigStoryMetric === "score" ? "on" : ""}
-              onClick={() => onChange({ ...settings, bigStoryMetric: "score" })}
-            >
-              Score /100
-            </button>
-            <button
-              role="radio"
-              aria-checked={settings.bigStoryMetric === "newsrooms"}
-              className={settings.bigStoryMetric === "newsrooms" ? "on" : ""}
-              onClick={() => onChange({ ...settings, bigStoryMetric: "newsrooms" })}
-            >
-              Newsrooms
-            </button>
-          </div>
-          <p className="field-note">
-            Tap the circle on any article to see how the number was worked out.
-          </p>
-
-          <p className="field-label reading-label">Reading</p>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={settings.hideRead}
-              onChange={(event) =>
-                onChange({ ...settings, hideRead: event.target.checked })
-              }
-            />
-            <span>
-              Hide articles I&rsquo;ve opened
-              <em>Otherwise they stay in the list, dimmed.</em>
-            </span>
-          </label>
-
-          {settings.openOnSite.length > 0 && (
+          {tab === "reading" && (
             <>
-              <p className="field-label reading-label">Opened on their site</p>
-              <p className="hint" style={{ marginTop: 0, marginBottom: 10 }}>
-                These skip reader view, because their text is only served to a
-                browser that is signed in.
-              </p>
-              <ul className="host-list">
-                {settings.openOnSite.map((host) => (
-                  <li key={host}>
-                    <span>{host}</span>
-                    <button
-                      className="link-btn"
-                      onClick={() =>
-                        onChange({
-                          ...settings,
-                          openOnSite: settings.openOnSite.filter(
-                            (h) => h !== host,
-                          ),
-                        })
-                      }
-                    >
-                      Try reader view again
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
+            <p className="field-label">Layout</p>
+            <div className="view-grid" role="radiogroup" aria-label="View">
+              {VIEWS.map((view) => (
+                <button
+                  key={view.id}
+                  role="radio"
+                  aria-checked={settings.view === view.id}
+                  className={`view-option ${settings.view === view.id ? "selected" : ""}`}
+                  onClick={() => onChange({ ...settings, view: view.id })}
+                >
+                  <Preview view={view.id} />
+                  <strong>{view.name}</strong>
+                  <span>{view.blurb}</span>
+                </button>
+              ))}
+            </div>
 
-          <p className="field-label reading-label">Notes</p>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={settings.quoteToNote}
-              onChange={(event) =>
-                onChange({ ...settings, quoteToNote: event.target.checked })
-              }
-            />
-            <span>
-              Highlight text to quote it into a note
-              <em>
-                Selecting text in an article offers <strong>Add to note</strong>.
-                The quote is kept word for word, and the article is saved with
-                it so it is still there later.
-              </em>
-            </span>
-          </label>
-          <p className="field-note">
-            {noteCount === 0
-              ? "Notes live in the sidebar, beside your feeds. Make one with New note, or straight from your first highlight."
-              : `${noteCount} note${noteCount === 1 ? "" : "s"} in the sidebar. Turning this off leaves them there; it only stops highlighting from offering to quote.`}
-          </p>
+            <p className="field-label reading-label">Big stories</p>
+            <div
+              className="scope-switch metric-switch"
+              role="radiogroup"
+              aria-label="What the circle beside a big story shows"
+            >
+              <button
+                role="radio"
+                aria-checked={settings.bigStoryMetric === "score"}
+                className={settings.bigStoryMetric === "score" ? "on" : ""}
+                onClick={() => onChange({ ...settings, bigStoryMetric: "score" })}
+              >
+                Score /100
+              </button>
+              <button
+                role="radio"
+                aria-checked={settings.bigStoryMetric === "newsrooms"}
+                className={settings.bigStoryMetric === "newsrooms" ? "on" : ""}
+                onClick={() => onChange({ ...settings, bigStoryMetric: "newsrooms" })}
+              >
+                Newsrooms
+              </button>
+            </div>
+            <p className="field-note">
+              Tap the circle on any article to see how the number was worked out.
+            </p>
 
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={settings.subjects}
-              onChange={(event) =>
-                onChange({ ...settings, subjects: event.target.checked })
-              }
-            />
-            <span>
-              Subjects
-              <em>
-                Turns each note into a subject: a board of story cards with your
-                quotes and notes, free text boxes, a whiteboard view, and AI
-                insights and suggested reading (with your own Claude or OpenAI key under
-                API keys). Turning it off shows your notes exactly as before.
-              </em>
-            </span>
-          </label>
+                      <label className="check-row">
+              <input
+                type="checkbox"
+                checked={settings.hideRead}
+                onChange={(event) =>
+                  onChange({ ...settings, hideRead: event.target.checked })
+                }
+              />
+              <span>
+                Hide articles I&rsquo;ve opened
+                <em>Otherwise they stay in the list, dimmed.</em>
+              </span>
+            </label>
 
-          {settings.subjects && (
+            {settings.openOnSite.length > 0 && (
+              <>
+                <p className="field-label reading-label">Opened on their site</p>
+                <p className="hint" style={{ marginTop: 0, marginBottom: 10 }}>
+                  These skip reader view, because their text is only served to a
+                  browser that is signed in.
+                </p>
+                <ul className="host-list">
+                  {settings.openOnSite.map((host) => (
+                    <li key={host}>
+                      <span>{host}</span>
+                      <button
+                        className="link-btn"
+                        onClick={() =>
+                          onChange({
+                            ...settings,
+                            openOnSite: settings.openOnSite.filter(
+                              (h) => h !== host,
+                            ),
+                          })
+                        }
+                      >
+                        Try reader view again
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            <p className="field-label reading-label">Sources</p>
+            <div className="settings-links">
+              <button className="btn ghost small" onClick={onOpenStatus}>Source status</button>
+              <a className="btn ghost small" href="/extension" target="_blank" rel="noopener">Chrome extension</a>
+            </div>
+            <p className="field-note">Which sources are delivering, which look broken or are losing access.</p>
+            <p className="field-label reading-label">Offline</p>
             <label className="check-row">
               <input
                 type="checkbox"
-                checked={settings.hideSubjectBoxes}
-                onChange={(event) => onChange({ ...settings, hideSubjectBoxes: event.target.checked })}
+                checked={settings.showDownloadBar}
+                onChange={(event) =>
+                  onChange({ ...settings, showDownloadBar: event.target.checked })
+                }
               />
               <span>
-                Hide boxes in subjects
-                <em>
-                  In a subject&apos;s document view, the borders around each story and text box
-                  disappear, so it reads like one document. They come back when you point at
-                  one or work inside it.
-                </em>
+                Show a progress bar while downloading
+                <em>The download otherwise runs quietly on every visit.</em>
               </span>
             </label>
+            <div className="offline-box">
+              <div className="offline-status">
+                <strong>
+                  {offline.state === "working"
+                    ? `Downloading… ${offline.done ?? 0} of ${offline.total ?? 0}`
+                    : offline.state === "error"
+                      ? "Download didn't finish"
+                      : offline.at
+                        ? `Saved ${new Date(offline.at).toLocaleString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })}`
+                        : "Nothing downloaded yet"}
+                </strong>
+                <span>
+                  {/* The count is the answer to "is this actually working?" —
+                      a run that saved nothing used to look the same as one that
+                      saved everything. */}
+                  <strong className="offline-count">
+                    {storedCount} of {targetCount} article
+                    {targetCount === 1 ? "" : "s"} on this device
+                  </strong>
+                  {offline.result && (
+                    <>
+                      {" · "}
+                      {offline.result.saved} saved
+                      {offline.result.failed > 0 &&
+                        `, ${offline.result.failed} unavailable`}{" "}
+                      last run
+                    </>
+                  )}
+                  <details className="settings-more">
+                    <summary>How offline reading works</summary>
+                    The newest 15 stories from each source, plus everything in
+                    Saved, are kept on this device so you can read them without a
+                    connection. Anything missing is fetched whenever the app is
+                    open, so an interrupted download finishes itself; the full
+                    refresh runs on the first visit after 7am and after 4pm ET.
+                    Downloaded articles carry a blue check in the list.{" "}
+                    {persisted
+                      ? "This browser has agreed to keep the cache."
+                      : "This browser may clear the cache when space is short — adding the app to your Home Screen usually prevents that."}
+                  </details>
+                </span>
+              </div>
+              <button
+                className="btn ghost small offline-btn"
+                onClick={onDownload}
+                disabled={offline.state === "working"}
+              >
+                {offline.state === "working" ? <span className="spinner" /> : null}
+                Download now
+              </button>
+            </div>
+
+            </>
           )}
 
-          {settings.subjects && (
-            <div className="box-width-setting">
-              <p className="field-note" style={{ marginTop: 0 }}>
-                Text box width
-                <span className="box-width-value">{settings.textBoxWidth ? `${settings.textBoxWidth}px` : "Default"}</span>
-              </p>
-              <div className="box-width-controls">
+          {tab === "subjects" && (
+            <>
+            <p className="field-label">Notes</p>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={settings.quoteToNote}
+                onChange={(event) =>
+                  onChange({ ...settings, quoteToNote: event.target.checked })
+                }
+              />
+              <span>
+                Highlight text to quote it into a note
+                <em>Selecting text in an article offers <strong>Add to note</strong>, word for word.</em>
+              </span>
+            </label>
+            <p className="field-note">
+              {noteCount === 0
+                ? "Notes live in the sidebar, beside your feeds. Make one with New note, or straight from your first highlight."
+                : `${noteCount} note${noteCount === 1 ? "" : "s"} in the sidebar. Turning this off leaves them there; it only stops highlighting from offering to quote.`}
+            </p>
+
+            <p className="field-label reading-label">Subjects</p>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={settings.subjects}
+                onChange={(event) =>
+                  onChange({ ...settings, subjects: event.target.checked })
+                }
+              />
+              <span>
+                Subjects
+                <em>Each note becomes a subject: story cards, text boxes, tables, transcripts, a whiteboard, and AI tools.</em>
+              </span>
+            </label>
+
+            {settings.subjects && (
+              <label className="check-row">
                 <input
-                  type="range"
-                  min={160}
-                  max={760}
-                  step={20}
-                  aria-label="Text box width"
-                  value={settings.textBoxWidth || 280}
-                  onChange={(event) => onChange({ ...settings, textBoxWidth: Number(event.target.value) })}
+                  type="checkbox"
+                  checked={settings.hideSubjectBoxes}
+                  onChange={(event) => onChange({ ...settings, hideSubjectBoxes: event.target.checked })}
                 />
-                <button type="button" className="link-btn" disabled={!settings.textBoxWidth}
-                  onClick={() => onChange({ ...settings, textBoxWidth: 0 })}>
-                  Reset
-                </button>
+                <span>
+                  Hide boxes in subjects
+                  <em>The document view reads as one page; borders come back when you point at a box.</em>
+                </span>
+              </label>
+            )}
+
+            {settings.subjects && (
+              <div className="box-width-setting">
+                <p className="field-note" style={{ marginTop: 0 }}>
+                  Text box width
+                  <span className="box-width-value">{settings.textBoxWidth ? `${settings.textBoxWidth}px` : "Default"}</span>
+                </p>
+                <div className="box-width-controls">
+                  <input
+                    type="range"
+                    min={160}
+                    max={760}
+                    step={20}
+                    aria-label="Text box width"
+                    value={settings.textBoxWidth || 280}
+                    onChange={(event) => onChange({ ...settings, textBoxWidth: Number(event.target.value) })}
+                  />
+                  <button type="button" className="link-btn" disabled={!settings.textBoxWidth}
+                    onClick={() => onChange({ ...settings, textBoxWidth: 0 })}>
+                    Reset
+                  </button>
+                </div>
+                <details className="settings-more">
+                  <summary>Preview</summary>
+                <div className="box-width-preview" aria-hidden="true">
+                  <div className="box-width-sample" style={{ width: settings.textBoxWidth ? `min(${settings.textBoxWidth}px, 100%)` : "100%" }}>
+                    <b>Interview notes</b>
+                    <p>
+                      She said the plant would close by spring. Two suppliers have already stopped deliveries, and
+                      the union meets on Thursday.
+                    </p>
+                  </div>
+                </div>
+                <p className="field-note">
+                  New whiteboard boxes start this wide; document boxes are no wider. Default: full column, 280px on the whiteboard.
+                </p>
+                </details>
               </div>
-              <div className="box-width-preview" aria-hidden="true">
-                <div className="box-width-sample" style={{ width: settings.textBoxWidth ? `min(${settings.textBoxWidth}px, 100%)` : "100%" }}>
-                  <b>Interview notes</b>
-                  <p>
-                    She said the plant would close by spring. Two suppliers have already stopped deliveries, and
-                    the union meets on Thursday.
-                  </p>
+            )}
+
+
+            </>
+          )}
+
+          {tab === "ai" && (
+            <>
+            {!settings.subjects && (
+              <p className="field-note" style={{ marginTop: 0 }}>
+                The AI tools work inside subjects. <button className="link-btn" onClick={() => setTab("subjects")}>Turn on Subjects</button> to use them.
+              </p>
+            )}
+            {settings.subjects && (
+              <div className="ai-choice">
+                <p className="field-label" style={{ marginTop: 0 }}>Provider</p>
+                <div className="seg" role="radiogroup" aria-label="AI provider">
+                  {(["anthropic", "openai"] as const).map((provider) => (
+                    <button
+                      key={provider}
+                      role="radio"
+                      aria-checked={settings.aiProvider === provider}
+                      className={settings.aiProvider === provider ? "on" : ""}
+                      onClick={() => onChange({ ...settings, aiProvider: provider })}
+                    >
+                      {provider === "anthropic" ? "Claude (Anthropic)" : "OpenAI"}
+                    </button>
+                  ))}
+                </div>
+                <p className="field-note">
+                  {apiKeys[settings.aiProvider]
+                    ? `Using your ${settings.aiProvider === "openai" ? "OpenAI" : "Anthropic"} key.`
+                    : <>No {settings.aiProvider === "openai" ? "OpenAI" : "Anthropic"} key yet — <button className="link-btn" onClick={() => setTab("account")}>add one under Account</button>.</>}
+                </p>
+                <p className="field-label reading-label">Models</p>
+                {(["deep", "quick"] as const).map((tier) => {
+                  const openai = settings.aiProvider === "openai";
+                  const key = tier === "deep" ? (openai ? "openaiModel" : "anthropicModel") : (openai ? "openaiQuickModel" : "anthropicQuickModel");
+                  return (
+                    <ModelPicker key={`${tier}-${settings.aiProvider}`} tier={tier}
+                      provider={settings.aiProvider}
+                      value={settings[key]}
+                      onChange={(id) => onChange({ ...settings, [key]: id })}
+                      openaiKey={apiKeys.openai}
+                    />
+                  );
+                })}
+                <p className="field-label reading-label">Usage</p>
+                <div className="settings-links">
+                  <button className="btn ghost small" onClick={onOpenSpend}>AI spending</button>
+                  <button className="btn ghost small" onClick={() => setFlagsOpen(true)}>
+                    Flagged AI results{flagCount ? ` (${flagCount})` : ""}
+                  </button>
                 </div>
               </div>
-              <p className="field-note">
-                New boxes on the whiteboard start this wide, and in the document view text boxes are no wider than this.
-                Default is the full column in the document and 280px on the whiteboard.
-              </p>
-            </div>
+            )}
+
+            </>
           )}
 
-          {settings.subjects && (
-            <div className="ai-choice">
-              <p className="field-note" style={{ marginTop: 0 }}>AI provider and models</p>
-              <div className="seg" role="radiogroup" aria-label="AI provider">
-                {(["anthropic", "openai"] as const).map((provider) => (
-                  <button
-                    key={provider}
-                    role="radio"
-                    aria-checked={settings.aiProvider === provider}
-                    className={settings.aiProvider === provider ? "on" : ""}
-                    onClick={() => onChange({ ...settings, aiProvider: provider })}
-                  >
-                    {provider === "anthropic" ? "Claude (Anthropic)" : "OpenAI"}
-                  </button>
-                ))}
-              </div>
-              {(["deep", "quick"] as const).map((tier) => {
-                const openai = settings.aiProvider === "openai";
-                const key = tier === "deep" ? (openai ? "openaiModel" : "anthropicModel") : (openai ? "openaiQuickModel" : "anthropicQuickModel");
-                return (
-                  <ModelPicker key={`${tier}-${settings.aiProvider}`} tier={tier}
-                    provider={settings.aiProvider}
-                    value={settings[key]}
-                    onChange={(id) => onChange({ ...settings, [key]: id })}
-                    openaiKey={apiKeys.openai}
-                  />
-                );
-              })}
-              <p className="field-note">
-                {apiKeys[settings.aiProvider]
-                  ? `Using your ${settings.aiProvider === "openai" ? "OpenAI" : "Anthropic"} key.`
-                  : `Add your ${settings.aiProvider === "openai" ? "OpenAI" : "Anthropic"} key under API keys below.`}
-              </p>
-            </div>
-          )}
+          {tab === "account" && (
+            <>
+            <p className="field-label">API keys &amp; subscriptions</p>
+            <ApiKeys vault={vault} keys={apiKeys} onChange={onKeysChange} />
 
-          <p className="field-label reading-label">Sources</p>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button className="btn ghost small" onClick={onOpenStatus}>
-              Source status
-            </button>
-            <button className="btn ghost small" onClick={onOpenSpend}>
-              AI spending
-            </button>
-            <button className="btn ghost small" onClick={() => setFlagsOpen(true)}>
-              Flagged AI results{flagCount ? ` (${flagCount})` : ""}
-            </button>
-            <a className="btn ghost small" href="/extension" target="_blank" rel="noopener">
-              Chrome extension
-            </a>
-          </div>
-          <p className="field-note">
-            How many stories each source is delivering and which look broken or
-            are losing access; and what the AI insights have cost on this device.
-          </p>
-
-          <p className="field-label reading-label">Team feeds</p>
-          <p className="hint" style={{ marginTop: 0, marginBottom: 12 }}>
-            A shared list that sits beside your saved articles. Save a story to
-            it with the <strong>Team</strong> button and everyone on the feed
-            sees it.
-          </p>
-          <TeamFeeds
-            teams={teams}
-            busy={teamsBusy}
-            onCreate={onCreateTeam}
-            onConnect={onJoinTeam}
-            onLeave={onLeaveTeam}
-          />
-
-          <p className="field-label reading-label">API keys &amp; subscriptions</p>
-          <ApiKeys vault={vault} keys={apiKeys} onChange={onKeysChange} />
-
-          <p className="field-label reading-label">Offline</p>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={settings.showDownloadBar}
-              onChange={(event) =>
-                onChange({ ...settings, showDownloadBar: event.target.checked })
-              }
+            <p className="field-label reading-label">Team feeds</p>
+            <p className="field-note" style={{ marginTop: 0, marginBottom: 10 }}>
+              A shared list beside Saved: the <strong>Team</strong> button on a story adds it for everyone.
+            </p>
+            <TeamFeeds
+              teams={teams}
+              busy={teamsBusy}
+              onCreate={onCreateTeam}
+              onConnect={onJoinTeam}
+              onLeave={onLeaveTeam}
             />
-            <span>
-              Show a progress bar while downloading
-              <em>
-                Off by default. The download runs quietly on every visit; the
-                count below says what is on this device.
-              </em>
-            </span>
-          </label>
-          <div className="offline-box">
-            <div className="offline-status">
-              <strong>
-                {offline.state === "working"
-                  ? `Downloading… ${offline.done ?? 0} of ${offline.total ?? 0}`
-                  : offline.state === "error"
-                    ? "Download didn't finish"
-                    : offline.at
-                      ? `Saved ${new Date(offline.at).toLocaleString(undefined, {
-                          month: "short",
-                          day: "numeric",
-                          hour: "numeric",
-                          minute: "2-digit",
-                        })}`
-                      : "Nothing downloaded yet"}
-              </strong>
-              <span>
-                {/* The count is the answer to "is this actually working?" —
-                    a run that saved nothing used to look the same as one that
-                    saved everything. */}
-                <strong className="offline-count">
-                  {storedCount} of {targetCount} article
-                  {targetCount === 1 ? "" : "s"} on this device
-                </strong>
-                {offline.result && (
-                  <>
-                    {" · "}
-                    {offline.result.saved} saved
-                    {offline.result.failed > 0 &&
-                      `, ${offline.result.failed} unavailable`}{" "}
-                    last run
-                  </>
-                )}
-                <br />
-                The newest 15 stories from each source, plus everything in
-                Saved, are kept on this device so you can read them without a
-                connection. Anything missing is fetched whenever the app is
-                open, so an interrupted download finishes itself; the full
-                refresh runs on the first visit after 7am and after 4pm ET.
-                Downloaded articles carry a blue check in the list.
-                <br />
-                {persisted
-                  ? "This browser has agreed to keep the cache."
-                  : "This browser may clear the cache when space is short — adding the app to your Home Screen usually prevents that."}
-              </span>
-            </div>
-            <button
-              className="btn ghost small offline-btn"
-              onClick={onDownload}
-              disabled={offline.state === "working"}
-            >
-              {offline.state === "working" ? <span className="spinner" /> : null}
-              Download now
-            </button>
-          </div>
+
+
+            </>
+          )}
         </div>
 
         <div className="dialog-foot">
@@ -502,6 +527,16 @@ export default function SettingsDialog({
     </div>
   );
 }
+
+/** The settings, in four places: how stories read, how subjects work, the AI, and the account. */
+type SettingsTab = "reading" | "subjects" | "ai" | "account";
+const SETTINGS_TABS: { id: SettingsTab; name: string }[] = [
+  { id: "reading", name: "Reading" },
+  { id: "subjects", name: "Subjects" },
+  { id: "ai", name: "AI" },
+  { id: "account", name: "Account" },
+];
+const TAB_KEY = "super-reader:settings-tab";
 
 /**
  * The model, chosen by what it is like rather than by its name, with what
@@ -567,11 +602,11 @@ function ModelPicker({ tier, provider, value, onChange, openaiKey }: {
           <button className="link-btn model-other" onClick={() => setCustom(true)}>Use another OpenAI model…</button>
         )
       )}
-      <p className="field-note model-basis">
+      {open && <p className="field-note model-basis">
         {basis
           ? `Estimates use your pace on this device for these tools: about ${basis.runs} run${basis.runs === 1 ? "" : "s"} a month${usage.days < 30 ? `, from ${Math.max(1, usage.days)} day${usage.days === 1 ? "" : "s"} of use` : ""}. Real bills vary with how long subjects and scripts are.`
           : "No use of these tools recorded on this device yet, so costs are shown per typical run. Fact-checks of long scripts cost several times more."}
-      </p>
+      </p>}
     </div>
   );
 }
