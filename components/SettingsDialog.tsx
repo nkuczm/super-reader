@@ -11,6 +11,7 @@ import { FLAGS_EVENT, loadFlags } from "@/lib/flags";
 import FlagsDialog from "./FlagsDialog";
 import StorageSection from "./StorageSection";
 import DbUsageSection from "./DbUsageSection";
+import PrefsHistory from "./PrefsHistory";
 import type { Settings, TeamFeed, ViewMode } from "@/lib/store";
 
 const VIEWS: { id: ViewMode; name: string; blurb: string }[] = [
@@ -78,6 +79,8 @@ export default function SettingsDialog({
   vault,
   apiKeys,
   onKeysChange,
+  signedIn,
+  onPrefsRestored,
   onDownload,
   noteCount,
   teams,
@@ -99,6 +102,10 @@ export default function SettingsDialog({
   vault: unknown | null;
   apiKeys: Record<string, string>;
   onKeysChange: (next: { vault: unknown | null; keys: Record<string, string> }) => void;
+  /** Signed in: the keys follow the account, which keeps earlier copies of them. */
+  signedIn?: boolean;
+  /** Keys were brought back on the account; fetch them. */
+  onPrefsRestored?: () => void;
   offline: {
     state: "idle" | "working" | "done" | "error";
     done?: number;
@@ -503,7 +510,8 @@ export default function SettingsDialog({
               <DbUsageSection />
 
             <p className="field-label reading-label">API keys &amp; subscriptions</p>
-            <ApiKeys vault={vault} keys={apiKeys} onChange={onKeysChange} />
+            <ApiKeys vault={vault} keys={apiKeys} onChange={onKeysChange} signedIn={signedIn} />
+            {signedIn && onPrefsRestored && <PrefsHistory onRestored={onPrefsRestored} />}
 
             <p className="field-label reading-label">Team feeds</p>
             <p className="field-note" style={{ marginTop: 0, marginBottom: 10 }}>

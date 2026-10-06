@@ -1,5 +1,5 @@
 import { meter } from "@/lib/db-usage";
-import { inlineImages, listVersions, readVersion } from "@/lib/accounts";
+import { inlineImages, listVersions, PICTURES_PER_RESPONSE_BYTES, readVersion } from "@/lib/accounts";
 import { json, requireAccount } from "@/lib/session";
 
 export const runtime = "nodejs";
@@ -18,7 +18,8 @@ export async function GET(request: Request) {
     const subject = params.get("subject");
     if (!subject) return json({ doc });
     const one = { notes: doc.notes.filter((n) => n.id === subject), noteRemovals: [], boards: doc.boards[subject] ? { [subject]: doc.boards[subject] } : {} };
-    return json({ doc: await inlineImages(guard.account.id, one) });
+    // Pictures filled in for the preview, as many as one answer can hold.
+    return json({ doc: await inlineImages(guard.account.id, one, PICTURES_PER_RESPONSE_BYTES) });
   }
   return json({ versions: await listVersions(guard.account.id) });
 }

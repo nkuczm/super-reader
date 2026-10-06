@@ -14,11 +14,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Note, NoteRemoval } from "@/lib/notes";
 import type { Boards } from "@/lib/subjects";
-import { delta, emptyBase, isEmpty, remember, withPictures, withRefs, type Base } from "@/lib/subject-sync";
+import { delta, emptyBase, isEmpty, joinParts, pictureBatches, remember, splitWriting, withPictures, withRefs, type Base } from "@/lib/subject-sync";
 
 export type AccountInfo = { id: string; email: string; name?: string; picture?: string };
 export type Writing = { notes: Note[]; noteRemovals: NoteRemoval[]; boards: Boards };
 export type SaveStatus = "idle" | "saving" | "saved" | "offline" | "error";
+
+class SignedOut extends Error {}
 
 const SAVE_DELAY_MS = 1500;
 /** Coming back to the tab looks for other devices' changes at most this often. */
@@ -63,6 +65,13 @@ export function useAccount(params: {
   applyRef.current = applyWriting;
   const adoptRef = useRef(adoptCode);
   adoptRef.current = adoptCode;
+  const syncCodeRef = useRef(syncCode);
+  syncCodeRef.current = syncCode;
+  const accountRef = useRef(account);
+  accountRef.current = account;
+  /** Bumped to try linking and loading again after they failed. */
+  const [attempt, setAttempt] = useState(0);
+  const failures = useRef(0);
 
   useEffect(() => {
     if (!ready) return;
@@ -103,6 +112,16 @@ export function useAccount(params: {
     }
     if (!res.ok) throw new Error("Could not load subjects");
     const data = await res.json();
+    if (Number(data.of) > 1) {
+      // Too big for one answer: the rest of the parts, then all of it as one.
+      const parts: Writing[] = [data.doc];
+      for (let part = 1; part < Number(data.of); part++) {
+        const more = await fetch(`/api/subjects?part=${part}&of=${data.of}`, { cache: "no-store" });
+        if (!more.ok) throw new Error("Could not load subjects");
+        parts.push((await more.json()).doc);
+      }
+      data.doc = joinParts(parts);
+    }
     const full = await applyRemote(data.doc);
     // The whole copy resets what the account is known to hold; changes add to it.
     if (data.full) base.current = emptyBase();
@@ -110,31 +129,70 @@ export function useAccount(params: {
     if (data.cursor) cursor.current = String(data.cursor);
     loaded.current = true;
     setNudge((n) => n + 1);
+    // Some pictures could not be fetched, and their boxes were left out. The
+    // next look reads the whole copy again — a look for changes only would
+    // never bring them back — and comes soon.
+    if ((full as { leftOut?: number }).leftOut) {
+      cursor.current = null;
+      setTimeout(() => {
+        if (accountRef.current) load().catch(() => {});
+      }, 60_000);
+    }
   }, [applyRemote]);
 
+  /**
+   * Tie this device to the account's sync code. A failure to reach the server
+   * is a failure, never "the account has no code": taking it for one used to
+   * start a fresh, empty code and leave the device on it.
+   */
+  const linkAccount = useCallback(async () => {
+    const link = async (code: string | null): Promise<{ code: string | null; taken?: boolean }> => {
+      const res = await fetch("/api/account/link", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (res.status === 409) return { code: null, taken: true };
+      if (!res.ok) throw new Error("Could not link this device to the account");
+      const data = await res.json();
+      return { code: typeof data.code === "string" ? data.code : null };
+    };
+    const mine = syncCodeRef.current;
+    let got = await link(mine);
+    // This device's code is another account's: this account's own, if it has one.
+    if (got.taken) got = await link(null);
+    if (!got.code) {
+      // The account has no code yet: this device's feeds start one.
+      const made = await adoptRef.current(null);
+      if (!made) throw new Error("Could not start syncing");
+      got = await link(made);
+      if (got.code && got.code !== made) await adoptRef.current(got.code);
+    } else if (got.code !== mine) {
+      await adoptRef.current(got.code);
+    }
+  }, []);
+
   // Once signed in: tie this device's sync code to the account, then read the
-  // account's subjects. Again on focus, for changes made on another device.
+  // account's subjects. Again on focus, for changes made on another device;
+  // and if either fails, again until it works — until it does, nothing from
+  // the account is here and nothing written here reaches it.
   const linked = useRef(false);
+  const starting = useRef(false);
   useEffect(() => {
     if (!ready || !account) return;
     let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | null = null;
     const start = async () => {
+      // One try at a time: two at once could each start a sync code.
+      if (starting.current) return;
+      starting.current = true;
       try {
         if (!linked.current) {
-          const link = async (code: string | null) => {
-            const res = await fetch("/api/account/link", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ code }),
-            });
-            return res.ok ? ((await res.json()).code as string | null) : null;
-          };
-          let code = await link(syncCode);
-          if (!code) code = await link(await adoptRef.current(null));
-          else if (code !== syncCode) await adoptRef.current(code);
+          await linkAccount();
           linked.current = true;
         }
         if (!cancelled) await load();
+        failures.current = 0;
         // Once per visit, bring Drive up to date even if nothing is edited:
         // only subjects that differ from their last backup are uploaded.
         if (!cancelled) {
@@ -143,23 +201,35 @@ export function useAccount(params: {
         }
         if (!cancelled) setStatus("saved");
       } catch {
-        if (!cancelled) setStatus(navigator.onLine ? "error" : "offline");
+        if (cancelled) return;
+        setStatus(navigator.onLine ? "error" : "offline");
+        const delay = Math.min(5 * 60_000, 15_000 * 2 ** failures.current);
+        failures.current += 1;
+        retry = setTimeout(() => setAttempt((n) => n + 1), delay);
+      } finally {
+        starting.current = false;
       }
     };
     start();
-    // Another device's changes, on coming back to the tab — not more often than every few minutes.
+    // Another device's changes, on coming back to the tab — not more often
+    // than every few minutes; straight away if the account was never reached.
     const onFocus = () => {
+      if (!loaded.current || !linked.current) {
+        if (starting.current) return;
+        if (retry) clearTimeout(retry);
+        setAttempt((n) => n + 1);
+        return;
+      }
       if (Date.now() - lastLoad.current < LOAD_EVERY_MS) return;
       load().catch(() => {});
     };
     window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
+      if (retry) clearTimeout(retry);
       window.removeEventListener("focus", onFocus);
     };
-    // syncCode is read once when linking; following it would re-run the link.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, account, load]);
+  }, [ready, account, load, linkAccount, attempt]);
 
   const backup = useCallback(async () => {
     if (backupTimer.current) clearTimeout(backupTimer.current);
@@ -183,6 +253,56 @@ export function useAccount(params: {
   const backupRef = useRef(backup);
   backupRef.current = backup;
 
+  /**
+   * Send a change. Pictures the account lacks go first, a few at a time and
+   * apart from the change; then the change itself, with every picture as a
+   * reference, in pieces that each fit in one request. A save carrying
+   * several new pictures used to be over the size a request may have, and
+   * was refused on every try — so nothing more ever reached the account.
+   */
+  const send = useCallback(async (change: Writing, hiding = false) => {
+    for (let round = 0; round < 2; round++) {
+      let { doc: body, sent, inline } = await withRefs(change, onServer.current);
+      for (const batch of pictureBatches(inline)) {
+        const res = await fetch("/api/subjects/images", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ images: batch }),
+        });
+        if (res.status === 401) throw new SignedOut();
+        if (!res.ok) throw new Error("Could not save pictures");
+        for (const h of ((await res.json().catch(() => ({}))).stored ?? []) as string[]) onServer.current.add(h);
+      }
+      if (inline.size) ({ doc: body, sent } = await withRefs(change, onServer.current));
+      let missing: string[] = [];
+      for (const piece of splitWriting(body)) {
+        const text = JSON.stringify(piece);
+        const res = await fetch("/api/subjects", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: text,
+          // Browsers carry a request past the page's end only up to 64 KB.
+          keepalive: hiding && text.length < 60_000,
+        });
+        if (res.status === 409) {
+          // The account lacks pictures this device thought it had: they go again, whole.
+          missing = (await res.json().catch(() => ({}))).missing ?? [];
+          break;
+        }
+        if (res.status === 401) throw new SignedOut();
+        if (!res.ok) throw new Error("save failed");
+      }
+      if (missing.length) {
+        for (const h of missing) onServer.current.delete(h);
+        continue;
+      }
+      remember(base.current, change);
+      for (const h of sent) onServer.current.add(h);
+      return;
+    }
+    throw new Error("save failed");
+  }, []);
+
   // Autosave: a burst of typing is one request, and only what changed goes.
   useEffect(() => {
     if (!account || !loaded.current) return;
@@ -191,63 +311,37 @@ export function useAccount(params: {
     setStatus("saving");
     const timer = setTimeout(async () => {
       try {
-        let { doc: body, sent } = await withRefs(change, onServer.current);
-        let res = await fetch("/api/subjects", {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        if (res.status === 409) {
-          // The account lacks pictures this device thought it had: send them whole.
-          const missing: string[] = (await res.json().catch(() => ({}))).missing ?? [];
-          for (const h of missing) onServer.current.delete(h);
-          ({ doc: body, sent } = await withRefs(change, onServer.current));
-          res = await fetch("/api/subjects", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-        }
-        if (res.status === 401) {
-          setAccount(null);
-          setStatus("error");
-          return;
-        }
-        if (!res.ok) throw new Error("save failed");
-        remember(base.current, change);
-        for (const h of sent) onServer.current.add(h);
+        await send(change);
         setSavedAt(Date.now());
         setStatus("saved");
         backupDue.current = true;
         if (!backupTimer.current) backupTimer.current = setTimeout(backup, BACKUP_DELAY_MS);
-      } catch {
+      } catch (error) {
+        if (error instanceof SignedOut) {
+          setAccount(null);
+          setStatus("error");
+          return;
+        }
         // Still safe on this device; the change stays unsent, and goes with the next try.
         setStatus(navigator.onLine ? "error" : "offline");
         setTimeout(() => setNudge((n) => n + 1), 30_000);
       }
     }, SAVE_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [account, writing, backup, nudge]);
+  }, [account, writing, backup, nudge, send]);
 
   const flushNow = useCallback(async () => {
     if (!account || !loaded.current) return;
     const change = delta(writingRef.current, base.current);
     if (isEmpty(change)) return;
     try {
-      const { doc: body, sent } = await withRefs(change, onServer.current);
-      const text = JSON.stringify(body);
-      const res = await fetch("/api/subjects", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: text,
-        // Browsers carry a request past the page's end only up to 64 KB.
-        keepalive: text.length < 60_000,
-      });
-      if (!res.ok) return;
-      remember(base.current, change);
-      for (const h of sent) onServer.current.add(h);
+      await send(change, true);
       setSavedAt(Date.now());
       setStatus("saved");
     } catch {
       /* the autosave, or the next visit, sends it */
     }
-  }, [account]);
+  }, [account, send]);
 
   // Putting the tab away is the moment work is most likely to be left: send
   // the backup then, in a request the browser finishes even as the page goes.

@@ -36,6 +36,7 @@ export const CATEGORY_NAME: Record<string, string> = {
   auth: "Sign-in & sessions",
   pulse: "News index (Pulse)",
   settings: "Settings & API keys",
+  library: "Library (saved, pasted, highlights)",
   usage: "This usage page",
 };
 

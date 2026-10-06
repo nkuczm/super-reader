@@ -1,6 +1,7 @@
 import { meter } from "@/lib/db-usage";
 import { changesSince, MissingImages, readSubjects, writeSubjects, type SubjectsDoc } from "@/lib/accounts";
 import { json, requireAccount } from "@/lib/session";
+import { partOf, partsFor } from "@/lib/subject-sync";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,12 +17,17 @@ export async function GET(request: Request) {
   meter("subjects");
   const guard = await requireAccount(request);
   if ("response" in guard) return guard.response;
-  const since = new URL(request.url).searchParams.get("since");
+  const params = new URL(request.url).searchParams;
+  const since = params.get("since");
   if (since) {
     const changes = await changesSince(guard.account.id, since);
     if (changes) return json({ doc: changes.doc, cursor: changes.cursor, full: false });
   }
   const { doc, updatedAt, cursor } = await readSubjects(guard.account.id);
+  // A whole copy too big for one answer goes in parts (?part=1&of=n for the rest).
+  const of = Math.min(50, Number(params.get("of")) || partsFor(doc));
+  const part = Math.max(0, Math.min(of - 1, Number(params.get("part")) || 0));
+  if (of > 1) return json({ doc: partOf(doc, part, of), updatedAt, cursor, full: true, part, of });
   return json({ doc, updatedAt, cursor, full: true });
 }
 

@@ -20,6 +20,7 @@ import { open, openJson, randomToken, seal, sealJson, sha256 } from "./secure";
 import { hashCode } from "./sync-code";
 import { mergeNotes, type Note, type NoteRemoval } from "./notes";
 import { mergeBoards, type Boards } from "./subjects";
+import { keysLost, mergePrefs, type AccountPrefs } from "./prefs-merge";
 
 export type Account = {
   id: string;
@@ -111,6 +112,15 @@ export function ensureAccountSchema() {
           updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
         )
       `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS account_prefs_versions (
+          id          BIGSERIAL PRIMARY KEY,
+          account_id  TEXT NOT NULL,
+          saved_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+          payload     TEXT NOT NULL
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS account_prefs_versions_account ON account_prefs_versions (account_id, id DESC)`;
       await sql`
         CREATE TABLE IF NOT EXISTS subject_backups (
           account_id  TEXT NOT NULL,
@@ -302,6 +312,22 @@ async function storeImages(accountId: string, images: Map<string, string>) {
   }
 }
 
+/**
+ * Pictures sent ahead of the change that uses them, so a save never has to
+ * carry several at once (a request has a size limit, and a save over it
+ * would never get through). Each is checked against its hash and must be a
+ * picture.
+ */
+export async function storePictures(accountId: string, pictures: Record<string, unknown>): Promise<string[]> {
+  await ensureAccountSchema();
+  const ok = new Map<string, string>();
+  for (const [hash, data] of Object.entries(pictures)) {
+    if (/^[0-9a-f]{64}$/.test(hash) && typeof data === "string" && data.startsWith("data:image/") && sha256(data) === hash) ok.set(hash, data);
+  }
+  await storeImages(accountId, ok);
+  return [...ok.keys()];
+}
+
 /** Which of these pictures the account does not hold. */
 async function missingImages(accountId: string, hashes: string[]): Promise<string[]> {
   if (!hashes.length) return [];
@@ -310,22 +336,43 @@ async function missingImages(accountId: string, hashes: string[]): Promise<strin
   return hashes.filter((h) => !have.has(h));
 }
 
-/** The pictures themselves, by hash, for a device that lacks them. */
+/** A response stays well inside what a function may return; the device asks again for the rest. */
+export const PICTURES_PER_RESPONSE_BYTES = 3 * 1024 * 1024;
+
+/** The pictures themselves, by hash, for a device that lacks them — as many as fit in one response, always at least one. */
 export async function readImages(accountId: string, hashes: string[]): Promise<Record<string, string>> {
   await ensureAccountSchema();
   const wanted = hashes.filter((h) => /^[0-9a-f]{64}$/.test(h)).slice(0, 50);
   if (!wanted.length) return {};
   const rows = await getSql()`SELECT hash, data FROM subject_images WHERE account_id = ${accountId} AND hash = ANY(${wanted})`;
-  return Object.fromEntries(rows.map((r) => [String(r.hash), open(String(r.data))]));
+  const out: Record<string, string> = {};
+  let bytes = 0;
+  for (const r of rows) {
+    const data = open(String(r.data));
+    if (bytes > 0 && bytes + data.length > PICTURES_PER_RESPONSE_BYTES) break;
+    out[String(r.hash)] = data;
+    bytes += data.length;
+  }
+  return out;
 }
 
-/** The document with its picture references filled back in (for a Google Docs backup). */
-export async function inlineImages(accountId: string, doc: SubjectsDoc): Promise<SubjectsDoc> {
+/**
+ * The document with its picture references filled back in (for a Google Docs
+ * backup, or a preview). With a budget, pictures past it are left out.
+ */
+export async function inlineImages(accountId: string, doc: SubjectsDoc, budget = Infinity): Promise<SubjectsDoc> {
   const { refs } = splitImages(doc);
   if (!refs.size) return doc;
   const sql = getSql();
   const rows = await sql`SELECT hash, data FROM subject_images WHERE account_id = ${accountId} AND hash = ANY(${[...refs]})`;
-  const found = new Map(rows.map((r) => [IMAGE_REF + String(r.hash), open(String(r.data))]));
+  const found = new Map<string, string>();
+  let bytes = 0;
+  for (const r of rows) {
+    const data = open(String(r.data));
+    if (bytes + data.length > budget) continue;
+    found.set(IMAGE_REF + String(r.hash), data);
+    bytes += data.length;
+  }
   const boards = Object.fromEntries(Object.entries(doc.boards).map(([subject, board]) => [subject, Object.fromEntries(
     Object.entries(board).map(([id, item]) => {
       const image = (item as { image?: unknown }).image;
@@ -629,16 +676,10 @@ export async function readVersion(accountId: string, id: string): Promise<Subjec
 /**
  * Every setting, and the AI and data API keys, kept with the account so a
  * new device signs in to find them. Encrypted at rest like the subjects.
- * Each half carries when it was last changed; the more recent wins.
+ * Each setting and key carries when it last changed, and the more recent
+ * wins one by one (lib/prefs-merge.ts).
  */
-export type AccountPrefs = {
-  settings?: Record<string, unknown>;
-  settingsAt?: number;
-  keys?: Record<string, string>;
-  keysAt?: number;
-  /** The passphrase-locked key vault (ciphertext only), kept with the keys. */
-  vault?: unknown;
-};
+export type { AccountPrefs } from "./prefs-merge";
 
 export async function readAccountPrefs(accountId: string): Promise<AccountPrefs | null> {
   await ensureAccountSchema();
@@ -646,41 +687,78 @@ export async function readAccountPrefs(accountId: string): Promise<AccountPrefs 
   return rows[0] ? openJson<AccountPrefs>(rows[0].payload) : null;
 }
 
-const cleanKeys = (keys: unknown): Record<string, string> =>
-  keys && typeof keys === "object" && !Array.isArray(keys)
-    ? Object.fromEntries(Object.entries(keys as Record<string, unknown>).filter(([k, v]) => /^[a-z0-9_-]{1,40}$/i.test(k) && typeof v === "string" && v.length < 400).slice(0, 40)) as Record<string, string>
-    : {};
+/** Copies that changed nothing but settings are kept at most this often. */
+const PREFS_VERSION_EVERY_MS = 24 * 60 * 60 * 1000;
 
-const vaultOk = (v: unknown) => !!v && typeof v === "object" && JSON.stringify(v).length < 20_000;
-
-/** Merge a device's copy in: each half kept from whichever side changed it last. Returns what is now held. */
+/**
+ * Merge a device's copy in: each setting and key from whichever side changed
+ * it last. Before a key is removed or replaced, or the vault replaced — and
+ * otherwise once a day — what was held is kept as a version.
+ */
 export async function writeAccountPrefs(accountId: string, incoming: AccountPrefs): Promise<AccountPrefs> {
   const held = (await readAccountPrefs(accountId)) ?? {};
-  const next: AccountPrefs = { ...held };
-  const inSettings = incoming.settings && typeof incoming.settings === "object" && !Array.isArray(incoming.settings);
-  if (inSettings && (held.settings === undefined || (incoming.settingsAt ?? 0) > (held.settingsAt ?? 0))) {
-    next.settings = incoming.settings;
-    next.settingsAt = incoming.settingsAt ?? 0;
-  }
-  if (incoming.keys) {
-    const keys = cleanKeys(incoming.keys);
-    if (held.keys === undefined || (incoming.keysAt ?? 0) > (held.keysAt ?? 0)) {
-      next.keys = keys;
-      next.keysAt = incoming.keysAt ?? 0;
-      if (vaultOk(incoming.vault)) next.vault = incoming.vault;
-    } else if (!(incoming.keysAt ?? 0) && !(held.keysAt ?? 0)) {
-      // Neither side has ever changed its keys here: a key either holds is better than none.
-      next.keys = { ...keys, ...held.keys };
-    }
-  }
-  // A vault is never dropped for want of one: a device without it keeps the held one.
-  if (next.vault === undefined && vaultOk(incoming.vault)) next.vault = incoming.vault;
+  const next = mergePrefs(incoming, held);
   if (JSON.stringify(next) === JSON.stringify(held)) return held;
-  await getSql()`
+  const sql = getSql();
+  const hadSomething = Object.keys(held.keys ?? {}).length > 0 || held.vault !== undefined || Object.keys(held.settings ?? {}).length > 0;
+  if (hadSomething) {
+    const loses = keysLost(held, next).length > 0 || (held.vault !== undefined && JSON.stringify(held.vault) !== JSON.stringify(next.vault));
+    let keep = loses;
+    if (!keep) {
+      const last = await sql`SELECT saved_at FROM account_prefs_versions WHERE account_id = ${accountId} ORDER BY id DESC LIMIT 1`;
+      keep = !last[0] || Date.now() - new Date(last[0].saved_at).getTime() > PREFS_VERSION_EVERY_MS;
+    }
+    if (keep) await sql`INSERT INTO account_prefs_versions (account_id, payload) VALUES (${accountId}, ${sealJson(held)})`;
+  }
+  await sql`
     INSERT INTO account_prefs (account_id, payload, updated_at) VALUES (${accountId}, ${sealJson(next)}, now())
     ON CONFLICT (account_id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = now()
   `;
   return next;
+}
+
+export type PrefsVersion = { id: string; savedAt: string; keys: string[]; settings: number; vault: boolean };
+
+/** Earlier copies of the settings and keys, newest first — key names only, never their values. */
+export async function listPrefsVersions(accountId: string, limit = 60): Promise<PrefsVersion[]> {
+  await ensureAccountSchema();
+  const rows = await getSql()`
+    SELECT id, saved_at, payload FROM account_prefs_versions
+    WHERE account_id = ${accountId} ORDER BY id DESC LIMIT ${limit}
+  `;
+  return rows.map((r) => {
+    const prefs = openJson<AccountPrefs>(r.payload);
+    return {
+      id: String(r.id),
+      savedAt: new Date(r.saved_at).toISOString(),
+      keys: Object.keys(prefs.keys ?? {}).sort(),
+      settings: Object.keys(prefs.settings ?? {}).length,
+      vault: prefs.vault !== undefined,
+    };
+  });
+}
+
+/**
+ * Bring back the keys an earlier copy held that the account no longer does
+ * (or the vault, if it has none). Nothing held now is replaced; the keys come
+ * back as a change made now, so every device takes them.
+ */
+export async function restorePrefsVersion(accountId: string, id: string): Promise<{ prefs: AccountPrefs; restored: string[] } | null> {
+  if (!/^\d{1,18}$/.test(id)) return null;
+  await ensureAccountSchema();
+  const rows = await getSql()`SELECT payload FROM account_prefs_versions WHERE account_id = ${accountId} AND id = ${id}`;
+  if (!rows[0]) return null;
+  const old = openJson<AccountPrefs>(rows[0].payload);
+  const held = (await readAccountPrefs(accountId)) ?? {};
+  const now = Date.now();
+  const restored = Object.keys(old.keys ?? {}).filter((name) => !(held.keys && name in held.keys));
+  const back: AccountPrefs = {
+    keys: Object.fromEntries(restored.map((name) => [name, old.keys![name]])),
+    keyStamps: Object.fromEntries(restored.map((name) => [name, now])),
+    ...(held.vault === undefined && old.vault !== undefined ? { vault: old.vault, vaultAt: now } : {}),
+  };
+  const prefs = await writeAccountPrefs(accountId, back);
+  return { prefs, restored };
 }
 
 /* ------------------------------------------------------------------------ */

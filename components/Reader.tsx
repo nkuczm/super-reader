@@ -53,6 +53,9 @@ import {
 } from "@/lib/store";
 import type { TeamArticle } from "@/lib/team";
 import { fitForSync, partStamp, type Part, type PartStamps } from "@/lib/sync-doc";
+import { useLibrary } from "./useLibrary";
+import type { Library } from "@/lib/library";
+import { takeFromAccount, vaultStamp as vaultStampOf, type AccountPrefs, type Stamps } from "@/lib/prefs-merge";
 import {
   loadNotes,
   saveNotes,
@@ -293,23 +296,34 @@ function onFocusEvery(run: () => void, lastRun: { current: number }) {
 
 const SETTINGS_AT = "super-reader:settings-at:v1";
 const KEYS_AT = "super-reader:keys-at:v1";
+const SETTING_STAMPS = "super-reader:setting-stamps:v1";
+const KEY_STAMPS = "super-reader:key-stamps:v1";
+const VAULT_AT = "super-reader:vault-at:v1";
 /**
- * When this device last changed its settings or keys. A device from before
- * these were stamped counts a real choice (anything but the defaults) as 1 —
- * older than any change made since, newer than another device's defaults.
+ * When this device last changed each setting and each key, so the account
+ * merges them one at a time (lib/prefs-merge.ts). A device from before these
+ * existed had one stamp per half; each choice it holds (anything but the
+ * default) is dated at that, or at 1 — older than any change made since,
+ * newer than another device's defaults.
  */
-function readStamp(key: string, chosen: () => boolean): number {
+function loadStamps(key: string, legacyKey: string, chosen: string[]): Stamps {
   try {
-    const held = Number(localStorage.getItem(key));
-    if (held > 0) return held;
+    const held = JSON.parse(localStorage.getItem(key) ?? "null");
+    if (held && typeof held === "object" && !Array.isArray(held)) return held as Stamps;
   } catch {
     /* fall through */
   }
-  return chosen() ? 1 : 0;
-}
-function saveStamp(key: string, at: number) {
+  let whole = 0;
   try {
-    localStorage.setItem(key, String(at));
+    whole = Number(localStorage.getItem(legacyKey)) || 0;
+  } catch {
+    /* none */
+  }
+  return Object.fromEntries(chosen.map((name) => [name, whole || 1]));
+}
+function saveStamps(key: string, stamps: Stamps | number) {
+  try {
+    localStorage.setItem(key, typeof stamps === "number" ? String(stamps) : JSON.stringify(stamps));
   } catch {
     /* kept for this session */
   }
@@ -1331,6 +1345,42 @@ export default function Reader() {
   const writing = useMemo<Writing>(() => ({ notes, noteRemovals, boards }), [notes, noteRemovals, boards]);
   const auth = useAccount({ ready, syncCode, writing, applyWriting, adoptCode });
   signedInRef.current = Boolean(auth.account);
+
+  /*
+   * Signed in, every bookmark, pasted story and highlight is also kept with
+   * the account, one by one and with no cap (lib/library.ts) — the synced
+   * document carries only the newest few hundred of each.
+   */
+  const library = useMemo(() => ({ saved, savedRemovals, manual, highlights }), [saved, savedRemovals, manual, highlights]);
+  const applyLibrary = useCallback((lib: Library) => {
+    const bookmarks = mergeSaved(
+      { saved: savedRef.current, removals: removalsRef.current },
+      { saved: lib.saved, removals: lib.savedRemovals },
+    );
+    if (!unchanged(bookmarks.saved, savedRef.current)) {
+      savedRef.current = bookmarks.saved;
+      setSaved(bookmarks.saved);
+      saveSaved(bookmarks.saved);
+    }
+    if (!unchanged(bookmarks.removals, removalsRef.current)) {
+      removalsRef.current = bookmarks.removals;
+      setSavedRemovals(bookmarks.removals);
+      saveSavedRemovals(bookmarks.removals);
+    }
+    const mergedManual = mergeManual(manualRef.current, lib.manual);
+    if (!sameManual(mergedManual, manualRef.current)) {
+      manualRef.current = mergedManual;
+      setManual(mergedManual);
+      saveManual(mergedManual);
+    }
+    const mergedHighlights = mergeHighlights(highlightsRef.current, lib.highlights);
+    if (!sameHighlights(mergedHighlights, highlightsRef.current)) {
+      highlightsRef.current = mergedHighlights;
+      setHighlights(mergedHighlights);
+      saveHighlights(mergedHighlights);
+    }
+  }, []);
+  useLibrary({ account: auth.account?.id ?? null, library, apply: applyLibrary });
   /** Subjects need a Google sign-in, wherever sign-in is set up — except here before it was. */
   const subjectsLocked = auth.enabled && auth.checked && !auth.account && (!grandfathered || writingInAccount);
 
@@ -2438,16 +2488,30 @@ export default function Reader() {
    * whose browser data was cleared, gets them back on signing in. Each half
    * is stamped when changed here; the more recent copy wins.
    */
-  const settingsAt = useRef(0);
-  const keysAt = useRef(0);
+  const settingStamps = useRef<Stamps>({});
+  const keyStamps = useRef<Stamps>({});
+  const vaultAt = useRef(0);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const vaultRef = useRef<unknown>(null);
   vaultRef.current = vault;
   const prefsSynced = useRef(0);
   useEffect(() => {
-    settingsAt.current = readStamp(SETTINGS_AT, () => JSON.stringify(loadSettings()) !== JSON.stringify(DEFAULT_SETTINGS));
-    keysAt.current = readStamp(KEYS_AT, () => Object.keys(loadUnlockedKeys()).length > 0);
+    const stored = loadSettings() as unknown as Record<string, unknown>;
+    const defaults = DEFAULT_SETTINGS as unknown as Record<string, unknown>;
+    settingStamps.current = loadStamps(
+      SETTING_STAMPS,
+      SETTINGS_AT,
+      Object.keys(stored).filter((field) => JSON.stringify(stored[field]) !== JSON.stringify(defaults[field])),
+    );
+    keyStamps.current = loadStamps(KEY_STAMPS, KEYS_AT, Object.keys(loadUnlockedKeys()));
+    let vaultStamp = 0;
+    try {
+      vaultStamp = Number(localStorage.getItem(VAULT_AT)) || (loadVault() ? Number(localStorage.getItem(KEYS_AT)) || 1 : 0);
+    } catch {
+      /* none */
+    }
+    vaultAt.current = vaultStamp;
   }, []);
   const syncAccountPrefs = useCallback(async () => {
     prefsSynced.current = Date.now();
@@ -2455,31 +2519,45 @@ export default function Reader() {
       const res = await fetch("/api/account/prefs", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ settings: settingsRef.current, settingsAt: settingsAt.current, keys: apiKeysRef.current, keysAt: keysAt.current, vault: vaultRef.current ?? undefined }),
+        body: JSON.stringify({
+          settings: settingsRef.current,
+          settingStamps: settingStamps.current,
+          keys: apiKeysRef.current,
+          keyStamps: keyStamps.current,
+          ...(vaultRef.current ? { vault: vaultRef.current, vaultAt: vaultAt.current } : {}),
+        }),
       });
       if (!res.ok) return;
-      const { prefs } = (await res.json()) as { prefs?: { settings?: Settings; settingsAt?: number; keys?: Record<string, string>; keysAt?: number; vault?: unknown } };
+      const { prefs } = (await res.json()) as { prefs?: AccountPrefs };
       if (!prefs) return;
       // The vault comes back to a device that lost it, or takes a newer one.
-      if (prefs.vault && (!vaultRef.current || ((prefs.keysAt ?? 0) > keysAt.current && JSON.stringify(prefs.vault) !== JSON.stringify(vaultRef.current)))) {
+      if (prefs.vault && JSON.stringify(prefs.vault) !== JSON.stringify(vaultRef.current) && (!vaultRef.current || vaultStampOf(prefs) > vaultAt.current)) {
         vaultRef.current = prefs.vault;
         setVault(prefs.vault);
         saveVault(prefs.vault);
+        vaultAt.current = vaultStampOf(prefs);
+        saveStamps(VAULT_AT, vaultAt.current);
       }
-      const newer = (theirs: number | undefined, mine: number, differ: boolean) => differ && ((theirs ?? 0) > mine || mine === 0);
-      if (prefs.settings && newer(prefs.settingsAt, settingsAt.current, JSON.stringify(prefs.settings) !== JSON.stringify(settingsRef.current))) {
-        const next = { ...DEFAULT_SETTINGS, ...prefs.settings };
+      // Each setting and key the account holds a newer copy of, one at a time.
+      const took = takeFromAccount(
+        { settings: settingsRef.current as unknown as Record<string, unknown>, settingStamps: settingStamps.current, keys: apiKeysRef.current, keyStamps: keyStamps.current },
+        prefs,
+      );
+      if (took.settings) {
+        const next = { ...DEFAULT_SETTINGS, ...(took.settings as Partial<Settings>) };
+        settingsRef.current = next;
         setSettings(next);
         saveSettings(next);
-        settingsAt.current = prefs.settingsAt ?? 0;
-        saveStamp(SETTINGS_AT, settingsAt.current);
       }
-      if (prefs.keys && newer(prefs.keysAt, keysAt.current, JSON.stringify(prefs.keys) !== JSON.stringify(apiKeysRef.current))) {
-        setApiKeys(prefs.keys);
-        saveUnlockedKeys(prefs.keys);
-        keysAt.current = prefs.keysAt ?? 0;
-        saveStamp(KEYS_AT, keysAt.current);
+      settingStamps.current = took.settingStamps;
+      saveStamps(SETTING_STAMPS, took.settingStamps);
+      if (took.keys) {
+        apiKeysRef.current = took.keys;
+        setApiKeys(took.keys);
+        saveUnlockedKeys(took.keys);
       }
+      keyStamps.current = took.keyStamps;
+      saveStamps(KEY_STAMPS, took.keyStamps);
     } catch {
       /* tried again on the next change or visit */
     }
@@ -2498,15 +2576,29 @@ export default function Reader() {
     const timer = setTimeout(() => void syncAccountPrefs(), 1000);
     return () => clearTimeout(timer);
   }, [prefsBump, auth.account, syncAccountPrefs]);
-  function stampPart(key: string, ref: { current: number }) {
-    ref.current = Math.max(Date.now(), ref.current + 1);
-    saveStamp(key, ref.current);
+  /** Date each name whose value differs between two copies: a change, an addition, or a removal. */
+  function stampChanged(stamps: { current: Stamps }, key: string, before: Record<string, unknown>, after: Record<string, unknown>) {
+    const now = Date.now();
+    let changed = false;
+    for (const name of new Set([...Object.keys(before), ...Object.keys(after)])) {
+      if (JSON.stringify(before[name]) === JSON.stringify(after[name])) continue;
+      stamps.current = { ...stamps.current, [name]: Math.max(now, (stamps.current[name] ?? 0) + 1) };
+      changed = true;
+    }
+    if (!changed) return;
+    saveStamps(key, stamps.current);
     setPrefsBump((n) => n + 1);
   }
 
   /** Keys changed: keep the device copy, the vault, and the feeds in step. */
   function updateKeys(next: { vault: unknown | null; keys: Record<string, string> }) {
-    stampPart(KEYS_AT, keysAt);
+    stampChanged(keyStamps, KEY_STAMPS, apiKeysRef.current, next.keys);
+    if (JSON.stringify(next.vault ?? null) !== JSON.stringify(vaultRef.current ?? null)) {
+      vaultAt.current = Math.max(Date.now(), vaultAt.current + 1);
+      saveStamps(VAULT_AT, vaultAt.current);
+      setPrefsBump((n) => n + 1);
+    }
+    apiKeysRef.current = next.keys;
     setVault(next.vault);
     setApiKeys(next.keys);
     saveVault(next.vault);
@@ -2526,9 +2618,10 @@ export default function Reader() {
       ? next
       : { ...next, subjects: prefsRef.current.subjects, aiProvider: prefsRef.current.aiProvider, openaiModel: prefsRef.current.openaiModel, anthropicModel: prefsRef.current.anthropicModel,
           anthropicQuickModel: prefsRef.current.anthropicQuickModel, openaiQuickModel: prefsRef.current.openaiQuickModel };
+    stampChanged(settingStamps, SETTING_STAMPS, settingsRef.current as unknown as Record<string, unknown>, settled as unknown as Record<string, unknown>);
+    settingsRef.current = settled;
     setSettings(settled);
     saveSettings(settled);
-    stampPart(SETTINGS_AT, settingsAt);
     if (madeChoice) {
       const stamped = sharedPrefsOf(next, Math.max(Date.now(), prefsRef.current.at + 1));
       prefsRef.current = stamped;
@@ -4576,6 +4669,8 @@ export default function Reader() {
           vault={vault}
           apiKeys={apiKeys}
           onKeysChange={updateKeys}
+          signedIn={Boolean(auth.account)}
+          onPrefsRestored={() => void syncAccountPrefs()}
           onDownload={runDownload}
           noteCount={notes.length}
           teams={teams}
