@@ -1,80 +1,10 @@
 import { getSql, ensureSchema } from "./db";
 import { hashCode, newSyncCode } from "./sync-code";
-import { mergeSaved } from "./saved";
-import type { SavedArticle, SavedRemoval } from "./saved";
-import { mergeMarks } from "./alerts";
-import { mergePositions, type Positions } from "./position";
-import type { WatchMarks } from "./alerts";
-import { mergeNotes } from "./notes";
-import type { Note, NoteRemoval } from "./notes";
-import { mergeBoards, slimBoardsForSync, type Boards } from "./subjects";
-import { mergeManual, type ManualStories } from "./manual";
-import { mergeHighlights, type Highlights } from "./highlights";
 import { isLinkedCode, type SubjectsDoc } from "./accounts";
+import { feedsSummary, losesSomething, mergeSyncDocs, versionOf, type SyncPayload } from "./sync-doc";
 
-export type SyncPayload = {
-  feeds: unknown[];
-  read?: string[];
-  /**
-   * Bookmarks, and the un-saves that must outlive a device that still holds
-   * the article. Unlike the rest of this document these are merged rather
-   * than replaced — see lib/saved.ts for why.
-   */
-  saved?: SavedArticle[];
-  savedRemovals?: SavedRemoval[];
-  /**
-   * How far each watched source has been read up to. Merged by taking the
-   * later of each, so looking at a source on one device clears its badge on
-   * the other.
-   */
-  watchMarks?: WatchMarks;
-  /**
-   * How far through each article the reader got. Merged per article, most
-   * recent change winning — including a dated clear for finished or restarted
-   * stories, so one device cannot resurrect a place the other has let go.
-   */
-  positions?: Positions;
-  /**
-   * Notes and their quotes, merged rather than replaced for the same reason
-   * bookmarks are: both devices write to them between syncs, and one of them
-   * pushing must not delete what the other wrote. Deletions carry tombstones.
-   */
-  notes?: Note[];
-  noteRemovals?: NoteRemoval[];
-  /**
-   * Subject boards (lib/subjects.ts), merged item by item with the most
-   * recent change winning, so moving a card on one device and writing under
-   * it on another both survive.
-   */
-  boards?: Boards;
-  /** Settings that follow the person (lib/store.ts SharedPrefs); newest wins. */
-  prefs?: { subjects: boolean; aiProvider: string; openaiModel: string; anthropicModel?: string; anthropicQuickModel?: string; openaiQuickModel?: string; at: number };
-  /** Stories pasted in by hand (lib/manual.ts), merged per link. */
-  manual?: ManualStories;
-  /** Passages marked in articles (lib/highlights.ts), merged per highlight. */
-  highlights?: Highlights;
-  /**
-   * Which team feeds this person has joined — the name and connect code, not
-   * the shared articles. Those live on the server because several people write
-   * to them; what syncs is only "this person is on that feed", so joining one
-   * on a laptop reaches their phone.
-   */
-  teams?: unknown[];
-  /**
-   * The API-key vault, encrypted in the browser before it ever reaches here.
-   * The server stores these bytes and cannot read them: it has no passphrase,
-   * and this deployment is public, so anything it could read would be readable
-   * by whoever holds the URL.
-   */
-  vault?: unknown;
-  /**
-   * When this data last changed, on the device that changed it. The rule is
-   * "most recent change wins" rather than "last write wins": a device that has
-   * been closed for a week must not overwrite what happened since, however
-   * long after the fact it reconnects.
-   */
-  updatedAt?: number;
-};
+export { MAX_PAYLOAD_BYTES } from "./sync-doc";
+export type { SyncPayload } from "./sync-doc";
 
 export type SyncRecord = {
   payload: SyncPayload;
@@ -82,9 +12,6 @@ export type SyncRecord = {
   /** The code is tied to a Google account: subjects live there, and only a signed-in device sees them. */
   inAccount?: boolean;
 };
-
-/** Keeps one device from filling the table with an oversized document. */
-export const MAX_PAYLOAD_BYTES = 512 * 1024;
 
 export async function createSync(): Promise<{ code: string }> {
   await ensureSchema();
@@ -116,69 +43,33 @@ export async function readSync(code: string): Promise<SyncRecord | null> {
   };
 }
 
-export class StaleWrite extends Error {
-  constructor(readonly current: SyncRecord) {
-    super("This device's copy is older than what is already synced.");
-    this.name = "StaleWrite";
-  }
-}
-
 /**
- * Most recent change wins. A write carrying an older change time than the one
- * already stored is refused, and the caller is handed what is there instead —
- * which is what a device that has been away needs anyway.
+ * Merge a device's copy into what is stored. Nothing is refused: the feed
+ * list, read marks, team list and vault each go to whichever side changed
+ * that part last, and everything else is the union of both (lib/sync-doc.ts).
+ * What is now held comes back, so the device can take the parts it was
+ * behind on.
  *
- * Two devices editing within the same moment still resolve by whichever
- * change is stamped later; the cost of that is one side's edit, not the list.
+ * Before a change takes a folder, a source, a team or the vault away — and
+ * otherwise every half hour of changes — the previous feed list is kept as a
+ * version, so a list overwritten by mistake can be brought back.
  */
 export async function writeSync(
   code: string,
   payload: SyncPayload,
 ): Promise<SyncRecord | null> {
   const existing = await readSync(code);
-  if (existing) {
-    const theirs = Number(existing.payload?.updatedAt ?? 0);
-    const ours = Number(payload.updatedAt ?? 0);
-    if (theirs > ours) throw new StaleWrite(existing);
-  }
-
-  // Bookmarks are merged into what is stored, not swapped for it. Two
-  // devices can each add something between syncs, and whichever pushes
-  // second would otherwise delete the other's — the stamps say which
-  // arrangement of the feed list is newer, but they cannot say that one
-  // device's bookmarks matter less.
-  const stored = existing?.payload ?? { feeds: [] };
-  const bookmarks = mergeSaved(
-    { saved: payload.saved ?? [], removals: payload.savedRemovals ?? [] },
-    { saved: stored.saved ?? [], removals: stored.savedRemovals ?? [] },
-  );
-  const notes = mergeNotes(
-    { notes: payload.notes ?? [], removals: payload.noteRemovals ?? [] },
-    { notes: stored.notes ?? [], removals: stored.noteRemovals ?? [] },
-  );
-  const merged: SyncPayload = {
-    ...payload,
-    saved: bookmarks.saved,
-    savedRemovals: bookmarks.removals,
-    // A mark only moves forward, so the later one always has more
-    // information — no stamps needed to resolve these.
-    watchMarks: mergeMarks(payload.watchMarks ?? {}, stored.watchMarks ?? {}),
-    positions: mergePositions(payload.positions ?? {}, stored.positions ?? {}),
-    notes: notes.notes,
-    noteRemovals: notes.removals,
-    boards: slimBoardsForSync(mergeBoards(payload.boards ?? {}, stored.boards ?? {})),
-    manual: mergeManual(payload.manual ?? {}, stored.manual ?? {}),
-    highlights: mergeHighlights(payload.highlights ?? {}, stored.highlights ?? {}),
-    prefs:
-      (stored.prefs?.at ?? 0) > (payload.prefs?.at ?? 0) ? stored.prefs : (payload.prefs ?? stored.prefs),
-  };
+  if (!existing) return null;
+  const stored = existing.payload;
+  const merged = mergeSyncDocs(payload, stored);
   // A code tied to a Google account carries no writing: subjects and notes
   // live with the account (lib/accounts.ts), where a code alone cannot reach
   // them. Anything an older device still sends is dropped, not stored.
-  if (await isLinkedCode(code)) withoutWriting(merged);
+  if (existing.inAccount) withoutWriting(merged);
 
   await ensureSchema();
   const sql = getSql();
+  await keepVersion(code, stored, merged);
   const rows = await sql`
     UPDATE feed_syncs
     SET payload = ${JSON.stringify(merged)}::jsonb, updated_at = now()
@@ -189,7 +80,58 @@ export async function writeSync(
   return {
     payload: merged,
     updatedAt: new Date(rows[0].updated_at).toISOString(),
+    ...(existing.inAccount ? { inAccount: true } : {}),
   };
+}
+
+/* ---------- versions of the feed list ---------- */
+
+/** Changes that take nothing away are kept at most this often. */
+export const VERSION_EVERY_MS = 30 * 60 * 1000;
+const VERSION_KEEP_DAYS = 400;
+
+async function keepVersion(code: string, before: SyncPayload, after: SyncPayload) {
+  const was = versionOf(before);
+  if (!was.feeds.length && !was.teams.length && was.vault === undefined) return;
+  if (JSON.stringify(was) === JSON.stringify(versionOf(after))) return;
+  const sql = getSql();
+  const codeHash = hashCode(code);
+  if (!losesSomething(before, after)) {
+    const last = await sql`SELECT saved_at FROM sync_versions WHERE code_hash = ${codeHash} ORDER BY id DESC LIMIT 1`;
+    if (last[0] && Date.now() - new Date(last[0].saved_at).getTime() < VERSION_EVERY_MS) return;
+  }
+  const { folders, sources } = feedsSummary(was.feeds);
+  await sql`
+    INSERT INTO sync_versions (code_hash, folders, sources, teams, payload)
+    VALUES (${codeHash}, ${folders}, ${sources}, ${was.teams.length}, ${JSON.stringify(was)}::jsonb)
+  `;
+  await sql`DELETE FROM sync_versions WHERE code_hash = ${codeHash} AND saved_at < now() - make_interval(days => ${VERSION_KEEP_DAYS})`;
+}
+
+export type SyncVersion = { id: string; savedAt: string; folders: number; sources: number; teams: number };
+
+/** Earlier feed lists for a code, newest first. */
+export async function listSyncVersions(code: string, limit = 100): Promise<SyncVersion[]> {
+  await ensureSchema();
+  const rows = await getSql()`
+    SELECT id, saved_at, folders, sources, teams FROM sync_versions
+    WHERE code_hash = ${hashCode(code)} ORDER BY id DESC LIMIT ${limit}
+  `;
+  return rows.map((r) => ({
+    id: String(r.id),
+    savedAt: new Date(r.saved_at).toISOString(),
+    folders: Number(r.folders),
+    sources: Number(r.sources),
+    teams: Number(r.teams),
+  }));
+}
+
+/** One earlier feed list: its folders and sources, teams, and vault. */
+export async function readSyncVersion(code: string, id: string): Promise<ReturnType<typeof versionOf> | null> {
+  if (!/^\d{1,18}$/.test(id)) return null;
+  await ensureSchema();
+  const rows = await getSql()`SELECT payload FROM sync_versions WHERE code_hash = ${hashCode(code)} AND id = ${id}`;
+  return rows[0] ? (rows[0].payload as ReturnType<typeof versionOf>) : null;
 }
 
 function withoutWriting(payload: SyncPayload) {

@@ -37,7 +37,8 @@ export const MANUAL_SOURCE = "manual";
 
 const KEY = "super-reader:manual:v1";
 const TOMBSTONE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
-const MAX_STORIES = 500;
+/** How many the synced document carries. */
+const MAX_STORIES = 300;
 
 export function loadManual(): ManualStories {
   if (typeof window === "undefined") return {};
@@ -71,11 +72,21 @@ export function mergeManual(mine: ManualStories, theirs: ManualStories, now = Da
       if (!merged[key] || story.at > merged[key].at) merged[key] = story;
     }
   }
+  // Every live story is kept; only the wire copy is capped (slimManualForSync).
   const kept = Object.entries(merged)
     .filter(([, story]) => !(story.deleted && now - story.at > TOMBSTONE_TTL_MS))
-    .sort((a, b) => b[1].at - a[1].at)
-    .slice(0, MAX_STORIES);
+    .sort((a, b) => b[1].at - a[1].at);
   return Object.fromEntries(kept);
+}
+
+/** The copy the synced document carries: the newest changes. The account's library keeps them all. */
+export function slimManualForSync(stories: ManualStories): ManualStories {
+  return Object.fromEntries(
+    Object.entries(stories ?? {})
+      .sort((a, b) => b[1].at - a[1].at)
+      .slice(0, MAX_STORIES)
+      .map(([key, story]) => [key, story.summary && story.summary.length > 300 ? { ...story, summary: story.summary.slice(0, 300) } : story]),
+  );
 }
 
 export function sameManual(a: ManualStories, b: ManualStories) {

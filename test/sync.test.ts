@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
 import { setSqlForTesting, type Sql } from "../lib/db";
-import { createSync, readSync, writeSync } from "../lib/sync";
+import { createSync, listSyncVersions, readSync, readSyncVersion, writeSync } from "../lib/sync";
 import { newSyncCode, normalizeCode, isValidCode, hashCode } from "../lib/sync-code";
 
 // Run the real SQL against a real Postgres, in-process.
@@ -102,13 +102,15 @@ test("a device that has been away cannot overwrite a newer change", async () => 
   });
 
   // The desktop, closed for a week, wakes up and pushes what it remembers.
-  await assert.rejects(
-    () =>
-      writeSync(code, {
-        feeds: [{ id: "old", name: "Stale desktop copy", sources: [] }],
-        updatedAt: 1_000,
-      }),
-    (error: Error) => error.name === "StaleWrite",
+  // Nothing is refused any more; the older copy simply loses.
+  const answer = await writeSync(code, {
+    feeds: [{ id: "old", name: "Stale desktop copy", sources: [] }],
+    updatedAt: 1_000,
+  });
+  assert.equal(
+    (answer?.payload.feeds?.[0] as { name: string }).name,
+    "Added on the phone",
+    "and what comes back is what is current, so the stale device can catch up",
   );
 
   const record = await readSync(code);
@@ -117,17 +119,78 @@ test("a device that has been away cannot overwrite a newer change", async () => 
     "Added on the phone",
     "the newer change survives",
   );
+});
 
-  // And the refusal hands back what is current, so the stale device can catch up.
-  try {
-    await writeSync(code, { feeds: [], updatedAt: 1_000 });
-    assert.fail("should have been refused");
-  } catch (error: any) {
-    assert.equal(
-      (error.current.payload.feeds[0] as { name: string }).name,
-      "Added on the phone",
-    );
-  }
+test("marking an article read never makes an old feed list look new", async () => {
+  // The bug: one stamp for the whole document. The laptop added a source; the
+  // phone, holding last week's list, marked a story read a minute later, and
+  // its push replaced the feed list with last week's.
+  const { code } = await createSync();
+  await writeSync(code, {
+    feeds: [{ id: "f", name: "News", sources: [{ id: "new", feedUrl: "https://new.example/rss" }] }],
+    read: [],
+    stamps: { feeds: 5_000, read: 1_000 },
+    updatedAt: 5_000,
+  });
+  const after = await writeSync(code, {
+    feeds: [{ id: "f", name: "News", sources: [] }],
+    read: ["story-1"],
+    stamps: { feeds: 1_000, read: 6_000 },
+    updatedAt: 6_000,
+  });
+  assert.deepEqual(
+    (after?.payload.feeds?.[0] as { sources: { id: string }[] }).sources.map((s) => s.id),
+    ["new"],
+    "the feed list stays the laptop's",
+  );
+  assert.deepEqual(after?.payload.read, ["story-1"], "while the read mark is the phone's");
+  assert.deepEqual(after?.payload.stamps, { feeds: 5_000, read: 6_000 });
+});
+
+test("pasted stories, highlights and shared settings are kept", async () => {
+  // These were dropped by the route, so they never reached another device.
+  const { code } = await createSync();
+  const at = Date.now();
+  await writeSync(code, {
+    feeds: [],
+    manual: { "https://a.example/x": { link: "https://a.example/x", title: "Pasted", at } },
+    highlights: { h1: { id: "h1", link: "https://a.example/x", text: "a line", at } },
+    prefs: { subjects: true, aiProvider: "openai", openaiModel: "gpt-5", at },
+    updatedAt: at,
+  });
+  const record = await readSync(code);
+  assert.equal(record?.payload.manual?.["https://a.example/x"]?.title, "Pasted");
+  assert.equal(record?.payload.highlights?.h1?.text, "a line");
+  assert.equal(record?.payload.prefs?.openaiModel, "gpt-5");
+});
+
+test("a feed list is kept as a version before anything is taken from it", async () => {
+  const { code } = await createSync();
+  const source = (id: string) => ({ id, feedUrl: `https://${id}.example/rss` });
+  await writeSync(code, { feeds: [{ id: "f", name: "News", sources: [source("a"), source("b")] }], stamps: { feeds: 1 }, updatedAt: 1 });
+  // A source is removed: the list as it was is kept.
+  await writeSync(code, { feeds: [{ id: "f", name: "News", sources: [source("a")] }], stamps: { feeds: 2 }, updatedAt: 2 });
+  // And the whole list emptied by a device that lost it: kept again, however soon after.
+  await writeSync(code, { feeds: [], stamps: { feeds: 3 }, updatedAt: 3 });
+
+  const versions = await listSyncVersions(code);
+  assert.equal(versions.length, 2);
+  assert.deepEqual(versions.map((v) => v.sources), [1, 2], "newest first");
+  const oldest = await readSyncVersion(code, versions[1].id);
+  assert.deepEqual((oldest?.feeds[0] as { sources: { id: string }[] }).sources.map((s) => s.id), ["a", "b"]);
+
+  // Another code cannot read them.
+  const other = await createSync();
+  assert.equal(await readSyncVersion(other.code, versions[1].id), null);
+  assert.deepEqual(await listSyncVersions(other.code), []);
+});
+
+test("adding to a feed list is versioned at most every half hour", async () => {
+  const { code } = await createSync();
+  await writeSync(code, { feeds: [{ id: "f", name: "News", sources: [] }], stamps: { feeds: 1 }, updatedAt: 1 });
+  await writeSync(code, { feeds: [{ id: "f", name: "News", sources: [{ id: "a", feedUrl: "u" }] }], stamps: { feeds: 2 }, updatedAt: 2 });
+  await writeSync(code, { feeds: [{ id: "f", name: "News", sources: [{ id: "a", feedUrl: "u" }, { id: "b", feedUrl: "v" }] }], stamps: { feeds: 3 }, updatedAt: 3 });
+  assert.equal((await listSyncVersions(code)).length, 1);
 });
 
 test("a later change from any device is accepted", async () => {

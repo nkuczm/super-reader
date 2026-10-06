@@ -8,7 +8,7 @@ import {
   MAX_SAVED,
 } from "../lib/saved";
 import { MAX_PAYLOAD_BYTES } from "../lib/sync";
-import { pullable } from "../lib/store";
+import { partStamp } from "../lib/sync-doc";
 import type { SavedArticle, SavedState } from "../lib/saved";
 
 const NOW = Date.UTC(2026, 8, 11, 12, 0, 0);
@@ -84,14 +84,16 @@ test("forgets tombstones once every device must have seen them", () => {
   assert.deepEqual(merged.removals, []);
 });
 
-test("stays inside what a synced document can carry", () => {
+test("a merge keeps every bookmark; only the wire copy is capped", () => {
   const many = Array.from({ length: MAX_SAVED + 120 }, (_, i) =>
     saved(`https://a.example/${i}`, ago(i)),
   );
   const merged = mergeSaved(state(many), state([]), NOW);
-  assert.equal(merged.saved.length, MAX_SAVED);
-  // The cap drops the oldest, not the newest.
-  assert.equal(merged.saved[0].link, "https://a.example/0");
+  assert.equal(merged.saved.length, MAX_SAVED + 120, "the 401st save must not delete the oldest");
+  const wire = slimForSync(merged.saved);
+  assert.equal(wire.length, MAX_SAVED);
+  // The wire carries the newest.
+  assert.equal(wire[0].link, "https://a.example/0");
 });
 
 test("knows when a merge has something the other side needs", () => {
@@ -173,10 +175,7 @@ test("an older synced document still hands over its bookmarks", () => {
    */
   const theirs = { updatedAt: ago(6) };
   const ourStamp = ago(1);
-
-  const plan = pullable(theirs.updatedAt, ourStamp);
-  assert.equal(plan.replace, false, "the feed list stays this device's");
-  assert.equal(plan.merge, true, "the bookmarks still merge");
+  assert.ok(partStamp(theirs, "feeds") < ourStamp, "the feed list stays this device's");
 
   const merged = mergeSaved(
     state([saved("https://a.example/mine", ago(2))]),
@@ -191,9 +190,8 @@ test("an older synced document still hands over its bookmarks", () => {
   assert.equal(merged.saved.length, 5, "all five, not the one this device had");
 });
 
-test("a document at least as new decides the replaced parts too", () => {
-  assert.equal(pullable(ago(1), ago(6)).replace, true);
-  assert.equal(pullable(ago(3), ago(3)).replace, true, "a tie is not stale");
-  // A document with no stamp at all cannot outrank a device that has one.
-  assert.equal(pullable(0, ago(9)).replace, false);
+test("each replaced part goes by its own stamp, an old document by its one stamp", () => {
+  assert.equal(partStamp({ updatedAt: ago(3), stamps: { feeds: ago(9) } }, "feeds"), ago(9));
+  assert.equal(partStamp({ updatedAt: ago(3), stamps: { feeds: ago(9) } }, "read"), ago(3), "a part without a stamp falls back");
+  assert.equal(partStamp({}, "vault"), 0, "a document with no stamp at all cannot outrank a device that has one");
 });

@@ -75,7 +75,6 @@ export const MAX_QUOTE_CHARS = 4000;
  */
 export const SYNC_BUDGET_BYTES = 140 * 1024;
 export const MAX_NOTES = 60;
-export const MAX_ENTRIES = 400;
 /** A tombstone only has to outlive the slowest device's absence. */
 export const REMOVAL_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const MAX_REMOVALS = 600;
@@ -209,10 +208,9 @@ export function mergeNotes(
     }
     entries.sort((a, b) => (Number(a.at) || 0) - (Number(b.at) || 0));
 
-    notes.push({
-      ...newest,
-      entries: entries.slice(-MAX_ENTRIES),
-    });
+    // Every entry is kept: a merge never decides what someone's work can do
+    // without. Only the copy sent over the wire is cut to a budget.
+    notes.push({ ...newest, entries });
   }
 
   // Oldest first, so both devices show the same order in the sidebar.
@@ -223,7 +221,10 @@ export function mergeNotes(
     .sort((a, b) => b.at - a.at)
     .slice(0, MAX_REMOVALS);
 
-  return { notes: notes.slice(-MAX_NOTES), removals: keptRemovals };
+  // Every note is kept, however many there are. This used to keep the newest
+  // sixty, and since the account's copy is rebuilt with this same merge, a
+  // sixty-first subject quietly took the oldest one away.
+  return { notes, removals: keptRemovals };
 }
 
 /**

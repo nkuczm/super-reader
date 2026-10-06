@@ -1,18 +1,16 @@
 import { meter } from "@/lib/db-usage";
 import { NextResponse } from "next/server";
 import { isConfigured } from "@/lib/db";
-import {
-  createSync,
-  readSync,
-  writeSync,
-  StaleWrite,
-  MAX_PAYLOAD_BYTES,
-} from "@/lib/sync";
+import { createSync, readSync, writeSync } from "@/lib/sync";
+import { MAX_PAYLOAD_BYTES, MAX_READ, PARTS, type SyncPayload } from "@/lib/sync-doc";
 import { isValidCode } from "@/lib/sync-code";
 import type { Note, NoteRemoval } from "@/lib/notes";
 import type { SavedArticle, SavedRemoval } from "@/lib/saved";
 import type { WatchMarks } from "@/lib/alerts";
 import type { Positions } from "@/lib/position";
+import type { Boards } from "@/lib/subjects";
+import type { ManualStories } from "@/lib/manual";
+import type { Highlights } from "@/lib/highlights";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,32 +54,30 @@ export async function POST() {
   }
 }
 
-/** Save this device's feeds under an existing code. */
+/**
+ * Merge this device's copy into the code's. Nothing is refused for being
+ * older: each part goes to whichever side changed it last, the rest merges,
+ * and what is now held comes back for the device to catch up from.
+ */
 export async function PUT(request: Request) {
   meter("sync");
   if (!isConfigured()) return notConfigured();
 
-  let body: {
-    code?: string;
-    feeds?: unknown;
-    read?: unknown;
-    saved?: unknown;
-    savedRemovals?: unknown;
-    watchMarks?: unknown;
-    positions?: unknown;
-    notes?: unknown;
-    noteRemovals?: unknown;
-    teams?: unknown;
-    vault?: unknown;
-    updatedAt?: unknown;
-  };
+  const text = await request.text();
+  if (text.length > MAX_PAYLOAD_BYTES) {
+    return NextResponse.json({ error: "That is too much data to sync." }, { status: 413 });
+  }
+  let body: Record<string, unknown>;
   try {
-    body = await request.json();
+    body = JSON.parse(text);
   } catch {
     return NextResponse.json({ error: "Expected JSON." }, { status: 400 });
   }
+  if (!body || typeof body !== "object") {
+    return NextResponse.json({ error: "Expected JSON." }, { status: 400 });
+  }
 
-  const code = body.code ?? "";
+  const code = typeof body.code === "string" ? body.code : "";
   if (!isValidCode(code)) {
     return NextResponse.json({ error: "That code is not valid." }, { status: 400 });
   }
@@ -89,39 +85,37 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "Expected a feeds array." }, { status: 400 });
   }
 
-  const payload = {
+  const obj = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? v : undefined);
+  const list = (v: unknown) => (Array.isArray(v) ? v : undefined);
+  const stamps = obj(body.stamps) as Record<string, unknown> | undefined;
+  // Every part is passed through; writeSync (lib/sync-doc.ts) decides what is
+  // kept. Pasted stories, highlights and shared settings used to be dropped
+  // here, so they never reached another device.
+  const payload: SyncPayload = {
     feeds: body.feeds,
-    read: Array.isArray(body.read) ? (body.read as string[]).slice(-3000) : [],
-    // Merged with what is stored rather than replacing it; writeSync does the
-    // merging, since it is the only place that sees both sides.
-    saved: Array.isArray(body.saved) ? (body.saved as SavedArticle[]) : [],
-    savedRemovals: Array.isArray(body.savedRemovals)
-      ? (body.savedRemovals as SavedRemoval[])
-      : [],
-    // Merged by writeSync, which is the only place that sees both sides.
-    watchMarks:
-      body.watchMarks && typeof body.watchMarks === "object"
-        ? (body.watchMarks as WatchMarks)
-        : {},
-    // Merged by writeSync, per article, most recent change winning.
-    positions:
-      body.positions && typeof body.positions === "object" && !Array.isArray(body.positions)
-        ? (body.positions as Positions)
-        : {},
-    // Merged by writeSync, like bookmarks: a device that has been away must
-    // not delete the notes written while it was.
-    notes: Array.isArray(body.notes) ? (body.notes as Note[]) : [],
-    noteRemovals: Array.isArray(body.noteRemovals)
-      ? (body.noteRemovals as NoteRemoval[])
-      : [],
-    ...(Array.isArray(body.teams) ? { teams: body.teams.slice(0, 50) } : {}),
+    ...(list(body.read) ? { read: (body.read as unknown[]).filter((id): id is string => typeof id === "string").slice(-MAX_READ) } : {}),
+    saved: (list(body.saved) ?? []) as SavedArticle[],
+    savedRemovals: (list(body.savedRemovals) ?? []) as SavedRemoval[],
+    watchMarks: (obj(body.watchMarks) ?? {}) as WatchMarks,
+    positions: (obj(body.positions) ?? {}) as Positions,
+    notes: (list(body.notes) ?? []) as Note[],
+    noteRemovals: (list(body.noteRemovals) ?? []) as NoteRemoval[],
+    boards: (obj(body.boards) ?? {}) as Boards,
+    manual: (obj(body.manual) ?? {}) as ManualStories,
+    highlights: (obj(body.highlights) ?? {}) as Highlights,
+    ...(obj(body.prefs) ? { prefs: body.prefs as SyncPayload["prefs"] } : {}),
+    ...(list(body.teams) ? { teams: (body.teams as unknown[]).slice(0, 50) } : {}),
     // Opaque to this server by design; stored and handed back untouched.
     ...(body.vault ? { vault: body.vault } : {}),
+    ...(stamps
+      ? {
+          stamps: Object.fromEntries(
+            PARTS.filter((part) => Number.isFinite(Number(stamps[part])) && Number(stamps[part]) > 0).map((part) => [part, Number(stamps[part])]),
+          ),
+        }
+      : {}),
     updatedAt: Number.isFinite(Number(body.updatedAt)) ? Number(body.updatedAt) : 0,
   };
-  if (JSON.stringify(payload).length > MAX_PAYLOAD_BYTES) {
-    return NextResponse.json({ error: "That is too much data to sync." }, { status: 413 });
-  }
 
   try {
     const record = await writeSync(code, payload);
@@ -129,15 +123,7 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: "No feeds found for that code." }, { status: 404 });
     }
     return NextResponse.json(record);
-  } catch (error) {
-    // Not a failure: this device is behind, and gets what is current so it can
-    // catch up rather than clobber.
-    if (error instanceof StaleWrite) {
-      return NextResponse.json(
-        { error: "A newer change is already synced.", ...error.current },
-        { status: 409 },
-      );
-    }
+  } catch {
     return NextResponse.json({ error: "Could not reach sync storage." }, { status: 502 });
   }
 }

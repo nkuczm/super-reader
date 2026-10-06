@@ -39,8 +39,11 @@ import {
   loadVault,
   saveVault,
   loadUpdatedAt,
-  pullable,
   saveUpdatedAt,
+  loadPartStamps,
+  savePartStamps,
+  unionTeams,
+  unionRead,
   loadUnlockedKeys,
   saveUnlockedKeys,
   type SavedArticle,
@@ -49,6 +52,7 @@ import {
   type Source,
 } from "@/lib/store";
 import type { TeamArticle } from "@/lib/team";
+import { fitForSync, partStamp, type Part, type PartStamps } from "@/lib/sync-doc";
 import {
   loadNotes,
   saveNotes,
@@ -87,6 +91,7 @@ import {
   titleFromUrl,
   mergeManual,
   sameManual,
+  slimManualForSync,
   saveManual,
   sourceFor,
   type ManualStories,
@@ -178,6 +183,7 @@ import {
   highlightsFor,
   loadHighlights,
   mergeHighlights,
+  slimHighlightsForSync,
   removeHighlight,
   sameHighlights,
   saveHighlights,
@@ -221,6 +227,11 @@ function fileTitleFor(file: Attachment, parentTitle: string) {
  * other on every focus, forever, with nothing to say. Cheap to compare: these
  * are the same documents that are about to be JSON-encoded onto the wire.
  */
+/** Whether this device has read a watched source further than the other copy says. */
+function marksAhead(mine: WatchMarks, theirs: WatchMarks) {
+  return Object.entries(mine ?? {}).some(([id, mark]) => (mark?.at ?? 0) > (theirs?.[id]?.at ?? 0));
+}
+
 function unchanged(a: unknown, b: unknown) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
@@ -523,6 +534,11 @@ export default function Reader() {
   const readRef = useRef<Set<string>>(new Set());
   /** Deletions, dated, so syncing does not put them back. */
   const noteRemovalsRef = useRef<NoteRemoval[]>([]);
+  /** When this device last changed each part sync replaces whole (lib/sync-doc.ts). */
+  const partStampsRef = useRef<PartStamps>({});
+  /** Each replaced part as last loaded or taken from sync, to tell a change made here from one that arrived. */
+  const known = useRef<Partial<Record<Part, string>>>({});
+  const vaultHeld = useRef<unknown>(null);
 
   // Crashes on a phone are otherwise invisible; see lib/client-errors.ts.
   useEffect(() => listenForClientErrors(), []);
@@ -606,9 +622,12 @@ export default function Reader() {
     const storedHighlights = loadHighlights();
     highlightsRef.current = storedHighlights;
     setHighlights(storedHighlights);
-    setVault(loadVault());
+    const storedVault = loadVault();
+    vaultHeld.current = storedVault;
+    setVault(storedVault);
     setApiKeys(loadUnlockedKeys());
     updatedAtRef.current = loadUpdatedAt();
+    partStampsRef.current = loadPartStamps();
     setUpdatedAt(updatedAtRef.current);
     setReady(true);
   }, []);
@@ -636,55 +655,109 @@ export default function Reader() {
     prefs?: unknown;
     teams?: unknown;
     vault?: unknown;
+    stamps?: PartStamps;
     updatedAt?: number;
   },
-  /**
-   * The synced document is older than what this device holds. Only the parts
-   * that resolve by "most recent change wins" are then this device's to keep:
-   * bookmarks, notes and watch marks merge whoever is newer, because a stamp
-   * can say which arrangement of the feed list is newer but cannot say that
-   * the other device's bookmarks matter less. Skipping the whole document was
-   * how a computer came to show one saved article while another device held
-   * five.
-   */
-  stale = false,
+  how: {
+    /** This device is taking up a code it did not have: what the code holds wins, and this device's additions join it. */
+    joining?: boolean;
+    /** The answer to this device's own push, carrying the stamp it sent. */
+    sent?: number;
+    /** The code belongs to a Google account, so it carries no writing. */
+    inAccount?: boolean;
+  } = {},
   ) => {
     applying.current = true;
-    if (
-      !stale &&
-      Array.isArray(payload.feeds) &&
-      !unchanged(cleanFeeds(payload.feeds), feedsRef.current)
-    ) {
-      // Checked like stored feeds: another device's malformed list must not
-      // blank this one.
-      setFeeds(cleanFeeds(payload.feeds));
+    const joining = Boolean(how.joining);
+    const fromPush = how.sent !== undefined;
+    const changedSinceSent = fromPush && updatedAtRef.current > how.sent!;
+    /*
+     * The feed list, read marks, team list and vault are each replaced whole,
+     * by whichever device changed that part last — each by its own stamp, so
+     * marking an article read never makes an old feed list look new.
+     */
+    const theirs = (part: Part) => partStamp(payload, part);
+    const mine = (part: Part) => partStampsRef.current[part] ?? 0;
+    /** Neither side has ever dated this part: nothing says which is newer, so both are kept. */
+    const unions = (part: Part) => joining || (theirs(part) === 0 && mine(part) === 0);
+    const takes = (part: Part) => unions(part) || theirs(part) >= mine(part);
+    const settle = (part: Part) => {
+      partStampsRef.current = { ...partStampsRef.current, [part]: Math.max(theirs(part), joining ? 0 : mine(part)) };
+      savePartStamps(partStampsRef.current);
+    };
+    /** Parts this device holds a newer copy of: still to be sent. */
+    const ahead: Part[] = [];
+    /** Parts a join added this device's own things to: to be sent as a change of its own. */
+    const added: Part[] = [];
+
+    if (Array.isArray(payload.feeds)) {
+      // Checked like stored feeds: another device's malformed list must not blank this one.
+      const remote = cleanFeeds(payload.feeds);
+      if (takes("feeds")) {
+        // Joining (a new or cleared browser, or one signing in), the feeds the
+        // code holds are taken whatever this device's stamp says, with anything
+        // only this device has added kept alongside.
+        const next = unions("feeds") ? unionFeeds(remote, feedsRef.current) : remote;
+        if (!unchanged(next, feedsRef.current)) {
+          known.current.feeds = JSON.stringify(next);
+          feedsRef.current = next;
+          setFeeds(next);
+        }
+        settle("feeds");
+        if (!unchanged(next, remote)) added.push("feeds");
+      } else if (!unchanged(remote, feedsRef.current)) ahead.push("feeds");
     }
     // Which team feeds this person is on travels between their own devices;
     // what is *in* those feeds does not, and never touches local storage.
-    if (!stale && Array.isArray(payload.teams)) {
-      const next = sanitizeTeams(payload.teams);
-      if (!unchanged(next, teamsRef.current)) {
-        setTeams(next);
-        saveTeams(next);
-      }
-    }
+    if (Array.isArray(payload.teams)) {
+      const remote = sanitizeTeams(payload.teams);
+      if (takes("teams")) {
+        const next = unions("teams") ? unionTeams(remote, teamsRef.current) : remote;
+        if (!unchanged(next, teamsRef.current)) {
+          known.current.teams = JSON.stringify(next);
+          teamsRef.current = next;
+          setTeams(next);
+          saveTeams(next);
+        }
+        settle("teams");
+        if (!unchanged(next, remote)) added.push("teams");
+      } else if (!unchanged(remote, teamsRef.current)) ahead.push("teams");
+    } else if (teamsRef.current.length) ahead.push("teams");
     // The vault arrives encrypted; it stays locked until a passphrase is
     // entered on this device, which is the whole point of it.
-    if (!stale && payload.vault) {
-      setVault(payload.vault);
-      saveVault(payload.vault);
-    }
+    if (payload.vault) {
+      const differs = JSON.stringify(payload.vault) !== JSON.stringify(vaultHeld.current ?? null);
+      if (unions("vault") && !joining && vaultHeld.current) {
+        // Undated on both sides: this device's vault is kept and sent, never dropped for the other.
+        if (differs) ahead.push("vault");
+      } else if (takes("vault")) {
+        if (differs) {
+          known.current.vault = JSON.stringify(payload.vault);
+          vaultHeld.current = payload.vault;
+          setVault(payload.vault);
+          saveVault(payload.vault);
+        }
+        settle("vault");
+      } else if (differs) ahead.push("vault");
+    } else if (vaultHeld.current) ahead.push("vault");
     // Compared before applying: a fresh Set of the same ids is still a new
-    // identity, and the stamping effect reads that as a local change — which
-    // is how two idle devices came to push to each other on every focus.
-    if (
-      !stale &&
-      Array.isArray(payload.read) &&
-      !unchanged(payload.read, [...readRef.current])
-    ) {
-      const next = new Set(payload.read);
-      setRead(next);
-      saveRead(next);
+    // identity — which is how two idle devices came to push to each other on
+    // every focus.
+    if (Array.isArray(payload.read)) {
+      const remote = [...new Set(payload.read.filter((id): id is string => typeof id === "string"))];
+      const local = [...readRef.current];
+      if (takes("read")) {
+        const next = unions("read") ? unionRead(remote, local) : remote;
+        if (!unchanged(next, local)) {
+          known.current.read = JSON.stringify(next);
+          const set = new Set(next);
+          readRef.current = set;
+          setRead(set);
+          saveRead(set);
+        }
+        settle("read");
+        if (!unchanged(next, remote)) added.push("read");
+      } else if (!unchanged(remote, local)) ahead.push("read");
     }
     /*
      * Bookmarks are merged, not taken. Everything else in this document
@@ -711,8 +784,9 @@ export default function Reader() {
       setPositions(places);
       savePositions(places);
     }
-    // Subject boards merge item by item, most recent change winning.
-    const writingHere = !signedInRef.current;
+    // Subject boards merge item by item, most recent change winning — on the
+    // code only while signed out and the code is not an account's.
+    const writingHere = !signedInRef.current && !how.inAccount;
     const mergedBoards = writingHere ? mergeBoards(boardsRef.current, payload.boards ?? {}) : boardsRef.current;
     if (!sameBoards(mergedBoards, boardsRef.current)) {
       boardsRef.current = mergedBoards;
@@ -804,48 +878,49 @@ export default function Reader() {
     }
 
     // If the merge kept something the other side had not seen, this device
-    // still has news — so it must not mark itself up to date.
+    // still has news — so it must not mark itself up to date. Everything is
+    // compared as it would be *sent*: the wire copy is cut to a budget, and
+    // comparing the full set would report news this device can never deliver
+    // — and push forever trying.
     const owes =
-      differsFrom(bookmarks, {
-        saved: payload.saved ?? [],
-        removals: payload.savedRemovals ?? [],
-      }) ||
+      ahead.length > 0 ||
+      added.length > 0 ||
+      differsFrom(
+        { saved: slimForSync(bookmarks.saved), removals: bookmarks.removals },
+        { saved: payload.saved ?? [], removals: payload.savedRemovals ?? [] },
+      ) ||
       releasable.length > 0 ||
-      // A place read further here than the other device knows about. Compared
-      // as sent — the wire copy is the newest 200 — for the same reason as
-      // notes below: comparing the full set would push forever.
       !samePositions(slimPositionsForSync(places), slimPositionsForSync(payload.positions ?? {})) ||
-      // The same for subject boards: compared as they would be sent.
       (writingHere && !sameBoards(slimBoardsForSync(mergedBoards), payload.boards ?? {})) ||
-      !sameManual(mergedManual, payload.manual ?? {}) ||
-      !sameHighlights(mergedHighlights, payload.highlights ?? {}) ||
+      !sameManual(slimManualForSync(mergedManual), payload.manual ?? {}) ||
+      !sameHighlights(slimHighlightsForSync(mergedHighlights), payload.highlights ?? {}) ||
+      marksAhead(marks, payload.watchMarks ?? {}) ||
       prefsRef.current.at > (cleanSharedPrefs(payload.prefs)?.at ?? 0) ||
-      // Compared as it would be *sent*, not as it is held: the wire copy is
-      // cut to a budget, and comparing the full set against the server's copy
-      // would report news this device can never deliver — and push forever
-      // trying.
       (writingHere &&
         notesDifferFrom(
           { notes: slimNotesForSync(merged.notes), removals: merged.removals },
           { notes: payload.notes ?? [], removals: payload.noteRemovals ?? [] },
         ));
 
-    // Never taken from a document this device has already moved past: the
-    // stamp only ever goes forward, or the next push looks like the stale one.
-    if (!stale && typeof payload.updatedAt === "number" && payload.updatedAt > 0) {
-      updatedAtRef.current = payload.updatedAt;
-      setUpdatedAt(payload.updatedAt);
-      saveUpdatedAt(payload.updatedAt);
-      // Only call this device up to date when it has nothing left to send.
-      pushedAt.current = owes ? 0 : payload.updatedAt;
+    // The stamp only ever goes forward, or the next push looks like the stale one.
+    const remoteUpdated = Number(payload.updatedAt) || 0;
+    if (remoteUpdated > updatedAtRef.current) {
+      updatedAtRef.current = remoteUpdated;
+      setUpdatedAt(remoteUpdated);
+      saveUpdatedAt(remoteUpdated);
     }
-    if (owes) {
+    // A join's additions are this device's own change, made now, so the code takes them.
+    for (const part of added) stampSyncPart(part);
+    if (fromPush) {
+      // The server has everything that was sent. Anything changed here since
+      // has its own stamp and goes in the next push; what came back is not news.
+      if (!changedSinceSent) pushedAt.current = updatedAtRef.current;
+    } else if (owes) {
       // Stamp the union as a change of this device's own, so the push effect
-      // sends it rather than sitting on bookmarks the other device lacks.
-      const now = Math.max(Date.now(), updatedAtRef.current + 1);
-      updatedAtRef.current = now;
-      setUpdatedAt(now);
-      saveUpdatedAt(now);
+      // sends it rather than sitting on what the other device lacks.
+      stampChange();
+    } else {
+      pushedAt.current = updatedAtRef.current;
     }
     // Release on the next tick, after the state updates have flushed.
     setTimeout(() => {
@@ -865,25 +940,12 @@ export default function Reader() {
 
       // Signed in on another device: the subjects moved to the account, and this copy is no longer kept up to date.
       if (data.inAccount) setWritingInAccount(true);
-      const remote = data.payload ?? {};
-      const theirs = Number(remote.updatedAt ?? 0);
-      /*
-       * An older document still has bookmarks and notes in it. Those merge
-       * whichever way round the two devices are — only the feed list, the
-       * read marks, the team list and the vault are decided by the stamp —
-       * so a stale pull is applied too, with the replaced parts held back.
-       */
-      if (joining) {
-        // Joining a code (a new or cleared browser, or one signing in): the
-        // feeds, teams and vault the code holds are taken whatever this
-        // device's stamp says, with anything only this device has added kept
-        // alongside. A device that did one thing before joining otherwise
-        // looked newer and replaced the synced feed list with its own.
-        if (Array.isArray(remote.feeds)) remote.feeds = unionFeeds(cleanFeeds(remote.feeds), feedsRef.current);
-        applyRemote(remote, false);
-        return;
-      }
-      applyRemote(remote, !pullable(theirs, loadUpdatedAt()).replace);
+      // Joining a code (a new or cleared browser, or one signing in), the
+      // feeds, teams, read marks and vault the code holds are taken whatever
+      // this device's stamps say, with anything only this device added kept
+      // alongside. Otherwise each part goes by its own stamp, and everything
+      // else merges whichever way round the two devices are.
+      applyRemote(data.payload ?? {}, { joining, inAccount: Boolean(data.inAccount) });
     },
     [applyRemote],
   );
@@ -929,7 +991,8 @@ export default function Reader() {
     feedsRef.current = feeds;
     teamsRef.current = teams;
     readRef.current = read;
-  }, [saved, savedRemovals, watchMarks, feeds, teams, read]);
+    vaultHeld.current = vault;
+  }, [saved, savedRemovals, watchMarks, feeds, teams, read, vault]);
 
   /**
    * Stamp a real local change. The first run is the load from storage, which
@@ -945,6 +1008,43 @@ export default function Reader() {
     setUpdatedAt(now);
     saveUpdatedAt(now);
   }, []);
+  /** A change here to a part sync replaces whole: dated past anything seen for it. */
+  const stampSyncPart = useCallback((part: Part) => {
+    const now = Math.max(Date.now(), (partStampsRef.current[part] ?? 0) + 1, updatedAtRef.current + 1);
+    partStampsRef.current = { ...partStampsRef.current, [part]: now };
+    savePartStamps(partStampsRef.current);
+    updatedAtRef.current = now;
+    setUpdatedAt(now);
+    saveUpdatedAt(now);
+  }, []);
+  /**
+   * A replaced part as it now stands. What was loaded, or taken from sync, is
+   * recorded in `known` first, so only a change made on this device is
+   * stamped — by content, not by timing, which a render can outrun.
+   */
+  const notice = useCallback(
+    (part: Part, value: unknown) => {
+      const text = JSON.stringify(value ?? null);
+      if (known.current[part] === text) return;
+      const first = known.current[part] === undefined;
+      known.current[part] = text;
+      if (!first) stampSyncPart(part);
+    },
+    [stampSyncPart],
+  );
+  useEffect(() => {
+    if (ready) notice("feeds", feeds);
+  }, [feeds, ready, notice]);
+  useEffect(() => {
+    if (ready) notice("read", [...read]);
+  }, [read, ready, notice]);
+  useEffect(() => {
+    if (ready) notice("teams", teams);
+  }, [teams, ready, notice]);
+  useEffect(() => {
+    if (ready) notice("vault", vault);
+  }, [vault, ready, notice]);
+  // Everything else merges, so one stamp says "this device has news".
   useEffect(() => {
     if (!ready) return;
     if (!hydrated.current) {
@@ -954,16 +1054,12 @@ export default function Reader() {
     if (applying.current) return;
     stampChange();
   }, [
-    feeds,
-    read,
     saved,
     savedRemovals,
     watchMarks,
     manual,
     highlights,
     prefs,
-    vault,
-    teams,
     ready,
     stampChange,
   ]);
@@ -1029,37 +1125,37 @@ export default function Reader() {
         const res = await fetch("/api/sync", {
           method: "PUT",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            code: syncCode,
-            feeds,
-            read: [...read],
-            // Trimmed: a few hundred full records would push the document
-            // past the size the route accepts, and then nothing syncs.
-            saved: slimForSync(saved),
-            savedRemovals,
-            watchMarks,
-            positions: slimPositionsForSync(positions),
-            // Signed in, writing goes to the account instead (useAccount).
-            ...(signedInRef.current
-              ? {}
-              : { notes: slimNotesForSync(notes), noteRemovals, boards: slimBoardsForSync(boards) }),
-            manual,
-            highlights,
-            prefs,
-            teams,
-            vault,
-            updatedAt,
-          }),
+          body: JSON.stringify(
+            fitForSync({
+              code: syncCode,
+              feeds,
+              read: [...read],
+              // Trimmed: the newest few hundred, the summaries short. The rest
+              // stay here and, signed in, in the account's library.
+              saved: slimForSync(saved),
+              savedRemovals,
+              watchMarks,
+              positions: slimPositionsForSync(positions),
+              // Signed in, writing goes to the account instead (useAccount).
+              ...(signedInRef.current
+                ? {}
+                : { notes: slimNotesForSync(notes), noteRemovals, boards: slimBoardsForSync(boards) }),
+              manual: slimManualForSync(manual),
+              highlights: slimHighlightsForSync(highlights),
+              prefs,
+              teams,
+              vault,
+              stamps: partStampsRef.current,
+              updatedAt,
+            }),
+          ),
         });
-        if (res.status === 409) {
-          // Something newer arrived while this device was away; take it.
-          const data = await res.json();
-          applyRemote(data.payload ?? {});
-          setSyncState("saved");
-          return;
-        }
         if (!res.ok) throw new Error("save failed");
-        pushedAt.current = updatedAt;
+        // What the code now holds comes back: any part another device changed
+        // more recently is taken now, rather than at the next look.
+        const data = await res.json().catch(() => null);
+        if (data?.payload) applyRemote(data.payload, { sent: updatedAt, inAccount: Boolean(data.inAccount) });
+        pushedAt.current = Math.max(pushedAt.current, updatedAt);
         setSyncState("saved");
       } catch {
         setSyncState("error");
@@ -1104,24 +1200,27 @@ export default function Reader() {
     const upload = await fetch("/api/sync", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        code: data.code,
-        feeds,
-        read: [...read],
-        saved: slimForSync(saved),
-        savedRemovals,
-        watchMarks,
-        positions: slimPositionsForSync(positions),
-        ...(signedInRef.current
-          ? {}
-          : { notes: slimNotesForSync(notes), noteRemovals, boards: slimBoardsForSync(boards) }),
-        manual,
-        highlights,
-        prefs,
-        teams,
-        vault,
-        updatedAt: Math.max(Date.now(), updatedAtRef.current + 1),
-      }),
+      body: JSON.stringify(
+        fitForSync({
+          code: data.code,
+          feeds,
+          read: [...read],
+          saved: slimForSync(saved),
+          savedRemovals,
+          watchMarks,
+          positions: slimPositionsForSync(positions),
+          ...(signedInRef.current
+            ? {}
+            : { notes: slimNotesForSync(notes), noteRemovals, boards: slimBoardsForSync(boards) }),
+          manual: slimManualForSync(manual),
+          highlights: slimHighlightsForSync(highlights),
+          prefs,
+          teams,
+          vault,
+          stamps: partStampsRef.current,
+          updatedAt: Math.max(Date.now(), updatedAtRef.current + 1),
+        }),
+      ),
     });
     if (!upload.ok) {
       setSyncState("error");
@@ -1162,6 +1261,32 @@ export default function Reader() {
       setSyncState("saved");
     },
     [pull],
+  );
+
+  /** An earlier feed list (kept on the server): what it had that this one lacks is added back. */
+  const restoreFeeds = useCallback(
+    async (id: string) => {
+      if (!syncCode) throw new Error("This device isn't syncing.");
+      const res = await fetch(`/api/sync/history?code=${encodeURIComponent(syncCode)}&id=${encodeURIComponent(id)}`, { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.version) throw new Error(data.error ?? "Could not load that feed list");
+      const count = (list: Feed[]) => list.reduce((n, feed) => n + feed.sources.length, 0);
+      const before = feedsRef.current;
+      const next = unionFeeds(before, cleanFeeds(data.version.feeds));
+      if (!unchanged(next, before)) {
+        feedsRef.current = next;
+        setFeeds(next);
+      }
+      const teamsBefore = teamsRef.current;
+      const teamsNext = unionTeams(teamsBefore, sanitizeTeams(data.version.teams));
+      if (!unchanged(teamsNext, teamsBefore)) {
+        teamsRef.current = teamsNext;
+        setTeams(teamsNext);
+        saveTeams(teamsNext);
+      }
+      return { folders: next.length - before.length, sources: count(next) - count(before), teams: teamsNext.length - teamsBefore.length };
+    },
+    [syncCode],
   );
 
   /** Merge the account's copy of the writing into this device's. */
@@ -1887,9 +2012,10 @@ export default function Reader() {
   const commitBoard = useCallback(
     (noteId: string, update: (board: Board | undefined) => Board) => {
       const current = boardsRef.current;
+      const live = new Set(notesRef.current.map((note) => note.id));
       const next = pruneBoards(
         { ...current, [noteId]: update(current[noteId]) },
-        new Set(notesRef.current.map((note) => note.id)),
+        new Set(noteRemovalsRef.current.map((r) => r.id).filter((id) => !live.has(id))),
       );
       boardsRef.current = next;
       setBoards(next);
@@ -4467,6 +4593,7 @@ export default function Reader() {
           onCreate={startSync}
           onConnect={connectSync}
           onDisconnect={stopSync}
+          onRestore={restoreFeeds}
           onClose={() => setSyncOpen(false)}
         />
       )}

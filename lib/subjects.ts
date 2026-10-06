@@ -341,10 +341,14 @@ export function pruneBoard(board: Board, now = Date.now()): Board {
   return kept;
 }
 
-/** Boards for subjects that no longer exist are let go. */
-export function pruneBoards(boards: Boards, noteIds: ReadonlySet<string>): Boards {
+/**
+ * Boards for subjects that were deleted are let go. Only a deletion counts: a
+ * board whose subject this device simply has not received yet is kept, or a
+ * sync arriving in the wrong order would throw away someone's board.
+ */
+export function pruneBoards(boards: Boards, deletedIds: ReadonlySet<string>): Boards {
   const kept: Boards = {};
-  for (const [id, board] of Object.entries(boards)) if (noteIds.has(id)) kept[id] = board;
+  for (const [id, board] of Object.entries(boards)) if (!deletedIds.has(id)) kept[id] = board;
   return kept;
 }
 
