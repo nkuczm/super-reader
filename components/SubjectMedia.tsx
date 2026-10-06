@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { DEFAULT_DRAWING_HEIGHT, DRAWING_WIDTH, escapeHtml, newItemId, safeImage, safeStrokes, type BoxItem, type Stroke } from "@/lib/subjects";
 import { EMBED_TYPE } from "./RichText";
 import FlagButton from "./FlagButton";
+import { copyPicture } from "./CropDialog";
 import { parseTranscript, safeTranscript, speakersOf, titleFromFile, type TMark, type TPoint, type Transcript } from "@/lib/transcript";
 
 const COLORS = ["#111111", "#2563eb", "#dc2626", "#16a34a", "#f59e0b"];
@@ -214,10 +215,26 @@ export function DrawingPad({ box, onChange }: { box: BoxItem; onChange: (next: P
   );
 }
 
-export function ImageView({ box, onChange }: { box: BoxItem; onChange: (next: Partial<BoxItem>) => void }) {
+export function ImageView({ box, onChange, onRemove }: { box: BoxItem; onChange: (next: Partial<BoxItem>) => void; onRemove?: () => void }) {
   const src = safeImage(box.image);
+  const [note, setNote] = useState<string | null>(null);
   return (
-    <figure className="subject-image">
+    // Click the picture, then ⌘C copies it and ⌘X cuts it, to paste into a table, a text box or another app.
+    <figure className="subject-image" tabIndex={-1}
+      onKeyDown={(e) => {
+        const key = e.key.toLowerCase();
+        if (!src || !(e.metaKey || e.ctrlKey) || (key !== "c" && key !== "x")) return;
+        if ((e.target as HTMLElement).closest("input, textarea")) return;
+        e.preventDefault();
+        e.stopPropagation();
+        void copyPicture(src).then((ok) => {
+          if (!ok) return setNote("Couldn't copy the picture");
+          if (key === "x" && onRemove) onRemove();
+          else { setNote("Picture copied"); setTimeout(() => setNote(null), 1400); }
+        });
+      }}
+      onClick={(e) => (e.target as HTMLElement).tagName === "IMG" && (e.currentTarget as HTMLElement).focus()}>
+      {note && <span className="rt-img-copied">{note}</span>}
       <EmbedGrip id={box.id} />
       {src ? (
         // eslint-disable-next-line @next/next/no-img-element

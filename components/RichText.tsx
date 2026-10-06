@@ -107,6 +107,16 @@ export default function RichText({
       window.removeEventListener("pointerdown", away, true);
     };
   }, [pickedImg]);
+  /** Copy the picture, then take it out of the text — paste puts it back wherever it is wanted. */
+  const cutImg = async (img: HTMLImageElement) => {
+    const ok = await copyPicture(img.src);
+    if (!ok) return;
+    img.remove();
+    setPickedImg(null);
+    setPinFor(null);
+    setImgMenu(null);
+    changed();
+  };
   const copyImg = async (img: HTMLImageElement) => {
     const ok = await copyPicture(img.src);
     setCopied(ok);
@@ -501,6 +511,7 @@ export default function RichText({
           {onReplaceEmbed && imgMenu.img.dataset.embed && (
             <button type="button" onClick={() => { setCropping(imgMenu.img); setImgMenu(null); }}>Crop</button>
           )}
+          <button type="button" onClick={() => { void cutImg(imgMenu.img); }}>Cut</button>
           <button type="button" onClick={() => { void copyImg(imgMenu.img); setImgMenu(null); }}>Copy</button>
           <button type="button" onClick={() => { imgMenu.img.remove(); setImgMenu(null); setPickedImg(null); setPinFor(null); changed(); }}>Remove</button>
         </div>
@@ -768,10 +779,12 @@ export default function RichText({
         onKeyDown={(event) => {
           // With a picture picked, ⌘C copies the picture and Delete removes it.
           if (pickedImg && el.current?.contains(pickedImg)) {
-            if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "c" && window.getSelection()?.isCollapsed !== false) {
+            const key = event.key.toLowerCase();
+            if ((event.metaKey || event.ctrlKey) && (key === "c" || key === "x") && window.getSelection()?.isCollapsed !== false) {
               event.preventDefault();
               event.stopPropagation();
-              void copyImg(pickedImg);
+              if (key === "c") void copyImg(pickedImg);
+              else void cutImg(pickedImg);
               return;
             }
             if (event.key === "Backspace" || event.key === "Delete") {

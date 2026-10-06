@@ -136,6 +136,9 @@ function clipboardPicture(e: ClipboardEvent): File | null {
 }
 
 /** A heading in a tab's outline: a section label (n = -1) or the nth heading in a text box. */
+/** One undoable change to a subject's cards. */
+type BoardOp = { undo: (b: Board | undefined) => Board; redo: (b: Board | undefined) => Board };
+
 type OutlineEntry = { id: string; n: number; level: number; text: string };
 
 /** A brief glow on what the reader was just taken to. */
@@ -653,6 +656,45 @@ export default function SubjectPage(props: Props) {
     <span className="subject-ai-hint error">{run.message}</span>
   ) : null;
 
+  /**
+   * Undo and redo for whole cards — deleting, cutting, pasting, moving —
+   * kept apart from the undo inside a text box or table, which handles its
+   * own. Each step knows how to take itself back and to do itself again.
+   */
+  const history = useRef<{ past: BoardOp[]; future: BoardOp[] }>({ past: [], future: [] });
+  const recordOp = (op: BoardOp) => {
+    history.current.past.push(op);
+    if (history.current.past.length > 100) history.current.past.shift();
+    history.current.future = [];
+  };
+  const removeCards = (ids: string[]) => {
+    const gone = new Set(ids);
+    const items = live(board).filter((i) =>
+      gone.has(i.id)
+      || (i.kind === "pos" && gone.has((i as PosItem).target))
+      || (i.kind === "link" && (gone.has((i as LinkItem).from) || gone.has((i as LinkItem).to))));
+    if (!items.length) return;
+    const putBack = (b: Board | undefined) => items.reduce((n, i) => put(n, { ...i, at: Date.now() }), b ?? {});
+    const takeAway = (b: Board | undefined) => items.reduce((n, i) => remove(n, i.id), b ?? {});
+    recordOp({ undo: putBack, redo: takeAway });
+    onBoard(takeAway);
+  };
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || (e.key.toLowerCase() !== "z" && e.key.toLowerCase() !== "y")) return;
+      // Typing has its own undo; so do tables and drawings.
+      if ((e.target as HTMLElement).closest?.("input, textarea, [contenteditable], .drawing, .tbl, .sheet")) return;
+      const redo = e.shiftKey || e.key.toLowerCase() === "y";
+      const step = (redo ? history.current.future : history.current.past).pop();
+      if (!step) return;
+      e.preventDefault();
+      (redo ? history.current.past : history.current.future).push(step);
+      onBoard(redo ? step.redo : step.undo);
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [onBoard]);
+
   const shared = {
     resolveEmbed,
     embedBox,
@@ -678,7 +720,9 @@ export default function SubjectPage(props: Props) {
         const base = held && held.kind === "box" ? held : box;
         return put(current, { ...base, ...change, at: Date.now() });
       }),
-    removeBox: (box: BoxItem) => onBoard((current) => remove(remove(current, box.id), posId(box.id))),
+    removeBox: (box: BoxItem) => removeCards([box.id]),
+    removeCards,
+    recordOp,
     replaceEmbed: (id: string, image: string) =>
       onBoard((current) => {
         const held = current?.[id];
@@ -1083,6 +1127,9 @@ type Shared = {
   factCheck: (box: BoxItem, sheet?: BoxItem, write?: (change: Partial<BoxItem>) => void) => Promise<void>;
   /** Open what a fact-check cited: the story at its passage, or the note or transcript on the page. */
   openSource: (target: SourceTarget, quote: string) => void;
+  /** Whole-card changes, undoable: delete cards (with their places and links), and record any other change as a step. */
+  removeCards: (ids: string[]) => void;
+  recordOp: (op: BoardOp) => void;
   /** For flagging AI results: which subject, and which model produced them. */
   subjectName: string;
   aiModel: string;
@@ -1252,7 +1299,7 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
       ) : box.drawing ? (
         <DrawingPad box={box} onChange={(change) => shared.updateBox(box, change)} />
       ) : box.image !== undefined || box.caption !== undefined ? (
-        <ImageView box={box} onChange={(change) => shared.updateBox(box, change)} />
+        <ImageView box={box} onChange={(change) => shared.updateBox(box, change)} onRemove={() => shared.removeBox(box)} />
       ) : (
         <RichText html={box.html} placeholder="Write anything…" autoFocus={shared.focusBox === box.id}
           resolveEmbed={shared.resolveEmbed} onEmbed={shared.embedBox} onDropImage={shared.dropImage} onReplaceEmbed={shared.replaceEmbed}
@@ -1735,7 +1782,6 @@ function Whiteboard(
    * nodes were (or that they had never been placed) and where they went.
    */
   type Spot = { id: string; x: number; y: number; w: number };
-  const moves = useRef<{ past: { before: (PosItem | string)[]; after: Spot[] }[]; future: { before: (PosItem | string)[]; after: Spot[] }[] }>({ past: [], future: [] });
   const writeSpots = (current: Board | undefined, spots: Spot[]) =>
     spots.reduce(
       (next, p) => put(next, { id: posId(p.id), kind: "pos", target: p.id, x: Math.round(p.x), y: Math.round(p.y), w: Math.round(p.w), at: Date.now() }),
@@ -1749,31 +1795,10 @@ function Whiteboard(
   const beforeOf = (ids: string[]) =>
     ids.map((nid) => (live(board).find((i) => i.kind === "pos" && (i as PosItem).target === nid) as PosItem | undefined) ?? nid);
   const place = (spots: Spot[]) => {
-    moves.current.past.push({ before: beforeOf(spots.map((p) => p.id)), after: spots });
-    if (moves.current.past.length > 100) moves.current.past.shift();
-    moves.current.future = [];
+    const before = beforeOf(spots.map((p) => p.id));
+    shared.recordOp({ undo: (b) => restore(b, before), redo: (b) => writeSpots(b, spots) });
     onBoard((current) => writeSpots(current, spots));
   };
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z" && e.key.toLowerCase() !== "y") return;
-      // Typing has its own undo; so does a drawing.
-      if ((e.target as HTMLElement).closest?.("input, textarea, [contenteditable], .drawing")) return;
-      const redo = e.shiftKey || e.key.toLowerCase() === "y";
-      const step = (redo ? moves.current.future : moves.current.past).pop();
-      if (!step) return;
-      e.preventDefault();
-      if (redo) {
-        moves.current.past.push(step);
-        onBoard((current) => writeSpots(current, step.after));
-      } else {
-        moves.current.future.push(step);
-        onBoard((current) => restore(current, step.before));
-      }
-    };
-    window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
-  }, [onBoard]);
 
   const labelUnder = (x: number, y: number, except: string) => {
     for (const id of labelIds) {
@@ -1974,7 +1999,8 @@ function Whiteboard(
   useEffect(() => {
     const typing = (e: Event) => {
       const t = e.target as HTMLElement | null;
-      if (t?.closest?.("input, textarea, [contenteditable]")) return true;
+      // Inside a card's own content — text, a table, a transcript, a picture — the clipboard is that content's.
+      if (t?.closest?.("input, textarea, [contenteditable], .tbl, .sheet, .transcript, .subject-image, .drawing")) return true;
       const sel = window.getSelection();
       return Boolean(sel && !sel.isCollapsed && String(sel).trim());
     };
@@ -1984,7 +2010,8 @@ function Whiteboard(
     };
     const copy = (e: ClipboardEvent, cut: boolean) => {
       if (typing(e)) return;
-      const ids = picked();
+      // Cutting takes cards away, so only cards deliberately selected — never the one the pointer happens to be over.
+      const ids = cut ? [...selected] : picked();
       const blocks = blocksFor(board, shared.cards, ids, positions);
       if (!blocks) return;
       e.preventDefault();
@@ -1993,7 +2020,7 @@ function Whiteboard(
       e.clipboardData?.setData(BLOCKS_TYPE, json);
       e.clipboardData?.setData("text/plain", blocks.text);
       if (cut) {
-        onBoard((current) => ids.reduce((next, id) => remove(remove(next, id), posId(id)), current ?? {}));
+        shared.removeCards(ids);
         setSelected(new Set());
       }
     };
@@ -2015,6 +2042,7 @@ function Whiteboard(
       const rect = canvas.current?.getBoundingClientRect();
       const at = pointer.current ?? toBoard((rect?.left ?? 0) + 80, (rect?.top ?? 0) + 80);
       const fresh = new Set<string>();
+      let recorded = false;
       onBoard((current) => {
         let next = current ?? {};
         const ids: string[] = [];
@@ -2036,6 +2064,16 @@ function Whiteboard(
         for (const [a, b] of blocks.links) {
           const [from, to] = [ids[a], ids[b]].sort();
           if (from && to && from !== to) next = put(next, { id: `link:${from}|${to}`, kind: "link", from, to, at: now });
+        }
+        // Undoable: what the paste added is taken away again.
+        if (!recorded) {
+          recorded = true;
+          const added = live(next).filter((i) => fresh.has(i.id) || (i.kind === "pos" && fresh.has((i as PosItem).target))
+            || (i.kind === "link" && (fresh.has((i as LinkItem).from) || fresh.has((i as LinkItem).to))));
+          shared.recordOp({
+            undo: (bd) => added.reduce((n, i) => remove(n, i.id), bd ?? {}),
+            redo: (bd) => added.reduce((n, i) => put(n, { ...i, at: Date.now() }), bd ?? {}),
+          });
         }
         return next;
       });
