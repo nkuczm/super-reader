@@ -698,3 +698,23 @@ export async function downloadForOffline(
   }
   return { saved, failed, skipped };
 }
+
+/**
+ * How much each article kept for offline reading takes, by its canonical
+ * link — for the storage summary in Settings. Sizes are the stored text's,
+ * close to what the browser holds.
+ */
+export async function offlineSizes(): Promise<Map<string, number>> {
+  const sizes = new Map<string, number>();
+  try {
+    const all = await run<CachedArticle[]>(ARTICLES, "readonly", (s) => s.getAll());
+    for (const article of all) {
+      const bytes = new Blob([JSON.stringify(article)]).size;
+      const key = canonicalUrl(article.url);
+      sizes.set(key, (sizes.get(key) ?? 0) + bytes);
+    }
+  } catch {
+    /* no offline store on this device */
+  }
+  return sizes;
+}
