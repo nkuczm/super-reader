@@ -11,7 +11,7 @@ import { DrawingPad, ImageView, TableBox, TranscriptBox, shrinkImage, DRAWING_HE
 import { tableHtml, transcriptHtml } from "@/lib/subject-doc";
 import type { Writing } from "./useAccount";
 import type { Note, NoteEntry } from "@/lib/notes";
-import { omissionsHtml, putFactNotes, researchOf, scriptRows, type FactCheckResult, type SourceTarget } from "@/lib/factcheck";
+import { omissionsHtml, putFactNotes, researchOf, scriptQuotes, scriptRows, type FactCheckResult, type SourceTarget } from "@/lib/factcheck";
 import { addTranscriptNote, documentOrder, LABEL_COLORS, labelColorOf, safeHref, youtubeThumbnail, type StoryItem } from "@/lib/subjects";
 import { titleFromUrl } from "@/lib/manual";
 import {
@@ -691,7 +691,7 @@ export default function SubjectPage(props: Props) {
       const res = await fetch("/api/subjects/fact-check", {
         method: "POST",
         headers,
-        body: JSON.stringify({ rows, sources, provider: ai.provider, model: ai.model }),
+        body: JSON.stringify({ rows, sources, quotes: scriptQuotes(rows, sources), provider: ai.provider, model: ai.model }),
       });
       const data = (await res.json().catch(() => ({}))) as Partial<FactCheckResult> & { error?: string };
       if (!res.ok) throw new Error(data.error ?? "The fact-check failed.");

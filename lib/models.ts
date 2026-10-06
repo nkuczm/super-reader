@@ -22,6 +22,7 @@ export type ModelChoice = {
   /** US dollars per million tokens. */
   input: number;
   output: number;
+  /** The model used until the reader chooses — a starting point, not the result of any comparison. */
   recommended?: boolean;
 };
 
@@ -41,7 +42,7 @@ export const MODEL_CHOICES: Record<AiProvider, ModelChoice[]> = {
     { id: "gpt-6-luna", name: "GPT-6 Luna", blurb: "OpenAI's current low-cost model: newer than GPT-5 mini and cheaper.", input: 0.1, output: 0.5, unconfirmed: true },
     { id: "gpt-6-astra", name: "GPT-6 Astra", blurb: "OpenAI's flagship. The most capable and by far the priciest.", input: 10, output: 50, unconfirmed: true },
     { id: "gpt-5", name: "GPT-5", blurb: "The previous generation's most capable model.", input: 1.25, output: 10 },
-    { id: "gpt-5-mini", name: "GPT-5 mini", blurb: "Good quality at a low price. Works with any OpenAI key.", input: 0.25, output: 2, recommended: true },
+    { id: "gpt-5-mini", name: "GPT-5 mini", blurb: "Low price, and works with any OpenAI key.", input: 0.25, output: 2, recommended: true },
     { id: "gpt-5-nano", name: "GPT-5 nano", blurb: "Cheapest and fastest; noticeably shallower.", input: 0.05, output: 0.4 },
     { id: "gpt-4.1", name: "GPT-4.1", blurb: "The previous generation; solid, with a large memory for long subjects.", input: 2, output: 8 },
   ],
