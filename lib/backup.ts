@@ -14,6 +14,7 @@
 import {
   backupState,
   driveFolderFor,
+  inlineImages,
   readSubjects,
   recordBackup,
   refreshTokenFor,
@@ -51,7 +52,8 @@ export async function backupSubjects(accountId: string): Promise<BackupResult> {
       continue;
     }
     try {
-      const html = subjectHtml(note, board);
+      const full = await inlineImages(accountId, { notes: [note], noteRemovals: [], boards: board ? { [note.id]: board } : {} });
+      const html = subjectHtml(note, full.boards[note.id]);
       if (state.fileId && (await fileAlive(accessToken, state.fileId))) {
         await updateDoc(accessToken, state.fileId, { name: note.name, html });
         await recordBackup(accountId, note.id, state.fileId, signature);
@@ -74,7 +76,7 @@ export async function exportSubject(accountId: string, subjectId: string): Promi
   const refresh = await refreshTokenFor(accountId);
   if (!refresh) throw new Error("Sign in with Google again to export to Docs.");
   const accessToken = await accessTokenFrom(refresh);
-  const { doc } = await readSubjects(accountId);
+  const doc = await inlineImages(accountId, (await readSubjects(accountId)).doc);
   const note = doc.notes.find((n) => n.id === subjectId);
   if (!note) throw new Error("That subject was not found.");
   const folder = await folderFor(accountId, accessToken);

@@ -263,6 +263,21 @@ function signInReason(reason: string | null): string {
   return `Sign-in did not complete (${reason}). Please try again.`;
 }
 
+/**
+ * Coming back to the tab checks the server for other devices' changes — at
+ * most this often. Each check wakes the database, and switching windows
+ * every few seconds would otherwise keep it awake all day.
+ */
+const FOCUS_CHECK_MS = 3 * 60 * 1000;
+/** Run on focus, but not again within FOCUS_CHECK_MS of the last run. */
+function onFocusEvery(run: () => void, lastRun: { current: number }) {
+  return () => {
+    if (Date.now() - lastRun.current < FOCUS_CHECK_MS) return;
+    lastRun.current = Date.now();
+    run();
+  };
+}
+
 const GRANDFATHER_KEY = "super-reader:subjects-before-signin";
 const SIGNIN_ERA_KEY = "super-reader:signin-era";
 const SUBJECT_USED_KEY = "super-reader:subject-used:v1";
@@ -884,13 +899,7 @@ export default function Reader() {
    * is not a change — stamping it would make a stale device look like the
    * freshest one.
    */
-  useEffect(() => {
-    if (!ready) return;
-    if (!hydrated.current) {
-      hydrated.current = true;
-      return;
-    }
-    if (applying.current) return;
+  const stampChange = useCallback(() => {
     // Always outrank what this device last saw. Wall clocks disagree between
     // devices, and a stamp pulled from one running ahead would otherwise
     // freeze this device out of syncing anything ever again.
@@ -898,23 +907,55 @@ export default function Reader() {
     updatedAtRef.current = now;
     setUpdatedAt(now);
     saveUpdatedAt(now);
+  }, []);
+  useEffect(() => {
+    if (!ready) return;
+    if (!hydrated.current) {
+      hydrated.current = true;
+      return;
+    }
+    if (applying.current) return;
+    stampChange();
   }, [
     feeds,
     read,
     saved,
     savedRemovals,
     watchMarks,
-    positions,
-    notes,
-    noteRemovals,
-    boards,
     manual,
     highlights,
     prefs,
     vault,
     teams,
     ready,
+    stampChange,
   ]);
+  // Subjects ride on the sync code only while signed out; signed in, they save to the account by themselves.
+  const writingSeen = useRef(false);
+  useEffect(() => {
+    if (!ready) return;
+    if (!writingSeen.current) {
+      writingSeen.current = true;
+      return;
+    }
+    if (applying.current || signedInRef.current) return;
+    stampChange();
+  }, [notes, noteRemovals, boards, ready, stampChange]);
+  // Reading positions change with every scroll: they go with the next sync, or at most two minutes later.
+  const positionsSeen = useRef(false);
+  const positionsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!ready) return;
+    if (!positionsSeen.current) {
+      positionsSeen.current = true;
+      return;
+    }
+    if (applying.current || positionsTimer.current) return;
+    positionsTimer.current = setTimeout(() => {
+      positionsTimer.current = null;
+      stampChange();
+    }, 2 * 60 * 1000);
+  }, [positions, ready, stampChange]);
 
   // Pull once the code is known, and again whenever the window regains focus,
   // so a device left open picks up changes made elsewhere.
@@ -933,10 +974,12 @@ export default function Reader() {
     };
 
     sync();
-    window.addEventListener("focus", sync);
+    const last = { current: Date.now() };
+    const onFocus = onFocusEvery(() => void sync(), last);
+    window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
-      window.removeEventListener("focus", sync);
+      window.removeEventListener("focus", onFocus);
     };
   }, [ready, syncCode, pull]);
 
@@ -1216,8 +1259,9 @@ export default function Reader() {
       }
     };
     load();
-    window.addEventListener("focus", load);
-    return () => window.removeEventListener("focus", load);
+    const onFocus = onFocusEvery(load, { current: Date.now() });
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [ready, teams, refreshTeam]);
 
   const createTeam = useCallback(async (name: string) => {
@@ -2019,7 +2063,7 @@ export default function Reader() {
   useEffect(() => {
     if (!ready || !syncCode) return;
     void checkInbox();
-    const onFocus = () => void checkInbox();
+    const onFocus = onFocusEvery(() => void checkInbox(), { current: Date.now() });
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [ready, syncCode, checkInbox]);
@@ -3624,7 +3668,7 @@ export default function Reader() {
             key={openNote.id}
             accountStrip={accountStrip}
             signedIn={Boolean(auth.account)}
-            onRestored={applyWriting}
+            onRestored={(doc) => void auth.applyRemote(doc)}
             articleMeta={articleMeta}
             sidebarHidden={sidebarHidden}
             onToggleSidebar={() =>

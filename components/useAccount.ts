@@ -14,12 +14,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Note, NoteRemoval } from "@/lib/notes";
 import type { Boards } from "@/lib/subjects";
+import { delta, emptyBase, isEmpty, remember, withPictures, withRefs, type Base } from "@/lib/subject-sync";
 
 export type AccountInfo = { id: string; email: string; name?: string; picture?: string };
 export type Writing = { notes: Note[]; noteRemovals: NoteRemoval[]; boards: Boards };
 export type SaveStatus = "idle" | "saving" | "saved" | "offline" | "error";
 
 const SAVE_DELAY_MS = 1500;
+/** Coming back to the tab looks for other devices' changes at most this often. */
+const LOAD_EVERY_MS = 3 * 60 * 1000;
 const BACKUP_DELAY_MS = 5 * 60 * 1000;
 
 export function useAccount(params: {
@@ -43,7 +46,15 @@ export function useAccount(params: {
   const loaded = useRef(false);
   /** Bumped to make the autosave look again without a new edit. */
   const [nudge, setNudge] = useState(0);
-  const lastSent = useRef("");
+  /** What the account is known to hold, so only changes are sent. */
+  const base = useRef<Base>(emptyBase());
+  /** The last change read from the account: the next look asks only for what came after. */
+  const cursor = useRef<string | null>(null);
+  const lastLoad = useRef(0);
+  /** Pictures the account is known to hold, by hash. */
+  const onServer = useRef(new Set<string>());
+  const writingRef = useRef(writing);
+  writingRef.current = writing;
   const backupDue = useRef(false);
   const backupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const applyRef = useRef(applyWriting);
@@ -63,18 +74,41 @@ export function useAccount(params: {
       .finally(() => setChecked(true));
   }, [ready]);
 
+  const fetchImages = useCallback(async (hashes: string[]) => {
+    const res = await fetch(`/api/subjects/images?h=${hashes.join(",")}`, { cache: "no-store" });
+    if (!res.ok) throw new Error("Could not load pictures");
+    return ((await res.json()).images ?? {}) as Record<string, string>;
+  }, []);
+
+  /** Anything from the account that has pictures by reference: filled in, then merged into this device's copy. */
+  const applyRemote = useCallback(
+    async (doc: Writing) => {
+      const full = await withPictures(doc, writingRef.current.boards, fetchImages, onServer.current);
+      applyRef.current(full);
+      return full;
+    },
+    [fetchImages],
+  );
+
+  /** Read what changed in the account since last time (all of it the first time), and merge it in. */
   const load = useCallback(async () => {
-    const res = await fetch("/api/subjects", { cache: "no-store" });
+    lastLoad.current = Date.now();
+    const since = cursor.current ? `?since=${encodeURIComponent(cursor.current)}` : "";
+    const res = await fetch(`/api/subjects${since}`, { cache: "no-store" });
     if (res.status === 401) {
       setAccount(null);
       return;
     }
     if (!res.ok) throw new Error("Could not load subjects");
     const data = await res.json();
-    applyRef.current(data.doc);
+    const full = await applyRemote(data.doc);
+    // The whole copy resets what the account is known to hold; changes add to it.
+    if (data.full) base.current = emptyBase();
+    remember(base.current, full);
+    if (data.cursor) cursor.current = String(data.cursor);
     loaded.current = true;
     setNudge((n) => n + 1);
-  }, []);
+  }, [applyRemote]);
 
   // Once signed in: tie this device's sync code to the account, then read the
   // account's subjects. Again on focus, for changes made on another device.
@@ -111,7 +145,9 @@ export function useAccount(params: {
       }
     };
     start();
+    // Another device's changes, on coming back to the tab — not more often than every few minutes.
     const onFocus = () => {
+      if (Date.now() - lastLoad.current < LOAD_EVERY_MS) return;
       load().catch(() => {});
     };
     window.addEventListener("focus", onFocus);
@@ -144,35 +180,41 @@ export function useAccount(params: {
   const backupRef = useRef(backup);
   backupRef.current = backup;
 
-  // Autosave: a burst of typing is one request, and only real changes go.
+  // Autosave: a burst of typing is one request, and only what changed goes.
   useEffect(() => {
     if (!account || !loaded.current) return;
-    const body = JSON.stringify(writing);
-    if (body === lastSent.current) return;
+    const change = delta(writing, base.current);
+    if (isEmpty(change)) return;
     setStatus("saving");
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch("/api/subjects", {
+        let { doc: body, sent } = await withRefs(change, onServer.current);
+        let res = await fetch("/api/subjects", {
           method: "PUT",
           headers: { "content-type": "application/json" },
-          body,
+          body: JSON.stringify(body),
         });
+        if (res.status === 409) {
+          // The account lacks pictures this device thought it had: send them whole.
+          const missing: string[] = (await res.json().catch(() => ({}))).missing ?? [];
+          for (const h of missing) onServer.current.delete(h);
+          ({ doc: body, sent } = await withRefs(change, onServer.current));
+          res = await fetch("/api/subjects", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+        }
         if (res.status === 401) {
           setAccount(null);
           setStatus("error");
           return;
         }
         if (!res.ok) throw new Error("save failed");
-        const data = await res.json();
-        lastSent.current = body;
-        applyRef.current(data.doc);
+        remember(base.current, change);
+        for (const h of sent) onServer.current.add(h);
         setSavedAt(Date.now());
         setStatus("saved");
         backupDue.current = true;
         if (!backupTimer.current) backupTimer.current = setTimeout(backup, BACKUP_DELAY_MS);
       } catch {
-        // Still safe on this device; the next change or focus tries again.
-        lastSent.current = "";
+        // Still safe on this device; the change stays unsent, and goes with the next try.
         setStatus(navigator.onLine ? "error" : "offline");
         setTimeout(() => setNudge((n) => n + 1), 30_000);
       }
@@ -189,7 +231,6 @@ export function useAccount(params: {
       if (navigator.sendBeacon?.("/api/subjects/backup")) backupDue.current = false;
     };
     const onOnline = () => {
-      lastSent.current = "";
       load().catch(() => {});
     };
     document.addEventListener("visibilitychange", onHide);
@@ -204,6 +245,8 @@ export function useAccount(params: {
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     loaded.current = false;
     linked.current = false;
+    base.current = emptyBase();
+    cursor.current = null;
     setAccount(null);
     setStatus("idle");
   }, []);
@@ -213,5 +256,5 @@ export function useAccount(params: {
     await backup();
   }, [backup]);
 
-  return { enabled, account, checked, status, savedAt, backedUpAt, backupProblem, signOut, backupNow };
+  return { enabled, account, checked, status, savedAt, backedUpAt, backupProblem, signOut, backupNow, applyRemote };
 }

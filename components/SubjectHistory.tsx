@@ -37,7 +37,7 @@ export default function SubjectHistory({
   useEffect(() => {
     if (!chosen) return;
     setPreview(null);
-    fetch(`/api/subjects/history?id=${encodeURIComponent(chosen)}`, { cache: "no-store" })
+    fetch(`/api/subjects/history?id=${encodeURIComponent(chosen)}&subject=${encodeURIComponent(subjectId)}`, { cache: "no-store" })
       .then(async (res) => {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Could not load that version");

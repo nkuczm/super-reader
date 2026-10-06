@@ -11,7 +11,8 @@
  *
  * Every write is merged into what is stored (the same merge sync uses, so two
  * devices never overwrite each other) and kept as a version: every save for
- * thirty days, then one per day for good.
+ * thirty days, then one per day for good. History is stored as changes, with
+ * a whole snapshot now and then, and each picture is stored once.
  */
 
 import { getSql, ensureSchema as ensureSyncSchema } from "./db";
@@ -85,6 +86,24 @@ export function ensureAccountSchema() {
         )
       `;
       await sql`CREATE INDEX IF NOT EXISTS subject_versions_account ON subject_versions (account_id, saved_at DESC)`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS subject_changes (
+          id          BIGSERIAL PRIMARY KEY,
+          account_id  TEXT NOT NULL,
+          saved_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+          kind        TEXT NOT NULL,
+          payload     TEXT NOT NULL
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS subject_changes_account ON subject_changes (account_id, id)`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS subject_images (
+          account_id  TEXT NOT NULL,
+          hash        TEXT NOT NULL,
+          data        TEXT NOT NULL,
+          PRIMARY KEY (account_id, hash)
+        )
+      `;
       await sql`
         CREATE TABLE IF NOT EXISTS subject_backups (
           account_id  TEXT NOT NULL,
@@ -227,69 +246,290 @@ export async function isLinkedCode(code: string): Promise<boolean> {
 
 export const EMPTY_DOC: SubjectsDoc = { notes: [], noteRemovals: [], boards: {} };
 
-export async function readSubjects(accountId: string): Promise<{ doc: SubjectsDoc; updatedAt: string | null }> {
-  await ensureAccountSchema();
-  const rows = await getSql()`SELECT payload, updated_at FROM subject_store WHERE account_id = ${accountId}`;
-  if (!rows[0]) return { doc: EMPTY_DOC, updatedAt: null };
-  return { doc: openJson<SubjectsDoc>(rows[0].payload), updatedAt: String(rows[0].updated_at) };
+/*
+ * Pictures are kept once. A picture in a board box is stored in its own row,
+ * by the SHA-256 of its data URL, and everywhere else — the current copy,
+ * every change, every snapshot — carries only `sr-img:<hash>` in its place.
+ * Devices keep the pictures they have and fetch only ones they lack.
+ */
+export const IMAGE_REF = "sr-img:";
+export const isImageRef = (v: unknown): v is string => typeof v === "string" && v.startsWith(IMAGE_REF) && /^[0-9a-f]{64}$/.test(v.slice(IMAGE_REF.length));
+
+export class MissingImages extends Error {
+  constructor(readonly hashes: string[]) {
+    super("Some pictures referred to are not stored yet.");
+    this.name = "MissingImages";
+  }
 }
 
-export function mergeDocs(mine: SubjectsDoc, theirs: SubjectsDoc): SubjectsDoc {
+/** The document with each inline picture swapped for its reference, and the pictures themselves. */
+export function splitImages(doc: SubjectsDoc): { doc: SubjectsDoc; images: Map<string, string>; refs: Set<string> } {
+  const images = new Map<string, string>();
+  const refs = new Set<string>();
+  const boards: Boards = {};
+  for (const [subject, board] of Object.entries(doc.boards ?? {})) {
+    const next: Record<string, unknown> = {};
+    for (const [id, item] of Object.entries(board ?? {})) {
+      const image = (item as { image?: unknown })?.image;
+      if (typeof image === "string" && image.startsWith("data:")) {
+        const hash = sha256(image);
+        images.set(hash, image);
+        next[id] = { ...item, image: IMAGE_REF + hash };
+      } else {
+        if (isImageRef(image)) refs.add(image.slice(IMAGE_REF.length));
+        next[id] = item;
+      }
+    }
+    boards[subject] = next as Boards[string];
+  }
+  return { doc: { ...doc, boards }, images, refs };
+}
+
+async function storeImages(accountId: string, images: Map<string, string>) {
+  const sql = getSql();
+  for (const [hash, data] of images) {
+    await sql`
+      INSERT INTO subject_images (account_id, hash, data) VALUES (${accountId}, ${hash}, ${seal(data)})
+      ON CONFLICT (account_id, hash) DO NOTHING
+    `;
+  }
+}
+
+/** Which of these pictures the account does not hold. */
+async function missingImages(accountId: string, hashes: string[]): Promise<string[]> {
+  if (!hashes.length) return [];
+  const rows = await getSql()`SELECT hash FROM subject_images WHERE account_id = ${accountId} AND hash = ANY(${hashes})`;
+  const have = new Set(rows.map((r) => String(r.hash)));
+  return hashes.filter((h) => !have.has(h));
+}
+
+/** The pictures themselves, by hash, for a device that lacks them. */
+export async function readImages(accountId: string, hashes: string[]): Promise<Record<string, string>> {
+  await ensureAccountSchema();
+  const wanted = hashes.filter((h) => /^[0-9a-f]{64}$/.test(h)).slice(0, 50);
+  if (!wanted.length) return {};
+  const rows = await getSql()`SELECT hash, data FROM subject_images WHERE account_id = ${accountId} AND hash = ANY(${wanted})`;
+  return Object.fromEntries(rows.map((r) => [String(r.hash), open(String(r.data))]));
+}
+
+/** The document with its picture references filled back in (for a Google Docs backup). */
+export async function inlineImages(accountId: string, doc: SubjectsDoc): Promise<SubjectsDoc> {
+  const { refs } = splitImages(doc);
+  if (!refs.size) return doc;
+  const sql = getSql();
+  const rows = await sql`SELECT hash, data FROM subject_images WHERE account_id = ${accountId} AND hash = ANY(${[...refs]})`;
+  const found = new Map(rows.map((r) => [IMAGE_REF + String(r.hash), open(String(r.data))]));
+  const boards = Object.fromEntries(Object.entries(doc.boards).map(([subject, board]) => [subject, Object.fromEntries(
+    Object.entries(board).map(([id, item]) => {
+      const image = (item as { image?: unknown }).image;
+      return [id, isImageRef(image) ? { ...item, image: found.get(image) } : item];
+    }),
+  )])) as Boards;
+  return { ...doc, boards };
+}
+
+/** The account's current copy, pictures as references. */
+export async function readSubjects(accountId: string): Promise<{ doc: SubjectsDoc; updatedAt: string | null; cursor: string | null }> {
+  await ensureAccountSchema();
+  const sql = getSql();
+  const rows = await sql`SELECT payload, updated_at FROM subject_store WHERE account_id = ${accountId}`;
+  const last = await sql`SELECT max(id) AS id FROM subject_changes WHERE account_id = ${accountId}`;
+  const cursor = last[0]?.id != null ? String(last[0].id) : null;
+  if (!rows[0]) return { doc: EMPTY_DOC, updatedAt: null, cursor };
+  // A copy stored before pictures were kept apart still has them inline.
+  const stored = openJson<SubjectsDoc>(rows[0].payload);
+  const { doc, images } = splitImages(stored);
+  if (images.size) {
+    await storeImages(accountId, images);
+    await sql`UPDATE subject_store SET payload = ${sealJson(doc)} WHERE account_id = ${accountId}`;
+  }
+  return { doc, updatedAt: String(rows[0].updated_at), cursor };
+}
+
+export function mergeDocs(mine: SubjectsDoc, theirs: SubjectsDoc, now = Date.now()): SubjectsDoc {
   const notes = mergeNotes(
     { notes: mine.notes ?? [], removals: mine.noteRemovals ?? [] },
     { notes: theirs.notes ?? [], removals: theirs.noteRemovals ?? [] },
+    now,
   );
-  return { notes: notes.notes, noteRemovals: notes.removals, boards: mergeBoards(mine.boards ?? {}, theirs.boards ?? {}) };
+  return { notes: notes.notes, noteRemovals: notes.removals, boards: mergeBoards(mine.boards ?? {}, theirs.boards ?? {}, now) };
 }
 
+/** Only what `after` has that `before` did not: changed notes, new removals, changed board items. */
+export function diffDocs(before: SubjectsDoc, after: SubjectsDoc): SubjectsDoc {
+  const was = new Map((before.notes ?? []).map((n) => [n.id, JSON.stringify(n)]));
+  const removed = new Set((before.noteRemovals ?? []).map((r) => `${r.id}:${r.at}`));
+  const boards: Boards = {};
+  for (const [subject, board] of Object.entries(after.boards ?? {})) {
+    const old = before.boards?.[subject] ?? {};
+    const changed = Object.fromEntries(Object.entries(board).filter(([id, item]) => JSON.stringify(old[id]) !== JSON.stringify(item)));
+    if (Object.keys(changed).length) boards[subject] = changed;
+  }
+  return {
+    notes: (after.notes ?? []).filter((n) => was.get(n.id) !== JSON.stringify(n)),
+    noteRemovals: (after.noteRemovals ?? []).filter((r) => !removed.has(`${r.id}:${r.at}`)),
+    boards,
+  };
+}
+
+const isEmpty = (d: SubjectsDoc) => !d.notes.length && !d.noteRemovals.length && !Object.keys(d.boards).length;
+
+/** A snapshot is written after this many changes, or once the changes outweigh the document. */
+export const SNAPSHOT_EVERY = 300;
+
 /**
- * Merge a device's copy into the stored one, save it, and record a version.
- * Returns the merged document, which the device takes as the new truth.
+ * Merge a device's changes into the stored copy, save it, and record what
+ * changed. A device sends only what it changed; a full copy works too, and
+ * only the real difference is recorded either way. Every save is a version.
  */
 export async function writeSubjects(
   accountId: string,
   incoming: SubjectsDoc,
   options: { reason?: string; replace?: boolean } = {},
-): Promise<{ doc: SubjectsDoc; changed: boolean }> {
+): Promise<{ doc: SubjectsDoc; changed: boolean; cursor: string | null }> {
   await ensureAccountSchema();
   const sql = getSql();
-  const { doc: stored } = await readSubjects(accountId);
-  // A restore replaces rather than merges; everything else merges.
-  const merged = options.replace ? incoming : mergeDocs(incoming, stored);
-  const changed = JSON.stringify(merged) !== JSON.stringify(stored);
-  if (!changed) return { doc: merged, changed: false };
+  const { doc: split, images, refs } = splitImages(incoming);
+  const missing = await missingImages(accountId, [...refs].filter((h) => !images.has(h)));
+  if (missing.length) throw new MissingImages(missing);
+  await storeImages(accountId, images);
 
-  const sealed = sealJson(merged);
+  const { doc: stored, cursor } = await readSubjects(accountId);
+  // A restore replaces rather than merges; everything else merges.
+  const merged = options.replace ? split : mergeDocs(split, stored);
+  const change = diffDocs(stored, merged);
+  if (!options.replace && isEmpty(change)) return { doc: merged, changed: false, cursor };
+
   await sql`
     INSERT INTO subject_store (account_id, payload, updated_at)
-    VALUES (${accountId}, ${sealed}, now())
+    VALUES (${accountId}, ${sealJson(merged)}, now())
     ON CONFLICT (account_id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = now()
   `;
-  await recordVersion(accountId, sealed);
-  return { doc: merged, changed: true };
+  const id = await recordChange(accountId, merged, change, !!options.replace);
+  return { doc: merged, changed: true, cursor: id };
 }
 
 /**
- * Keep a version. Saves a couple of minutes apart are separate versions;
- * closer than that, the latest version is updated in place, so a burst of
- * typing is one version rather than hundreds.
+ * Keep the change as a version. Most saves store only the difference; now
+ * and then — after many changes, after a restore, or when the changes have
+ * grown larger than the document — the whole document is stored instead, so
+ * rebuilding any version reads one snapshot and the changes after it.
  */
-async function recordVersion(accountId: string, sealed: string) {
+async function recordChange(accountId: string, merged: SubjectsDoc, change: SubjectsDoc, replace: boolean): Promise<string> {
   const sql = getSql();
-  const latest = await sql`
-    SELECT id, saved_at FROM subject_versions WHERE account_id = ${accountId}
-    ORDER BY saved_at DESC LIMIT 1
+  const since = await sql`
+    SELECT count(*)::int AS n, coalesce(sum(length(payload)), 0)::bigint AS bytes
+    FROM subject_changes
+    WHERE account_id = ${accountId}
+      AND id > coalesce((SELECT max(id) FROM subject_changes WHERE account_id = ${accountId} AND kind = 'snap'), 0)
   `;
-  const recent = latest[0] && Date.now() - new Date(latest[0].saved_at).getTime() < VERSION_GAP_MS;
-  if (recent) {
-    await sql`UPDATE subject_versions SET payload = ${sealed}, saved_at = now() WHERE id = ${latest[0].id}`;
-  } else {
-    await sql`INSERT INTO subject_versions (account_id, payload) VALUES (${accountId}, ${sealed})`;
-  }
-  await thinVersions(accountId);
+  const hasSnap = await sql`SELECT 1 FROM subject_changes WHERE account_id = ${accountId} AND kind = 'snap' LIMIT 1`;
+  const whole = sealJson(merged);
+  const snap = replace || !hasSnap[0] || since[0].n >= SNAPSHOT_EVERY || Number(since[0].bytes) > Math.max(whole.length, 64 * 1024);
+  const rows = await sql`
+    INSERT INTO subject_changes (account_id, kind, payload)
+    VALUES (${accountId}, ${snap ? "snap" : "delta"}, ${snap ? whole : sealJson(change)})
+    RETURNING id
+  `;
+  // Compacting old history is only worth doing now and then; slimming old whole versions goes on until done.
+  if (snap) await compactChanges(accountId);
+  else await slimLegacyVersions(accountId, 10);
+  return String(rows[0].id);
 }
 
-/** Older than thirty days, keep the last version of each day; never delete the newest. */
+/** The document as it stood after change `id`: its snapshot, with the changes after it replayed in order. */
+async function stateAt(accountId: string, id: string): Promise<SubjectsDoc | null> {
+  const sql = getSql();
+  const base = await sql`
+    SELECT id, payload FROM subject_changes
+    WHERE account_id = ${accountId} AND kind = 'snap' AND id <= ${id}
+    ORDER BY id DESC LIMIT 1
+  `;
+  if (!base[0]) return null;
+  let doc = openJson<SubjectsDoc>(base[0].payload);
+  const after = await sql`
+    SELECT payload, saved_at FROM subject_changes
+    WHERE account_id = ${accountId} AND kind = 'delta' AND id > ${base[0].id} AND id <= ${id}
+    ORDER BY id
+  `;
+  // Replayed as of when each was saved, so nothing expires that had not then.
+  for (const row of after) doc = mergeDocs(openJson<SubjectsDoc>(row.payload), doc, new Date(row.saved_at).getTime());
+  return doc;
+}
+
+/** Everything that changed after `since`, merged — or null when only the whole document will do. */
+export async function changesSince(accountId: string, since: string): Promise<{ doc: SubjectsDoc; cursor: string } | null> {
+  await ensureAccountSchema();
+  if (!/^\d+$/.test(since)) return null;
+  const rows = await getSql()`
+    SELECT id, kind, payload, saved_at FROM subject_changes
+    WHERE account_id = ${accountId} AND id > ${since}
+    ORDER BY id LIMIT 201
+  `;
+  if (rows.length > 200 || rows.some((r) => r.kind === "snap")) return null;
+  // The cursor names a change this account has (or had): a stale or foreign one gets the whole document.
+  const known = await getSql()`SELECT 1 FROM subject_changes WHERE account_id = ${accountId} AND id <= ${since} LIMIT 1`;
+  if (!known[0]) return null;
+  let doc: SubjectsDoc = EMPTY_DOC;
+  for (const row of rows) doc = mergeDocs(openJson<SubjectsDoc>(row.payload), doc, new Date(row.saved_at).getTime());
+  return { doc, cursor: rows.length ? String(rows[rows.length - 1].id) : since };
+}
+
+/**
+ * Past thirty days, history is kept one version per day: the day's last
+ * change becomes a snapshot of the document as it then stood, and that day's
+ * earlier changes go. Done a few days at a time.
+ */
+export async function compactChanges(accountId: string, days = 3) {
+  const sql = getSql();
+  const old = await sql`
+    SELECT max(id) AS last FROM subject_changes
+    WHERE account_id = ${accountId} AND saved_at < now() - (${KEEP_EVERY_VERSION_DAYS} || ' days')::interval
+    GROUP BY date_trunc('day', saved_at)
+    HAVING count(*) > 1
+    ORDER BY 1 LIMIT ${days}
+  `;
+  for (const { last } of old) {
+    const state = await stateAt(accountId, String(last));
+    if (!state) continue;
+    await sql`UPDATE subject_changes SET kind = 'snap', payload = ${sealJson(state)} WHERE id = ${last}`;
+    await sql`
+      DELETE FROM subject_changes
+      WHERE account_id = ${accountId} AND id < ${last}
+        AND date_trunc('day', saved_at) = (SELECT date_trunc('day', saved_at) FROM subject_changes WHERE id = ${last})
+    `;
+  }
+  await thinVersions(accountId);
+  await slimLegacyVersions(accountId);
+}
+
+/**
+ * Whole versions saved before pictures were kept apart carry every picture
+ * again in each of them. A few at a time, each picture moves to the shared
+ * store and the version keeps only its reference — same history, a fraction
+ * of the space.
+ */
+export async function slimLegacyVersions(accountId: string, batch = 20) {
+  const sql = getSql();
+  const rows = await sql`
+    SELECT id, payload FROM subject_versions
+    WHERE account_id = ${accountId} AND payload NOT LIKE 'slim:%'
+    ORDER BY id LIMIT ${batch}
+  `;
+  for (const row of rows) {
+    let doc: SubjectsDoc;
+    try {
+      doc = openJson<SubjectsDoc>(row.payload);
+    } catch {
+      continue;
+    }
+    const { doc: slim, images } = splitImages(doc);
+    await storeImages(accountId, images);
+    await sql`UPDATE subject_versions SET payload = ${"slim:" + sealJson(slim)} WHERE id = ${row.id}`;
+  }
+}
+
+/** Older than thirty days, keep the last version of each day; never delete the newest. (Versions kept whole, from before changes.) */
 export async function thinVersions(accountId: string) {
   const sql = getSql();
   await sql`
@@ -305,22 +545,43 @@ export async function thinVersions(accountId: string) {
   `;
 }
 
+/**
+ * The versions to choose from, newest first: every save, with saves only
+ * moments apart shown as one (the last of them), then the whole copies
+ * kept before history was stored as changes. Ids: "c<n>" for a change.
+ */
 export async function listVersions(accountId: string, limit = 200): Promise<{ id: string; savedAt: string }[]> {
   await ensureAccountSchema();
-  const rows = await getSql()`
-    SELECT id, saved_at FROM subject_versions WHERE account_id = ${accountId}
-    ORDER BY saved_at DESC LIMIT ${limit}
+  const sql = getSql();
+  const changes = await sql`
+    SELECT id, saved_at FROM subject_changes WHERE account_id = ${accountId}
+    ORDER BY id DESC LIMIT ${limit * 20}
   `;
-  return rows.map((row) => ({ id: String(row.id), savedAt: new Date(row.saved_at).toISOString() }));
+  const out: { id: string; savedAt: string }[] = [];
+  let previous = Infinity;
+  for (const row of changes) {
+    const at = new Date(row.saved_at).getTime();
+    if (previous - at >= VERSION_GAP_MS) out.push({ id: `c${row.id}`, savedAt: new Date(at).toISOString() });
+    previous = at;
+    if (out.length >= limit) return out;
+  }
+  const legacy = await sql`
+    SELECT id, saved_at FROM subject_versions WHERE account_id = ${accountId}
+    ORDER BY saved_at DESC LIMIT ${limit - out.length}
+  `;
+  return [...out, ...legacy.map((row) => ({ id: String(row.id), savedAt: new Date(row.saved_at).toISOString() }))];
 }
 
 export async function readVersion(accountId: string, id: string): Promise<SubjectsDoc | null> {
   await ensureAccountSchema();
+  if (/^c\d+$/.test(id)) return stateAt(accountId, id.slice(1));
   if (!/^\d+$/.test(id)) return null;
   const rows = await getSql()`
     SELECT payload FROM subject_versions WHERE account_id = ${accountId} AND id = ${id}
   `;
-  return rows[0] ? openJson<SubjectsDoc>(rows[0].payload) : null;
+  if (!rows[0]) return null;
+  const payload = String(rows[0].payload);
+  return splitImages(openJson<SubjectsDoc>(payload.startsWith("slim:") ? payload.slice(5) : payload)).doc;
 }
 
 /* ------------------------------------------------------------------------ */

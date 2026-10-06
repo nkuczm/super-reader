@@ -1,4 +1,4 @@
-import { readSubjects, writeSubjects, type SubjectsDoc } from "@/lib/accounts";
+import { changesSince, MissingImages, readSubjects, writeSubjects, type SubjectsDoc } from "@/lib/accounts";
 import { json, requireAccount } from "@/lib/session";
 
 export const runtime = "nodejs";
@@ -6,15 +6,24 @@ export const dynamic = "force-dynamic";
 
 const MAX_BYTES = 4 * 1024 * 1024;
 
-/** The signed-in account's subjects and notes. */
+/**
+ * The signed-in account's subjects and notes, pictures as references. With
+ * ?since=<cursor>, only what changed after it — the whole copy when that is
+ * not possible (`full: true`).
+ */
 export async function GET(request: Request) {
   const guard = await requireAccount(request);
   if ("response" in guard) return guard.response;
-  const { doc, updatedAt } = await readSubjects(guard.account.id);
-  return json({ doc, updatedAt });
+  const since = new URL(request.url).searchParams.get("since");
+  if (since) {
+    const changes = await changesSince(guard.account.id, since);
+    if (changes) return json({ doc: changes.doc, cursor: changes.cursor, full: false });
+  }
+  const { doc, updatedAt, cursor } = await readSubjects(guard.account.id);
+  return json({ doc, updatedAt, cursor, full: true });
 }
 
-/** Merge this device's copy in; the merged whole comes back. */
+/** Merge this device's changes in. Only what changed is sent, and nothing but the time comes back. */
 export async function PUT(request: Request) {
   const guard = await requireAccount(request, { write: true });
   if ("response" in guard) return guard.response;
@@ -31,6 +40,12 @@ export async function PUT(request: Request) {
   } catch {
     return json({ error: "Expected JSON" }, { status: 400 });
   }
-  const { doc } = await writeSubjects(guard.account.id, incoming);
-  return json({ doc, savedAt: new Date().toISOString() });
+  try {
+    const { changed } = await writeSubjects(guard.account.id, incoming);
+    return json({ changed, savedAt: new Date().toISOString() });
+  } catch (error) {
+    // The device thought the server had these pictures; it sends them again.
+    if (error instanceof MissingImages) return json({ error: "Pictures missing", missing: error.hashes }, { status: 409 });
+    throw error;
+  }
 }
