@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { loadNotes } from "@/lib/notes";
 import { loadSaved } from "@/lib/store";
-import { loadBoards } from "@/lib/subjects";
+import { loadBoards, loadBoardsAsync } from "@/lib/subjects";
 import { offlineSizes } from "@/lib/offline";
 import { formatBytes, savedUsage, subjectUsage } from "@/lib/storage";
 
@@ -14,7 +14,11 @@ type Sort = { by: "size" | "date"; desc: boolean };
  * subject listed — sortable by size or by when it was last edited.
  */
 export default function StorageSection() {
-  const subjects = useMemo(() => subjectUsage(loadNotes(), loadBoards()), []);
+  const [boards, setBoardsHere] = useState(() => loadBoards());
+  useEffect(() => {
+    void loadBoardsAsync().then(setBoardsHere);
+  }, []);
+  const subjects = useMemo(() => subjectUsage(loadNotes(), boards), [boards]);
   const saved = useMemo(() => loadSaved(), []);
   const [offline, setOffline] = useState<Map<string, number> | null>(null);
   const [device, setDevice] = useState<{ usage: number; quota: number } | null>(null);
