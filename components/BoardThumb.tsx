@@ -14,8 +14,8 @@ type Node = { id: string; kind: "card" | "box" | "insight" | "suggest"; title: s
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 
 /**
- * The whole whiteboard, zoomed all the way out: every card and box where it
- * sits, scaled to fit the tile. Heights are estimated from what each holds
+ * A glimpse of the whiteboard: a window around its busiest middle, the
+ * shape of the tile, with every card and box there where it sits. Heights are estimated from what each holds
  * (the board measures them on screen; a thumbnail does not need to), and it
  * is drawn as one small SVG — no cards are rendered, so a grid of subjects
  * stays cheap.
@@ -56,16 +56,36 @@ function BoardThumb({ board, cards }: { board: Board | undefined; cards: { id: s
       minX = Math.min(minX, r.x); minY = Math.min(minY, r.y);
       maxX = Math.max(maxX, r.x + r.w); maxY = Math.max(maxY, r.y + r.h);
     }
+    // Not the whole board: a window the shape of the tile, around where the
+    // board is busiest — the middle of its cards, by the median of their
+    // centres — wide enough to show a few of them at a readable size.
+    const centres = [...laid.values()].map((r) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 }));
+    const median = (values: number[]) => values.sort((a, b) => a - b)[Math.floor(values.length / 2)];
+    const cx = median(centres.map((c) => c.x));
+    const cy = median(centres.map((c) => c.y));
+    const ASPECT = 1.55;
+    // A board that fits is shown whole; a big one, through a window about
+    // four cards wide, or as tall as the board is when that is less.
+    const fullW = maxX - minX + 40;
+    const fullH = maxY - minY + 40;
+    let w = Math.min(fullW, 1400);
+    let h = Math.min(fullH, w / ASPECT);
+    // Keep the tile's shape so nothing is cut off at the sides.
+    if (w / h > ASPECT) h = w / ASPECT;
+    else w = h * ASPECT;
+    const clamp = (v: number, lo: number, hi: number) => (hi < lo ? (lo + hi) / 2 : Math.max(lo, Math.min(hi, v)));
+    const x = clamp(cx - w / 2, minX - 20, maxX + 20 - w);
+    const y = clamp(cy - h / 2, minY - 20, maxY + 20 - h);
     let pictures = 0;
     return {
-      box: `${minX - 20} ${minY - 20} ${maxX - minX + 40} ${maxY - minY + 40}`,
+      box: `${x} ${y} ${w} ${h}`,
       shapes: nodes.map((node) => ({ node, rect: laid.get(node.id)!, image: node.image && pictures++ < MAX_PICTURES ? node.image : undefined })),
     };
   }, [board, cards]);
 
   if (!drawing) return <span className="subject-tile-empty">Nothing on the board yet</span>;
   return (
-    <svg className="board-thumb" viewBox={drawing.box} preserveAspectRatio="xMidYMin meet" aria-hidden="true">
+    <svg className="board-thumb" viewBox={drawing.box} preserveAspectRatio="xMidYMid meet" aria-hidden="true">
       {drawing.shapes.map(({ node, rect, image }) => (
         <g key={node.id} className={`bt-${node.kind}`}>
           <rect x={rect.x} y={rect.y} width={rect.w} height={rect.h} rx={10} />
