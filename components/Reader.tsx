@@ -85,6 +85,7 @@ import NotePage from "./NotePage";
 import { foldIntoNote } from "@/lib/note-flow";
 import AddSourceDialog from "./AddSourceDialog";
 import SyncDialog from "./SyncDialog";
+import SourcePanel from "./SourcePanel";
 import InlineName from "./InlineName";
 import SettingsDialog from "./SettingsDialog";
 import DownloadBar from "./DownloadBar";
@@ -4300,6 +4301,20 @@ export default function Reader() {
           </div>
         </div>
 
+        {selection.type === "source" && (() => {
+          const feed = feeds.find((f) => f.sources.some((s) => s.id === selection.id));
+          const source = feed?.sources.find((s) => s.id === selection.id);
+          return feed && source ? (
+            <SourcePanel
+              key={source.id}
+              source={source}
+              feedName={feed.name}
+              health={health[source.id]}
+              onRemove={() => removeSource(feed.id, source.id)}
+            />
+          ) : null;
+        })()}
+
         {!ready ? null : selection.type === "alerts" ? (
           <div className="alerts-view">
             {alerts.length === 0 ? (
@@ -4477,11 +4492,24 @@ export default function Reader() {
                           size={15}
                         />
                       )}
-                      <span className="meta-name">
-                        {source?.title ??
-                          savedMeta(article.link)?.sourceTitle ??
-                          hostOf(article.link)}
-                      </span>
+                      {source ? (
+                        // The outlet's name opens its own feed.
+                        <button
+                          className="meta-name meta-source-link"
+                          title={`Open ${source.title}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            event.preventDefault();
+                            choose({ type: "source", id: source.id });
+                          }}
+                        >
+                          {source.title}
+                        </button>
+                      ) : (
+                        <span className="meta-name">
+                          {savedMeta(article.link)?.sourceTitle ?? hostOf(article.link)}
+                        </span>
+                      )}
                       {article.author && (
                         <>
                           <span className="dot">·</span>
