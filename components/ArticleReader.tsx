@@ -1,5 +1,7 @@
 "use client";
 
+import { isSignedIn } from "@/lib/signed-in";
+
 import { useEffect, useRef, useState } from "react";
 import { forgetPosition, positionFor, rememberPosition } from "@/lib/position";
 import type { ReadableArticle } from "@/lib/article";
@@ -465,12 +467,13 @@ export default function ArticleReader({
       }
 
       // Saved from the browser with the Chrome extension: the copy the
-      // reader's own browser was given, kept with their sync code so any of
+      // reader's own browser was given, kept with their account so any of
       // their devices can show it. It beats fetching the page again.
-      const code = loadSyncCode();
-      if (code) {
+      // Signed in, the account's saved pages (the session is the key); otherwise an old code's.
+      const code = isSignedIn() ? null : loadSyncCode();
+      if (code || isSignedIn()) {
         try {
-          const res = await fetch(`/api/inbox?code=${encodeURIComponent(code)}&page=${encodeURIComponent(url)}`, {
+          const res = await fetch(`/api/inbox?${code ? `code=${encodeURIComponent(code)}&` : ""}page=${encodeURIComponent(url)}`, {
             cache: "no-store",
             signal: AbortSignal.timeout(8000),
           });

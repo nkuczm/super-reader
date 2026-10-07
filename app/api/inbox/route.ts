@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { sanitizeArticleHtml } from "@/lib/article";
 import { addInboxItem, clearInboxItems, readInbox, readPage, setSubjectIndex, type InboxItem } from "@/lib/inbox";
 import { readSync } from "@/lib/sync";
+import { currentAccount } from "@/lib/session";
+import { accountKey } from "@/lib/account-state";
 import { isConfigured } from "@/lib/db";
 import { cleanLinkedIn, safeImage } from "@/lib/subjects";
 
@@ -17,10 +19,16 @@ function reply(data: unknown, status = 200) {
   return NextResponse.json(data, { status, headers: PRIVATE });
 }
 
-/** The sync code is the key: only a code that exists has an inbox. */
-async function codeFrom(value: unknown): Promise<string | null> {
-  if (typeof value !== "string" || !value.trim() || value.length > 200) return null;
+/**
+ * Whose inbox or ledger this is: a signed-in account's (the session cookie
+ * is the key, from the app or the extension), or — for a device still on an
+ * old sync code and not signed in — that code's.
+ */
+async function codeFrom(request: Request, value: unknown): Promise<string | null> {
   if (!isConfigured()) return null;
+  const account = await currentAccount(request);
+  if (account) return accountKey(account.id);
+  if (typeof value !== "string" || !value.trim() || value.length > 200) return null;
   return (await readSync(value.trim())) ? value.trim() : null;
 }
 
@@ -28,8 +36,8 @@ async function codeFrom(value: unknown): Promise<string | null> {
 export async function GET(request: Request) {
   meter("inbox");
   const params = new URL(request.url).searchParams;
-  const code = await codeFrom(params.get("code"));
-  if (!code) return reply({ error: "That sync code was not found." }, 404);
+  const code = await codeFrom(request, params.get("code"));
+  if (!code) return reply({ error: "Sign in to Super Reader with Google first." }, 404);
   // One page's saved text, for a device that did not file it itself.
   const page = params.get("page");
   if (page) {
@@ -50,8 +58,8 @@ export async function POST(request: Request) {
   } catch {
     return reply({ error: "Expected JSON" }, 400);
   }
-  const code = await codeFrom(body.code);
-  if (!code) return reply({ error: "That sync code was not found. Check it in Super Reader → Sync." }, 404);
+  const code = await codeFrom(request, body.code);
+  if (!code) return reply({ error: "Sign in to Super Reader with Google in this browser first." }, 404);
   // A person from a profile page, rather than an article.
   if (body.contact && typeof body.contact === "object") {
     const c = body.contact as Record<string, unknown>;
@@ -109,8 +117,8 @@ export async function POST(request: Request) {
 export async function PUT(request: Request) {
   meter("inbox");
   const body = await request.json().catch(() => ({}));
-  const code = await codeFrom(body.code);
-  if (!code) return reply({ error: "That sync code was not found." }, 404);
+  const code = await codeFrom(request, body.code);
+  if (!code) return reply({ error: "Sign in to Super Reader with Google first." }, 404);
   await setSubjectIndex(code, Array.isArray(body.subjects) ? body.subjects : []);
   return reply({ ok: true });
 }
@@ -119,8 +127,8 @@ export async function PUT(request: Request) {
 export async function DELETE(request: Request) {
   meter("inbox");
   const body = await request.json().catch(() => ({}));
-  const code = await codeFrom(body.code);
-  if (!code) return reply({ error: "That sync code was not found." }, 404);
+  const code = await codeFrom(request, body.code);
+  if (!code) return reply({ error: "Sign in to Super Reader with Google first." }, 404);
   await clearInboxItems(code, Array.isArray(body.ids) ? body.ids.filter((id: unknown) => typeof id === "string") : []);
   return reply({ ok: true });
 }

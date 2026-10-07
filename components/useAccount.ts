@@ -30,14 +30,11 @@ const BACKUP_DELAY_MS = 20 * 60 * 1000;
 
 export function useAccount(params: {
   ready: boolean;
-  syncCode: string | null;
   writing: Writing;
   /** Merge the account's copy into this device's. */
   applyWriting: (doc: Writing) => void;
-  /** Follow a sync code (the account's), or start one when there is none. */
-  adoptCode: (code: string | null) => Promise<string | null>;
 }) {
-  const { ready, syncCode, writing, applyWriting, adoptCode } = params;
+  const { ready, writing, applyWriting } = params;
   const [enabled, setEnabled] = useState(false);
   const [account, setAccount] = useState<AccountInfo | null>(null);
   const [checked, setChecked] = useState(false);
@@ -63,10 +60,6 @@ export function useAccount(params: {
   const lastBackup = useRef(0);
   const applyRef = useRef(applyWriting);
   applyRef.current = applyWriting;
-  const adoptRef = useRef(adoptCode);
-  adoptRef.current = adoptCode;
-  const syncCodeRef = useRef(syncCode);
-  syncCodeRef.current = syncCode;
   const accountRef = useRef(account);
   accountRef.current = account;
   /** Bumped to try linking and loading again after they failed. */
@@ -140,43 +133,9 @@ export function useAccount(params: {
     }
   }, [applyRemote]);
 
-  /**
-   * Tie this device to the account's sync code. A failure to reach the server
-   * is a failure, never "the account has no code": taking it for one used to
-   * start a fresh, empty code and leave the device on it.
-   */
-  const linkAccount = useCallback(async () => {
-    const link = async (code: string | null): Promise<{ code: string | null; taken?: boolean }> => {
-      const res = await fetch("/api/account/link", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ code }),
-      });
-      if (res.status === 409) return { code: null, taken: true };
-      if (!res.ok) throw new Error("Could not link this device to the account");
-      const data = await res.json();
-      return { code: typeof data.code === "string" ? data.code : null };
-    };
-    const mine = syncCodeRef.current;
-    let got = await link(mine);
-    // This device's code is another account's: this account's own, if it has one.
-    if (got.taken) got = await link(null);
-    if (!got.code) {
-      // The account has no code yet: this device's feeds start one.
-      const made = await adoptRef.current(null);
-      if (!made) throw new Error("Could not start syncing");
-      got = await link(made);
-      if (got.code && got.code !== made) await adoptRef.current(got.code);
-    } else if (got.code !== mine) {
-      await adoptRef.current(got.code);
-    }
-  }, []);
-
-  // Once signed in: tie this device's sync code to the account, then read the
-  // account's subjects. Again on focus, for changes made on another device;
+  // Once signed in: read the account's subjects. Again on focus, for changes made on another device;
   // and if either fails, again until it works — until it does, nothing from
   // the account is here and nothing written here reaches it.
-  const linked = useRef(false);
   const starting = useRef(false);
   useEffect(() => {
     if (!ready || !account) return;
@@ -187,10 +146,6 @@ export function useAccount(params: {
       if (starting.current) return;
       starting.current = true;
       try {
-        if (!linked.current) {
-          await linkAccount();
-          linked.current = true;
-        }
         if (!cancelled) await load();
         failures.current = 0;
         // Once per visit, bring Drive up to date even if nothing is edited:
@@ -214,7 +169,7 @@ export function useAccount(params: {
     // Another device's changes, on coming back to the tab — not more often
     // than every few minutes; straight away if the account was never reached.
     const onFocus = () => {
-      if (!loaded.current || !linked.current) {
+      if (!loaded.current) {
         if (starting.current) return;
         if (retry) clearTimeout(retry);
         setAttempt((n) => n + 1);
@@ -229,7 +184,7 @@ export function useAccount(params: {
       if (retry) clearTimeout(retry);
       window.removeEventListener("focus", onFocus);
     };
-  }, [ready, account, load, linkAccount, attempt]);
+  }, [ready, account, load, attempt]);
 
   const backup = useCallback(async () => {
     if (backupTimer.current) clearTimeout(backupTimer.current);
@@ -372,7 +327,6 @@ export function useAccount(params: {
   const signOut = useCallback(async () => {
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     loaded.current = false;
-    linked.current = false;
     base.current = emptyBase();
     cursor.current = null;
     setAccount(null);

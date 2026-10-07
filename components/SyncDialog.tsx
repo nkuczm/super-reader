@@ -2,12 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { Icon } from "./icons";
+import { signInHref } from "./SignInCard";
 
 type Props = {
-  code: string | null;
-  busy: boolean;
-  onCreate: () => Promise<void>;
-  onConnect: (code: string) => Promise<void>;
+  code: string;
   onDisconnect: () => void;
   /** Bring back what an earlier feed list had that this one does not; says how much came back. */
   onRestore: (versionId: string) => Promise<{ folders: number; sources: number; teams: number }>;
@@ -25,7 +23,7 @@ const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
  * one. Bringing one back adds what it had that the current list lacks; it
  * removes nothing, so trying one costs nothing.
  */
-function FeedHistory({ code, onRestore }: { code: string; onRestore: Props["onRestore"] }) {
+export function FeedHistory({ listUrl, onRestore }: { listUrl: string; onRestore: Props["onRestore"] }) {
   const [versions, setVersions] = useState<Version[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -34,7 +32,7 @@ function FeedHistory({ code, onRestore }: { code: string; onRestore: Props["onRe
   async function load() {
     setError(null);
     try {
-      const res = await fetch(`/api/sync/history?code=${encodeURIComponent(code)}`, { cache: "no-store" });
+      const res = await fetch(listUrl, { cache: "no-store" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not load earlier feed lists");
       setVersions(data.versions ?? []);
@@ -101,45 +99,21 @@ function FeedHistory({ code, onRestore }: { code: string; onRestore: Props["onRe
   );
 }
 
-export default function SyncDialog({
-  code,
-  busy,
-  onCreate,
-  onConnect,
-  onDisconnect,
-  onRestore,
-  onClose,
-}: Props) {
-  const [entry, setEntry] = useState("");
-  const [error, setError] = useState<string | null>(null);
+/**
+ * For a device still on an old sync code. Codes are retired: none can be
+ * made or entered any more, and signing in with Google folds this one into
+ * the account and forgets it.
+ */
+export default function SyncDialog({ code, onDisconnect, onRestore, onClose }: Props) {
   const [copied, setCopied] = useState(false);
 
-  async function connect() {
-    setError(null);
-    try {
-      await onConnect(entry);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not connect");
-    }
-  }
-
-  async function create() {
-    setError(null);
-    try {
-      await onCreate();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not start syncing");
-    }
-  }
-
   async function copy() {
-    if (!code) return;
     try {
       await navigator.clipboard.writeText(code);
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
     } catch {
-      setError("Couldn't copy — select the code and copy it manually.");
+      /* the code is on screen to select */
     }
   }
 
@@ -153,91 +127,34 @@ export default function SyncDialog({
 
   return (
     <div className="overlay" onMouseDown={onClose}>
-      <div
-        className="dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Sync across devices"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+      <div className="dialog" role="dialog" aria-modal="true" aria-label="Sync" onMouseDown={(event) => event.stopPropagation()}>
         <div className="dialog-head">
-          <button
-            className="dialog-close"
-            aria-label="Close"
-            onClick={onClose}
-          >
+          <button className="dialog-close" aria-label="Close" onClick={onClose}>
             {Icon.close}
           </button>
-          <h2>Sync across devices</h2>
+          <h2>Sign in to keep your work</h2>
           <p>
-            Your feeds live in this browser. Turn on sync to read them
-            everywhere — no account needed.
+            Sync codes are being retired. Sign in with Google and everything on this device — feeds, saved
+            articles, subjects, settings — is kept with your account and on every device you sign in on.
           </p>
         </div>
-
         <div className="dialog-body">
-          {code ? (
-            <>
-              <p className="field-label">This device&rsquo;s sync code</p>
-              <div className="code-row">
-                <code className="sync-code">{code}</code>
-                <button className="btn small" onClick={copy}>
-                  {copied ? "Copied" : "Copy"}
-                </button>
-              </div>
-              <p className="hint">
-                Open this app on another device, choose <strong>Sync</strong>,
-                and paste this code. Keep it private: anyone with the code can
-                read and change your feeds.
-              </p>
-              <FeedHistory code={code} onRestore={onRestore} />
-              <button className="btn ghost small stop-sync" onClick={onDisconnect}>
-                Stop syncing on this device
-              </button>
-            </>
-          ) : (
-            <>
-              <button className="btn" onClick={create} disabled={busy}>
-                {busy ? <span className="spinner" /> : Icon.sync}
-                Start syncing this device
-              </button>
-              <p className="hint">
-                Creates a private code and uploads the feeds you already have.
-              </p>
-
-              <div className="divider">
-                <span>or</span>
-              </div>
-
-              <p className="field-label">Already have a code?</p>
-              <div className="row">
-                <input
-                  className="input"
-                  placeholder="XXXXX-XXXXX-XXXXX-XXXXX"
-                  value={entry}
-                  onChange={(event) => setEntry(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") connect();
-                  }}
-                />
-                <button
-                  className="btn small"
-                  onClick={connect}
-                  disabled={busy || entry.trim().length < 8}
-                >
-                  Connect
-                </button>
-              </div>
-              <p className="hint">
-                The synced feeds come to this device, and any feeds only this
-                device has are added to them.
-              </p>
-            </>
-          )}
-
-          {error && <p className="error">{error}</p>}
+          <a className="btn" href={signInHref()}>
+            Sign in with Google
+          </a>
+          <p className="hint">This device&rsquo;s sync code is folded into your account when you sign in, then retired.</p>
+          <p className="field-label">This device&rsquo;s sync code, until then</p>
+          <div className="code-row">
+            <code className="sync-code">{code}</code>
+            <button className="btn small" onClick={copy}>
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+          <FeedHistory listUrl={`/api/sync/history?code=${encodeURIComponent(code)}`} onRestore={onRestore} />
+          <button className="btn ghost small stop-sync" onClick={onDisconnect}>
+            Stop syncing on this device
+          </button>
         </div>
-
         <div className="dialog-foot">
           <button className="btn ghost small" onClick={onClose}>
             Done

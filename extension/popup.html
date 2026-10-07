@@ -8,8 +8,11 @@
     <main id="app">
       <section id="setup" hidden>
         <h1>Connect to Super Reader</h1>
-        <p>Paste your sync code from Super Reader → <b>Sync across devices</b>. Saved stories arrive on every device using that code.</p>
-        <input id="code" placeholder="Sync code" autocomplete="off" spellcheck="false" />
+        <p>Open <a id="open-app" href="https://super-reader-wine.vercel.app" target="_blank">Super Reader</a> in this browser and sign in with Google. Then press Connect — saved stories go straight to your account.</p>
+        <details>
+          <summary>Still using an old sync code?</summary>
+          <input id="code" placeholder="Sync code" autocomplete="off" spellcheck="false" />
+        </details>
         <details>
           <summary>Server</summary>
           <input id="server" placeholder="https://super-reader-wine.vercel.app" />

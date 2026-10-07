@@ -12,6 +12,7 @@ import FlagsDialog from "./FlagsDialog";
 import StorageSection from "./StorageSection";
 import DbUsageSection from "./DbUsageSection";
 import PrefsHistory from "./PrefsHistory";
+import { FeedHistory } from "./SyncDialog";
 import type { Settings, TeamFeed, ViewMode } from "@/lib/store";
 
 const VIEWS: { id: ViewMode; name: string; blurb: string }[] = [
@@ -81,6 +82,7 @@ export default function SettingsDialog({
   onKeysChange,
   signedIn,
   onPrefsRestored,
+  onRestoreFeeds,
   onDownload,
   noteCount,
   teams,
@@ -106,6 +108,8 @@ export default function SettingsDialog({
   signedIn?: boolean;
   /** Keys were brought back on the account; fetch them. */
   onPrefsRestored?: () => void;
+  /** Bring back what an earlier feed list had (signed in: kept with the account). */
+  onRestoreFeeds?: (versionId: string) => Promise<{ folders: number; sources: number; teams: number }>;
   offline: {
     state: "idle" | "working" | "done" | "error";
     done?: number;
@@ -375,20 +379,6 @@ export default function SettingsDialog({
                 : `${noteCount} note${noteCount === 1 ? "" : "s"} in the sidebar. Turning this off leaves them there; it only stops highlighting from offering to quote.`}
             </p>
 
-            <p className="field-label reading-label">Subjects</p>
-            <label className="check-row">
-              <input
-                type="checkbox"
-                checked={settings.subjects}
-                onChange={(event) =>
-                  onChange({ ...settings, subjects: event.target.checked })
-                }
-              />
-              <span>
-                Subjects
-                <em>Each note becomes a subject: story cards, text boxes, tables, transcripts, a whiteboard, and AI tools.</em>
-              </span>
-            </label>
 
             {settings.subjects && (
               <label className="check-row">
@@ -449,11 +439,6 @@ export default function SettingsDialog({
 
           {tab === "ai" && (
             <>
-            {!settings.subjects && (
-              <p className="field-note" style={{ marginTop: 0 }}>
-                The AI tools work inside subjects. <button className="link-btn" onClick={() => setTab("subjects")}>Turn on Subjects</button> to use them.
-              </p>
-            )}
             {settings.subjects && (
               <div className="ai-choice">
                 <p className="field-label" style={{ marginTop: 0 }}>Provider</p>
@@ -503,7 +488,16 @@ export default function SettingsDialog({
 
           {tab === "account" && (
             <>
-              <p className="field-label">Storage</p>
+              {signedIn && onRestoreFeeds && (
+                <>
+                  <p className="field-label">Your feeds</p>
+                  <p className="field-note" style={{ marginTop: 0 }}>
+                    Kept with your Google account, on every device you sign in on. A copy of the list is kept before anything is taken out of it.
+                  </p>
+                  <FeedHistory listUrl="/api/account/state/history" onRestore={onRestoreFeeds} />
+                </>
+              )}
+              <p className="field-label reading-label">Storage</p>
               <StorageSection />
 
               <p className="field-label reading-label">Database usage</p>
