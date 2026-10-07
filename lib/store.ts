@@ -148,6 +148,47 @@ export function moveSourceBetweenFeeds(
   });
 }
 
+/**
+ * Put a source at a place: in `toFeedId`, beside `targetSourceId` (after it
+ * when `after`), or at the end with no target. The same feed reorders it;
+ * another feed moves it, unless that feed already follows the same address.
+ */
+export function placeSource(
+  feeds: Feed[],
+  sourceId: string,
+  fromFeedId: string,
+  toFeedId: string,
+  targetSourceId: string | null,
+  after: boolean,
+): Feed[] {
+  const source = feeds.find((f) => f.id === fromFeedId)?.sources.find((s) => s.id === sourceId);
+  const target = feeds.find((f) => f.id === toFeedId);
+  if (!source || !target || targetSourceId === sourceId) return feeds;
+  if (toFeedId !== fromFeedId && target.sources.some((s) => s.feedUrl === source.feedUrl)) {
+    return feeds.map((f) => (f.id === fromFeedId ? { ...f, sources: f.sources.filter((s) => s.id !== sourceId) } : f));
+  }
+  return feeds.map((feed) => {
+    let sources = feed.id === fromFeedId ? feed.sources.filter((s) => s.id !== sourceId) : feed.sources;
+    if (feed.id === toFeedId) {
+      const at = targetSourceId ? sources.findIndex((s) => s.id === targetSourceId) : -1;
+      const index = at < 0 ? sources.length : at + (after ? 1 : 0);
+      sources = [...sources.slice(0, index), source, ...sources.slice(index)];
+    }
+    return sources === feed.sources ? feed : { ...feed, sources };
+  });
+}
+
+/** Move a whole feed beside another (after it when `after`). */
+export function placeFeed(feeds: Feed[], feedId: string, targetFeedId: string, after: boolean): Feed[] {
+  const moving = feeds.find((f) => f.id === feedId);
+  if (!moving || feedId === targetFeedId) return feeds;
+  const rest = feeds.filter((f) => f.id !== feedId);
+  const at = rest.findIndex((f) => f.id === targetFeedId);
+  if (at < 0) return feeds;
+  const index = at + (after ? 1 : 0);
+  return [...rest.slice(0, index), moving, ...rest.slice(index)];
+}
+
 export type ViewMode = "magazine" | "cards" | "list";
 
 /**
