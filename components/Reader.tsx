@@ -28,6 +28,8 @@ import {
   type Settings,
   newId,
   moveSourceBetweenFeeds,
+  placeSource,
+  placeFeed,
   loadSaved,
   saveSaved,
   loadSavedRemovals,
@@ -83,7 +85,7 @@ import InlineName from "./InlineName";
 import SettingsDialog from "./SettingsDialog";
 import DownloadBar from "./DownloadBar";
 import Attachments from "./Attachments";
-import { useSourceDrag } from "./useSourceDrag";
+import { useSourceDrag, type DropAt } from "./useSourceDrag";
 import SubjectPage from "./SubjectPage";
 import StatusPage from "./StatusPage";
 import SpendPage from "./SpendPage";
@@ -1879,10 +1881,12 @@ export default function Reader() {
 
   /** Move a source into another feed, and show the feed it landed in. */
   const moveSource = useCallback(
-    (sourceId: string, fromFeedId: string, toFeedId: string) => {
-      setFeeds((current) =>
-        moveSourceBetweenFeeds(current, sourceId, fromFeedId, toFeedId),
-      );
+    ({ kind, id, fromFeedId, toFeedId, targetSourceId, after }: DropAt) => {
+      if (kind === "feed") {
+        setFeeds((current) => placeFeed(current, id, toFeedId, after));
+        return;
+      }
+      setFeeds((current) => placeSource(current, id, fromFeedId, toFeedId, targetSourceId, after));
       // A feed you just dropped something into should show what it now holds.
       setCollapsed((current) => {
         if (!current.has(toFeedId)) return current;
@@ -3667,10 +3671,14 @@ export default function Reader() {
             return (
               <div
                 className={`feed-group${
-                  drag && drag.overFeedId === feed.id && drag.fromFeedId !== feed.id
+                  drag?.kind === "source" && drag.overFeedId === feed.id && !drag.overSourceId && drag.fromFeedId !== feed.id
                     ? " drop-target"
                     : ""
-                }`}
+                }${
+                  drag?.kind === "feed" && drag.overFeedId === feed.id && drag.sourceId !== feed.id
+                    ? drag.after ? " drop-after" : " drop-before"
+                    : ""
+                }${drag?.kind === "feed" && drag.sourceId === feed.id ? " dragging" : ""}`}
                 key={feed.id}
                 data-feed-id={feed.id}
               >
@@ -3699,6 +3707,25 @@ export default function Reader() {
                     </div>
                   ) : (
                     <>
+                      <button
+                        className="drag-grip feed-grip"
+                        aria-label={`Move ${feed.name} up or down (arrow keys work too)`}
+                        title="Drag to move this feed up or down"
+                        onPointerDown={(event) => onPointerDown(event, { id: feed.id, title: feed.name }, feed.id, "feed")}
+                        onPointerMove={onPointerMove}
+                        onPointerUp={onPointerUp}
+                        onPointerCancel={onPointerCancel}
+                        onClick={(event) => event.preventDefault()}
+                        onKeyDown={(event) => {
+                          if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+                          event.preventDefault();
+                          const at = feeds.findIndex((f) => f.id === feed.id);
+                          const other = feeds[event.key === "ArrowUp" ? at - 1 : at + 1];
+                          if (other) setFeeds((current) => placeFeed(current, feed.id, other.id, event.key === "ArrowDown"));
+                        }}
+                      >
+                        {Icon.grip}
+                      </button>
                       <button
                         className={`chev ${collapsed.has(feed.id) ? "" : "open"}`}
                         onClick={() => toggleCollapsed(feed.id)}
@@ -3748,14 +3775,19 @@ export default function Reader() {
                   feed.sources.map((source) => (
                   <div
                     className={`source-row${
-                      drag?.sourceId === source.id ? " dragging" : ""
+                      drag?.kind === "source" && drag.sourceId === source.id ? " dragging" : ""
+                    }${
+                      drag?.kind === "source" && drag.overSourceId === source.id && drag.sourceId !== source.id
+                        ? drag.after ? " drop-after" : " drop-before"
+                        : ""
                     }`}
                     key={source.id}
+                    data-source-id={source.id}
                   >
                     <button
                       className="drag-grip"
-                      aria-label={`Move ${source.title} to another feed`}
-                      title="Drag into another feed"
+                      aria-label={`Move ${source.title} up, down or to another feed`}
+                      title="Drag up, down or into another feed"
                       onPointerDown={(event) =>
                         onPointerDown(event, source, feed.id)
                       }

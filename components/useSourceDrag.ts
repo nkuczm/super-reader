@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
- * Dragging a source from one feed to another.
+ * Dragging a source up, down, or into another feed — and dragging a whole
+ * feed up or down the sidebar.
  *
  * Pointer events rather than HTML5 drag-and-drop: dragstart/drop never fire on
  * iOS, and this app is used on a phone. Dragging begins from a grip rather than
@@ -13,6 +14,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * before we do.
  */
 export type SourceDrag = {
+  /** A source, or (with kind "feed") a whole feed, whose id is in sourceId. */
+  kind: "source" | "feed";
   sourceId: string;
   fromFeedId: string;
   title: string;
@@ -22,7 +25,13 @@ export type SourceDrag = {
   y: number;
   /** The feed under the pointer, if any. */
   overFeedId: string | null;
+  /** The source row under the pointer (source drags), if any. */
+  overSourceId: string | null;
+  /** Whether the drop lands after what is under the pointer, not before it. */
+  after: boolean;
 };
+
+export type DropAt = { kind: "source" | "feed"; id: string; fromFeedId: string; toFeedId: string; targetSourceId: string | null; after: boolean };
 
 type Handle = { id: string; title: string; favicon?: string };
 
@@ -30,9 +39,7 @@ type Handle = { id: string; title: string; favicon?: string };
 const EDGE = 56;
 const STEP = 12;
 
-export function useSourceDrag(
-  onDrop: (sourceId: string, fromFeedId: string, toFeedId: string) => void,
-) {
+export function useSourceDrag(onDrop: (drop: DropAt) => void) {
   const [drag, setDrag] = useState<SourceDrag | null>(null);
   // The handlers run from pointer events, which do not see fresh state.
   const current = useRef<SourceDrag | null>(null);
@@ -42,10 +49,20 @@ export function useSourceDrag(
     setDrag(next);
   }, []);
 
-  /** The feed under the pointer — the ghost must not intercept its own hit. */
-  const feedAt = (x: number, y: number) => {
+  /** What is under the pointer — the ghost must not intercept its own hit. */
+  const targetAt = (kind: SourceDrag["kind"], x: number, y: number) => {
     const el = document.elementFromPoint(x, y);
-    return el?.closest<HTMLElement>("[data-feed-id]")?.dataset.feedId ?? null;
+    const group = el?.closest<HTMLElement>("[data-feed-id]");
+    const overFeedId = group?.dataset.feedId ?? null;
+    if (kind === "feed") {
+      const box = group?.querySelector<HTMLElement>(".feed-head")?.getBoundingClientRect() ?? group?.getBoundingClientRect();
+      // Over a feed's own head, its top half puts the drop above it; anywhere in its sources, below.
+      const after = box ? y > box.top + box.height / 2 : false;
+      return { overFeedId, overSourceId: null, after };
+    }
+    const row = el?.closest<HTMLElement>("[data-source-id]");
+    const box = row?.getBoundingClientRect();
+    return { overFeedId, overSourceId: row?.dataset.sourceId ?? null, after: box ? y > box.top + box.height / 2 : false };
   };
 
   const autoScroll = (y: number) => {
@@ -57,7 +74,7 @@ export function useSourceDrag(
   };
 
   const onPointerDown = useCallback(
-    (event: React.PointerEvent, source: Handle, fromFeedId: string) => {
+    (event: React.PointerEvent, source: Handle, fromFeedId: string, kind: SourceDrag["kind"] = "source") => {
       // Left button or touch only; and keep the browser from starting its own
       // text selection or scroll with this gesture.
       if (event.button !== 0) return;
@@ -65,6 +82,7 @@ export function useSourceDrag(
       event.stopPropagation();
       (event.currentTarget as Element).setPointerCapture(event.pointerId);
       set({
+        kind,
         sourceId: source.id,
         fromFeedId,
         title: source.title,
@@ -72,6 +90,8 @@ export function useSourceDrag(
         x: event.clientX,
         y: event.clientY,
         overFeedId: fromFeedId,
+        overSourceId: null,
+        after: false,
       });
     },
     [set],
@@ -87,7 +107,7 @@ export function useSourceDrag(
         ...active,
         x: event.clientX,
         y: event.clientY,
-        overFeedId: feedAt(event.clientX, event.clientY),
+        ...targetAt(active.kind, event.clientX, event.clientY),
       });
     },
     [set],
@@ -98,10 +118,11 @@ export function useSourceDrag(
       const active = current.current;
       set(null);
       if (!active || !commit) return;
-      const { sourceId, fromFeedId, overFeedId } = active;
-      if (overFeedId && overFeedId !== fromFeedId) {
-        onDrop(sourceId, fromFeedId, overFeedId);
-      }
+      const { kind, sourceId, fromFeedId, overFeedId, overSourceId, after } = active;
+      if (!overFeedId) return;
+      if (kind === "feed" && overFeedId === sourceId) return;
+      if (kind === "source" && overFeedId === fromFeedId && (!overSourceId || overSourceId === sourceId)) return;
+      onDrop({ kind, id: sourceId, fromFeedId, toFeedId: overFeedId, targetSourceId: overSourceId, after });
     },
     [onDrop, set],
   );
