@@ -252,13 +252,77 @@ const TOMBSTONE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 export const BOARDS_SYNC_BUDGET = 150 * 1024;
 export const MAX_HTML = 20_000;
 
-export function loadBoards(): Boards {
-  if (typeof window === "undefined") return {};
+/*
+ * Boards live in IndexedDB. They used to live in localStorage, which a
+ * browser caps at about 5 MB per site — a few dozen pictures — and a phone
+ * filled it, after which nothing new was kept on the device. IndexedDB is
+ * given hundreds of megabytes. A device with boards still in localStorage
+ * moves them across on first load and frees that room.
+ */
+const DB = "super-reader-boards";
+const STORE = "kv";
+let cache: Boards | null = null;
+
+function idb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore(STORE);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function idbGet(): Promise<Boards | null> {
+  const db = await idb();
+  return new Promise((resolve, reject) => {
+    const q = db.transaction(STORE).objectStore(STORE).get(KEY);
+    q.onsuccess = () => resolve((q.result as Boards) ?? null);
+    q.onerror = () => reject(q.error);
+  });
+}
+
+async function idbPut(boards: Boards): Promise<void> {
+  const db = await idb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).put(boards, KEY);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+
+function fromLocal(): Boards {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(KEY) ?? "{}");
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
   } catch {
     return {};
+  }
+}
+
+/** What is known at once: the copy already read this session, or one still in localStorage. */
+export function loadBoards(): Boards {
+  if (typeof window === "undefined") return {};
+  return cache ?? fromLocal();
+}
+
+/** The device's boards from IndexedDB, moving any still in localStorage across first. */
+export async function loadBoardsAsync(): Promise<Boards> {
+  if (typeof window === "undefined") return {};
+  const local = fromLocal();
+  try {
+    const held = (await idbGet()) ?? {};
+    const merged = Object.keys(local).length ? mergeBoards(held, local) : held;
+    if (Object.keys(local).length) {
+      await idbPut(merged);
+      window.localStorage.removeItem(KEY);
+    }
+    cache = merged;
+    return merged;
+  } catch {
+    // No IndexedDB here (some private modes): localStorage, as before.
+    return local;
   }
 }
 
@@ -272,14 +336,34 @@ export function reportStored(ok: boolean) {
   window.dispatchEvent(new CustomEvent(STORAGE_FULL_EVENT, { detail: full }));
 }
 
+let pending: Boards | null = null;
+let writing: Promise<void> | null = null;
+
+/** Kept on the device: written to IndexedDB, the latest copy only, one write at a time. */
 export function saveBoards(boards: Boards) {
-  try {
-    window.localStorage.setItem(KEY, JSON.stringify(boards));
-    reportStored(true);
-  } catch {
-    // Storage full: the board still holds for this session, and the reader is told.
-    reportStored(false);
-  }
+  cache = boards;
+  pending = boards;
+  if (writing) return;
+  writing = (async () => {
+    while (pending) {
+      const next = pending;
+      pending = null;
+      try {
+        await idbPut(next);
+        reportStored(true);
+      } catch {
+        try {
+          window.localStorage.setItem(KEY, JSON.stringify(next));
+          reportStored(true);
+        } catch {
+          // Storage full: the board still holds for this session, and the reader is told.
+          reportStored(false);
+        }
+      }
+    }
+  })().finally(() => {
+    writing = null;
+  });
 }
 
 export function newItemId(prefix = "i") {

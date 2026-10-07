@@ -2691,7 +2691,7 @@
 .fc-bar .tbl-more-menu button:hover { background: var(--bg-hover); }
 .tbl-more-note { padding: 6px 10px; font-size: 12.5px; color: var(--text-dim); }
 .signin-note { font-size: 14px; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--text); }
-.storage-full { display: flex; gap: 8px; align-items: flex-start; position: fixed; z-index: 500; top: calc(10px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); width: min(560px, calc(100vw - 32px)); box-sizing: border-box; max-height: 40vh; overflow-y: auto; box-shadow: 0 6px 18px rgba(0,0,0,.15); padding: 10px 12px; border-radius: 8px; font-size: 14px; background: color-mix(in srgb, var(--danger) 12%, var(--bg)); color: var(--text); border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent); }
+.storage-full { display: flex; gap: 8px; align-items: flex-start; position: fixed; z-index: 500; top: calc(10px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); width: min(560px, calc(100vw - 32px)); box-sizing: border-box; max-height: calc(85vh - env(safe-area-inset-top, 0px)); overflow-y: auto; box-shadow: 0 6px 18px rgba(0,0,0,.15); padding: 10px 12px; border-radius: 8px; font-size: 14px; background: color-mix(in srgb, var(--danger) 12%, var(--bg)); color: var(--text); border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent); }
 .db-meter { display: block !important; }
 .db-meter-bar { display: block; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; margin: 2px 0 4px; }
 .db-meter-bar > span { display: block; height: 100%; background: var(--accent); }
@@ -2699,3 +2699,9 @@
 
 .storage-full-close { flex: none; border: 0; background: none; color: var(--text-dim); padding: 2px; cursor: pointer; line-height: 0; }
 .storage-full-close svg { width: 16px; height: 16px; }
+
+.storage-full-help { margin-top: 6px; }
+.storage-full-help summary { cursor: pointer; font-weight: 600; color: var(--accent); }
+.storage-full-help ol { margin: 6px 0 0; padding-left: 20px; display: grid; gap: 6px; font-size: 13.5px; line-height: 1.45; }
+.storage-full-help a, .storage-full-help .link-btn { color: var(--accent); }
+.storage-full .link-btn { padding: 0; font: inherit; }

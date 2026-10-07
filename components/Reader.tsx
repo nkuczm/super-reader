@@ -112,6 +112,7 @@ import {
   cardNoteId,
   contactId,
   loadBoards,
+  loadBoardsAsync,
   mergeBoards,
   pruneBoards,
   put as putItem,
@@ -640,6 +641,13 @@ export default function Reader() {
     const storedBoards = loadBoards();
     boardsRef.current = storedBoards;
     setBoards(storedBoards);
+    // The full copy is in IndexedDB; whatever happened meanwhile is merged in, not replaced.
+    void loadBoardsAsync().then((held) => {
+      const merged = mergeBoards(held, boardsRef.current);
+      if (sameBoards(merged, boardsRef.current)) return;
+      boardsRef.current = merged;
+      setBoards(merged);
+    });
     setHealth(loadHealth());
     try {
       const used = JSON.parse(localStorage.getItem(SUBJECT_USED_KEY) ?? "{}");
@@ -1377,13 +1385,51 @@ export default function Reader() {
     typeof document !== "undefined" &&
     createPortal(
       <div className="storage-full" role="alert">
-        <span>
-          This browser is out of room, so new changes to your subjects are not being kept on this device.
+        <div>
+          <strong>This browser is out of room.</strong>{" "}
           {auth.account && auth.status !== "error" && auth.status !== "offline"
-            ? " They are being saved to your account — keep this tab open until it says saved."
-            : " They are not saved anywhere yet: keep this tab open, and sign in or reconnect so they can be saved to your account."}
-          {" "}Removing large pictures frees room.
-        </span>
+            ? "Your changes are still being saved to your Google account — keep this tab open until it says saved."
+            : "New changes are not being kept on this device yet — keep this tab open."}
+          <details className="storage-full-help">
+            <summary>How to fix it</summary>
+            <ol>
+              <li>
+                {auth.account ? "You're signed in, so nothing is lost: your work is kept with your Google account." : (
+                  <>
+                    <a href={signInHref()}>Sign in with Google</a> first — then your work is kept with your account, not only in this browser.
+                  </>
+                )}
+              </li>
+              <li>
+                Reload the page. The app now keeps subjects and pictures in the browser&rsquo;s larger storage, and moves them there on its own — this usually clears the warning.
+              </li>
+              <li>
+                Still full? Open{" "}
+                <button
+                  className="link-btn"
+                  onClick={() => {
+                    try {
+                      localStorage.setItem("super-reader:settings-tab", "account");
+                    } catch {
+                      /* opens on the last tab */
+                    }
+                    setFullHidden(true);
+                    setSettingsOpen(true);
+                  }}
+                >
+                  Settings → Account → Storage
+                </button>
+                {" "}to see which subjects and offline articles take the most room, and remove pictures or downloaded articles you no longer need.
+              </li>
+              <li>
+                On iPhone, check the phone itself has free space (Settings → General → iPhone Storage) — Safari gives sites less room when the phone is nearly full.
+              </li>
+              <li>
+                Last resort, once the top of Subjects says &ldquo;Saved&rdquo;: clear this site&rsquo;s data in your browser settings and sign in again. Everything comes back from your account.
+              </li>
+            </ol>
+          </details>
+        </div>
         <button className="storage-full-close" aria-label="Hide this warning" onClick={() => setFullHidden(true)}>
           {Icon.close}
         </button>
