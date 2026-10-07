@@ -25,3 +25,15 @@ test("whole feeds move up and down", () => {
   assert.deepEqual(placeFeed(feeds(), "A", "C", true).map((f) => f.id), ["B", "C", "A"]);
   assert.deepEqual(placeFeed(feeds(), "A", "A", true).map((f) => f.id), ["A", "B", "C"]);
 });
+
+test("the same source twice in a feed, however its address is written, is kept once", async () => {
+  const { cleanFeeds, unionFeeds } = await import("../lib/store");
+  const one = cleanFeeds([{ id: "F", name: "F", sources: [
+    { id: "x", feedUrl: "https://www.example.com/feed/", title: "Ex" },
+    { id: "y", feedUrl: "http://example.com/feed?utm_source=newsletter", title: "Ex again" },
+    { id: "z", feedUrl: "https://other.example/rss", title: "Other" },
+  ] }]);
+  assert.deepEqual(one[0].sources.map((s) => s.id), ["x", "z"]);
+  const joined = unionFeeds(one, [{ id: "F", name: "F", sources: [{ id: "w", feedUrl: "https://example.com/feed", title: "Ex" } as never] }]);
+  assert.equal(joined[0].sources.length, 2, "a device bringing the same source under another spelling does not add it twice");
+});

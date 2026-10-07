@@ -2712,3 +2712,25 @@
 .feed-group.dragging { opacity: 0.45; }
 .feed-head .feed-grip { flex: none; }
 .feed-head:hover .feed-grip, .feed-grip:focus-visible { opacity: 0.8; }
+
+/* Feed colours: a soft highlight behind the name, the same hue in both themes. */
+.feed-hl-red { --hl: #ef4444; } .feed-hl-orange { --hl: #f97316; } .feed-hl-yellow { --hl: #eab308; }
+.feed-hl-green { --hl: #22c55e; } .feed-hl-teal { --hl: #14b8a6; } .feed-hl-blue { --hl: #3b82f6; }
+.feed-hl-purple { --hl: #a855f7; } .feed-hl-pink { --hl: #ec4899; }
+.feed-name.feed-hl { background: color-mix(in srgb, var(--hl) 24%, transparent); border-radius: 5px; padding: 1px 6px; margin-left: -6px; box-decoration-break: clone; }
+.feed-color-btn .feed-color-dot { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--text-dim); display: block; }
+.feed-color-btn[class*="feed-hl-"] .feed-color-dot { background: var(--hl); border-color: var(--hl); }
+.feed-palette { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 8px 8px 30px; }
+.feed-swatch { width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; background: var(--hl); cursor: pointer; padding: 0; }
+.feed-swatch.on { border-color: var(--text); }
+.feed-swatch.none { background: transparent; border: 1.5px dashed var(--text-dim); color: var(--text-dim); display: inline-flex; align-items: center; justify-content: center; }
+.feed-swatch.none svg { width: 12px; height: 12px; }
+
+/* A subject's tile: its whole whiteboard, zoomed out. */
+.subject-tile-preview:has(.board-thumb) { padding: 8px; display: block; }
+.board-thumb { width: 100%; height: 100%; display: block; }
+.board-thumb rect { fill: var(--bg); stroke: var(--border); stroke-width: 3; }
+.board-thumb .bt-box > rect:first-child { fill: color-mix(in srgb, var(--accent) 6%, var(--bg)); }
+.board-thumb .bt-insight > rect:first-child, .board-thumb .bt-suggest > rect:first-child { fill: color-mix(in srgb, var(--accent) 14%, var(--bg)); stroke-dasharray: 10 8; }
+.board-thumb .bt-line { fill: var(--border); stroke: none; }
+.board-thumb .bt-title { fill: var(--text); font-size: 22px; font-weight: 700; }

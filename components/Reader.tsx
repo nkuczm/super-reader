@@ -30,6 +30,10 @@ import {
   moveSourceBetweenFeeds,
   placeSource,
   placeFeed,
+  sourceKey as feedSourceKey,
+  FEED_COLORS,
+  isFeedColor,
+  type FeedColor,
   loadSaved,
   saveSaved,
   loadSavedRemovals,
@@ -1823,14 +1827,15 @@ export default function Reader() {
         return [...current, feed];
       }
       return current.map((feed) =>
-        feed.id === target
-          ? // Adding the same feed twice is a no-op rather than a duplicate.
-            feed.sources.some((s) => s.feedUrl === source.feedUrl)
-            ? feed
-            : { ...feed, sources: [...feed.sources, source] }
+        feed.id === target && !feed.sources.some((s) => feedSourceKey(s.feedUrl) === feedSourceKey(source.feedUrl))
+          ? { ...feed, sources: [...feed.sources, source] }
           : feed,
       );
     });
+    // Adding a source a feed already has is not a duplicate; say so rather than doing nothing silently.
+    const into = feedsRef.current.find((feed) => feed.id === target);
+    const held = into?.sources.find((s) => feedSourceKey(s.feedUrl) === feedSourceKey(source.feedUrl));
+    if (into && held) setPasteNotice({ kind: "error", text: `${held.title} is already in ${into.name}.` });
     setDialogOpen(false);
   }
 
@@ -1860,11 +1865,14 @@ export default function Reader() {
       }
       return current.map((feed) => {
         if (feed.id !== target) return feed;
-        const have = new Set(feed.sources.map((source) => source.feedUrl));
-        return {
-          ...feed,
-          sources: [...feed.sources, ...made.filter((source) => !have.has(source.feedUrl))],
-        };
+        const have = new Set(feed.sources.map((source) => feedSourceKey(source.feedUrl)));
+        const fresh: Source[] = [];
+        for (const source of made) {
+          if (have.has(feedSourceKey(source.feedUrl))) continue;
+          have.add(feedSourceKey(source.feedUrl));
+          fresh.push(source);
+        }
+        return { ...feed, sources: [...feed.sources, ...fresh] };
       });
     });
     setDialogOpen(false);
@@ -1917,6 +1925,20 @@ export default function Reader() {
       ),
     );
     setSelection({ type: "all" });
+  }
+
+  const [coloring, setColoring] = useState<string | null>(null);
+  /** A highlight behind a feed's name; it syncs with the feed list. */
+  function setFeedColor(id: string, color: FeedColor | null) {
+    setFeeds((current) =>
+      current.map((feed) => {
+        if (feed.id !== id) return feed;
+        const { color: _old, ...rest } = feed;
+        void _old;
+        return color ? { ...rest, color } : rest;
+      }),
+    );
+    setColoring(null);
   }
 
   function renameFeed(id: string, name: string) {
@@ -3746,8 +3768,17 @@ export default function Reader() {
                         onDoubleClick={() => setEditing(feed.id)}
                         title="Double-click to rename"
                       >
-                        <span className="feed-name">{feed.name}</span>
+                        <span className={`feed-name${isFeedColor(feed.color) ? ` feed-hl feed-hl-${feed.color}` : ""}`}>{feed.name}</span>
                         <span className="count">{count || ""}</span>
+                      </button>
+                      <button
+                        className={`icon-btn feed-color-btn${isFeedColor(feed.color) ? ` feed-hl-${feed.color}` : ""}`}
+                        onClick={() => setColoring(coloring === feed.id ? null : feed.id)}
+                        aria-label={`Colour for ${feed.name}`}
+                        aria-expanded={coloring === feed.id}
+                        title="Highlight colour"
+                      >
+                        <span className="feed-color-dot" />
                       </button>
                       <button
                         className="icon-btn"
@@ -3766,6 +3797,23 @@ export default function Reader() {
                     </>
                   )}
                 </div>
+
+                {coloring === feed.id && (
+                  <div className="feed-palette" role="group" aria-label={`Colour for ${feed.name}`}>
+                    {FEED_COLORS.map((color) => (
+                      <button
+                        key={color}
+                        className={`feed-swatch feed-hl-${color}${feed.color === color ? " on" : ""}`}
+                        aria-label={color}
+                        aria-pressed={feed.color === color}
+                        onClick={() => setFeedColor(feed.id, color)}
+                      />
+                    ))}
+                    <button className="feed-swatch none" aria-label="No colour" aria-pressed={!feed.color} onClick={() => setFeedColor(feed.id, null)}>
+                      {Icon.close}
+                    </button>
+                  </div>
+                )}
 
                 {!collapsed.has(feed.id) && feed.sources.length === 0 && (
                   <div className="empty-hint">No sources yet</div>

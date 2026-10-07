@@ -1,5 +1,7 @@
 "use client";
 
+import BoardThumb from "./BoardThumb";
+
 import { useState } from "react";
 import { Icon } from "./icons";
 import type { Note } from "@/lib/notes";
@@ -110,15 +112,9 @@ export default function SubjectsHome({
         {tiles.map(({ note, cards, quotes, insights, suggested, lastChange }) => (
           <div key={note.id} className="subject-tile">
             <button className="subject-tile-open" onClick={() => onOpen(note.id)}>
-              {/* A miniature of the page: the first few stories, as lines. */}
+              {/* The whole whiteboard, zoomed all the way out. */}
               <div className="subject-tile-preview" aria-hidden="true">
-                {cards.slice(0, 4).map((card) => (
-                  <div key={card.id} className="subject-tile-line">
-                    <strong>{card.title}</strong>
-                    {card.quotes[0] && <span>“{card.quotes[0].text}”</span>}
-                  </div>
-                ))}
-                {cards.length === 0 && <span className="subject-tile-empty">No stories yet</span>}
+                <BoardThumb board={boards[note.id]} cards={cards} />
               </div>
               <div className="subject-tile-meta">
                 <span className="subject-tile-name">{note.name}</span>
