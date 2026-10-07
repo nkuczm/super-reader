@@ -4,6 +4,14 @@
  */
 
 import type { Feed, TeamFeed } from "./store";
+import { canonicalUrl } from "./url";
+
+/**
+ * One source, however its address was written: with or without www, http or
+ * https, a trailing slash or tracking tags. Two sources with the same key in
+ * one feed are the same source.
+ */
+export const sourceKey = (feedUrl: string) => canonicalUrl(feedUrl);
 
 /**
  * Feeds as they can safely be drawn. Stored and synced data outlives the code
@@ -27,7 +35,10 @@ export function cleanFeeds(input: unknown): Feed[] {
             typeof source.feedUrl === "string",
         )
         // A source without a name is drawn by its address, not left to throw.
-        .map((source) => (typeof source.title === "string" ? source : { ...source, title: source.feedUrl })),
+        .map((source) => (typeof source.title === "string" ? source : { ...source, title: source.feedUrl }))
+        // The same source twice in one feed (added under two spellings, or
+        // merged in from another device) is shown, and kept, once.
+        .filter((source, i, all) => all.findIndex((other) => sourceKey(other.feedUrl) === sourceKey(source.feedUrl)) === i),
     }));
 }
 
@@ -44,7 +55,7 @@ export function unionFeeds(theirs: Feed[], mine: Feed[]): Feed[] {
       out.push(feed);
       continue;
     }
-    for (const source of feed.sources) if (!held.sources.some((s) => s.id === source.id)) held.sources.push(source);
+    for (const source of feed.sources) if (!held.sources.some((s) => s.id === source.id || sourceKey(s.feedUrl) === sourceKey(source.feedUrl))) held.sources.push(source);
   }
   return out;
 }

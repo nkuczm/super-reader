@@ -11,8 +11,8 @@ import type { Article, SourceMeta } from "./types";
 import type { SavedArticle, SavedRemoval } from "./saved";
 import type { WatchMarks } from "./alerts";
 import { PARTS, type PartStamps } from "./sync-doc";
-import { cleanFeeds, sanitizeTeams } from "./feed-merge";
-export { cleanFeeds, unionFeeds, unionTeams, unionRead, sanitizeTeams } from "./feed-merge";
+import { cleanFeeds, sanitizeTeams, sourceKey } from "./feed-merge";
+export { cleanFeeds, unionFeeds, unionTeams, unionRead, sanitizeTeams, sourceKey } from "./feed-merge";
 
 export type Source = SourceMeta & {
   id: string;
@@ -34,7 +34,18 @@ export type Source = SourceMeta & {
    */
   notify?: boolean;
 };
-export type Feed = { id: string; name: string; sources: Source[] };
+/** Highlight colours a feed's name can carry. */
+export const FEED_COLORS = ["red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"] as const;
+export type FeedColor = (typeof FEED_COLORS)[number];
+export const isFeedColor = (v: unknown): v is FeedColor => typeof v === "string" && (FEED_COLORS as readonly string[]).includes(v);
+
+export type Feed = {
+  id: string;
+  name: string;
+  sources: Source[];
+  /** A highlight behind the feed's name in the sidebar. */
+  color?: FeedColor;
+};
 
 const KEY = "super-reader:v1";
 
@@ -141,7 +152,7 @@ export function moveSourceBetweenFeeds(
       return { ...feed, sources: feed.sources.filter((s) => s.id !== sourceId) };
     }
     if (feed.id === toFeedId) {
-      const already = feed.sources.some((s) => s.feedUrl === source.feedUrl);
+      const already = feed.sources.some((s) => sourceKey(s.feedUrl) === sourceKey(source.feedUrl));
       return already ? feed : { ...feed, sources: [...feed.sources, source] };
     }
     return feed;
@@ -164,7 +175,7 @@ export function placeSource(
   const source = feeds.find((f) => f.id === fromFeedId)?.sources.find((s) => s.id === sourceId);
   const target = feeds.find((f) => f.id === toFeedId);
   if (!source || !target || targetSourceId === sourceId) return feeds;
-  if (toFeedId !== fromFeedId && target.sources.some((s) => s.feedUrl === source.feedUrl)) {
+  if (toFeedId !== fromFeedId && target.sources.some((s) => sourceKey(s.feedUrl) === sourceKey(source.feedUrl))) {
     return feeds.map((f) => (f.id === fromFeedId ? { ...f, sources: f.sources.filter((s) => s.id !== sourceId) } : f));
   }
   return feeds.map((feed) => {
