@@ -11,7 +11,7 @@ import { canonicalUrl } from "./url";
  * https, a trailing slash or tracking tags. Two sources with the same key in
  * one feed are the same source.
  */
-export const sourceKey = (feedUrl: string) => canonicalUrl(feedUrl);
+export const sourceKey = (feedUrl: string) => (typeof feedUrl === "string" && feedUrl ? canonicalUrl(feedUrl) : "");
 
 /**
  * Feeds as they can safely be drawn. Stored and synced data outlives the code
@@ -55,7 +55,10 @@ export function unionFeeds(theirs: Feed[], mine: Feed[]): Feed[] {
       out.push(feed);
       continue;
     }
-    for (const source of feed.sources) if (!held.sources.some((s) => s.id === source.id || sourceKey(s.feedUrl) === sourceKey(source.feedUrl))) held.sources.push(source);
+    for (const source of feed.sources) {
+      const key = sourceKey(source.feedUrl);
+      if (!held.sources.some((s) => s.id === source.id || (key && sourceKey(s.feedUrl) === key))) held.sources.push(source);
+    }
   }
   return out;
 }
