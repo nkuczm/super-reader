@@ -1928,6 +1928,8 @@ export default function Reader() {
   }
 
   const [coloring, setColoring] = useState<string | null>(null);
+  /** Edit mode for the sidebar: moving, colouring, renaming and removing feeds and sources. */
+  const [editingFeeds, setEditingFeeds] = useState(false);
   /** A highlight behind a feed's name; it syncs with the feed list. */
   function setFeedColor(id: string, color: FeedColor | null) {
     setFeeds((current) =>
@@ -3729,6 +3731,7 @@ export default function Reader() {
                     </div>
                   ) : (
                     <>
+                      {editingFeeds && (
                       <button
                         className="drag-grip feed-grip"
                         aria-label={`Move ${feed.name} up or down (arrow keys work too)`}
@@ -3748,6 +3751,7 @@ export default function Reader() {
                       >
                         {Icon.grip}
                       </button>
+                      )}
                       <button
                         className={`chev ${collapsed.has(feed.id) ? "" : "open"}`}
                         onClick={() => toggleCollapsed(feed.id)}
@@ -3771,6 +3775,8 @@ export default function Reader() {
                         <span className={`feed-name${isFeedColor(feed.color) ? ` feed-hl feed-hl-${feed.color}` : ""}`}>{feed.name}</span>
                         <span className="count">{count || ""}</span>
                       </button>
+                      {editingFeeds && (
+                        <>
                       <button
                         className={`icon-btn feed-color-btn${isFeedColor(feed.color) ? ` feed-hl-${feed.color}` : ""}`}
                         onClick={() => setColoring(coloring === feed.id ? null : feed.id)}
@@ -3794,11 +3800,13 @@ export default function Reader() {
                       >
                         {Icon.trash}
                       </button>
+                        </>
+                      )}
                     </>
                   )}
                 </div>
 
-                {coloring === feed.id && (
+                {editingFeeds && coloring === feed.id && (
                   <div className="feed-palette" role="group" aria-label={`Colour for ${feed.name}`}>
                     {FEED_COLORS.map((color) => (
                       <button
@@ -3832,6 +3840,7 @@ export default function Reader() {
                     key={source.id}
                     data-source-id={source.id}
                   >
+                    {editingFeeds && (
                     <button
                       className="drag-grip"
                       aria-label={`Move ${source.title} up, down or to another feed`}
@@ -3847,6 +3856,7 @@ export default function Reader() {
                     >
                       {Icon.grip}
                     </button>
+                    )}
                     <button
                       className={`nav-item ${
                         selection.type === "source" && selection.id === source.id
@@ -3879,6 +3889,7 @@ export default function Reader() {
                     >
                       {source.notify ? Icon.bellOn : Icon.bell}
                     </button>
+                    {editingFeeds && (
                     <button
                       className="icon-btn danger"
                       onClick={() => removeSource(feed.id, source.id)}
@@ -3886,6 +3897,7 @@ export default function Reader() {
                     >
                       {Icon.trash}
                     </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -3925,13 +3937,28 @@ export default function Reader() {
               )}
             </div>
           )}
-          <button
-            className="sync-btn"
-            onClick={() => openPanel(setSettingsOpen)}
-          >
-            {Icon.gear}
-            Settings
-          </button>
+          <div className="settings-row">
+            <button
+              className="sync-btn"
+              onClick={() => openPanel(setSettingsOpen)}
+            >
+              {Icon.gear}
+              Settings
+            </button>
+            <button
+              className={`edit-feeds-btn${editingFeeds ? " on" : ""}`}
+              aria-pressed={editingFeeds}
+              aria-label={editingFeeds ? "Done editing feeds" : "Edit feeds"}
+              title={editingFeeds ? "Done editing feeds" : "Edit feeds: move, colour, rename or remove"}
+              onClick={() => {
+                setEditingFeeds((on) => !on);
+                setColoring(null);
+              }}
+            >
+              {editingFeeds ? Icon.check : Icon.pencil}
+            </button>
+          </div>
+
           {auth.account ? (
             // Signed in: everything is kept with the Google account; there is nothing to set up.
             <span className="sync-btn sync-status" title={`Saved to ${auth.account.email}`}>

@@ -2734,3 +2734,13 @@
 .board-thumb .bt-insight > rect:first-child, .board-thumb .bt-suggest > rect:first-child { fill: color-mix(in srgb, var(--accent) 14%, var(--bg)); stroke-dasharray: 10 8; }
 .board-thumb .bt-line { fill: var(--border); stroke: none; }
 .board-thumb .bt-title { fill: var(--text); font-size: 22px; font-weight: 700; }
+
+/* Edit mode: the controls are only there when editing, and then always shown. */
+.sidebar-scroll .feed-head .icon-btn, .sidebar-scroll .source-row .icon-btn.danger { opacity: 1; }
+.edit-feeds-btn { border: 0; background: transparent; color: var(--text-dim); padding: 4px 6px; border-radius: 6px; line-height: 0; cursor: pointer; }
+.edit-feeds-btn:hover { background: var(--bg-hover); color: var(--text); }
+.edit-feeds-btn.on { color: var(--accent); background: var(--accent-soft); }
+.feed-group .drag-grip { opacity: 0.7; }
+
+.settings-row { display: flex; align-items: center; gap: 4px; margin-top: 7px; }
+.settings-row .sync-btn { margin-top: 0; flex: 1; }
