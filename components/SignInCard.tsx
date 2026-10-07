@@ -29,8 +29,8 @@ export default function SignInCard({ onOpenMenu, failed, movedToAccount }: { onO
           kept, and backed up as Google Docs in your own Drive.
         </p>
         <p className="signin-small">
-          Signing in also ties this device&apos;s feeds and sync code to your account. Feeds, saved stories and reading
-          work without signing in, as before.
+          Signing in also keeps your feeds, saved stories, highlights and settings with your account, on every device
+          you sign in on. Without signing in they stay only in this browser.
         </p>
         {movedToAccount && (
           <p className="signin-note">

@@ -33,10 +33,6 @@ async function capture(tab) {
     // Pages that build the article with JavaScript need a moment after "complete".
     await new Promise((r) => setTimeout(r, 1800));
     const { code = "", server = DEFAULT_SERVER } = await chrome.storage.local.get(["code", "server"]);
-    if (!code) {
-      await badge(tab.id, "!", "Open the Super Reader extension and paste your sync code first.");
-      return;
-    }
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["vendor/Readability.js", "extract.js"] });
     // A YouTube video: its transcript, as this browser sees it, is the text.
     const youtube = /(^|\.)youtube\.com$/.test(new URL(tab.url).hostname);
@@ -52,11 +48,12 @@ async function capture(tab) {
     page.selection = "";
     const res = await fetch(`${server.replace(/\/+$/, "")}/api/inbox`, {
       method: "POST",
+      credentials: "include",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code, article: page }),
+      body: JSON.stringify({ ...(code ? { code } : {}), article: page }),
     });
     if (!res.ok) {
-      await badge(tab.id, "!", `Super Reader didn't accept the page (${res.status}).`);
+      await badge(tab.id, "!", res.status === 404 ? "Sign in to Super Reader with Google in this browser first." : `Super Reader didn't accept the page (${res.status}).`);
       return;
     }
     // Back to where the reader asked for it; the article is waiting there.

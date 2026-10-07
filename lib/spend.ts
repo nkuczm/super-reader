@@ -10,6 +10,8 @@
  * it, and each device's runs are its own.
  */
 
+import { isSignedIn } from "./signed-in";
+
 export type AiProvider = "anthropic" | "openai";
 
 export const PROVIDER_NAME: Record<AiProvider, string> = {
@@ -196,17 +198,19 @@ export function idOf(record: SpendRecord): string {
  */
 export async function loadSharedSpend(code: string | null): Promise<{ records: SpendRecord[]; shared: boolean }> {
   const local = loadSpend();
-  if (!code) return { records: local, shared: false };
+  // Signed in, the ledger is the account's (the session is the key); otherwise an old code's.
+  if (isSignedIn()) code = null;
+  else if (!code) return { records: local, shared: false };
   try {
     const records = local.map((r) => ({ ...r, id: idOf(r), device: r.device ?? deviceName() }));
     if (records.length) {
       await fetch("/api/spend", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ code, records: records.slice(-MAX_RECORDS) }),
+        body: JSON.stringify({ ...(code ? { code } : {}), records: records.slice(-MAX_RECORDS) }),
       });
     }
-    const res = await fetch(`/api/spend?code=${encodeURIComponent(code)}`, { cache: "no-store" });
+    const res = await fetch(`/api/spend${code ? `?code=${encodeURIComponent(code)}` : ""}`, { cache: "no-store" });
     if (!res.ok) throw new Error();
     const data = (await res.json()) as { records?: SpendRecord[] };
     return { records: data.records ?? local, shared: true };
@@ -217,11 +221,12 @@ export async function loadSharedSpend(code: string | null): Promise<{ records: S
 
 /** Send one run to the shared ledger as it happens; the page sends any it missed. */
 export function shareSpend(code: string | null, record: SpendRecord) {
-  if (!code) return;
+  if (isSignedIn()) code = null;
+  else if (!code) return;
   void fetch("/api/spend", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ code, records: [record] }),
+    body: JSON.stringify({ ...(code ? { code } : {}), records: [record] }),
     keepalive: true,
   }).catch(() => {});
 }

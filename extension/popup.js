@@ -4,8 +4,9 @@
  * The page is read here, in the reader's own browser, with Mozilla's
  * Readability (the same library the app uses on its server): the text is
  * the copy this browser was given, subscriptions included. It is posted to
- * the app's inbox under the reader's sync code; the app files it into Saved
- * and, if one was chosen, a subject, the next time it syncs.
+ * the app's inbox under the reader's Google sign-in (the app's own session in
+ * this browser) — or, for someone still on an old sync code, that code — and
+ * the app files it into Saved and, if one was chosen, a subject.
  */
 
 const DEFAULT_SERVER = "https://super-reader-wine.vercel.app";
@@ -101,7 +102,7 @@ async function fillSubjects(select, { required, keep = 0 }) {
   const { code, server } = await settings();
   let subjects = [];
   try {
-    const res = await fetch(`${server}/api/inbox?code=${encodeURIComponent(code)}`, { cache: "no-store" });
+    const res = await fetch(`${server}/api/inbox${code ? `?code=${encodeURIComponent(code)}` : ""}`, { cache: "no-store", credentials: "include" });
     const data = res.ok ? await res.json() : {};
     subjects = data.subjects || [];
   } catch {
@@ -190,9 +191,10 @@ $("person-save").addEventListener("click", async () => {
   try {
     const res = await fetch(`${server}/api/inbox`, {
       method: "POST",
+      credentials: "include",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        code,
+        ...(code ? { code } : {}),
         subjectId: choice !== "__new" ? choice : undefined,
         newSubject: newSubject || undefined,
         note: $("person-note").value.trim() || undefined,
@@ -268,7 +270,7 @@ $("save-btn").addEventListener("click", async () => {
   const { code, server } = await settings();
   const choice = $("subject").value;
   const body = {
-    code,
+    ...(code ? { code } : {}),
     article: page,
     subjectId: choice && choice !== "__new" ? choice : undefined,
     newSubject: choice === "__new" ? $("new-subject").value.trim() || undefined : undefined,
@@ -280,6 +282,7 @@ $("save-btn").addEventListener("click", async () => {
   try {
     const res = await fetch(`${server}/api/inbox`, {
       method: "POST",
+      credentials: "include",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
@@ -299,15 +302,22 @@ $("connect").addEventListener("click", async () => {
   const server = ($("server").value.trim() || DEFAULT_SERVER).replace(/\/+$/, "");
   const error = $("setup-error");
   error.hidden = true;
-  if (!code) return;
   try {
     // Another deployment needs permission to talk to it.
     if (server !== DEFAULT_SERVER) {
       const granted = await chrome.permissions.request({ origins: [`${new URL(server).origin}/*`] });
       if (!granted) throw new Error("Permission to reach that server was not given.");
     }
-    const res = await fetch(`${server}/api/inbox?code=${encodeURIComponent(code)}`, { cache: "no-store" });
-    if (!res.ok) throw new Error(res.status === 404 ? "That sync code wasn't found." : `Couldn't reach Super Reader (${res.status}).`);
+    const res = await fetch(`${server}/api/inbox${code ? `?code=${encodeURIComponent(code)}` : ""}`, { cache: "no-store", credentials: "include" });
+    if (!res.ok) {
+      throw new Error(
+        res.status === 404
+          ? code
+            ? "That sync code wasn't found. Sign in to Super Reader with Google instead."
+            : "Not signed in yet: open Super Reader in this browser and sign in with Google."
+          : `Couldn't reach Super Reader (${res.status}).`,
+      );
+    }
     await chrome.storage.local.set({ code, server });
     void start();
   } catch (e) {
@@ -330,9 +340,19 @@ async function start() {
   return startSave();
 }
 
+/** Signed in to Super Reader in this browser: its session reaches the account's inbox, no code needed. */
+async function signedIn(server) {
+  try {
+    const res = await fetch(`${server}/api/inbox`, { cache: "no-store", credentials: "include" });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 (async () => {
   const { code, server } = await settings();
   $("server").value = server;
-  if (code) void start();
+  if (code || (await signedIn(server))) void start();
   else show("setup");
 })();

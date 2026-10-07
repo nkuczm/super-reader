@@ -10,8 +10,9 @@ into a subject, with any selected text as a quote and a note under it.
 2. Click **Load unpacked** and choose this `extension` folder.
 3. Pin it: click the puzzle-piece icon in the toolbar, then the pin beside
    Super Reader.
-4. Click it once and paste your sync code (Super Reader → **Sync across
-   devices**).
+4. Open Super Reader in the same browser and sign in with Google, then click
+   the extension and press **Connect**. (A device still on an old sync code
+   can paste it under "Still using an old sync code?".)
 
 ## Use
 
@@ -24,8 +25,8 @@ the next time you open or return to the app.
 
 The page is read in your browser with Mozilla's Readability
 (`vendor/Readability.js`, Apache 2.0, see `vendor/Readability-LICENSE.md`)
-and posted to `/api/inbox` under your sync code. The app files it on its
-next sync and clears it from the inbox; anything not collected is dropped
+and posted to `/api/inbox` under your Google sign-in (the app's session in
+this browser). The app files it the next time it is open and clears it from the inbox; anything not collected is dropped
 after a week. Nothing is shared or cached publicly.
 
 Updating Readability: `cp node_modules/@mozilla/readability/Readability.js extension/vendor/`.

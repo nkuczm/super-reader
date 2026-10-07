@@ -58,7 +58,7 @@ function DailyBars({ days }: { days: { day: string; cost: number; runs: number }
 
 export default function SpendPage({ onOpenMenu, onBack }: { onOpenMenu?: () => void; onBack?: () => void }) {
   const [records, setRecords] = useState<SpendRecord[]>([]);
-  /** Whether these are every device's runs (through the sync code) or this one's. */
+  /** Whether these are every device's runs (through the account) or this one's. */
   const [shared, setShared] = useState(false);
 
   useEffect(() => {
@@ -149,7 +149,7 @@ export default function SpendPage({ onOpenMenu, onBack }: { onOpenMenu?: () => v
             Estimated from the tokens each run reported ·{" "}
             {shared
               ? `every device on your account${byDevice.length > 1 ? ` (${byDevice.length})` : ""}`
-              : "this device only — turn on Sync across devices to count them all"}
+              : "this device only — sign in with Google to count them all"}
           </p>
         </div>
       </div>

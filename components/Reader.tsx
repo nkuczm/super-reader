@@ -55,6 +55,7 @@ import {
 import type { TeamArticle } from "@/lib/team";
 import { fitForSync, partStamp, type Part, type PartStamps } from "@/lib/sync-doc";
 import { useLibrary } from "./useLibrary";
+import { setSignedIn } from "@/lib/signed-in";
 import type { Library } from "@/lib/library";
 import { takeFromAccount, vaultStamp as vaultStampOf, type AccountPrefs, type Stamps } from "@/lib/prefs-merge";
 import {
@@ -180,7 +181,7 @@ import type { SavedRemoval } from "@/lib/saved";
 import { useAccount, type Writing } from "./useAccount";
 import type { ArticleMark } from "./ArticleReader";
 import type { InboxItem } from "@/lib/inbox";
-import SignInCard, { AccountStrip, describe as describeSave } from "./SignInCard";
+import SignInCard, { AccountStrip, describe as describeSave, signInHref } from "./SignInCard";
 import {
   highlightsOverlapping,
   toggleHighlight,
@@ -404,6 +405,16 @@ export default function Reader() {
   }, []);
 
   const [syncCode, setSyncCode] = useState<string | null>(null);
+  /**
+   * The signed-in Google account, mirrored here so the sync effects above the
+   * account hook can see it. Signed in, everything shared goes to the account
+   * and sync codes are not used at all.
+   */
+  const [accountId, setAccountId] = useState<string | null>(null);
+  /** Whether sign-in has been checked: an old code is used only once it is known nobody is signed in. */
+  const [accountChecked, setAccountChecked] = useState(false);
+  /** This session has folded the device into the account (and dropped any old code). */
+  const joinedAccount = useRef(false);
   const [syncOpen, setSyncOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   // Naming and deleting happen inline in the sidebar rather than in
@@ -412,6 +423,11 @@ export default function Reader() {
   const [editing, setEditing] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  // Subjects are no longer optional, and the plain notes they replaced are
+  // gone: whatever a stored or synced copy says, they are on.
+  useEffect(() => {
+    if (!settings.subjects) setSettings((current) => ({ ...current, subjects: true }));
+  }, [settings.subjects]);
   /** Importance by article id, from the shared story corpus. */
   const [ranking, setRanking] = useState<Map<string, RankedArticle>>(new Map());
   /**
@@ -1102,16 +1118,43 @@ export default function Reader() {
     stampChange();
   }, [positions, ready, stampChange]);
 
-  // Pull once the code is known, and again whenever the window regains focus,
-  // so a device left open picks up changes made elsewhere.
+  // Pull once the account or code is known, and again whenever the window
+  // regains focus, so a device left open picks up changes made elsewhere.
+  //
+  // Signed in, the account is the only place things are kept. The first time
+  // in a session the device joins it (POST /api/account/link): an old sync
+  // code it still had is folded into the account once and forgotten, and
+  // what the account holds is taken with this device's own additions kept.
   useEffect(() => {
-    if (!ready || !syncCode) return;
+    if (!ready || (!accountId && (!syncCode || !accountChecked))) return;
     let cancelled = false;
 
     const sync = async () => {
       setSyncState("working");
       try {
-        await pull(syncCode);
+        if (accountId) {
+          if (!joinedAccount.current) {
+            const res = await fetch("/api/account/link", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ code: loadSyncCode() }),
+            });
+            if (!res.ok) throw new Error("Could not reach your account");
+            const data = await res.json();
+            pulled.current = true;
+            applyRemote(data.payload ?? {}, { joining: true, inAccount: true });
+            joinedAccount.current = true;
+            saveSyncCode(null);
+            setSyncCode(null);
+          } else {
+            const res = await fetch("/api/account/state", { cache: "no-store" });
+            if (!res.ok) throw new Error("Could not reach your account");
+            const data = await res.json();
+            applyRemote(data.payload ?? {}, { inAccount: true });
+          }
+        } else if (syncCode) {
+          await pull(syncCode);
+        }
         if (!cancelled) setSyncState("saved");
       } catch {
         if (!cancelled) setSyncState("error");
@@ -1120,29 +1163,39 @@ export default function Reader() {
 
     sync();
     const last = { current: Date.now() };
+    // Not joined yet (it failed): try again on the very next focus.
     const onFocus = onFocusEvery(() => void sync(), last);
-    window.addEventListener("focus", onFocus);
+    const onFocusNow = () => {
+      if (accountId && !joinedAccount.current) void sync();
+      else onFocus();
+    };
+    window.addEventListener("focus", onFocusNow);
+    window.addEventListener("online", onFocusNow);
     return () => {
       cancelled = true;
-      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("focus", onFocusNow);
+      window.removeEventListener("online", onFocusNow);
     };
-  }, [ready, syncCode, pull]);
+    // syncCode is dropped on joining; that must not start another round.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, accountId, accountId ? null : syncCode, accountChecked, pull, applyRemote]);
 
   // Push local changes, debounced so a burst of edits is one request.
   useEffect(() => {
-    if (!ready || !syncCode || applying.current) return;
+    if (!ready || (!accountId && (!syncCode || !accountChecked)) || applying.current) return;
+    if (accountId && !joinedAccount.current) return; // never before joining the account
     if (!pulled.current) return; // never before knowing what is out there
     if (updatedAt === 0 || updatedAt <= pushedAt.current) return;
 
     const timer = setTimeout(async () => {
       setSyncState("working");
       try {
-        const res = await fetch("/api/sync", {
+        const res = await fetch(accountId ? "/api/account/state" : "/api/sync", {
           method: "PUT",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(
             fitForSync({
-              code: syncCode,
+              ...(accountId ? {} : { code: syncCode }),
               feeds,
               read: [...read],
               // Trimmed: the newest few hundred, the summaries short. The rest
@@ -1193,96 +1246,26 @@ export default function Reader() {
     teams,
     ready,
     syncCode,
+    accountId,
+    accountChecked,
     vault,
     updatedAt,
     applyRemote,
   ]);
 
-  const startSync = useCallback(async () => {
-    setSyncState("working");
-    const res = await fetch("/api/sync", { method: "POST" });
-    const data = await res.json();
-    if (!res.ok) {
-      setSyncState("error");
-      throw new Error(data.error ?? "Could not start syncing");
-    }
-
-    // Upload what this device already has *before* the code goes live,
-    // otherwise the first pull would overwrite these feeds with the empty
-    // record we just created. Bookmarks go with it: turning sync on should
-    // carry the list that is already here, not wait for the next change to
-    // it. (Named `upload`, not `saved` — that name is the bookmark list.)
-    const upload = await fetch("/api/sync", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(
-        fitForSync({
-          code: data.code,
-          feeds,
-          read: [...read],
-          saved: slimForSync(saved),
-          savedRemovals,
-          watchMarks,
-          positions: slimPositionsForSync(positions),
-          ...(signedInRef.current
-            ? {}
-            : { notes: slimNotesForSync(notes), noteRemovals, boards: slimBoardsForSync(boards) }),
-          manual: slimManualForSync(manual),
-          highlights: slimHighlightsForSync(highlights),
-          prefs,
-          teams,
-          vault,
-          stamps: partStampsRef.current,
-          updatedAt: Math.max(Date.now(), updatedAtRef.current + 1),
-        }),
-      ),
-    });
-    if (!upload.ok) {
-      setSyncState("error");
-      throw new Error("Could not upload this device's feeds");
-    }
-
-    saveSyncCode(data.code);
-    setSyncCode(data.code);
-    setSyncState("saved");
-  }, [
-    feeds,
-    read,
-    saved,
-    savedRemovals,
-    watchMarks,
-    positions,
-    notes,
-    noteRemovals,
-    boards,
-    manual,
-    highlights,
-    prefs,
-    teams,
-    vault,
-  ]);
-
-  const connectSync = useCallback(
-    async (entered: string) => {
-      setSyncState("working");
-      try {
-        await pull(entered, entered !== loadSyncCode());
-      } catch (error) {
-        setSyncState("error");
-        throw error;
-      }
-      saveSyncCode(entered);
-      setSyncCode(entered);
-      setSyncState("saved");
-    },
-    [pull],
-  );
+  // New sync codes are no longer made, nor entered: signing in with Google
+  // replaced them. A device that already had one keeps using it until it signs in.
 
   /** An earlier feed list (kept on the server): what it had that this one lacks is added back. */
   const restoreFeeds = useCallback(
     async (id: string) => {
-      if (!syncCode) throw new Error("This device isn't syncing.");
-      const res = await fetch(`/api/sync/history?code=${encodeURIComponent(syncCode)}&id=${encodeURIComponent(id)}`, { cache: "no-store" });
+      const url = accountId
+        ? `/api/account/state/history?id=${encodeURIComponent(id)}`
+        : syncCode
+          ? `/api/sync/history?code=${encodeURIComponent(syncCode)}&id=${encodeURIComponent(id)}`
+          : null;
+      if (!url) throw new Error("Sign in to keep earlier feed lists.");
+      const res = await fetch(url, { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.version) throw new Error(data.error ?? "Could not load that feed list");
       const count = (list: Feed[]) => list.reduce((n, feed) => n + feed.sources.length, 0);
@@ -1301,7 +1284,7 @@ export default function Reader() {
       }
       return { folders: next.length - before.length, sources: count(next) - count(before), teams: teamsNext.length - teamsBefore.length };
     },
-    [syncCode],
+    [syncCode, accountId],
   );
 
   /** Merge the account's copy of the writing into this device's. */
@@ -1328,24 +1311,16 @@ export default function Reader() {
     }
   }, []);
 
-  const startSyncRef = useRef(startSync);
-  startSyncRef.current = startSync;
-  /** The account's sync code becomes this device's; with none, one is made. */
-  const adoptCode = useCallback(
-    async (code: string | null) => {
-      if (code) {
-        await connectSync(code);
-        return code;
-      }
-      await startSyncRef.current();
-      return loadSyncCode();
-    },
-    [connectSync],
-  );
-
   const writing = useMemo<Writing>(() => ({ notes, noteRemovals, boards }), [notes, noteRemovals, boards]);
-  const auth = useAccount({ ready, syncCode, writing, applyWriting, adoptCode });
+  const auth = useAccount({ ready, writing, applyWriting });
   signedInRef.current = Boolean(auth.account);
+  useEffect(() => {
+    const id = auth.account?.id ?? null;
+    if (!id) joinedAccount.current = false;
+    setAccountId(id);
+    setSignedIn(Boolean(id));
+    if (auth.checked) setAccountChecked(true);
+  }, [auth.account, auth.checked]);
 
   /*
    * Signed in, every bookmark, pasted story and highlight is also kept with
@@ -1382,8 +1357,8 @@ export default function Reader() {
     }
   }, []);
   useLibrary({ account: auth.account?.id ?? null, library, apply: applyLibrary });
-  /** Subjects need a Google sign-in, wherever sign-in is set up — except here before it was. */
-  const subjectsLocked = auth.enabled && auth.checked && !auth.account && (!grandfathered || writingInAccount);
+  /** Subjects need a Google sign-in, wherever sign-in is set up: they are saved only to the account. */
+  const subjectsLocked = auth.enabled && auth.checked && !auth.account;
 
   // This device's storage refusing the writing is the one failure that can lose work: say so plainly.
   const [storageFull, setStorageFull] = useState(false);
@@ -2274,10 +2249,11 @@ export default function Reader() {
   );
 
   const checkInbox = useCallback(async () => {
-    const code = syncCode;
-    if (!code) return;
+    // Signed in, the inbox is the account's (the session is the key); otherwise an old code's.
+    const code = accountId ? null : syncCode;
+    if (!accountId && !code) return;
     try {
-      const res = await fetch(`/api/inbox?code=${encodeURIComponent(code)}`, { cache: "no-store" });
+      const res = await fetch(`/api/inbox${code ? `?code=${encodeURIComponent(code)}` : ""}`, { cache: "no-store" });
       if (!res.ok) return;
       const data = (await res.json()) as { items?: InboxItem[] };
       const items = data.items ?? [];
@@ -2286,7 +2262,7 @@ export default function Reader() {
       await fetch("/api/inbox", {
         method: "DELETE",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ code, ids: items.map((i) => i.id) }),
+        body: JSON.stringify({ ...(code ? { code } : {}), ids: items.map((i) => i.id) }),
       });
       setPasteNotice({
         kind: "done",
@@ -2300,30 +2276,30 @@ export default function Reader() {
     } catch {
       /* the next visit tries again */
     }
-  }, [syncCode, fileFromExtension]);
+  }, [syncCode, accountId, fileFromExtension]);
 
   // Collected on arrival and whenever the window comes back into view.
   useEffect(() => {
-    if (!ready || !syncCode) return;
+    if (!ready || (!syncCode && !accountId)) return;
     void checkInbox();
     const onFocus = onFocusEvery(() => void checkInbox(), { current: Date.now() });
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [ready, syncCode, checkInbox]);
+  }, [ready, syncCode, accountId, checkInbox]);
 
   // The extension offers subjects by name; leave it the current list.
   const subjectIndex = useMemo(() => JSON.stringify(notes.map((n) => ({ id: n.id, name: n.name }))), [notes]);
   useEffect(() => {
-    if (!ready || !syncCode) return;
+    if (!ready || (!syncCode && !accountId)) return;
     const timer = setTimeout(() => {
       void fetch("/api/inbox", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ code: syncCode, subjects: JSON.parse(subjectIndex) }),
+        body: JSON.stringify({ ...(accountId ? {} : { code: syncCode }), subjects: JSON.parse(subjectIndex) }),
       }).catch(() => {});
     }, 2000);
     return () => clearTimeout(timer);
-  }, [ready, syncCode, subjectIndex]);
+  }, [ready, syncCode, accountId, subjectIndex]);
 
   /**
    * A highlighted passage becomes a quote, and the article behind it becomes
@@ -3627,8 +3603,8 @@ export default function Reader() {
 
           {/* Notes sit with Saved and the team feeds: places things are kept,
               above the feeds things arrive in. */}
-          {/* With Subjects on, one entry leads to all of them. */}
-          {settings.subjects && (
+          {/* One entry leads to every subject. */}
+          {(
             <button
               className={`nav-item ${selection.type === "subjects" || selection.type === "note" ? "active" : ""}`}
               onClick={() => choose({ type: "subjects" })}
@@ -3637,85 +3613,6 @@ export default function Reader() {
               <span className="feed-name">Subjects</span>
               <span className="count">{notes.length || ""}</span>
             </button>
-          )}
-          {!settings.subjects && (notes.length > 0 || addingNote) && (
-            <div className="notes-nav">
-              {notes.map((note) => (
-                <div className="note-row" key={note.id}>
-                  {editingNote === note.id ? (
-                    <InlineName
-                      initial={note.name}
-                      onSubmit={(value) => {
-                        commitNotes((current) => renameNote(current, note.id, value));
-                        setEditingNote(null);
-                      }}
-                      onCancel={() => setEditingNote(null)}
-                    />
-                  ) : confirmingNote === note.id ? (
-                    <div className="confirm-row">
-                      <span>Delete “{note.name}”?</span>
-                      <button
-                        className="link-btn danger"
-                        onClick={() => removeNote(note.id)}
-                      >
-                        Delete
-                      </button>
-                      <button
-                        className="link-btn"
-                        onClick={() => setConfirmingNote(null)}
-                      >
-                        Keep
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <button
-                        className={`nav-item ${
-                          selection.type === "note" && selection.id === note.id
-                            ? "active"
-                            : ""
-                        }`}
-                        onClick={() => choose({ type: "note", id: note.id })}
-                        onDoubleClick={() => setEditingNote(note.id)}
-                        title="Double-click to rename"
-                      >
-                        {Icon.note}
-                        <span className="feed-name">{note.name}</span>
-                        <span className="count">
-                          {note.entries.filter((entry) => entry.kind === "quote")
-                            .length || ""}
-                        </span>
-                      </button>
-                      <button
-                        className="icon-btn"
-                        onClick={() => setEditingNote(note.id)}
-                        aria-label={`Rename ${note.name}`}
-                      >
-                        {Icon.pencil}
-                      </button>
-                      <button
-                        className="icon-btn danger"
-                        onClick={() => setConfirmingNote(note.id)}
-                        aria-label={`Delete ${note.name}`}
-                      >
-                        {Icon.trash}
-                      </button>
-                    </>
-                  )}
-                </div>
-              ))}
-              {addingNote && (
-                <InlineName
-                  placeholder="Name this note"
-                  onSubmit={(value) => {
-                    const name = value.trim();
-                    setAddingNote(false);
-                    if (name) choose({ type: "note", id: createNote(name) });
-                  }}
-                  onCancel={() => setAddingNote(false)}
-                />
-              )}
-            </div>
           )}
 
           {feeds.map((feed) => {
@@ -3909,20 +3806,24 @@ export default function Reader() {
             {Icon.gear}
             Settings
           </button>
-          <button
-            className="sync-btn"
-            onClick={() => openPanel(setSyncOpen)}
-            title={syncCode ? "Syncing across devices" : "Sync across devices"}
-          >
-            <span className={`sync-dot ${syncCode ? syncState : "off"}`} />
-            {syncCode
-              ? syncState === "working"
-                ? "Syncing…"
-                : syncState === "error"
-                  ? "Sync problem"
-                  : "Synced"
-              : "Sync across devices"}
-          </button>
+          {auth.account ? (
+            // Signed in: everything is kept with the Google account; there is nothing to set up.
+            <span className="sync-btn sync-status" title={`Saved to ${auth.account.email}`}>
+              <span className={`sync-dot ${syncState === "error" ? "error" : syncState === "working" ? "working" : "saved"}`} />
+              {syncState === "error" ? "Can't reach your account" : syncState === "working" ? "Saving…" : "Saved to Google"}
+            </span>
+          ) : syncCode ? (
+            // A device still on an old sync code, until it signs in.
+            <button className="sync-btn" onClick={() => openPanel(setSyncOpen)} title="Syncing with an old sync code">
+              <span className={`sync-dot ${syncState}`} />
+              {syncState === "working" ? "Syncing…" : syncState === "error" ? "Sync problem" : "Synced"}
+            </button>
+          ) : auth.enabled ? (
+            <a className="sync-btn signin-nudge" href={signInHref()} title="Your feeds and work are kept only in this browser until you sign in">
+              <span className="sync-dot off" />
+              Sign in to save across devices
+            </a>
+          ) : null}
         </div>
       </aside>
 
@@ -4686,6 +4587,7 @@ export default function Reader() {
           onKeysChange={updateKeys}
           signedIn={Boolean(auth.account)}
           onPrefsRestored={() => void syncAccountPrefs()}
+          onRestoreFeeds={restoreFeeds}
           onDownload={runDownload}
           noteCount={notes.length}
           teams={teams}
@@ -4696,12 +4598,9 @@ export default function Reader() {
         />
       )}
 
-      {syncOpen && (
+      {syncOpen && syncCode && !auth.account && (
         <SyncDialog
           code={syncCode}
-          busy={syncState === "working"}
-          onCreate={startSync}
-          onConnect={connectSync}
           onDisconnect={stopSync}
           onRestore={restoreFeeds}
           onClose={() => setSyncOpen(false)}
