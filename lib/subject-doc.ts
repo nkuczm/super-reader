@@ -16,28 +16,64 @@ import {
   contactsOf,
   safeImage,
   composeCardDoc,
+  drawingSvg,
   escapeHtml,
   live,
   sanitizeRichText,
   tabOf,
   tabsOf,
+  textOf,
   type Board,
   type BoxItem,
+  type Card,
   type InsightItem,
   type SuggestItem,
 } from "./subjects";
 
 const LABEL: Record<InsightItem["type"], string> = { connection: "Connection", question: "Question", deeper: "Deeper" };
 
-function unlinkQuotes(html: string, board?: Board) {
+/**
+ * How a drawing is written out. A Google Doc does not keep an SVG picture,
+ * so the export names it; a printed page shows it.
+ */
+type Drawings = "named" | "shown";
+
+function unlinkQuotes(html: string, board?: Board, drawings: Drawings = "named") {
   return sanitizeRichText(html)
     .replace(/<a data-quote="[^"]+">([\s\S]*?)<\/a>/g, "$1")
     .replace(/<img data-embed="([^"]+)">/g, (_, id: string) => {
       const item = board?.[id];
       if (!item || item.kind !== "box") return "";
       const image = safeImage(item.image);
-      return image ? `<img src="${image}" alt="" style="max-width:100%">` : item.drawing ? "<i>[A drawing]</i>" : "";
+      if (image) return `<img src="${image}" alt="" style="max-width:100%">`;
+      if (!item.drawing) return "";
+      return drawings === "shown" ? `<img src="${drawingSvg(item)}" alt="A drawing" style="max-width:100%">` : "<i>[A drawing]</i>";
     });
+}
+
+/** A story as written up: its headline, linked, the byline, then the quotes and notes. */
+export function cardHtml(card: Pick<Card, "link" | "title" | "note" | "quotes" | "publishedAt" | "author" | "source">, board?: Board, drawings: Drawings = "named"): string {
+  const byline = bylineOf(card);
+  return (
+    `<h3><a href="${escapeHtml(card.link)}">${escapeHtml(card.title)}</a></h3>` +
+    (byline ? `<p><i>${escapeHtml(byline)}</i></p>` : "") +
+    unlinkQuotes(composeCardDoc(card.note, card.quotes), board, drawings)
+  );
+}
+
+/** A box as written up: a section heading, picture, transcript, table, drawing or text. */
+export function boxHtml(box: BoxItem, board?: Board, drawings: Drawings = "named"): string {
+  if (box.label) return `<h2 class="section">${escapeHtml(textOf(box.html).trim())}</h2>`;
+  const image = safeImage(box.image);
+  if (image) return `<p><img src="${image}" alt="" style="max-width:100%"></p>${box.caption ? `<p><i>${escapeHtml(box.caption)}</i></p>` : ""}`;
+  if (box.transcript) return transcriptHtml(box.transcript, box.transcriptTabs);
+  if (box.table) return tableCardHtml(box);
+  if (box.drawing) {
+    return drawings === "shown"
+      ? `<p><img src="${drawingSvg(box)}" alt="A drawing" style="max-width:100%"></p>`
+      : "<p><i>[A drawing — open the subject in Super Reader to see it]</i></p>";
+  }
+  return unlinkQuotes(box.html, board, drawings);
 }
 
 export function subjectHtml(note: Note, board: Board | undefined, now = new Date()): string {
@@ -57,19 +93,8 @@ export function subjectHtml(note: Note, board: Board | undefined, now = new Date
     const tabBoxes = boxes.filter((box) => !box.embedded && tabOf(board, box.id, tabs) === tab.id);
     if (tabs.length > 1) parts.push(`<h2>${escapeHtml(tab.name)}</h2>`);
     if (tabCards.length === 0 && tabBoxes.length === 0) parts.push("<p><i>Empty</i></p>");
-    for (const card of tabCards) {
-      parts.push(`<h3><a href="${escapeHtml(card.link)}">${escapeHtml(card.title)}</a></h3>`);
-      if (bylineOf(card)) parts.push(`<p><i>${escapeHtml(bylineOf(card))}</i></p>`);
-      parts.push(unlinkQuotes(composeCardDoc(card.note, card.quotes), board));
-    }
-    for (const box of tabBoxes) {
-      const image = safeImage(box.image);
-      if (image) parts.push(`<p><img src="${image}" alt="" style="max-width:100%"></p>${box.caption ? `<p><i>${escapeHtml(box.caption)}</i></p>` : ""}`);
-      else if (box.transcript) parts.push(transcriptHtml(box.transcript, box.transcriptTabs));
-      else if (box.table) parts.push(tableCardHtml(box));
-      else if (box.drawing) parts.push("<p><i>[A drawing — open the subject in Super Reader to see it]</i></p>");
-      else parts.push(unlinkQuotes(box.html, board));
-    }
+    for (const card of tabCards) parts.push(cardHtml(card, board));
+    for (const box of tabBoxes) parts.push(box.label ? unlinkQuotes(box.html, board) : boxHtml(box, board));
   }
   const contacts = contactsOf(board);
   if (contacts.length > 0) {

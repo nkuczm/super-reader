@@ -12,7 +12,8 @@ import { EXTRACT_VERSION } from "@/lib/offline";
 import SubjectContacts from "./SubjectContacts";
 import { tableWidth } from "./TableBox";
 import { DrawingPad, ImageView, TableBox, TranscriptBox, shrinkImage, DRAWING_HEIGHT, type AiSearch } from "./SubjectMedia";
-import { tableCardHtml, transcriptHtml } from "@/lib/subject-doc";
+import { boxHtml, cardHtml, tableCardHtml, transcriptHtml } from "@/lib/subject-doc";
+import { printHtml, printPage } from "@/lib/print";
 import type { Writing } from "./useAccount";
 import type { Note, NoteEntry } from "@/lib/notes";
 import { omissionsHtml, putFactNotes, researchOf, scriptQuotes, scriptRows, type FactCheckResult, type SourceTarget } from "@/lib/factcheck";
@@ -130,6 +131,11 @@ const INSIGHT_LABEL: Record<InsightItem["type"], string> = {
  * suggested reading last. The whiteboard lays the same cards out on a canvas
  * where they can be moved and joined with lines.
  */
+const PRINT_ICON = (
+  <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+    <path d="M7 9V3h10v6M7 17H4v-6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v6h-3M7 14h10v7H7z" />
+  </svg>
+);
 const NEW_TABLE = () => [["", "", ""], ["", "", ""], ["", "", ""]];
 
 /** Blocks copied on the whiteboard, as the clipboard carries them between subjects. */
@@ -557,6 +563,48 @@ export default function SubjectPage(props: Props) {
    * formatting. Quote links are an id of this app's, so only their words go.
    */
   const [copied, setCopied] = useState(false);
+
+  /**
+   * Printing. A tab prints as the document reads — each section heading,
+   * then what is linked under it — with drawings drawn and quote links
+   * reduced to their words; every tab prints one after another; a single
+   * story (with its notes), text box or table prints on its own.
+   */
+  const printedOn = () => `Printed ${new Date().toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })}`;
+  const tabPrintHtml = (tabId: string) => {
+    const entries = [
+      ...allCards
+        .filter((card) => tabOf(board, card.id, tabs) === tabId)
+        .map((card) => ({ id: card.id, at: card.at, html: cardHtml(card, board, "shown") })),
+      ...items
+        .filter((item): item is BoxItem => item.kind === "box" && !item.embedded && tabOf(board, item.id, tabs) === tabId)
+        .map((box) => ({ id: box.id, at: box.at, label: box.label, html: boxHtml(box, board, "shown") })),
+    ];
+    const byId = new Map(entries.map((entry) => [entry.id, entry]));
+    return documentOrder(entries, board).map((id) => `<div class="print-block">${byId.get(id)!.html}</div>`).join("");
+  };
+  const printDoc = (every: boolean) => {
+    const chosen = every ? tabs : tabs.filter((tab) => tab.id === currentTab);
+    const body = chosen
+      .map((tab) => `${every && tabs.length > 1 ? `<h2 class="tab">${escapeHtml(tab.name)}</h2>` : ""}${tabPrintHtml(tab.id) || "<p><i>Empty</i></p>"}`)
+      .join("");
+    const shownInsights = every ? items.filter((item): item is InsightItem => item.kind === "insight") : insights;
+    const insightList = shownInsights.length
+      ? `<div class="print-insights"><h2>Insights</h2><ul>${shownInsights.map((i) => `<li><b>${INSIGHT_LABEL[i.type]}:</b> ${escapeHtml(i.text)}</li>`).join("")}</ul></div>`
+      : "";
+    const tabName = tabs.find((tab) => tab.id === currentTab)?.name;
+    const sub = [!every && tabs.length > 1 ? tabName : "", printedOn()].filter(Boolean).join(" · ");
+    printHtml(printPage(note.name, sub, body + insightList));
+  };
+  const printItem = (id: string) => {
+    const card = allCards.find((c) => c.id === id);
+    const item = board?.[id];
+    const box = item && item.kind === "box" ? item : undefined;
+    if (!card && !box) return;
+    const html = card ? cardHtml(card, board, "shown") : boxHtml(box!, board, "shown");
+    printHtml(printPage(note.name, printedOn(), html));
+  };
+
   const copyTab = async () => {
     const tabName = tabs.find((tab) => tab.id === currentTab)?.name;
     const unlinkQuotes = (html: string) => sanitizeRichText(html).replace(/<a data-quote="[^"]+">([\s\S]*?)<\/a>/g, "$1");
@@ -751,6 +799,7 @@ export default function SubjectPage(props: Props) {
         return put(current, { ...base, ...change, at: Date.now() });
       }),
     removeBox: (box: BoxItem) => removeCards([box.id]),
+    printItem,
     removeCards,
     recordOp,
     stepHistory,
@@ -1030,6 +1079,12 @@ export default function SubjectPage(props: Props) {
                 </div>
                 <button role="menuitem" title="Copy this tab as formatted text, for Google Docs and the like"
                   onClick={() => { close(); void copyTab(); }}>Copy this tab</button>
+                <button role="menuitem" title="Print this tab as the document reads, or save it as a PDF"
+                  onClick={() => { close(); printDoc(false); }}>{tabs.length > 1 ? "Print this tab" : "Print"}</button>
+                {tabs.length > 1 && (
+                  <button role="menuitem" title="Print every tab, one after another"
+                    onClick={() => { close(); printDoc(true); }}>Print every tab</button>
+                )}
                 {props.onToggleHideBoxes && (
                   <button role="menuitemcheckbox" aria-checked={Boolean(props.hideBoxes)} onClick={props.onToggleHideBoxes}>
                     Hide boxes{props.hideBoxes && <span className="more-check">✓</span>}
@@ -1163,6 +1218,8 @@ export default function SubjectPage(props: Props) {
 }
 
 type Shared = {
+  /** Print one story (with its notes), text box or table on its own. */
+  printItem: (id: string) => void;
   tabs: Tab[];
   currentTab: string;
   moveCard: (target: string, tab: string) => void;
@@ -1294,6 +1351,10 @@ function StoryCard({
             ))}
           </select>
         )}
+        <button className="icon-btn subtle print-btn" aria-label="Print this story and its notes" title="Print this story and its notes"
+          onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.printItem(card.id)}>
+          {PRINT_ICON}
+        </button>
         <button className="icon-btn subtle" aria-label="Remove story from subject" title="Remove from subject"
           onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.removeCard(card)}>
           {Icon.close}
@@ -1403,6 +1464,12 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
               </span>
             )}
           </span>
+        )}
+        {!box.label && (
+          <button className="icon-btn subtle print-btn" aria-label={`Print this ${box.table ? "table" : box.transcript ? "transcript" : box.drawing ? "drawing" : box.image !== undefined ? "image" : "text"}`}
+            title="Print this on its own" onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.printItem(box.id)}>
+            {PRINT_ICON}
+          </button>
         )}
         <button className="icon-btn subtle" aria-label="Delete text box" onPointerDown={(e) => e.stopPropagation()}
           onClick={() => shared.removeBox(box)}>
