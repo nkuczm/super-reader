@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "./icons";
 import RichText from "./RichText";
+import SubjectChoices from "./SubjectChoices";
 import { cleanQuoteText, type Note } from "@/lib/notes";
 
 type Placed = { text: string; top: number; left: number };
@@ -299,16 +300,7 @@ export default function QuoteToNote({
             </div>
           ) : (
             <div className="quote-menu" role="menu">
-              {notes.map((note) => (
-                <button
-                  key={note.id}
-                  role="menuitem"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => finish(note.id, note.name, placed.text)}
-                >
-                  {note.name}
-                </button>
-              ))}
+              <SubjectChoices notes={notes} keepSelection onPick={(note) => finish(note.id, note.name, placed.text)} />
               <div className="quote-new">
                 <input
                   className="input"
@@ -345,17 +337,7 @@ export default function QuoteToNote({
         <div className="quote-toast" role="status" ref={toast}>
           {changing && (
             <div className="quote-menu toast-menu" role="menu">
-              {notes
-                .filter((note) => note.id !== added.noteId)
-                .map((note) => (
-                  <button
-                    key={note.id}
-                    role="menuitem"
-                    onClick={() => moveTo(note.id, note.name)}
-                  >
-                    {note.name}
-                  </button>
-                ))}
+              <SubjectChoices notes={notes.filter((note) => note.id !== added.noteId)} onPick={(note) => moveTo(note.id, note.name)} />
               <div className="quote-new">
                 <input
                   className="input"

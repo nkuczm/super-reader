@@ -2433,9 +2433,11 @@ export default function Reader() {
         saveSaved(next);
         return next;
       });
+      // The subject just quoted into is the one offered first next time.
+      touchSubject(noteId);
       return entryId;
     },
-    [reading, articles, allSources, commitNotes],
+    [reading, articles, allSources, commitNotes, touchSubject],
   );
 
   /**
@@ -2447,8 +2449,9 @@ export default function Reader() {
   const moveQuote = useCallback(
     (entryId: string, toNoteId: string) => {
       commitNotes((current) => moveEntry(current, entryId, toNoteId));
+      touchSubject(toNoteId);
     },
-    [commitNotes],
+    [commitNotes, touchSubject],
   );
 
   const removeNote = useCallback(
