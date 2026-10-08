@@ -2767,3 +2767,8 @@
 .source-runs .run-bad { color: var(--danger); }
 .source-url { word-break: break-all; }
 @media (max-width: 640px) { .source-panel { padding: 8px 16px 4px; } }
+/* Print one block: beside its close button, not adrift in the middle of the head. */
+.subject-box-head .print-btn { margin-left: auto; }
+.print-btn svg { display: block; }
+/* The old words, then the new, with a breath between so they do not run together. */
+.cmp-table del.cmp-del + ins.cmp-ins { margin-left: 0.3em; }

@@ -10,11 +10,22 @@ export type Piece = { kind: "same" | "del" | "ins"; text: string };
 const tokens = (s: string) => s.match(/\s+|[\p{L}\p{N}'’]+|[^\s\p{L}\p{N}]/gu) ?? [];
 
 /**
- * The word-level difference from `a` to `b`: a longest-common-subsequence
- * over words, with neighbouring pieces of the same kind joined. Long cells
- * fall back to the whole cell replaced, to keep it quick.
+ * The word-level difference from `a` to `b`, as it reads best: every change
+ * shown as what was there, then what replaced it — never old and new words
+ * shuffled together. See `readable()`.
  */
 export function wordDiff(a: string, b: string): Piece[] {
+  return readable(exactDiff(a, b));
+}
+
+/**
+ * The exact word-level difference: a longest-common-subsequence over words,
+ * with neighbouring pieces of the same kind joined. Long cells fall back to
+ * the whole cell replaced, to keep it quick. Exact, which is what counting
+ * words needs, but not how a change should be read: a rewritten phrase comes
+ * out as "~~quick~~ slow brown ~~fox~~ dog", old and new words interleaved.
+ */
+function exactDiff(a: string, b: string): Piece[] {
   if (a === b) return a ? [{ kind: "same", text: a }] : [];
   const x = tokens(a);
   const y = tokens(b);
@@ -40,8 +51,121 @@ export function wordDiff(a: string, b: string): Piece[] {
   }
   while (i < n) push("del", x[i++]);
   while (j < m) push("ins", y[j++]);
-  // A space between a deletion and an insertion reads better inside the change than as unchanged text.
   return out;
+}
+
+const wordsIn = (s: string) => s.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu)?.length ?? 0;
+/** Unchanged text this short, between two changes, reads as part of one change. */
+const ABSORB_WORDS = 2;
+/** A sentence this much rewritten reads better as the old sentence, then the new. */
+const REWRITE_SHARE = 0.5;
+/** …as does one changed in this many separate places. */
+const REWRITE_PLACES = 3;
+
+/** Joined: neighbours of one kind become one piece, empty pieces go. */
+function joined(pieces: Piece[]): Piece[] {
+  const out: Piece[] = [];
+  for (const p of pieces) {
+    if (!p.text) continue;
+    const last = out[out.length - 1];
+    if (last && last.kind === p.kind) last.text += p.text;
+    else out.push({ ...p });
+  }
+  return out;
+}
+
+/** A sentence ends at . ! or ? (with any closing quote or bracket) and the space after it. */
+function splitSentences(pieces: Piece[]): Piece[][] {
+  const sentences: Piece[][] = [];
+  let current: Piece[] = [];
+  for (const p of pieces) {
+    if (p.kind !== "same") {
+      current.push(p);
+      continue;
+    }
+    const ends = /[.!?]["”’)\]]*\s+/g;
+    let from = 0;
+    for (let m = ends.exec(p.text); m; m = ends.exec(p.text)) {
+      const to = m.index + m[0].length;
+      current.push({ kind: "same", text: p.text.slice(from, to) });
+      sentences.push(current);
+      current = [];
+      from = to;
+    }
+    if (from < p.text.length) current.push({ kind: "same", text: p.text.slice(from) });
+  }
+  if (current.length) sentences.push(current);
+  return sentences;
+}
+
+/**
+ * One sentence's changes, each as one deletion followed by one insertion.
+ * Unchanged text of a word or two between changes joins them — it goes into
+ * both sides, so neither the old nor the new text changes — and a sentence
+ * mostly rewritten, or changed all over, is shown whole: old, then new.
+ */
+function groupSentence(sentence: Piece[]): Piece[] {
+  // A short unchanged run between two changes is part of the change.
+  const marked = sentence.map((p, k) => {
+    if (p.kind !== "same") return { ...p, absorbed: false };
+    const before = sentence.slice(0, k).some((q) => q.kind !== "same");
+    const after = sentence.slice(k + 1).some((q) => q.kind !== "same");
+    const short = wordsIn(p.text) <= ABSORB_WORDS && p.text.length <= 24;
+    return { ...p, absorbed: before && after && short && k > 0 && k < sentence.length - 1 };
+  });
+
+  const out: Piece[] = [];
+  let del = "";
+  let ins = "";
+  let places = 0;
+  const flush = () => {
+    if (del || ins) places += 1;
+    if (del) out.push({ kind: "del", text: del });
+    if (ins) out.push({ kind: "ins", text: ins });
+    del = "";
+    ins = "";
+  };
+  for (const p of marked) {
+    if (p.kind === "same" && !p.absorbed) {
+      flush();
+      out.push({ kind: "same", text: p.text });
+    } else {
+      if (p.kind !== "ins") del += p.text;
+      if (p.kind !== "del") ins += p.text;
+    }
+  }
+  flush();
+
+  const was = sentence.filter((p) => p.kind !== "ins").map((p) => p.text).join("");
+  const now = sentence.filter((p) => p.kind !== "del").map((p) => p.text).join("");
+  const changed = sentence.reduce((n, p) => n + (p.kind === "same" ? 0 : wordsIn(p.text)), 0);
+  const total = wordsIn(was) + wordsIn(now);
+  const both = out.some((p) => p.kind === "del") && out.some((p) => p.kind === "ins");
+  if (!both || total === 0 || (changed / total < REWRITE_SHARE && places < REWRITE_PLACES)) return out;
+
+  // Rewritten: the whole sentence as it was, then as it is. Spacing around
+  // it, which both versions share, stays unmarked.
+  const lead = (s: string) => s.match(/^\s*/)![0];
+  const trail = (s: string) => s.match(/\s*$/)![0];
+  const head = lead(was) === lead(now) ? lead(was) : "";
+  const tail = trail(was) === trail(now) ? trail(was) : "";
+  const inner = (s: string) => s.slice(head.length, s.length - tail.length);
+  return [
+    { kind: "same", text: head },
+    { kind: "del", text: inner(was) },
+    { kind: "ins", text: inner(now) },
+    { kind: "same", text: tail },
+  ];
+}
+
+/**
+ * A diff as a person reads one: within each sentence, every change is the
+ * old words struck through and then the new ones, together, instead of the
+ * two alternating word by word. The text is untouched — all but the
+ * insertions is still the old text, and all but the deletions the new.
+ */
+export function readable(pieces: Piece[]): Piece[] {
+  return joined(splitSentences(pieces).flatMap(groupSentence));
 }
 
 export type RowPair =
@@ -97,14 +221,14 @@ export function diffSummary(a: string[][], b: string[][]) {
   let removed = 0;
   let rowsAdded = 0;
   let rowsRemoved = 0;
-  const count = (s: string) => s.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu)?.length ?? 0;
+  const count = wordsIn;
   for (const pair of alignRows(a, b)) {
     if (pair.kind === "added") { rowsAdded++; added += b[pair.b].reduce((n, c) => n + count(c), 0); }
     else if (pair.kind === "removed") { rowsRemoved++; removed += a[pair.a].reduce((n, c) => n + count(c), 0); }
     else if (pair.kind === "changed") {
       const cols = Math.max(a[pair.a].length, b[pair.b].length);
       for (let c = 0; c < cols; c++) {
-        for (const p of wordDiff(a[pair.a][c] ?? "", b[pair.b][c] ?? "")) {
+        for (const p of exactDiff(a[pair.a][c] ?? "", b[pair.b][c] ?? "")) {
           if (p.kind === "ins") added += count(p.text);
           if (p.kind === "del") removed += count(p.text);
         }
