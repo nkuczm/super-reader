@@ -2904,3 +2904,9 @@
 .subject-choices-search { margin: 2px 0 4px; font-size: 13.5px; padding: 7px 9px; }
 .subject-choices-scroll { max-height: 220px; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .subject-choices-none { margin: 6px 9px; font-size: 12.5px; color: var(--text-dim); }
+
+/* Connecting: every card is just a block to join. Nothing inside it — titles,
+   text, buttons, tables — takes a click, so a click always picks the block. */
+.wb-canvas.connecting .wb-node > * { pointer-events: none; user-select: none; -webkit-user-select: none; }
+.wb-canvas.connecting .wb-node:hover > .subject-card,
+.wb-canvas.connecting .wb-node:hover > .subject-box { outline: 2px dashed var(--accent); outline-offset: 2px; }

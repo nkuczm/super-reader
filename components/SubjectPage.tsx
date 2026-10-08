@@ -2147,6 +2147,13 @@ function Whiteboard(
   /** A card being resized, and any others selected with it — each by the same amount. */
   const [resize, setResize] = useState<{ id: string; w: number; dw: number; others: Map<string, { x: number; y: number; w: number }> } | null>(null);
   const [connecting, setConnecting] = useState<string | null | false>(false);
+  // Connecting turns every card into a plain block: whatever was being typed in lets go.
+  useEffect(() => {
+    if (connecting === false) return;
+    const active = document.activeElement as HTMLElement | null;
+    if (active?.closest(".wb-canvas")) active.blur();
+    window.getSelection()?.removeAllRanges();
+  }, [connecting]);
   const [focus, setFocus] = useState<string | null>(null);
   const [showAiLinks, setShowAiLinks] = useState(false);
   const [sizes, setSizes] = useState<Record<string, { w: number; h: number }>>({});
@@ -2339,6 +2346,8 @@ function Whiteboard(
     if (event.button !== 0) return;
     if (connecting !== false) {
       event.stopPropagation();
+      // A block to join, nothing more: no caret, no selection, no link followed.
+      event.preventDefault();
       if (connecting === null) setConnecting(id);
       else {
         if (connecting !== id) {

@@ -229,7 +229,48 @@ export type ContactItem = Base & {
  * outlet, read from the article itself — for stories saved before those were
  * kept, or from a page the feed said little about.
  */
-export type CardInfoItem = Base & { kind: "cardinfo"; card: string; publishedAt?: string; author?: string; source?: string };
+/**
+ * What was learned about a story after it was filed: its date, author and
+ * outlet, read off the article — and its headline, when the full text was
+ * scanned or fetched and the page's own title differs from the one it was
+ * filed under (a link titled from its address, a feed's shortened headline).
+ */
+export type CardInfoItem = Base & { kind: "cardinfo"; card: string; title?: string; publishedAt?: string; author?: string; source?: string };
+
+/**
+ * A subject's cards for a story given the story's full text: each one whose
+ * headline differs takes the article's, and picks up a date, author or
+ * outlet it lacked. Returns the board unchanged (the same object) when there
+ * is nothing to change, so a caller can tell.
+ */
+export function retitleCards(
+  note: Note,
+  board: Board | undefined,
+  links: string[],
+  found: { title: string; publishedAt?: string; author?: string; source?: string },
+  now = Date.now(),
+): Board | undefined {
+  const title = found.title.replace(/\s+/g, " ").trim().slice(0, 300);
+  if (!title) return board;
+  const keys = new Set(links.filter(Boolean).map((link) => canonicalUrl(link)));
+  let next = board;
+  for (const card of cardsOf(note, board)) {
+    if (!keys.has(card.id) || card.title === title) continue;
+    const held = next?.[cardInfoId(card.id)];
+    const info = held && held.kind === "cardinfo" && !held.deleted ? held : undefined;
+    next = put(next, {
+      id: cardInfoId(card.id),
+      kind: "cardinfo",
+      card: card.id,
+      title,
+      publishedAt: info?.publishedAt ?? found.publishedAt,
+      author: info?.author ?? found.author?.slice(0, 120),
+      source: info?.source ?? found.source?.slice(0, 120),
+      at: now,
+    }, now);
+  }
+  return next;
+}
 
 export function cardInfoId(cardId: string) {
   return `cardinfo:${cardId}`;
@@ -552,6 +593,8 @@ export function cardsOf(note: Note, board: Board | undefined): Card[] {
     if (item.kind === "cardinfo") {
       const card = cards.get(item.card);
       if (card) {
+        // The article's own headline, once its text has been read, is the one to show.
+        if (item.title) card.title = item.title;
         card.publishedAt ??= item.publishedAt;
         card.author ??= item.author;
         card.source ??= item.source;

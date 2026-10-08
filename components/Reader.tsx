@@ -113,6 +113,7 @@ import {
   addStory,
   placeNew,
   cardsOf,
+  retitleCards,
   metaOf,
   addQuoteNote,
   quoteNotesFor,
@@ -158,6 +159,7 @@ import ArticleReader from "./ArticleReader";
 import SourceIcon from "./SourceIcon";
 import { Icon } from "./icons";
 import { timeAgo, hostOf } from "./format";
+import type { ReadableArticle } from "@/lib/article";
 import { sortNewestFirst, timeOf } from "@/lib/sort";
 import type { RankedArticle } from "@/lib/pulse";
 import type { PickedSource } from "./OutletCatalog";
@@ -2157,6 +2159,32 @@ export default function Reader() {
     [notes, subjectUsed],
   );
 
+  /**
+   * A story card filed under one headline, whose article turns out to have
+   * another once its full text is read — scanned in with the extension, or
+   * fetched — takes the article's own, in every subject that holds it.
+   * Only a full copy counts: a page's preview or a paywall's stub can carry
+   * a title that is not the story's.
+   */
+  const retitleFromArticle = useCallback(
+    (article: ReadableArticle, requestedUrl: string) => {
+      const title = article.title?.trim();
+      if (!title || article.via === "preview" || article.paywalled) return;
+      if (title === hostOf(requestedUrl) || title === hostOf(article.url)) return;
+      for (const note of notesRef.current) {
+        const before = boardsRef.current[note.id];
+        const after = retitleCards(note, before, [requestedUrl, article.url], {
+          title,
+          publishedAt: article.publishedAt,
+          author: article.byline,
+          source: article.siteName,
+        });
+        if (after !== before) commitBoard(note.id, () => after ?? {});
+      }
+    },
+    [commitBoard],
+  );
+
   /** The article being read, added to a subject whole — no quote needed. */
   const addReadingToSubject = useCallback(
     (noteId: string) => {
@@ -4010,6 +4038,7 @@ export default function Reader() {
           />
         ) : reading ? (
           <ArticleReader
+            onLoaded={retitleFromArticle}
             url={reading.url}
             fallbackTitle={reading.title}
             feedUrl={reading.feedUrl}
