@@ -72,6 +72,12 @@ type Props = {
     onOpen: (noteId: string) => void;
   };
   onClose: () => void;
+  /**
+   * The article as it now reads: fetched, scanned in with the extension or
+   * pasted. Lets the app bring a story card filed under an older headline
+   * up to the article's own.
+   */
+  onLoaded?: (article: ReadableArticle, requestedUrl: string) => void;
 };
 
 
@@ -114,9 +120,12 @@ export default function ArticleReader({
   isHighlighted,
   onRemoveHighlight,
   onClose,
+  onLoaded,
 }: Props) {
   const [subjectMenu, setSubjectMenu] = useState(false);
   const [printing, setPrinting] = useState(false);
+  const onLoadedRef = useRef(onLoaded);
+  onLoadedRef.current = onLoaded;
   const [addedTo, setAddedTo] = useState<string | null>(null);
   /** The name being typed for a new subject, or null when not naming one. */
   const [newSubject, setNewSubject] = useState<string | null>(null);
@@ -598,6 +607,11 @@ export default function ArticleReader({
                 </div>
               </div>
   ) : null;
+
+  // Tell the app what this article turned out to be called, once per copy.
+  useEffect(() => {
+    if (article) onLoadedRef.current?.(article, url);
+  }, [article, url]);
 
   const printJob = useMemo<PrintJob | null>(() => {
     if (!article) return null;
