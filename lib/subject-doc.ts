@@ -9,6 +9,7 @@
 
 import { cellKey, coveredCells, display, evaluate, safeGrid, safeMetas } from "./sheet";
 import { safeTranscript } from "./transcript";
+import { firstWords, remainderNote, TRANSCRIPT_PREVIEW_WORDS, wordsIn } from "./print";
 import type { Note } from "./notes";
 import {
   bylineOf,
@@ -33,12 +34,15 @@ import {
 const LABEL: Record<InsightItem["type"], string> = { connection: "Connection", question: "Question", deeper: "Deeper" };
 
 /**
- * How a drawing is written out. A Google Doc does not keep an SVG picture,
- * so the export names it; a printed page shows it.
+ * Who the HTML is for. The Google Doc export (the default) gets plain
+ * formatting a Doc keeps: a drawing is named, since a Doc drops SVG, and a
+ * transcript is given whole. A printed page gets drawings drawn, classes its
+ * stylesheet lays out, and transcripts as an opening excerpt unless the
+ * whole of them is asked for.
  */
-type Drawings = "named" | "shown";
+export type Output = { print?: boolean; fullTranscripts?: boolean };
 
-function unlinkQuotes(html: string, board?: Board, drawings: Drawings = "named") {
+function unlinkQuotes(html: string, board?: Board, out: Output = {}) {
   return sanitizeRichText(html)
     .replace(/<a data-quote="[^"]+">([\s\S]*?)<\/a>/g, "$1")
     .replace(/<img data-embed="([^"]+)">/g, (_, id: string) => {
@@ -47,33 +51,53 @@ function unlinkQuotes(html: string, board?: Board, drawings: Drawings = "named")
       const image = safeImage(item.image);
       if (image) return `<img src="${image}" alt="" style="max-width:100%">`;
       if (!item.drawing) return "";
-      return drawings === "shown" ? `<img src="${drawingSvg(item)}" alt="A drawing" style="max-width:100%">` : "<i>[A drawing]</i>";
+      return out.print ? `<img src="${drawingSvg(item)}" alt="A drawing" style="max-width:100%">` : "<i>[A drawing]</i>";
     });
 }
 
+type CardLike = Pick<Card, "link" | "title" | "note" | "quotes" | "publishedAt" | "author" | "source">;
+
+/** A story's quotes and notes, without its headline. */
+export function cardNotesHtml(card: CardLike, board?: Board, out: Output = {}): string {
+  return unlinkQuotes(composeCardDoc(card.note, card.quotes), board, out);
+}
+
 /** A story as written up: its headline, linked, the byline, then the quotes and notes. */
-export function cardHtml(card: Pick<Card, "link" | "title" | "note" | "quotes" | "publishedAt" | "author" | "source">, board?: Board, drawings: Drawings = "named"): string {
+export function cardHtml(card: CardLike, board?: Board, out: Output = {}): string {
   const byline = bylineOf(card);
   return (
     `<h3><a href="${escapeHtml(card.link)}">${escapeHtml(card.title)}</a></h3>` +
-    (byline ? `<p><i>${escapeHtml(byline)}</i></p>` : "") +
-    unlinkQuotes(composeCardDoc(card.note, card.quotes), board, drawings)
+    (byline ? (out.print ? `<p class="print-byline">${escapeHtml(byline)}</p>` : `<p><i>${escapeHtml(byline)}</i></p>`) : "") +
+    cardNotesHtml(card, board, out)
   );
 }
 
+/** What a box is, in a word: for its print button and the class its printed block carries. */
+export function boxKind(box: BoxItem): "label" | "image" | "transcript" | "table" | "drawing" | "text" {
+  if (box.label) return "label";
+  if (box.image !== undefined || box.caption !== undefined) return "image";
+  if (box.transcript) return "transcript";
+  if (box.table) return "table";
+  if (box.drawing) return "drawing";
+  return "text";
+}
+
 /** A box as written up: a section heading, picture, transcript, table, drawing or text. */
-export function boxHtml(box: BoxItem, board?: Board, drawings: Drawings = "named"): string {
+export function boxHtml(box: BoxItem, board?: Board, out: Output = {}): string {
   if (box.label) return `<h2 class="section">${escapeHtml(textOf(box.html).trim())}</h2>`;
   const image = safeImage(box.image);
-  if (image) return `<p><img src="${image}" alt="" style="max-width:100%"></p>${box.caption ? `<p><i>${escapeHtml(box.caption)}</i></p>` : ""}`;
-  if (box.transcript) return transcriptHtml(box.transcript, box.transcriptTabs);
+  if (image) {
+    if (out.print) return `<figure><img src="${image}" alt="">${box.caption ? `<figcaption>${escapeHtml(box.caption)}</figcaption>` : ""}</figure>`;
+    return `<p><img src="${image}" alt="" style="max-width:100%"></p>${box.caption ? `<p><i>${escapeHtml(box.caption)}</i></p>` : ""}`;
+  }
+  if (box.transcript) return out.print ? transcriptHtml(box.transcript, box.transcriptTabs, { full: out.fullTranscripts }) : transcriptHtml(box.transcript, box.transcriptTabs);
   if (box.table) return tableCardHtml(box);
   if (box.drawing) {
-    return drawings === "shown"
-      ? `<p><img src="${drawingSvg(box)}" alt="A drawing" style="max-width:100%"></p>`
+    return out.print
+      ? `<p><img src="${drawingSvg(box)}" alt="A drawing"></p>`
       : "<p><i>[A drawing — open the subject in Super Reader to see it]</i></p>";
   }
-  return unlinkQuotes(box.html, board, drawings);
+  return unlinkQuotes(box.html, board, out);
 }
 
 export function subjectHtml(note: Note, board: Board | undefined, now = new Date()): string {
@@ -155,9 +179,17 @@ export function tableHtml(table: unknown, mode?: "doc" | "sheet", cells?: unknow
   return `<table style="border-collapse:collapse">${rows.join("")}</table>`;
 }
 
-/** A transcript as who-said-what paragraphs, for the exported copy. */
-export function transcriptHtml(input: unknown, more?: unknown): string {
-  return [input, ...(Array.isArray(more) ? more : [])].map(oneTranscriptHtml).join("");
+/**
+ * A transcript as who-said-what paragraphs. Without `print` this is the
+ * export's form, unchanged. With it, the printed form: each turn's speaker
+ * and time over what they said — and, unless `full`, only the opening
+ * (about TRANSCRIPT_PREVIEW_WORDS words) and a line saying how much more
+ * there is. A transcript can run to hours; a print of a subject should not
+ * be forty pages of one interview unless that is what was asked for.
+ */
+export function transcriptHtml(input: unknown, more?: unknown, print?: { full?: boolean }): string {
+  const all = [input, ...(Array.isArray(more) ? more : [])];
+  return print ? all.map((t) => printedTranscriptHtml(t, Boolean(print.full))).join("") : all.map(oneTranscriptHtml).join("");
 }
 
 function oneTranscriptHtml(input: unknown): string {
@@ -169,4 +201,26 @@ function oneTranscriptHtml(input: unknown): string {
       return t.x.split("\n\n").map((p, i) => `<p>${i === 0 ? who : ""}${escapeHtml(p)}</p>`).join("");
     })
     .join("");
+}
+
+function printedTranscriptHtml(input: unknown, full: boolean): string {
+  const { title, turns } = safeTranscript(input);
+  const shown: typeof turns = [];
+  let words = 0;
+  for (const turn of turns) {
+    if (!full && words >= TRANSCRIPT_PREVIEW_WORDS) break;
+    const n = wordsIn(turn.x);
+    // A long turn is cut rather than dropped: the excerpt always says something.
+    shown.push(!full && words + n > TRANSCRIPT_PREVIEW_WORDS * 1.4 ? { ...turn, x: firstWords(turn.x, Math.max(40, TRANSCRIPT_PREVIEW_WORDS - words)) } : turn);
+    words += n;
+  }
+  const turnHtml = (t: (typeof turns)[number]) => {
+    const head = t.s || t.t ? `<p>${t.s ? `<span class="t-who">${escapeHtml(t.s)}</span>` : ""}${t.t ? `<span class="t-time">${escapeHtml(t.t)}</span>` : ""}</p>` : "";
+    return `<div class="t-turn">${head}${t.x.split("\n\n").map((p) => `<p>${escapeHtml(p)}</p>`).join("")}</div>`;
+  };
+  const cut = shown.length > 0 && shown[shown.length - 1].x !== turns[shown.length - 1].x;
+  const restTurns = turns.slice(shown.length);
+  const restWords = restTurns.reduce((n, t) => n + wordsIn(t.x), 0) + (cut ? wordsIn(turns[shown.length - 1].x) - wordsIn(shown[shown.length - 1].x) : 0);
+  const rest = !full && (restTurns.length > 0 || cut) ? remainderNote(restTurns.length, restWords) : "";
+  return `<div class="print-transcript"><p class="t-title">Transcript${title ? ` — ${escapeHtml(title)}` : ""}</p>${shown.map(turnHtml).join("") || "<p><i>Empty</i></p>"}${rest}</div>`;
 }

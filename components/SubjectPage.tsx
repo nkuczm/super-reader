@@ -12,8 +12,10 @@ import { EXTRACT_VERSION } from "@/lib/offline";
 import SubjectContacts from "./SubjectContacts";
 import { tableWidth } from "./TableBox";
 import { DrawingPad, ImageView, TableBox, TranscriptBox, shrinkImage, DRAWING_HEIGHT, type AiSearch } from "./SubjectMedia";
-import { boxHtml, cardHtml, tableCardHtml, transcriptHtml } from "@/lib/subject-doc";
-import { printHtml, printPage } from "@/lib/print";
+import { boxHtml, boxKind, cardHtml, cardNotesHtml, tableCardHtml, transcriptHtml, type Output } from "@/lib/subject-doc";
+import { printedOn, printPage } from "@/lib/print";
+import { safeTranscript } from "@/lib/transcript";
+import PrintDialog, { type PrintJob } from "./PrintDialog";
 import type { Writing } from "./useAccount";
 import type { Note, NoteEntry } from "@/lib/notes";
 import { omissionsHtml, putFactNotes, researchOf, scriptQuotes, scriptRows, type FactCheckResult, type SourceTarget } from "@/lib/factcheck";
@@ -131,11 +133,6 @@ const INSIGHT_LABEL: Record<InsightItem["type"], string> = {
  * suggested reading last. The whiteboard lays the same cards out on a canvas
  * where they can be moved and joined with lines.
  */
-const PRINT_ICON = (
-  <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
-    <path d="M7 9V3h10v6M7 17H4v-6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v6h-3M7 14h10v7H7z" />
-  </svg>
-);
 const NEW_TABLE = () => [["", "", ""], ["", "", ""], ["", "", ""]];
 
 /** Blocks copied on the whiteboard, as the clipboard carries them between subjects. */
@@ -568,41 +565,89 @@ export default function SubjectPage(props: Props) {
    * Printing. A tab prints as the document reads — each section heading,
    * then what is linked under it — with drawings drawn and quote links
    * reduced to their words; every tab prints one after another; a single
-   * story (with its notes), text box or table prints on its own.
+   * story (with its notes), text box, table or transcript prints on its own.
+   * Each opens the print dialog first, with a preview, where transcripts
+   * can be put in whole rather than as their opening lines.
    */
-  const printedOn = () => `Printed ${new Date().toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })}`;
-  const tabPrintHtml = (tabId: string) => {
+  const [printJob, setPrintJob] = useState<PrintJob | null>(null);
+  const tabBoxes = (tabId: string) =>
+    items.filter((item): item is BoxItem => item.kind === "box" && !item.embedded && tabOf(board, item.id, tabs) === tabId);
+  const tabPrintHtml = (tabId: string, out: Output) => {
     const entries = [
       ...allCards
         .filter((card) => tabOf(board, card.id, tabs) === tabId)
-        .map((card) => ({ id: card.id, at: card.at, html: cardHtml(card, board, "shown") })),
-      ...items
-        .filter((item): item is BoxItem => item.kind === "box" && !item.embedded && tabOf(board, item.id, tabs) === tabId)
-        .map((box) => ({ id: box.id, at: box.at, label: box.label, html: boxHtml(box, board, "shown") })),
+        .map((card) => ({ id: card.id, at: card.at, html: `<section class="print-block print-story">${cardHtml(card, board, out)}</section>` })),
+      ...tabBoxes(tabId).map((box) => ({
+        id: box.id,
+        at: box.at,
+        label: box.label,
+        html: box.label ? boxHtml(box, board, out) : `<section class="print-block print-${boxKind(box)}">${boxHtml(box, board, out)}</section>`,
+      })),
     ];
     const byId = new Map(entries.map((entry) => [entry.id, entry]));
-    return documentOrder(entries, board).map((id) => `<div class="print-block">${byId.get(id)!.html}</div>`).join("");
+    return documentOrder(entries, board).map((id) => byId.get(id)!.html).join("");
   };
   const printDoc = (every: boolean) => {
     const chosen = every ? tabs : tabs.filter((tab) => tab.id === currentTab);
-    const body = chosen
-      .map((tab) => `${every && tabs.length > 1 ? `<h2 class="tab">${escapeHtml(tab.name)}</h2>` : ""}${tabPrintHtml(tab.id) || "<p><i>Empty</i></p>"}`)
-      .join("");
-    const shownInsights = every ? items.filter((item): item is InsightItem => item.kind === "insight") : insights;
-    const insightList = shownInsights.length
-      ? `<div class="print-insights"><h2>Insights</h2><ul>${shownInsights.map((i) => `<li><b>${INSIGHT_LABEL[i.type]}:</b> ${escapeHtml(i.text)}</li>`).join("")}</ul></div>`
-      : "";
     const tabName = tabs.find((tab) => tab.id === currentTab)?.name;
-    const sub = [!every && tabs.length > 1 ? tabName : "", printedOn()].filter(Boolean).join(" · ");
-    printHtml(printPage(note.name, sub, body + insightList));
+    const shownInsights = every ? items.filter((item): item is InsightItem => item.kind === "insight") : insights;
+    const storyCount = allCards.filter((card) => chosen.some((tab) => tabOf(board, card.id, tabs) === tab.id)).length;
+    setPrintJob({
+      what: every ? `${note.name}, every tab` : tabs.length > 1 ? `${note.name} — ${tabName}` : note.name,
+      transcripts: chosen.some((tab) => tabBoxes(tab.id).some((box) => box.transcript)),
+      build: ({ fullTranscripts }) => {
+        const out: Output = { print: true, fullTranscripts };
+        const body = chosen
+          .map((tab) => `${every && tabs.length > 1 ? `<h2 class="tab">${escapeHtml(tab.name)}</h2>` : ""}${tabPrintHtml(tab.id, out) || "<p><i>Nothing here yet.</i></p>"}`)
+          .join("");
+        const insightList = shownInsights.length
+          ? `<section class="print-insights"><h2>Insights</h2><ul>${shownInsights.map((i) => `<li><b>${INSIGHT_LABEL[i.type]}.</b> ${escapeHtml(i.text)}</li>`).join("")}</ul></section>`
+          : "";
+        return printPage({
+          kicker: !every && tabs.length > 1 && tabName ? `Subject · ${tabName}` : "Subject",
+          title: note.name,
+          meta: [storyCount ? `${storyCount} ${storyCount === 1 ? "story" : "stories"}` : "", printedOn()].filter(Boolean).join("  ·  "),
+          body: body + insightList,
+        });
+      },
+    });
   };
   const printItem = (id: string) => {
     const card = allCards.find((c) => c.id === id);
     const item = board?.[id];
     const box = item && item.kind === "box" ? item : undefined;
-    if (!card && !box) return;
-    const html = card ? cardHtml(card, board, "shown") : boxHtml(box!, board, "shown");
-    printHtml(printPage(note.name, printedOn(), html));
+    if (card) {
+      setPrintJob({
+        what: card.title,
+        transcripts: false,
+        build: () => printPage({
+          kicker: note.name,
+          title: card.title,
+          meta: [bylineOf(card), printedOn()].filter(Boolean).join("  ·  "),
+          body: `<div class="print-story">${cardNotesHtml(card, board, { print: true }) || "<p><i>No notes yet.</i></p>"}</div>`,
+          footer: card.link,
+        }),
+      });
+      return;
+    }
+    if (!box) return;
+    const kind = boxKind(box);
+    const title =
+      kind === "table" ? box.tableName || "Table"
+      : kind === "transcript" ? safeTranscript(box.transcript).title.trim() || "Transcript"
+      : kind === "image" ? box.caption?.trim() || "Picture"
+      : kind === "drawing" ? "Drawing"
+      : "Notes";
+    setPrintJob({
+      what: `${title} from ${note.name}`,
+      transcripts: kind === "transcript",
+      build: ({ fullTranscripts }) => printPage({
+        kicker: note.name,
+        title,
+        meta: printedOn(),
+        body: `<section class="print-block print-${kind} print-solo">${boxHtml(box, board, { print: true, fullTranscripts })}</section>`,
+      }),
+    });
   };
 
   const copyTab = async () => {
@@ -1128,6 +1173,7 @@ export default function SubjectPage(props: Props) {
           event.target.value = "";
         }} />
       {imageProblem && <div className="subject-ai-bar">{imageProblem}</div>}
+      {printJob && <PrintDialog job={printJob} onClose={() => setPrintJob(null)} />}
       {historyOpen && (
         <SubjectHistory
           subjectId={note.id}
@@ -1353,7 +1399,7 @@ function StoryCard({
         )}
         <button className="icon-btn subtle print-btn" aria-label="Print this story and its notes" title="Print this story and its notes"
           onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.printItem(card.id)}>
-          {PRINT_ICON}
+          {Icon.print}
         </button>
         <button className="icon-btn subtle" aria-label="Remove story from subject" title="Remove from subject"
           onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.removeCard(card)}>
@@ -1466,9 +1512,9 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
           </span>
         )}
         {!box.label && (
-          <button className="icon-btn subtle print-btn" aria-label={`Print this ${box.table ? "table" : box.transcript ? "transcript" : box.drawing ? "drawing" : box.image !== undefined ? "image" : "text"}`}
+          <button className="icon-btn subtle print-btn" aria-label={`Print this ${boxKind(box) === "image" ? "picture" : boxKind(box)}`}
             title="Print this on its own" onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.printItem(box.id)}>
-            {PRINT_ICON}
+            {Icon.print}
           </button>
         )}
         <button className="icon-btn subtle" aria-label="Delete text box" onPointerDown={(e) => e.stopPropagation()}

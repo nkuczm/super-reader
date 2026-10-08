@@ -2,7 +2,7 @@
 
 import { isSignedIn } from "@/lib/signed-in";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { forgetPosition, positionFor, rememberPosition } from "@/lib/position";
 import type { ReadableArticle } from "@/lib/article";
 import { Icon } from "./icons";
@@ -14,6 +14,8 @@ import { cleanPastedHtml } from "@/lib/paste";
 import { parsePastedTranscript, transcriptArticleHtml, youtubeId } from "@/lib/youtube";
 import { timeAgo, hostOf } from "./format";
 import QuoteToNote from "./QuoteToNote";
+import PrintDialog, { type PrintJob } from "./PrintDialog";
+import { printedOn, printPage, transcriptArticleExcerpt } from "@/lib/print";
 import { findQuoteRange } from "@/lib/highlight";
 import type { Note } from "@/lib/notes";
 
@@ -114,6 +116,7 @@ export default function ArticleReader({
   onClose,
 }: Props) {
   const [subjectMenu, setSubjectMenu] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const [addedTo, setAddedTo] = useState<string | null>(null);
   /** The name being typed for a new subject, or null when not naming one. */
   const [newSubject, setNewSubject] = useState<string | null>(null);
@@ -598,8 +601,27 @@ export default function ArticleReader({
               </div>
   ) : null;
 
+  const printJob = useMemo<PrintJob | null>(() => {
+    if (!article) return null;
+    const date = article.publishedAt && Number.isFinite(Date.parse(article.publishedAt))
+      ? new Date(article.publishedAt).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })
+      : "";
+    return {
+      what: article.title,
+      transcripts: Boolean(article.transcript),
+      build: ({ fullTranscripts }) => printPage({
+        kicker: article.siteName ?? hostOf(url),
+        title: article.title,
+        meta: [article.byline, date, article.wordCount ? `${Math.max(1, Math.round(article.wordCount / 220))} min read` : ""].filter(Boolean).join("  ·  "),
+        body: article.transcript && !fullTranscripts ? transcriptArticleExcerpt(article.html) : article.html,
+        footer: `${url.split("#")[0]}  ·  ${printedOn()}`,
+      }),
+    };
+  }, [article, url]);
+
   return (
     <div className="reader">
+      {printing && printJob && <PrintDialog job={printJob} onClose={() => setPrinting(false)} />}
       <div className="reader-bar">
         {onOpenMenu && (
           <button className="menu-btn" onClick={onOpenMenu} aria-label="Open feeds">
@@ -617,6 +639,12 @@ export default function ArticleReader({
           >
             {saved ? Icon.bookmarkOn : Icon.bookmark}
             <span className="btn-label">{saved ? "Saved" : "Save"}</span>
+          </button>
+        )}
+        {article && article.html && (
+          <button className="btn ghost small" onClick={() => setPrinting(true)} title="Print this article, or save it as a PDF" aria-label="Print">
+            {Icon.print}
+            <span className="btn-label">Print</span>
           </button>
         )}
         {/* What is open here is a file, not a page — so offer to keep it.
