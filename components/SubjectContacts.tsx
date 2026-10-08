@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { authorsOf, cleanLinkedIn, contactId, safeImage, type Card, type ContactItem } from "@/lib/subjects";
+import { authorsOf, cleanLinkedIn, contactId, initialsOf, safeImage, tagOrder, type Card, type ContactItem } from "@/lib/subjects";
 import { shrinkImage } from "./SubjectMedia";
 
 const HIDE_SUGGESTED_KEY = "super-reader:hide-suggested-contacts";
@@ -22,6 +22,8 @@ export default function SubjectContacts({
   onAdd,
   onOpenCard,
   dismissedIds,
+  taggedCount,
+  onOpenTagged,
 }: {
   contacts: ContactItem[];
   cards: Card[];
@@ -34,6 +36,10 @@ export default function SubjectContacts({
   onOpenCard: (card: Card) => void;
   /** People removed from the list, so an author removed is not brought back. */
   dismissedIds: string[];
+  /** How many blocks someone is tagged on, sections counted by what is in them. */
+  taggedCount: (contact: ContactItem) => number;
+  /** Everything tagged with someone, as a document. */
+  onOpenTagged: (contact: ContactItem) => void;
 }) {
   const [adding, setAdding] = useState<{ name: string; role: string } | null>(null);
   // The stories' own authors are contacts without asking: a byline is the
@@ -85,7 +91,8 @@ export default function SubjectContacts({
         {title && <h2>{title}</h2>}
         {note && <p className="sub">{note}</p>}
         <ul className="contacts-list">
-          {list.map((contact) => (
+          {/* Within each group, whoever was tagged on something most recently comes first. */}
+          {tagOrder(list).map((contact) => (
             <ContactRow
               key={contact.id}
               contact={contact}
@@ -95,6 +102,8 @@ export default function SubjectContacts({
               onSave={onSave}
               onRemove={onRemove}
               onOpenCard={onOpenCard}
+              tagged={taggedCount(contact)}
+              onOpenTagged={() => onOpenTagged(contact)}
             />
           ))}
         </ul>
@@ -155,8 +164,12 @@ function ContactRow({
   onRemove,
   onOpenCard,
   refsLabel,
+  tagged,
+  onOpenTagged,
 }: {
   refsLabel: (n: number) => string;
+  tagged: number;
+  onOpenTagged: () => void;
   contact: ContactItem;
   stories: Card[];
   onSave: (contact: ContactItem) => void;
@@ -206,16 +219,21 @@ function ContactRow({
   return (
     <li className={`contact${contact.state === "pending" && contact.origin === "suggested" ? " pending" : ""}${contact.outreach ? ` outreach-${contact.outreach}` : ""}${contact.origin === "suggested" && contact.state === "kept" ? " picked" : ""}`}>
       <div className="contact-main">
-        <div className="contact-name">
+        {/* The person themselves opens everything tagged with them, as a document. */}
+        <div className="contact-name contact-open" role="button" tabIndex={0}
+          title={tagged ? `Show the ${tagged} block${tagged === 1 ? "" : "s"} tagged with ${contact.name}` : `Nothing tagged with ${contact.name} yet`}
+          onClick={onOpenTagged}
+          onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onOpenTagged())}>
           <span className="contact-avatar" aria-hidden="true">
             {safeImage(contact.photo) ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={safeImage(contact.photo)} alt="" />
             ) : (
-              contact.name.split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase()
+              initialsOf(contact.name)
             )}
           </span>
           {contact.name}
+          {tagged > 0 && <span className="contact-tagged" aria-label={`${tagged} tagged`}>{tagged} tagged</span>}
           {contact.role && <span className="contact-role">{contact.role}</span>}
           {contact.origin === "suggested" && contact.state === "kept" && <span className="contact-badge picked">Picked</span>}
         </div>

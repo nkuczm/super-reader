@@ -14,6 +14,7 @@ import { cleanPastedHtml } from "@/lib/paste";
 import { parsePastedTranscript, transcriptArticleHtml, youtubeId } from "@/lib/youtube";
 import { timeAgo, hostOf } from "./format";
 import QuoteToNote from "./QuoteToNote";
+import SubjectChoices from "./SubjectChoices";
 import PrintDialog, { type PrintJob } from "./PrintDialog";
 import { printedOn, printPage, transcriptArticleExcerpt } from "@/lib/print";
 import { findQuoteRange } from "@/lib/highlight";
@@ -73,7 +74,6 @@ type Props = {
   onClose: () => void;
 };
 
-const SUBJECTS_SHOWN = 5;
 
 /**
  * Something marked in the article: a plain highlight, or a quote a subject
@@ -120,8 +120,6 @@ export default function ArticleReader({
   const [addedTo, setAddedTo] = useState<string | null>(null);
   /** The name being typed for a new subject, or null when not naming one. */
   const [newSubject, setNewSubject] = useState<string | null>(null);
-  /** The menu lists the most recently used subjects first, five at a time. */
-  const [showAllSubjects, setShowAllSubjects] = useState(false);
   const [article, setArticle] = useState<ReadableArticle | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** The article's text pasted in by hand, for a site that will not give it to us. */
@@ -669,10 +667,7 @@ export default function ArticleReader({
             <button
               className={`btn ghost small${addedTo ? " on" : ""}`}
               aria-expanded={subjectMenu}
-              onClick={() => {
-                setSubjectMenu((open) => !open);
-                setShowAllSubjects(false);
-              }}
+              onClick={() => setSubjectMenu((open) => !open)}
             >
               {Icon.note}
               <span className="btn-label">
@@ -685,31 +680,19 @@ export default function ArticleReader({
             </button>
             {subjectMenu && (
               <div className="subject-menu" role="menu">
-                {(showAllSubjects ? (notes ?? []) : (notes ?? []).slice(0, SUBJECTS_SHOWN)).map((note) => (
-                  <button
-                    key={note.id}
-                    role="menuitem"
-                    className={subjects.containing.has(note.id) ? "in" : ""}
-                    onClick={() => {
-                      setSubjectMenu(false);
-                      if (subjects.containing.has(note.id)) {
-                        subjects.onOpen(note.id);
-                        return;
-                      }
-                      subjects.onAdd(note.id);
-                      setAddedTo(note.name);
-                    }}
-                    title={subjects.containing.has(note.id) ? `Open ${note.name}` : `Add to ${note.name}`}
-                  >
-                    <span>{note.name}</span>
-                    {subjects.containing.has(note.id) && <span className="subject-menu-in">{Icon.check} Open</span>}
-                  </button>
-                ))}
-                {!showAllSubjects && (notes ?? []).length > SUBJECTS_SHOWN && (
-                  <button role="menuitem" className="subject-menu-more" onClick={() => setShowAllSubjects(true)}>
-                    Show {(notes ?? []).length - SUBJECTS_SHOWN} more
-                  </button>
-                )}
+                <SubjectChoices
+                  notes={notes ?? []}
+                  label={(note) => subjects.containing.has(note.id) && <span className="subject-menu-in">{Icon.check} Open</span>}
+                  onPick={(note) => {
+                    setSubjectMenu(false);
+                    if (subjects.containing.has(note.id)) {
+                      subjects.onOpen(note.id);
+                      return;
+                    }
+                    subjects.onAdd(note.id);
+                    setAddedTo(note.name);
+                  }}
+                />
                 {newSubject === null ? (
                   <button role="menuitem" className="subject-menu-new" onClick={() => setNewSubject("")}>
                     + New subject

@@ -38,6 +38,13 @@ import {
   bylineOf,
   contactsOf,
   contactId,
+  contactRoster,
+  initialsOf,
+  safeImage,
+  tagOrder,
+  taggedWith,
+  withTags,
+  type ContactItem,
   metaOf,
   migrateNoteWriting,
   newItemId,
@@ -495,6 +502,56 @@ export default function SubjectPage(props: Props) {
   const suggestions = items.filter(
     (item): item is SuggestItem => item.kind === "suggest" && item.state === "pending",
   );
+
+  /**
+   * Tagging people on blocks. A person's tags live on them (lib/subjects.ts,
+   * ContactItem.tagged); a tagged section label stands for everything filed
+   * under it. Their initials sit in the corner of each block tagged; clicking
+   * them lights up everything tagged with that person, and the person's card
+   * in Contacts opens all of it as one document.
+   */
+  const roster = useMemo(() => contactRoster(contacts, allCards, dismissedContacts), [contacts, allCards, dismissedContacts]);
+  const blockIds = useMemo(
+    () => new Set([...allCards.map((card) => card.id), ...items.filter((item) => item.kind === "box" && !item.deleted).map((item) => item.id)]),
+    [allCards, items],
+  );
+  const tagsByBlock = useMemo(() => {
+    const map = new Map<string, ContactItem[]>();
+    for (const person of tagOrder(roster)) {
+      for (const id of person.tagged ?? []) map.set(id, [...(map.get(id) ?? []), person]);
+    }
+    return map;
+  }, [roster]);
+  const taggedBlocks = useCallback((person: ContactItem | undefined) => [...taggedWith(board, person)].filter((id) => blockIds.has(id)), [board, blockIds]);
+  const toggleTags = useCallback(
+    (person: ContactItem, ids: string[], on: boolean) =>
+      onBoard((current) => {
+        const held = current?.[person.id];
+        return put(current, withTags(held && held.kind === "contact" && !held.deleted ? held : person, ids, on));
+      }),
+    [onBoard],
+  );
+  /** Someone new, typed into the tag picker: added to Contacts and tagged at once. */
+  const addTagged = (name: string, ids: string[]) =>
+    onBoard((current) => {
+      const id = contactId(name);
+      const held = current?.[id];
+      const person: ContactItem = held && held.kind === "contact" && !held.deleted
+        ? { ...held, state: "kept" }
+        : { id, kind: "contact", name, role: "", why: "", refs: [], origin: "you", state: "kept", at: Date.now() };
+      return put(current, withTags(person, ids, true));
+    });
+  /** Whose blocks are lit up, and whose are open as a document. */
+  const [tagFocus, setTagFocus] = useState<string | null>(null);
+  const [tagDoc, setTagDoc] = useState<string | null>(null);
+  const focusPerson = tagFocus ? roster.find((c) => c.id === tagFocus) : undefined;
+  const lit = useMemo(() => (focusPerson ? new Set(taggedBlocks(focusPerson)) : null), [focusPerson, taggedBlocks]);
+  useEffect(() => {
+    if (!tagFocus) return;
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setTagFocus(null);
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [tagFocus]);
   const [run, setRun] = useState<RunState>({ state: "idle" });
   const [focusBox, setFocusBox] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -572,12 +629,14 @@ export default function SubjectPage(props: Props) {
   const [printJob, setPrintJob] = useState<PrintJob | null>(null);
   const tabBoxes = (tabId: string) =>
     items.filter((item): item is BoxItem => item.kind === "box" && !item.embedded && tabOf(board, item.id, tabs) === tabId);
-  const tabPrintHtml = (tabId: string, out: Output) => {
+  const tabPrintHtml = (tabId: string, out: Output) =>
+    blocksPrintHtml(allCards.filter((card) => tabOf(board, card.id, tabs) === tabId), tabBoxes(tabId), out);
+  /** Stories and boxes as printed, in document order: each section heading, then what is filed under it. */
+  const blocksPrintHtml = (printCards: Card[], printBoxes: BoxItem[], out: Output) => {
     const entries = [
-      ...allCards
-        .filter((card) => tabOf(board, card.id, tabs) === tabId)
+      ...printCards
         .map((card) => ({ id: card.id, at: card.at, html: `<section class="print-block print-story">${cardHtml(card, board, out)}</section>` })),
-      ...tabBoxes(tabId).map((box) => ({
+      ...printBoxes.map((box) => ({
         id: box.id,
         at: box.at,
         label: box.label,
@@ -845,6 +904,15 @@ export default function SubjectPage(props: Props) {
       }),
     removeBox: (box: BoxItem) => removeCards([box.id]),
     printItem,
+    tags: {
+      roster,
+      on: (id: string) => tagsByBlock.get(id) ?? [],
+      toggle: toggleTags,
+      add: addTagged,
+      focus: tagFocus,
+      setFocus: setTagFocus,
+      lit,
+    },
     removeCards,
     recordOp,
     stepHistory,
@@ -1083,9 +1151,9 @@ export default function SubjectPage(props: Props) {
           </button>
           <div className="seg" role="tablist" aria-label="View">
             <button role="tab" aria-selected={meta.view !== "board"} className={meta.view !== "board" ? "on" : ""}
-              onClick={() => setView("doc")}>Document</button>
+              onClick={() => { setTagDoc(null); setView("doc"); }}>Document</button>
             <button role="tab" aria-selected={meta.view === "board"} className={meta.view === "board" ? "on" : ""}
-              onClick={() => setView("board")}>Whiteboard</button>
+              onClick={() => { setTagDoc(null); setView("board"); }}>Whiteboard</button>
           </div>
           <button className="btn ghost small" disabled={!hasAiKey || allCards.length < 2 || run.state === "running"}
             onClick={() => void synthesize()} title={insightsWhyNot ?? "Find connections and suggest reading now"} aria-label="Insights">
@@ -1210,7 +1278,61 @@ export default function SubjectPage(props: Props) {
       </div>
       </div>
       )}
-      {meta.view === "board" ? (
+      {focusPerson && !tagDoc && (() => {
+        const ids = taggedBlocks(focusPerson);
+        const here = new Set([...cards.map((c) => c.id), ...boxes.map((b) => b.id)]);
+        const away = ids.filter((id) => !here.has(id)).length;
+        return (
+          <div className="tag-focus-bar" role="status">
+            <Avatar person={focusPerson} size="small" />
+            <span><b>{focusPerson.name}</b> · {ids.length} tagged block{ids.length === 1 ? "" : "s"}{away ? ` (${away} on other tabs)` : ""}</span>
+            <button className="btn ghost small" onClick={() => { setTagDoc(focusPerson.id); setTagFocus(null); }}>Open as document</button>
+            <button className="link-btn" onClick={() => setTagFocus(null)}>Done</button>
+          </div>
+        );
+      })()}
+      {tagDoc ? (() => {
+        const person = roster.find((c) => c.id === tagDoc);
+        const ids = new Set(taggedBlocks(person));
+        const docCards = allCards.filter((card) => ids.has(card.id));
+        const docBoxes = items.filter((item): item is BoxItem => item.kind === "box" && !item.embedded && ids.has(item.id));
+        const close = () => setTagDoc(null);
+        return (
+          <div className="contact-doc">
+            <div className="contact-doc-head">
+              {person && <Avatar person={person} />}
+              <div className="contact-doc-title">
+                <h2>{person?.name ?? "Contact"}</h2>
+                <p>{[person?.role, `${ids.size} tagged block${ids.size === 1 ? "" : "s"}${tabs.length > 1 ? ", from every tab" : ""}`].filter(Boolean).join(" · ")}</p>
+              </div>
+              <button className="btn ghost small" disabled={ids.size === 0} title="Print everything tagged with them"
+                onClick={() => setPrintJob({
+                  what: `Tagged with ${person?.name ?? "contact"}`,
+                  transcripts: docBoxes.some((b) => b.transcript),
+                  build: ({ fullTranscripts }) => printPage({
+                    kicker: `${note.name} · Tagged`,
+                    title: person?.name ?? "Contact",
+                    meta: [person?.role, printedOn()].filter(Boolean).join("  ·  "),
+                    body: blocksPrintHtml(docCards, docBoxes, { print: true, fullTranscripts }) || "<p><i>Nothing tagged.</i></p>",
+                  }),
+                })}>
+                {Icon.print}<span>Print</span>
+              </button>
+              <button className="btn ghost small" onClick={close}>
+                Back to {meta.view === "board" ? "whiteboard" : "document"}
+              </button>
+            </div>
+            {ids.size === 0 ? (
+              <p className="hint contact-doc-empty">
+                Nothing is tagged with {person?.name ?? "them"} yet. Use the person button at the top of any block — or
+                right-click blocks on the whiteboard — to tag them.
+              </p>
+            ) : (
+              <DocumentView {...shared} cards={docCards} boxes={docBoxes} insights={[]} suggestions={[]} board={board} addBox={addBox} pickImage={pickImage} />
+            )}
+          </div>
+        );
+      })() : meta.view === "board" ? (
         <Whiteboard {...shared} placeKey={placeKey} board={board} onBoard={onBoard} addBox={addBox} pickImage={pickImage} boxWidth={props.boxWidth ?? 0} />
       ) : (
         <DocumentView {...shared} board={board} addBox={addBox} pickImage={pickImage} />
@@ -1255,6 +1377,8 @@ export default function SubjectPage(props: Props) {
           }
           onOpenCard={(card) => props.onOpenArticle(card.link, card.title, "")}
           dismissedIds={dismissedContacts}
+          taggedCount={(person) => taggedBlocks(person).length}
+          onOpenTagged={(person) => { setTagFocus(null); setTagDoc(person.id); }}
         />
         </aside>
       )}
@@ -1266,6 +1390,7 @@ export default function SubjectPage(props: Props) {
 type Shared = {
   /** Print one story (with its notes), text box or table on its own. */
   printItem: (id: string) => void;
+  tags: Tags;
   tabs: Tab[];
   currentTab: string;
   moveCard: (target: string, tab: string) => void;
@@ -1312,6 +1437,140 @@ type Shared = {
 /* ---------------------------------------------------------------------- */
 /* Pieces shared by both views                                             */
 /* ---------------------------------------------------------------------- */
+
+type Tags = {
+  /** Everyone on the contact sheet. */
+  roster: ContactItem[];
+  /** Who is tagged on a block, most recently tagged first. */
+  on: (id: string) => ContactItem[];
+  toggle: (person: ContactItem, ids: string[], on: boolean) => void;
+  /** Add someone new to Contacts, tagged on these blocks. */
+  add: (name: string, ids: string[]) => void;
+  /** The person whose blocks are lit up, and those blocks. */
+  focus: string | null;
+  setFocus: (id: string | null) => void;
+  lit: Set<string> | null;
+};
+
+function Avatar({ person, size }: { person: ContactItem; size?: "small" }) {
+  const photo = safeImage(person.photo);
+  return (
+    <span className={`tag-avatar${size === "small" ? " small" : ""}`} aria-hidden="true">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      {photo ? <img src={photo} alt="" /> : initialsOf(person.name)}
+    </span>
+  );
+}
+
+/**
+ * Choose who is tagged on some blocks: everyone on the contact sheet, the
+ * people tagged most recently first, with a search — and a name that is not
+ * there yet can be added and tagged in one go.
+ */
+function TagPicker({ ids, tags, at, onClose }: { ids: string[]; tags: Tags; at: { left: number; top: number }; onClose: () => void }) {
+  const [query, setQuery] = useState("");
+  const box = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const away = (e: PointerEvent) => !box.current?.contains(e.target as globalThis.Node) && onClose();
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && (e.stopPropagation(), onClose());
+    window.addEventListener("pointerdown", away, true);
+    window.addEventListener("keydown", esc, true);
+    return () => {
+      window.removeEventListener("pointerdown", away, true);
+      window.removeEventListener("keydown", esc, true);
+    };
+  }, [onClose]);
+  const q = query.trim().toLowerCase();
+  const people = tagOrder(tags.roster).filter((c) => !q || c.name.toLowerCase().includes(q) || c.role?.toLowerCase().includes(q));
+  const exact = tags.roster.some((c) => c.name.trim().toLowerCase() === q);
+  const stateOf = (person: ContactItem) => {
+    const n = ids.filter((id) => person.tagged?.includes(id)).length;
+    return n === 0 ? "none" : n === ids.length ? "all" : "some";
+  };
+  // Kept on screen: the picker opens beside its button, and flips up near the bottom.
+  const left = Math.max(8, Math.min(at.left, window.innerWidth - 268));
+  const top = at.top + 320 > window.innerHeight ? Math.max(8, at.top - 330) : at.top;
+  return createPortal(
+    <div ref={box} className="tag-picker" role="dialog" aria-label="Tag contacts" style={{ left, top }}
+      onPointerDown={(e) => e.stopPropagation()}>
+      <div className="tag-picker-head">{ids.length > 1 ? `Tag ${ids.length} blocks` : "Tag a contact"}</div>
+      <input className="input tag-picker-search" autoFocus placeholder="Search or add a name…" value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          e.preventDefault();
+          if (people[0]) tags.toggle(people[0], ids, stateOf(people[0]) !== "all");
+          else if (query.trim()) { tags.add(query.trim().slice(0, 120), ids); setQuery(""); }
+        }} />
+      <ul className="tag-picker-list">
+        {people.map((person) => {
+          const state = stateOf(person);
+          return (
+            <li key={person.id}>
+              <button role="menuitemcheckbox" aria-checked={state === "all" ? true : state === "some" ? "mixed" : false}
+                className={`tag-picker-row${state !== "none" ? " on" : ""}`}
+                onClick={() => tags.toggle(person, ids, state !== "all")}>
+                <Avatar person={person} size="small" />
+                <span className="tag-picker-name">{person.name}{person.role && <small>{person.role}</small>}</span>
+                <span className="tag-picker-check" aria-hidden="true">{state === "all" ? "✓" : state === "some" ? "–" : ""}</span>
+              </button>
+            </li>
+          );
+        })}
+        {people.length === 0 && !query.trim() && <li className="tag-picker-empty">No contacts yet. Type a name to add one.</li>}
+      </ul>
+      {query.trim() && !exact && (
+        <button className="tag-picker-add" onClick={() => { tags.add(query.trim().slice(0, 120), ids); setQuery(""); }}>
+          + Add “{query.trim()}” and tag
+        </button>
+      )}
+    </div>,
+    document.body,
+  );
+}
+
+/** The person button in a block's header: who is tagged on it. */
+function TagButton({ id, tags, label }: { id: string; tags: Tags; label: string }) {
+  const [at, setAt] = useState<{ left: number; top: number } | null>(null);
+  const count = tags.on(id).length;
+  return (
+    <>
+      <button className={`icon-btn subtle tag-btn${count ? " on" : ""}`} aria-label={`Tag a contact on this ${label}`} title="Tag a contact"
+        aria-expanded={Boolean(at)}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          setAt((open) => (open ? null : { left: r.right - 260, top: r.bottom + 6 }));
+        }}>
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+          <circle cx="10" cy="8" r="3.6" /><path d="M3.5 20c.8-3.6 3.4-5.6 6.5-5.6 1.4 0 2.7.4 3.8 1.2M18 13v7M14.5 16.5h7" />
+        </svg>
+      </button>
+      {at && <TagPicker ids={[id]} tags={tags} at={at} onClose={() => setAt(null)} />}
+    </>
+  );
+}
+
+/** Initials in the block's corner, one per person tagged; a click lights up everything tagged with them. */
+function TagBadges({ id, tags }: { id: string; tags: Tags }) {
+  const people = tags.on(id);
+  if (people.length === 0) return null;
+  const shown = people.slice(0, 4);
+  return (
+    <div className="tag-badges" onPointerDown={(e) => e.stopPropagation()}>
+      {shown.map((person) => (
+        <button key={person.id} className={`tag-badge${tags.focus === person.id ? " on" : ""}`}
+          title={tags.focus === person.id ? `Stop highlighting ${person.name}` : `${person.name} — highlight everything tagged with them`}
+          aria-label={`${person.name}: highlight everything tagged with them`}
+          aria-pressed={tags.focus === person.id}
+          onClick={() => tags.setFocus(tags.focus === person.id ? null : person.id)}>
+          <Avatar person={person} size="small" />
+        </button>
+      ))}
+      {people.length > shown.length && <span className="tag-badge more">+{people.length - shown.length}</span>}
+    </div>
+  );
+}
 
 function StoryCard({
   card,
@@ -1397,6 +1656,7 @@ function StoryCard({
             ))}
           </select>
         )}
+        <TagButton id={card.id} tags={shared.tags} label="story" />
         <button className="icon-btn subtle print-btn" aria-label="Print this story and its notes" title="Print this story and its notes"
           onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.printItem(card.id)}>
           {Icon.print}
@@ -1448,6 +1708,7 @@ function StoryCard({
           </div>
         ))}
       </div>
+      <TagBadges id={card.id} tags={shared.tags} />
     </div>
   );
 }
@@ -1511,6 +1772,7 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
             )}
           </span>
         )}
+        <TagButton id={box.id} tags={shared.tags} label={box.label ? "section" : boxKind(box) === "image" ? "picture" : boxKind(box)} />
         {!box.label && (
           <button className="icon-btn subtle print-btn" aria-label={`Print this ${boxKind(box) === "image" ? "picture" : boxKind(box)}`}
             title="Print this on its own" onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.printItem(box.id)}>
@@ -1552,6 +1814,7 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
           resolveEmbed={shared.resolveEmbed} onEmbed={shared.embedBox} onDropImage={shared.dropImage} onReplaceEmbed={shared.replaceEmbed}
           onChange={(html) => shared.setBox(box, html)} />
       )}
+      <TagBadges id={box.id} tags={shared.tags} />
     </div>
   );
 }
@@ -1736,7 +1999,8 @@ function DocumentView(
         </p>
       )}
       {stack.map((entry) => (
-        <div key={entry.key} data-item={entry.key}>{entry.node}</div>
+        <div key={entry.key} data-item={entry.key}
+          className={shared.tags.lit ? (shared.tags.lit.has(entry.id) ? "tag-lit" : "tag-dim") : undefined}>{entry.node}</div>
       ))}
       {apart.length > 0 && (
         <div className="subject-insights-card">
@@ -1864,6 +2128,8 @@ function Whiteboard(
   const [selected, setSelected] = useState<Set<string>>(new Set());
   /** The right-click menu on a block: where it opened, and for which. */
   const [nodeMenu, setNodeMenu] = useState<{ id: string; left: number; top: number } | null>(null);
+  /** Blocks being tagged from the right-click menu — the whole selection, if it was part of one. */
+  const [tagging, setTagging] = useState<{ ids: string[]; at: { left: number; top: number } } | null>(null);
   useEffect(() => {
     if (!nodeMenu) return;
     const close = () => setNodeMenu(null);
@@ -2734,6 +3000,7 @@ function Whiteboard(
           <span className="wb-hint">Drag by the title · drag empty space to select several · Shift-drag to pan · double-click for a text box</span>
         )}
       </div>
+      {tagging && tagging.ids.length > 0 && <TagPicker ids={tagging.ids} tags={shared.tags} at={tagging.at} onClose={() => setTagging(null)} />}
       {nodeMenu && (() => {
         // The block right-clicked, or the whole selection if it is part of one.
         const ids = selected.has(nodeMenu.id) ? [...selected] : [nodeMenu.id];
@@ -2742,6 +3009,15 @@ function Whiteboard(
         );
         return (
           <div className="wb-menu" role="menu" style={{ left: nodeMenu.left, top: nodeMenu.top }} onPointerDown={(e) => e.stopPropagation()}>
+            <button role="menuitem"
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                setTagging({ ids: ids.filter((id) => positions.has(id) && nodes.some((n) => n.id === id && (n.kind === "card" || n.kind === "box"))), at: { left: r.left, top: r.top } });
+                setNodeMenu(null);
+              }}>
+              <span className="wb-menu-icon">👤</span>
+              {ids.length > 1 ? `Tag a contact on ${ids.length} blocks…` : "Tag a contact…"}
+            </button>
             <button role="menuitem" disabled={linked.length === 0}
               onClick={() => {
                 onBoard((current) => linked.reduce((next, l) => remove(next, l.id), current ?? {}));
@@ -2837,7 +3113,7 @@ function Whiteboard(
       })()}
       <div
         ref={canvas}
-        className={`wb-canvas${connecting !== false ? " connecting" : ""}${marquee ? " selecting" : ""}`}
+        className={`wb-canvas${connecting !== false ? " connecting" : ""}${marquee ? " selecting" : ""}${shared.tags.lit ? " tag-focus" : ""}`}
         onPointerDownCapture={markBoardUsed}
         onPointerDown={startPan}
         onDoubleClick={(event) => {
@@ -2886,7 +3162,7 @@ function Whiteboard(
                   if (el) nodeEls.current.set(node.id, el);
                   else nodeEls.current.delete(node.id);
                 }}
-                className={`wb-node kind-${node.kind}${connecting === node.id ? " picked" : ""}${drag?.id === node.id || drag?.group.has(node.id) ? " dragging" : ""}${selected.has(node.id) ? " selected" : ""}`}
+                className={`wb-node kind-${node.kind}${connecting === node.id ? " picked" : ""}${drag?.id === node.id || drag?.group.has(node.id) ? " dragging" : ""}${selected.has(node.id) ? " selected" : ""}${shared.tags.lit?.has(node.id) ? " tag-lit" : ""}`}
                 style={{
                   left: pos.x, top: pos.y, width: pos.w,
                   // Every card blurs as the board zooms out; a section's cards also fade under its colour.

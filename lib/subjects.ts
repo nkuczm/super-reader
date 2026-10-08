@@ -214,6 +214,14 @@ export type ContactItem = Base & {
   state: "pending" | "kept" | "dismissed";
   /** Whether the reader means to reach them, and whether they have. */
   outreach?: "want" | "reached";
+  /**
+   * Blocks the reader tagged this person on: story cards (by card id) and
+   * boxes, section labels included — a tagged label stands for everything
+   * filed under it. Kept on the person, so the tags travel with them.
+   */
+  tagged?: string[];
+  /** When they were last tagged on something, so the people being tagged lately are offered first. */
+  taggedAt?: number;
 };
 
 /**
@@ -797,6 +805,8 @@ function putContact(board: Board, found: FoundContact, cardIds: Set<string>, now
       notes: existing?.notes,
       photo: existing?.photo,
       outreach: existing?.outreach,
+      tagged: existing?.tagged,
+      taggedAt: existing?.taggedAt,
       emailFrom: existing?.email ? existing.emailFrom : found.email ? "story" : undefined,
       state: existing?.state ?? "pending",
       at: now,
@@ -809,6 +819,79 @@ export function contactsOf(board: Board | undefined): ContactItem[] {
   return live(board)
     .filter((item): item is ContactItem => item.kind === "contact" && item.state !== "dismissed")
     .sort((a, b) => (a.origin === b.origin ? a.name.localeCompare(b.name) : a.origin === "story" ? -1 : b.origin === "story" ? 1 : 0));
+}
+
+/**
+ * Everyone on the contact sheet, as the Contacts panel lists them: the
+ * subject's own contacts, and the stories' authors, who are contacts
+ * without being asked for (one removed stays removed). An author not yet
+ * stored is made up here, and stored the first time anything is done with
+ * them — a tag, an edit, a note.
+ */
+export function contactRoster(contacts: ContactItem[], cards: { id: string; author?: string; source?: string }[], dismissedIds: Iterable<string>): ContactItem[] {
+  const held = new Map(contacts.map((c) => [c.id, c]));
+  const dismissed = new Set(dismissedIds);
+  const authors: ContactItem[] = authorsOf(cards).flatMap(({ name, refs }) => {
+    const id = contactId(name);
+    if (dismissed.has(id)) return [];
+    const mine = held.get(id);
+    return [
+      mine
+        ? { ...mine, refs: [...new Set([...refs, ...mine.refs])] }
+        : { id, kind: "contact" as const, name, role: "Author", why: "", refs, origin: "story" as const, state: "kept" as const, at: 0 },
+    ];
+  });
+  const authorIds = new Set(authors.map((a) => a.id));
+  return [...authors, ...contacts.filter((c) => !authorIds.has(c.id))];
+}
+
+/** "Maria Lopez" → "ML"; one name gives one letter. */
+export function initialsOf(name: string): string {
+  return name.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((w) => [...w][0] ?? "").join("").toUpperCase() || "?";
+}
+
+/** The blocks filed under a section label: whatever a line joins to it, other labels aside. */
+export function sectionMembers(board: Board | undefined, labelId: string): string[] {
+  const out: string[] = [];
+  for (const item of live(board)) {
+    if (item.kind !== "link") continue;
+    const other = item.from === labelId ? item.to : item.to === labelId ? item.from : null;
+    if (!other || out.includes(other)) continue;
+    const held = board?.[other];
+    if (held && held.kind === "box" && held.label) continue;
+    out.push(other);
+  }
+  return out;
+}
+
+/**
+ * Everything a person is tagged on: the blocks tagged directly, and every
+ * block in a section whose label is tagged.
+ */
+export function taggedWith(board: Board | undefined, contact: Pick<ContactItem, "tagged"> | undefined): Set<string> {
+  const out = new Set<string>();
+  for (const id of contact?.tagged ?? []) {
+    out.add(id);
+    const held = board?.[id];
+    if (held && held.kind === "box" && held.label && !held.deleted) for (const member of sectionMembers(board, id)) out.add(member);
+  }
+  return out;
+}
+
+/** A person with blocks tagged (`on`) or untagged; tagging keeps someone only suggested. */
+export function withTags(contact: ContactItem, ids: string[], on: boolean, now = Date.now()): ContactItem {
+  const tagged = new Set(contact.tagged ?? []);
+  for (const id of ids) {
+    if (on) tagged.add(id);
+    else tagged.delete(id);
+  }
+  return { ...contact, tagged: [...tagged], state: on ? "kept" : contact.state, ...(on ? { taggedAt: now } : {}), at: now };
+}
+
+/** The people to offer for tagging: whoever was tagged most recently first, then the sheet in its own order. */
+export function tagOrder(roster: ContactItem[]): ContactItem[] {
+  const recent = roster.filter((c) => c.taggedAt).sort((a, b) => (b.taggedAt ?? 0) - (a.taggedAt ?? 0));
+  return [...recent, ...roster.filter((c) => !c.taggedAt)];
 }
 
 /** Emails written out in some text, lower-cased. */
