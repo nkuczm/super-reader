@@ -1815,6 +1815,8 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
                     ))}
                   </span>
                 )}
+                {/* A node is always filled with its colour; underline or background is a heading's choice. */}
+                {!(box.labelShape === "node" && dragHandle) && (
                 <span className="seg label-style-seg">
                   {(["underline", "fill"] as const).map((st) => (
                     <button key={st} className={(box.labelStyle ?? "underline") === st ? "on" : ""}
@@ -1823,6 +1825,7 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
                     </button>
                   ))}
                 </span>
+                )}
               </span>
             )}
           </span>
@@ -1841,7 +1844,7 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
       </div>
       {box.label && box.labelShape === "node" && dragHandle ? (
         // A node: the label in a circle, which also drags it; lines leave from all round it.
-        <div className={`node-circle${box.labelStyle === "fill" ? " fill" : ""}`} style={{ "--label-color": labelColorOf(box) } as React.CSSProperties}
+        <div className="node-circle" style={{ "--label-color": labelColorOf(box) } as React.CSSProperties}
           onPointerDown={dragHandle}>
           <input
             className="section-label node-label"
@@ -3028,11 +3031,14 @@ function Whiteboard(
             if (l.to === label.id && positions.has(l.from)) members.push(l.from);
           }
           const rects = members.map((id) => ({ id, ...positions.get(id)!, h: sizes[id]?.h ?? 160 }));
+          // A node is its own coloured circle: no square of tint behind it, only behind what it holds.
+          const tinted = label.labelShape === "node" ? rects.filter((r) => r.id !== label.id) : rects;
           const x0 = Math.min(...rects.map((r) => r.x));
           const y0 = Math.min(...rects.map((r) => r.y));
           const x1 = Math.max(...rects.map((r) => r.x + r.w));
           const y1 = Math.max(...rects.map((r) => r.y + r.h));
-          return { id: label.id, text: textOf(label.html).trim() || "Section", color: labelColorOf(label), rects, box: { x0, y0, x1, y1 } };
+          const node = label.labelShape === "node" ? rects.find((r) => r.id === label.id) : undefined;
+          return { id: label.id, text: textOf(label.html).trim() || (node ? "Node" : "Section"), color: labelColorOf(label), rects, tinted, node, box: { x0, y0, x1, y1 } };
         })
     : [];
   const grouped = new Set(sections.flatMap((sec) => sec.rects.map((r) => r.id)));
@@ -3219,10 +3225,16 @@ function Whiteboard(
               const by = minY + (e.clientY - r.top - oy) / k;
               setView((v) => ({ ...v, x: host.width / 2 - bx * v.zoom, y: host.height / 2 - by * v.zoom }));
             }}>
-            {rects.map((r) => (
-              <rect key={r.id} className={labelIds.has(r.id) ? "mm-label" : "mm-node"} x={sx(r.x)} y={sy(r.y)}
-                width={Math.max(2, r.w * k)} height={Math.max(2, r.h * k)} rx={1.5} />
-            ))}
+            {rects.map((r) =>
+              isNode(r.id) ? (
+                // A node is a dot in its colour, on the map as on the board.
+                <circle key={r.id} className="mm-node-circle" cx={sx(r.x + r.w / 2)} cy={sy(r.y + r.h / 2)}
+                  r={Math.max(2, (Math.min(r.w, r.h) * k) / 2)} style={{ fill: labelColorOf(board![r.id] as BoxItem) }} />
+              ) : (
+                <rect key={r.id} className={labelIds.has(r.id) ? "mm-label" : "mm-node"} x={sx(r.x)} y={sy(r.y)}
+                  width={Math.max(2, r.w * k)} height={Math.max(2, r.h * k)} rx={1.5} />
+              ),
+            )}
             <rect className="mm-view" x={sx(seen.x)} y={sy(seen.y)} width={seen.w * k} height={seen.h * k} rx={2} />
           </svg>
         );
@@ -3263,7 +3275,7 @@ function Whiteboard(
           )}
           {sections.map((sec) => (
             <div key={`far-${sec.id}`} className="wb-far" aria-hidden="true">
-              {sec.rects.map((r) => (
+              {sec.tinted.map((r) => (
                 <div key={r.id} className="wb-far-blob"
                   style={{ left: r.x, top: r.y, width: r.w, height: r.h, background: sec.color, opacity: 0.5 * tint, ...(blurPx > 0 ? { filter: `blur(${(blurPx * 2) / view.zoom}px)` } : {}) }} />
               ))}
@@ -3282,7 +3294,7 @@ function Whiteboard(
                 style={{
                   left: pos.x, top: pos.y, width: pos.w,
                   // Every card blurs as the board zooms out; a section's cards also fade under its colour.
-                  ...(haze > 0
+                  ...(haze > 0 && !isNode(node.id)
                     ? lowPower
                       ? { opacity: grouped.has(node.id) ? 1 - 0.55 * haze : 1 - 0.35 * haze }
                       : { filter: `blur(${blurPx / view.zoom}px)`, opacity: grouped.has(node.id) ? 1 - 0.35 * haze : 1 }
@@ -3317,6 +3329,19 @@ function Whiteboard(
           })}
           {/* Section headers over everything, never blurred, all the same size on screen. */}
           {sections.map((sec) => {
+            // A node stays a circle zoomed out: at least a readable size on screen, its name inside.
+            if (sec.node) {
+              const d = Math.max(sec.node.w, 56 / view.zoom);
+              return (
+                <div key={`node-${sec.id}`} className="wb-far-node" aria-hidden="true"
+                  style={{
+                    left: sec.node.x + sec.node.w / 2, top: sec.node.y + sec.node.w / 2, width: d, height: d,
+                    background: sec.color, fontSize: Math.min(d * 0.21, 15 / view.zoom),
+                  }}>
+                  {sec.text}
+                </div>
+              );
+            }
             const cx = (sec.box.x0 + sec.box.x1) / 2;
             const cy = (sec.box.y0 + sec.box.y1) / 2;
             const fit = ((sec.box.x1 - sec.box.x0) * view.zoom * 0.9) / Math.max(4, Math.max(...sec.text.split(/\s+/).map((w) => w.length)) * 0.6);
