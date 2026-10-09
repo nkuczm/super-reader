@@ -344,3 +344,18 @@ test("a story added from a pasted link remembers the block it was pasted into", 
   const [card] = cardsOf({ id: "n", name: "n", entries: [], at: 0 } as never, board);
   assert.equal(card.after, "box1");
 });
+
+test("madeAt reads a block's making time from its id, not its last edit", async () => {
+  const { madeAt, newItemId } = await import("../lib/subjects");
+  const before = Date.now();
+  const id = newItemId("box");
+  assert.ok(Math.abs(madeAt({ id, at: before + 60_000 }) - before) < 1000);
+  // Ids without a time in them keep their own `at`.
+  assert.equal(madeAt({ id: "b1", at: 42 }), 42);
+});
+
+test("a story put back after deletion keeps its place in the document", () => {
+  const board = put({}, { id: "story:https://e.com/x", kind: "story", link: "https://e.com/x", title: "X", since: 5, at: 900 } as never, 900);
+  const [card] = cardsOf({ id: "n", name: "n", entries: [], at: 0 } as never, board);
+  assert.equal(card.at, 5);
+});

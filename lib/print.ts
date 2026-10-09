@@ -53,6 +53,8 @@ h2, h3, h4 { hyphens: manual; break-after: avoid; page-break-after: avoid; }
 h2 { margin: 20pt 0 7pt; font: 700 15pt/1.25 ${SERIF}; }
 h2.tab { margin-top: 26pt; padding-bottom: 4pt; border-bottom: 0.75pt solid #cfcfcf; }
 h2.tab:first-child { margin-top: 0; }
+/* Each tab of a document begins a page of its own. */
+h2.tab:not(:first-child) { break-before: page; page-break-before: always; margin-top: 0; }
 h2.section { margin: 20pt 0 8pt; font: 700 8.5pt/1.3 ${SANS}; letter-spacing: 0.1em; text-transform: uppercase; color: #8a6a2f; }
 h3 { margin: 0 0 2pt; font: 700 13pt/1.3 ${SERIF}; }
 h3 a { color: inherit; text-decoration: none; }

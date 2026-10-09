@@ -900,6 +900,9 @@ function DocTable({ facts, media, grid, metas, widths, heights, startResize, sta
         } else if (command === "checklist") {
           if (!el.querySelector("ul")) document.execCommand("insertUnorderedList");
           el.querySelector("ul")?.setAttribute("data-check", "");
+        } else if (command === "letteredList") {
+          if (!el.querySelector("ol")) document.execCommand("insertOrderedList");
+          el.querySelector("ol")?.setAttribute("type", "a");
         } else document.execCommand(command, false, value);
       }
       sel?.removeAllRanges();

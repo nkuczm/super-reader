@@ -1,12 +1,22 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import CropDialog, { copyPicture, pastedWidth } from "./CropDialog";
 import { sanitizeRichText } from "@/lib/subjects";
 import { cleanPastedHtml } from "@/lib/paste";
 import { CITE_OPEN_EVENT, CITE_TYPE, CITES_CHANGED_EVENT, citeChipHtml, citeFor, citeTextHtml, refreshCiteChips, type Cite } from "@/lib/cite";
 import { refreshSubjectChips, subjectChipHtml, subjectsMatching, SUBJECT_OPEN_EVENT, SUBJECTS_CHANGED_EVENT, type SubjectRef } from "@/lib/subject-links";
+
+/**
+ * Where the text tools go instead of beside the text: the document gives its
+ * one fixed bar at the top, so the buttons stay put whichever block is being
+ * written in, rather than moving with the caret.
+ */
+export const ToolsHostContext = createContext<HTMLElement | null>(null);
+
+/** The tools as the fixed bar shows them before any text has been clicked into. */
+export const TOOL_LABELS = ["↶", "↷", "B", "I", "H", "• List", "1. List", "a. List", "☐ Check", "H3", "Link", "◈ Subject"];
 
 /** The drag type a drawing or image box carries, for dropping into text. */
 export const EMBED_TYPE = "application/x-super-reader-box";
@@ -41,6 +51,27 @@ function caretInto(node: HTMLElement, x: number, y: number) {
     end.collapse(false);
     selection?.addRange(end);
   }
+}
+
+/** The caret so many characters into an element's text. */
+function caretAtText(root: Node, offset: number) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let left = offset;
+  const range = document.createRange();
+  range.selectNodeContents(root);
+  range.collapse(true);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const length = n.nodeValue?.length ?? 0;
+    if (left <= length) {
+      range.setStart(n, left);
+      range.collapse(true);
+      break;
+    }
+    left -= length;
+  }
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(range);
 }
 
 /**
@@ -568,8 +599,10 @@ export default function RichText({
    */
   const [focused, setFocused] = useState(false);
   const [side, setSide] = useState<{ left: number; top: number } | null>(null);
+  const toolsHost = useContext(ToolsHostContext);
+  const hosted = Boolean(toolsHost) && !docked;
   useEffect(() => {
-    if (!focused || docked) {
+    if (!focused || docked || hosted) {
       setSide(null);
       return;
     }
@@ -607,7 +640,7 @@ export default function RichText({
     };
     tick();
     return () => cancelAnimationFrame(frame);
-  }, [focused, docked]);
+  }, [focused, docked, hosted]);
 
   /** The list the caret is in, if any. */
   function listAtCaret(): HTMLUListElement | null {
@@ -615,6 +648,74 @@ export default function RichText({
     const elNode = node && (node.nodeType === 1 ? (node as Element) : node.parentElement);
     const list = elNode?.closest("ul");
     return list && el.current?.contains(list) ? (list as HTMLUListElement) : null;
+  }
+
+  /** The numbered list the caret is in, if any. */
+  function orderedAtCaret(): HTMLOListElement | null {
+    const node = window.getSelection()?.anchorNode;
+    const elNode = node && (node.nodeType === 1 ? (node as Element) : node.parentElement);
+    const list = elNode?.closest("ol");
+    return list && el.current?.contains(list) ? (list as HTMLOListElement) : null;
+  }
+
+  /** Lines into a numbered list (1, 2, 3) or a lettered one (a, b, c); the same again turns it back into lines. */
+  function toggleNumbered(lettered: boolean) {
+    if (onFormat?.(lettered ? "letteredList" : "insertOrderedList")) return;
+    el.current?.focus();
+    const list = orderedAtCaret();
+    if (list && (list.getAttribute("type") === "a") === lettered) {
+      document.execCommand("insertOrderedList");
+    } else {
+      if (!list) document.execCommand("insertOrderedList");
+      let ol = orderedAtCaret();
+      // The browser joins a new list onto one just above it. Numbers after
+      // numbers carry on, as in a Doc; a list of the other kind starts afresh.
+      const sel = window.getSelection();
+      const node = sel?.anchorNode;
+      const li = (node && (node.nodeType === 1 ? (node as Element) : node.parentElement))?.closest("li");
+      if (!list && ol && li?.parentElement === ol && li.previousElementSibling && (ol.getAttribute("type") === "a") !== lettered) {
+        const inLi = document.createRange();
+        inLi.selectNodeContents(li);
+        inLi.setEnd(sel!.anchorNode!, sel!.anchorOffset);
+        const offset = inLi.toString().length;
+        const fresh = document.createElement("ol");
+        for (let item: Element | null = li; item; ) {
+          const next: Element | null = item.nextElementSibling;
+          fresh.append(item);
+          item = next;
+        }
+        ol.after(fresh);
+        ol = fresh;
+        caretAtText(li, offset);
+      }
+      if (lettered) ol?.setAttribute("type", "a");
+      else ol?.removeAttribute("type");
+    }
+    changed();
+  }
+
+  /**
+   * As in a Doc: "1." or "a." then a space at the start of a line starts a
+   * numbered or lettered list, and "-" or "*" a bulleted one. True when it did.
+   */
+  function listFromTyping(): boolean {
+    const sel = window.getSelection();
+    const root = el.current;
+    if (!root || !sel?.isCollapsed || !sel.anchorNode || sel.anchorNode.nodeType !== Node.TEXT_NODE) return false;
+    const block = (sel.anchorNode.parentElement?.closest("p, div, h3, li, blockquote") ?? root) as HTMLElement;
+    if (!root.contains(block) || block.closest("li")) return false;
+    const before = document.createRange();
+    before.setStart(block, 0);
+    before.setEnd(sel.anchorNode, sel.anchorOffset);
+    const typed = before.toString();
+    const kind = /^1[.)]$/.test(typed) ? "numbered" : /^a[.)]$/.test(typed) ? "lettered" : /^[-*]$/.test(typed) ? "bullets" : null;
+    if (!kind) return false;
+    sel.removeAllRanges();
+    sel.addRange(before);
+    document.execCommand("delete");
+    if (kind === "bullets") format("insertUnorderedList");
+    else toggleNumbered(kind === "lettered");
+    return true;
   }
 
   /** Lines into a checklist, or a checklist back into plain lines. */
@@ -679,10 +780,10 @@ export default function RichText({
   }
 
   const toolbar = (
-    <div ref={tools} className={`rich-tools${docked ? " docked" : side ? " side" : ""}`}
+    <div ref={tools} className={`rich-tools${docked ? " docked" : hosted ? " hosted" : side ? " side" : ""}`}
       style={docked ? { top: vvTop } : side ? { left: side.left, top: side.top } : undefined}
       onMouseDown={(event) => event.preventDefault()}>
-      {docked && (
+      {(docked || hosted) && (
         <>
           <button type="button" className="rich-undo" title="Undo" aria-label="Undo" onClick={() => format("undo")}>↶</button>
           <button type="button" className="rich-undo" title="Redo" aria-label="Redo" onClick={() => format("redo")}>↷</button>
@@ -694,6 +795,8 @@ export default function RichText({
         <mark>H</mark>
       </button>
       <button type="button" title="Bulleted list (⌘⇧8)" onClick={() => format("insertUnorderedList")}>• List</button>
+      <button type="button" title="Numbered list (⌘⇧7) — or type 1. and a space" onClick={() => toggleNumbered(false)}>1. List</button>
+      <button type="button" title="Lettered list — or type a. and a space" onClick={() => toggleNumbered(true)}>a. List</button>
       <button type="button" title="Checklist (⌘⇧9)" onClick={toggleChecklist}>☐ Check</button>
       <button type="button" title="Heading" onClick={() => format("formatBlock", "h3")}>H3</button>
       <button type="button" title="Link (⌘K)" onClick={startLink}>Link</button>
@@ -762,7 +865,9 @@ export default function RichText({
       )}
       {/* Docked, the toolbar lives at the top of the page: inside a scaled
           whiteboard, "fixed" would mean fixed to the board, not the screen. */}
-      {(docked || side) && typeof document !== "undefined" ? createPortal(toolbar, document.body) : toolbar}
+      {hosted
+        ? focused && toolsHost ? createPortal(toolbar, toolsHost) : null
+        : (docked || side) && typeof document !== "undefined" ? createPortal(toolbar, document.body) : toolbar}
       {linking && (
         <form
           className="rich-link-field"
@@ -1162,6 +1267,17 @@ export default function RichText({
           if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.code === "Digit8") {
             event.preventDefault();
             format("insertUnorderedList");
+            event.stopPropagation();
+            return;
+          }
+          if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.code === "Digit7") {
+            event.preventDefault();
+            toggleNumbered(false);
+            event.stopPropagation();
+            return;
+          }
+          if (event.key === " " && !event.metaKey && !event.ctrlKey && !event.altKey && listFromTyping()) {
+            event.preventDefault();
             event.stopPropagation();
             return;
           }

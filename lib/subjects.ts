@@ -38,6 +38,8 @@ export type StoryItem = Base & {
   author?: string;
   /** The block it was pasted into as a link: in the document it reads right below that block. */
   after?: string;
+  /** When it first arrived, kept when a deleted story is put back (which restamps `at`), so it returns to its place. */
+  since?: number;
 };
 
 /** What you wrote on a story's card, under its quotes. Sanitised HTML. */
@@ -65,6 +67,8 @@ export type BoxItem = Base & {
   embedded?: boolean;
   /** A section label: one line of big header text, which stories gather under. */
   label?: boolean;
+  /** Started from the keyboard below another block in the document: it reads right after that block. */
+  after?: string;
   /** A section label's colour (one of LABEL_COLORS) and whether it underlines or fills behind the text. */
   labelColor?: string;
   labelStyle?: "underline" | "fill";
@@ -623,7 +627,7 @@ export function cardsOf(note: Note, board: Board | undefined): Card[] {
   }
   for (const item of live(board)) {
     if (item.kind === "story") {
-      const card = ensure(item.link, item.title, item.source, item.at, item);
+      const card = ensure(item.link, item.title, item.source, item.since ?? item.at, item);
       if (item.after && item.after !== card.id) card.after ??= item.after;
     }
     if (item.kind === "suggest" && item.state === "accepted") {
@@ -1128,6 +1132,8 @@ export function sanitizeRichText(html: string): string {
       stack.push(tag);
       // A checklist: a list marked as one, and each item ticked or not.
       if (tag === "ul" && /\bdata-check\b/.test(match[2])) out.push(`<ul data-check="">`);
+      // A lettered list: a numbered one counting a, b, c.
+      else if (tag === "ol" && /\btype=["']?a\b/.test(match[2])) out.push(`<ol type="a">`);
       else if (tag === "li" && /\bdata-checked=["']?true/.test(match[2])) out.push(`<li data-checked="true">`);
       else out.push(`<${tag}>`);
     }
