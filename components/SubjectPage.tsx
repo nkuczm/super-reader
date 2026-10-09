@@ -16,6 +16,7 @@ import { boxHtml, boxKind, cardHtml, cardNotesHtml, tableCardHtml, transcriptHtm
 import { printedOn, printPage } from "@/lib/print";
 import { safeTranscript } from "@/lib/transcript";
 import PrintDialog, { type PrintJob } from "./PrintDialog";
+import SubjectFind, { type FindTarget } from "./SubjectFind";
 import type { Writing } from "./useAccount";
 import type { Note, NoteEntry } from "@/lib/notes";
 import { omissionsHtml, putFactNotes, researchOf, scriptQuotes, scriptRows, type FactCheckResult, type SourceTarget } from "@/lib/factcheck";
@@ -544,6 +545,39 @@ export default function SubjectPage(props: Props) {
   /** Whose blocks are lit up, and whose are open as a document. */
   const [tagFocus, setTagFocus] = useState<string | null>(null);
   const [tagDoc, setTagDoc] = useState<string | null>(null);
+
+  /**
+   * Find: ⌘F (Ctrl+F) on a subject searches its whiteboard or its document
+   * instead of the browser's page — which on the whiteboard would find text
+   * scattered off-screen and leave it there.
+   */
+  const [findOpen, setFindOpen] = useState(false);
+  const [findKey, setFindKey] = useState(0);
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.key.toLowerCase() !== "f") return;
+      // A dialog over the subject keeps the browser's own.
+      if (document.querySelector(".print-overlay, .history-overlay, .cmp-overlay")) return;
+      e.preventDefault();
+      setFindOpen(true);
+      setFindKey((k) => k + 1);
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, []);
+  const findOnBoard = meta.view === "board" && !tagDoc;
+  const goToFound = useCallback((target: FindTarget) => {
+    if (findOnBoard) {
+      window.dispatchEvent(new CustomEvent("super-reader:find-goto", { detail: target }));
+      return;
+    }
+    // The document scrolls the match to a third of the way down, unless it is already comfortably in view.
+    const scroller = target.el.closest<HTMLElement>(".main") ?? document.scrollingElement as HTMLElement | null;
+    if (!scroller) return;
+    const box = scroller.getBoundingClientRect();
+    const top = target.rect.top - box.top;
+    if (top < 90 || top > box.height - 80) scroller.scrollBy({ top: top - box.height / 3, behavior: "smooth" });
+  }, [findOnBoard]);
   const focusPerson = tagFocus ? roster.find((c) => c.id === tagFocus) : undefined;
   const lit = useMemo(() => (focusPerson ? new Set(taggedBlocks(focusPerson)) : null), [focusPerson, taggedBlocks]);
   useEffect(() => {
@@ -1155,6 +1189,13 @@ export default function SubjectPage(props: Props) {
             <button role="tab" aria-selected={meta.view === "board"} className={meta.view === "board" ? "on" : ""}
               onClick={() => { setTagDoc(null); setView("board"); }}>Whiteboard</button>
           </div>
+          <button className={`btn ghost small subject-find-btn${findOpen ? " on" : ""}`} aria-label="Find (⌘F)" title="Find on this page (⌘F / Ctrl+F)"
+            onClick={() => { setFindOpen(true); setFindKey((k) => k + 1); }}>
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+              <circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" strokeWidth="2" />
+              <path d="M15 15l5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+          </button>
           <button className="btn ghost small" disabled={!hasAiKey || allCards.length < 2 || run.state === "running"}
             onClick={() => void synthesize()} title={insightsWhyNot ?? "Find connections and suggest reading now"} aria-label="Insights">
             ✦ <span className="insights-label">Insights</span>
@@ -1278,6 +1319,7 @@ export default function SubjectPage(props: Props) {
       </div>
       </div>
       )}
+      {findOpen && <SubjectFind key={findKey} board={findOnBoard} onGo={goToFound} onClose={() => setFindOpen(false)} />}
       {focusPerson && !tagDoc && (() => {
         const ids = taggedBlocks(focusPerson);
         const here = new Set([...cards.map((c) => c.id), ...boxes.map((b) => b.id)]);
@@ -2687,6 +2729,25 @@ function Whiteboard(
     };
     window.addEventListener("super-reader:goto", go);
     return () => window.removeEventListener("super-reader:goto", go);
+  });
+
+  // A match from Find: centre it, zoomed in far enough to read.
+  useEffect(() => {
+    const go = (event: Event) => {
+      const { rect, node } = (event as CustomEvent<FindTarget>).detail;
+      const box = canvas.current?.getBoundingClientRect();
+      if (!box) return;
+      setView((v) => {
+        // The match's place on the board, from where it is on screen now.
+        const bx = (rect.left + rect.width / 2 - box.left - v.x) / v.zoom;
+        const by = (rect.top + rect.height / 2 - box.top - v.y) / v.zoom;
+        const zoom = v.zoom < 0.8 ? 1 : v.zoom;
+        return { zoom, x: box.width / 2 - bx * zoom, y: box.height * 0.42 - by * zoom };
+      });
+      if (node) flashEl(node);
+    };
+    window.addEventListener("super-reader:find-goto", go);
+    return () => window.removeEventListener("super-reader:find-goto", go);
   });
 
   // Space held down turns a drag over empty board back into panning.
