@@ -2728,13 +2728,36 @@
 .feed-swatch.none svg { width: 12px; height: 12px; }
 
 /* A subject's tile: its whole whiteboard, zoomed out. */
-.subject-tile-preview:has(.board-thumb) { padding: 8px; display: block; }
-.board-thumb { width: 100%; height: 100%; display: block; }
-.board-thumb rect { fill: var(--bg); stroke: var(--border); stroke-width: 3; }
-.board-thumb .bt-box > rect:first-child { fill: color-mix(in srgb, var(--accent) 6%, var(--bg)); }
-.board-thumb .bt-insight > rect:first-child, .board-thumb .bt-suggest > rect:first-child { fill: color-mix(in srgb, var(--accent) 14%, var(--bg)); stroke-dasharray: 10 8; }
-.board-thumb .bt-line { fill: var(--border); stroke: none; }
-.board-thumb .bt-title { fill: var(--text); font-size: 22px; font-weight: 700; }
+/* A subject's thumbnail: the middle of its board as it looks, a page in miniature. */
+.subject-tile-preview:has(.bt-page) { height: auto; aspect-ratio: 1.45; padding: 0; display: block; mask-image: none; -webkit-mask-image: none; }
+.bt-page { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--bg-sub);
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--text-dim) 22%, transparent) 1px, transparent 1.2px); background-size: 9px 9px; }
+.bt-page > .subject-tile-empty { position: absolute; inset: 0; display: grid; place-items: center; }
+.bt-canvas { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: none; user-select: none; }
+.bt-links { position: absolute; inset: 0; overflow: visible; }
+.bt-links line { stroke: color-mix(in srgb, var(--text-dim) 55%, transparent); stroke-width: 2.5; }
+.bt-node { position: absolute; overflow: hidden; }
+.bt-card, .bt-box {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  padding: 12px 14px; font-size: 14px; line-height: 1.45; color: var(--text); overflow: hidden;
+}
+.bt-card-title { font-size: 15.5px; font-weight: 650; line-height: 1.3; }
+.bt-byline { margin-top: 3px; font-size: 12px; color: var(--text-dim); }
+.bt-quotes { margin: 8px 0 4px; padding-left: 18px; }
+.bt-quotes li { margin: 0 0 4px; }
+.bt-text p, .bt-text ul, .bt-text ol { margin: 0 0 6px; }
+.bt-text ul, .bt-text ol { padding-left: 18px; }
+.bt-card .bt-text { margin-top: 6px; color: var(--text); }
+.bt-insight { background: var(--accent-soft); border-color: var(--accent); font-size: 13px; }
+.bt-tag { font-weight: 650; color: var(--accent); }
+.bt-label { padding: 6px 2px; font-size: 26px; font-weight: 750; letter-spacing: -0.01em; color: var(--text); border-bottom: 3px solid var(--label-color, var(--accent)); }
+.bt-picture { padding: 8px; }
+.bt-picture img { display: block; width: 100%; max-height: 260px; object-fit: cover; border-radius: 6px; background: #fff; }
+.bt-caption { margin-top: 5px; font-size: 12px; color: var(--text-dim); }
+.bt-table-name { font-size: 12px; font-weight: 650; color: var(--text-dim); margin-bottom: 6px; }
+.bt-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.bt-table td { border: 1px solid var(--border); padding: 4px 6px; vertical-align: top; }
+.bt-turn { margin: 0 0 5px; font-size: 13px; }
 
 /* Edit mode: the controls are only there when editing, and then always shown. */
 .sidebar-scroll .feed-head .icon-btn, .sidebar-scroll .source-row .icon-btn.danger { opacity: 1; }
