@@ -1133,7 +1133,12 @@ export function sanitizeRichText(html: string): string {
       // A checklist: a list marked as one, and each item ticked or not.
       if (tag === "ul" && /\bdata-check\b/.test(match[2])) out.push(`<ul data-check="">`);
       // A lettered list: a numbered one counting a, b, c.
-      else if (tag === "ol" && /\btype=["']?a\b/.test(match[2])) out.push(`<ol type="a">`);
+      else if (tag === "ol") {
+        // Lettered (a, b, c or A, B, C), and where it counts from.
+        const type = match[2].match(/\btype=["']?([aA])\b/)?.[1];
+        const start = Number(match[2].match(/\bstart=["']?(\d{1,3})\b/)?.[1]);
+        out.push(`<ol${type ? ` type="${type}"` : ""}${start > 1 ? ` start="${start}"` : ""}>`);
+      }
       else if (tag === "li" && /\bdata-checked=["']?true/.test(match[2])) out.push(`<li data-checked="true">`);
       else out.push(`<${tag}>`);
     }

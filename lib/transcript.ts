@@ -5,6 +5,8 @@
  *   Riverside   "Name (00:01.512)" on its own line, then what they said
  *   Otter       "Name  0:01" on its own line, then what they said
  *   Zoom / VTT  cue lines and timings, then "Name: what they said"
+ *   Premiere    "00;01;55;26 - 00;02;18;29" (video timecode, frames last),
+ *               then the speaker on a line of their own, then what they said
  *   plain       "Name: what they said", optionally "[00:01] Name: …"
  * — and anything else becomes one block of text, so nothing pasted is lost.
  */
@@ -25,8 +27,11 @@ export type TMark = { id: string; from: TPoint; to: TPoint; comment?: string };
 
 export type Transcript = { title: string; turns: Turn[]; marks?: TMark[] };
 
-export const MAX_TRANSCRIPT_CHARS = 200_000;
-const MAX_TURNS = 5000;
+/** About eight hours of talk. A two-hour interview runs to some 130,000 characters. */
+export const MAX_TRANSCRIPT_CHARS = 500_000;
+const MAX_TURNS = 8000;
+/** A turn's longest stretch; a longer one is carried on in the next turn, never cut off. */
+export const MAX_TURN_CHARS = 20_000;
 
 const TIME = String.raw`(?:\d{1,2}:)?\d{1,2}:\d{2}(?:[.,]\d+)?`;
 const NAME = String.raw`[\p{L}][\p{L}\p{M}'’.\- ]{0,58}?`;
@@ -39,6 +44,15 @@ const TRAILING_TIME_HEADER = new RegExp(String.raw`^(${NAME})\s+(${TIME})\s*$`, 
 const INLINE = new RegExp(String.raw`^(?:\[?(${TIME})\]?\s*[-–—]?\s*)?(${NAME}):\s+(.*)$`, "u");
 /** "00:00:01.000 --> 00:00:04.000" — a VTT/SRT cue timing. */
 const CUE = new RegExp(String.raw`^(${TIME})\s*-->\s*${TIME}`);
+/** "00;01;55;26 - 00;02;18;29" — video timecode (hours, minutes, seconds, frames), as Premiere and Resolve export captions. */
+const TIMECODE = String.raw`\d{1,2}[;:]\d{2}[;:]\d{2}[;:]\d{2}`;
+const TIMECODE_CUE = new RegExp(String.raw`^(${TIMECODE})(?:\s*[-–—]\s*${TIMECODE})?$`);
+
+/** A timecode as a time: frames dropped, and the hour only when there is one. "00;01;55;26" → "01:55". */
+function fromTimecode(code: string) {
+  const [h, m, sec] = code.split(/[;:]/);
+  return Number(h) > 0 ? `${h.padStart(2, "0")}:${m}:${sec}` : `${m}:${sec}`;
+}
 
 /** A time as written, without its fraction: "00:01.512" → "00:01". */
 const shortTime = (t: string) => t.replace(/[.,]\d+$/, "");
@@ -64,6 +78,8 @@ export function parseTranscript(input: string): Turn[] {
   let pendingTime: string | undefined;
   let blank = false;
   let sawCue = false;
+  /** Just after a timecode cue, where the speaker's name comes on its own line. */
+  let nameNext = false;
 
   const start = (s: string | undefined, t: string | undefined, x = "") => {
     current = { ...(s ? { s: s.trim() } : {}), ...(t ? { t: shortTime(t) } : {}), x };
@@ -84,6 +100,26 @@ export function parseTranscript(input: string): Turn[] {
       continue;
     }
     if (line === "WEBVTT" || /^\d+$/.test(line)) continue;
+    const code = line.match(TIMECODE_CUE);
+    if (code) {
+      pendingTime = fromTimecode(code[1]);
+      sawCue = true;
+      nameNext = true;
+      continue;
+    }
+    if (nameNext) {
+      nameNext = false;
+      // The name, never a line of what was said ("Okay." ends a sentence; a name does not).
+      if (speakerLike(line) && !/[.?!,;…]$/.test(line)) {
+        start(line, pendingTime);
+        pendingTime = undefined;
+        continue;
+      }
+      start(undefined, pendingTime);
+      pendingTime = undefined;
+      add(line);
+      continue;
+    }
     const cue = line.match(CUE);
     if (cue) {
       pendingTime = cue[1];
@@ -116,7 +152,30 @@ export function parseTranscript(input: string): Turn[] {
     }
     merged.push(turn);
   }
-  return merged.slice(0, MAX_TURNS);
+  return merged.flatMap(splitLong).slice(0, MAX_TURNS);
+}
+
+/**
+ * A turn longer than a turn may be — one speaker for twenty minutes, or a
+ * transcript in no shape we know, read as one block — is carried on in
+ * further turns by the same speaker, broken between paragraphs or
+ * sentences, so none of it is lost.
+ */
+function splitLong(turn: Turn): Turn[] {
+  if (turn.x.length <= MAX_TURN_CHARS) return [turn];
+  const out: Turn[] = [];
+  let rest = turn.x;
+  while (rest.length > MAX_TURN_CHARS) {
+    const window = rest.slice(0, MAX_TURN_CHARS);
+    const at = [window.lastIndexOf("\n\n"), window.search(/[.?!…]["”’)]?\s[^.?!…]*$/)]
+      .map((i, k) => (i > MAX_TURN_CHARS / 2 ? i + (k === 0 ? 0 : 1) : -1))
+      .find((i) => i > 0) ?? window.lastIndexOf(" ");
+    const cut = at > 0 ? at : MAX_TURN_CHARS;
+    out.push({ ...(out.length ? { s: turn.s } : turn), x: rest.slice(0, cut).trim() });
+    rest = rest.slice(cut).trim();
+  }
+  if (rest) out.push({ ...(turn.s ? { s: turn.s } : {}), x: rest });
+  return out.map((t) => (t.s === undefined ? (({ s: _s, ...r }) => r)(t) : t));
 }
 
 /** Everyone who speaks, in order of first appearance. */
@@ -132,7 +191,7 @@ export function safeTranscript(input: unknown): Transcript {
     return [{
       ...(typeof t.s === "string" && t.s ? { s: t.s.slice(0, 80) } : {}),
       ...(typeof t.t === "string" && t.t ? { t: t.t.slice(0, 16) } : {}),
-      x: t.x.slice(0, 20_000),
+      x: t.x.slice(0, MAX_TURN_CHARS),
     }];
   });
   const point = (v: unknown): TPoint | null => {

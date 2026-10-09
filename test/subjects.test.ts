@@ -359,3 +359,10 @@ test("a story put back after deletion keeps its place in the document", () => {
   const [card] = cardsOf({ id: "n", name: "n", entries: [], at: 0 } as never, board);
   assert.equal(card.at, 5);
 });
+
+test("lettered and numbered lists keep their kind and where they count from", () => {
+  assert.equal(sanitizeRichText('<ol type="a"><li>x</li></ol>'), '<ol type="a"><li>x</li></ol>');
+  assert.equal(sanitizeRichText('<ol type="A" start="3"><li>x</li></ol>'), '<ol type="A" start="3"><li>x</li></ol>');
+  assert.equal(sanitizeRichText('<ol start="4" onclick="x"><li>x</li></ol>'), '<ol start="4"><li>x</li></ol>');
+  assert.equal(sanitizeRichText('<ol type="i"><li>x</li></ol>'), "<ol><li>x</li></ol>");
+});
