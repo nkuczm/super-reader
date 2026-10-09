@@ -3028,3 +3028,24 @@
   .subjects-toolbar { padding: 4px 12px 6px; }
 }
 @media (pointer: coarse) { .tile-pin, .subjects-list-row .col-actions .icon-btn { opacity: 1; } }
+
+/* ---------- a section as a node: a circle lines leave from on every side ---------- */
+.subject-box.node-box, .subject-box.node-box:hover, .subject-box.node-box:focus-within {
+  padding: 0; border-color: transparent; background: transparent; box-shadow: none;
+}
+/* Its controls float above the circle, so the box is exactly the circle the lines meet. */
+.node-box .subject-box-head { position: absolute; left: 0; right: 0; bottom: 100%; padding-bottom: 4px; }
+.node-circle {
+  width: 100%; aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; padding: 14%;
+  border: 3px solid var(--label-color, var(--accent)); background: var(--bg); cursor: grab;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+}
+.node-circle.fill { background: color-mix(in srgb, var(--label-color, var(--accent)) 22%, var(--bg)); }
+.node-circle .section-label.node-label {
+  border: 0; padding: 0; text-align: center; font-size: 19px; line-height: 1.2; background: transparent; cursor: text;
+  text-overflow: ellipsis;
+}
+.wb-node.selected .node-circle, .wb-node.picked .node-circle { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
+/* Thumbnail */
+.bt-node-circle { width: 100%; aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; padding: 14%; text-align: center;
+  border: 3px solid var(--label-color, var(--accent)); background: var(--bg); font-size: 19px; font-weight: 750; color: var(--text); }

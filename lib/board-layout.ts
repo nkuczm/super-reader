@@ -54,10 +54,75 @@ export function layoutBoard(
 }
 
 /**
+ * Lines from a section label that would only repeat a path already drawn.
+ * When cards linked to the same label are also linked to one another —
+ * directly, or through cards between them — only the one nearest the label
+ * keeps its own line from it, and the rest are reached through the chain:
+ * label → first card → next card, instead of a fan of lines from the label
+ * to each. The links themselves stay; only their drawing is spared, so
+ * sections and the document's order still count every member.
+ */
+export function chainedLabelLinks(
+  links: { id: string; from: string; to: string }[],
+  isLabel: (id: string) => boolean,
+  place: (id: string) => Rect | undefined,
+): Set<string> {
+  const hidden = new Set<string>();
+  // Which cards (not labels) reach which, through links between cards.
+  const next = new Map<string, string[]>();
+  for (const l of links) {
+    if (isLabel(l.from) || isLabel(l.to)) continue;
+    next.set(l.from, [...(next.get(l.from) ?? []), l.to]);
+    next.set(l.to, [...(next.get(l.to) ?? []), l.from]);
+  }
+  const group = new Map<string, number>();
+  let n = 0;
+  for (const start of next.keys()) {
+    if (group.has(start)) continue;
+    const stack = [start];
+    group.set(start, n);
+    while (stack.length) for (const other of next.get(stack.pop()!) ?? []) if (!group.has(other)) (group.set(other, n), stack.push(other));
+    n++;
+  }
+  const centre = (r: Rect) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
+  const byLabel = new Map<string, { link: string; member: string }[]>();
+  for (const l of links) {
+    const label = isLabel(l.from) ? l.from : isLabel(l.to) ? l.to : null;
+    if (!label) continue;
+    const member = label === l.from ? l.to : l.from;
+    if (isLabel(member)) continue;
+    byLabel.set(label, [...(byLabel.get(label) ?? []), { link: l.id, member }]);
+  }
+  for (const [label, members] of byLabel) {
+    const at = place(label);
+    const chains = new Map<number, { link: string; member: string }[]>();
+    for (const m of members) {
+      const g = group.get(m.member);
+      if (g === undefined) continue;
+      chains.set(g, [...(chains.get(g) ?? []), m]);
+    }
+    for (const chain of chains.values()) {
+      if (chain.length < 2) continue;
+      // The member nearest the label keeps its line; the others hang off the chain.
+      const distance = (id: string) => {
+        const r = place(id);
+        if (!r || !at) return Infinity;
+        const p = centre(r);
+        const q = centre(at);
+        return Math.hypot(p.x - q.x, p.y - q.y);
+      };
+      const keep = chain.reduce((best, m) => (distance(m.member) < distance(best.member) ? m : best));
+      for (const m of chain) if (m !== keep) hidden.add(m.link);
+    }
+  }
+  return hidden;
+}
+
+/**
  * A line between two rectangles, leaving from the facing sides and curving
  * in, so it runs through the gap between two cards instead of across both.
  */
-export function edgePath(a: Rect, b: Rect): { d: string; mid: { x: number; y: number } } {
+export function edgePath(a: Rect, b: Rect, round: { a?: boolean; b?: boolean } = {}): { d: string; mid: { x: number; y: number } } {
   const ac = { x: a.x + a.w / 2, y: a.y + a.h / 2 };
   const bc = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
   const horizontalGap = Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w));
@@ -81,6 +146,30 @@ export function edgePath(a: Rect, b: Rect): { d: string; mid: { x: number; y: nu
     const pull = Math.max(40, Math.abs(end.y - start.y) / 2);
     c1 = { x: start.x, y: start.y + (down ? pull : -pull) };
     c2 = { x: end.x, y: end.y + (down ? -pull : pull) };
+  }
+  // A round end (a node) is left from wherever on its circle faces the other
+  // end, and the curve sets off straight out from it — lines fan out on
+  // every side rather than queueing at one edge.
+  const radial = (rect: Rect, toward: { x: number; y: number }) => {
+    const c = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
+    const dx = toward.x - c.x;
+    const dy = toward.y - c.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const radius = Math.min(rect.w, rect.h) / 2;
+    return { p: { x: c.x + (dx / len) * radius, y: c.y + (dy / len) * radius }, u: { x: dx / len, y: dy / len } };
+  };
+  if (round.a || round.b) {
+    const pull = Math.max(40, Math.hypot(bc.x - ac.x, bc.y - ac.y) / 3);
+    if (round.a) {
+      const { p, u } = radial(a, round.b ? bc : end);
+      start = p;
+      c1 = { x: p.x + u.x * pull, y: p.y + u.y * pull };
+    }
+    if (round.b) {
+      const { p, u } = radial(b, round.a ? ac : start);
+      end = p;
+      c2 = { x: p.x + u.x * pull, y: p.y + u.y * pull };
+    }
   }
   const r = (n: number) => Math.round(n);
   return {

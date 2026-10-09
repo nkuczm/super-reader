@@ -66,6 +66,12 @@ export type BoxItem = Base & {
   /** A section label's colour (one of LABEL_COLORS) and whether it underlines or fills behind the text. */
   labelColor?: string;
   labelStyle?: "underline" | "fill";
+  /**
+   * "node": on the whiteboard, the label is a circle that lines leave from
+   * on every side — a hub rather than a heading. In the document it reads as
+   * an ordinary section heading.
+   */
+  labelShape?: "node";
   /** A little spreadsheet: what was typed in each cell, formulas included. */
   table?: string[][];
   /** "doc" for a plain table typed into like text; "sheet" (the default for older tables) for a spreadsheet. */
