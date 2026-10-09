@@ -36,6 +36,8 @@ export type StoryItem = Base & {
   source?: string;
   publishedAt?: string;
   author?: string;
+  /** The block it was pasted into as a link: in the document it reads right below that block. */
+  after?: string;
 };
 
 /** What you wrote on a story's card, under its quotes. Sanitised HTML. */
@@ -181,6 +183,8 @@ export type MetaItem = Base & {
   activeTab?: string;
   /** Keep every story in this subject downloaded for reading offline. */
   offline?: boolean;
+  /** AI suggestions turned off here: no insights or suggested reading shown, and none fetched. */
+  aiOff?: boolean;
 };
 
 /**
@@ -440,6 +444,17 @@ export function newItemId(prefix = "i") {
   return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/**
+ * When an item was made, for reading order: a block's `at` moves every time
+ * it is edited, which would send the block being written in to the bottom of
+ * the document. Ids from newItemId carry their making time; older ids, which
+ * do not, fall back to `at`.
+ */
+export function madeAt(item: { id: string; at: number }): number {
+  const stamp = item.id.length > 14 ? parseInt(item.id.slice(-14, -6), 36) : NaN;
+  return stamp > 1.5e12 && stamp <= item.at + 1000 ? stamp : item.at;
+}
+
 /** The live items of a board, without the tombstones. */
 export function live(board: Board | undefined): BoardItem[] {
   return Object.values(board ?? {}).filter((item) => !item.deleted);
@@ -568,6 +583,8 @@ export type Card = {
   note: string;
   /** When the story first arrived in the subject; the feed view's order. */
   at: number;
+  /** The block it reads right below in the document (see StoryItem.after). */
+  after?: string;
 };
 
 /**
@@ -605,7 +622,10 @@ export function cardsOf(note: Note, board: Board | undefined): Card[] {
     });
   }
   for (const item of live(board)) {
-    if (item.kind === "story") ensure(item.link, item.title, item.source, item.at, item);
+    if (item.kind === "story") {
+      const card = ensure(item.link, item.title, item.source, item.at, item);
+      if (item.after && item.after !== card.id) card.after ??= item.after;
+    }
     if (item.kind === "suggest" && item.state === "accepted") {
       ensure(item.link, item.title, item.source, item.at);
     }
@@ -640,7 +660,7 @@ export function posId(target: string) {
 /** Add a story to a subject without a quote. Adding it twice is a no-op. */
 export function addStory(
   board: Board | undefined,
-  story: { link: string; title: string; source?: string; publishedAt?: string; author?: string },
+  story: { link: string; title: string; source?: string; publishedAt?: string; author?: string; after?: string },
   now = Date.now(),
 ): Board {
   const id = `story:${canonicalUrl(story.link)}`;
@@ -648,7 +668,17 @@ export function addStory(
   if (held && !held.deleted) return board ?? {};
   return put(
     board,
-    { id, kind: "story", link: story.link, title: story.title, source: story.source, publishedAt: story.publishedAt, author: story.author, at: now },
+    {
+      id,
+      kind: "story",
+      link: story.link,
+      title: story.title,
+      source: story.source,
+      publishedAt: story.publishedAt,
+      author: story.author,
+      ...(story.after ? { after: story.after } : {}),
+      at: now,
+    },
     now,
   );
 }
@@ -1537,8 +1567,27 @@ export function labelColorOf(box: { labelColor?: string }): string {
  * blocks by when they were made, so a header's content could sit pages
  * away from it.
  */
-export function documentOrder(entries: { id: string; at: number; label?: boolean }[], board: Board | undefined): string[] {
+export function documentOrder(entries: { id: string; at: number; label?: boolean; after?: string }[], board: Board | undefined): string[] {
   const byId = new Map(entries.map((e) => [e.id, e]));
+  // A story pasted in as a link reads right below the block it was pasted
+  // into — as long as that block is here, and the chain of such stories
+  // leads back to one that is placed the ordinary way.
+  const anchorOf = (id: string) => {
+    const after = byId.get(id)?.after;
+    return after && after !== id && byId.has(after) ? after : null;
+  };
+  const follows = new Map<string, string>();
+  for (const entry of entries) {
+    const anchor = anchorOf(entry.id);
+    if (!anchor) continue;
+    let at: string | null = anchor;
+    const seen = new Set([entry.id]);
+    while (at && !seen.has(at)) {
+      seen.add(at);
+      at = anchorOf(at);
+    }
+    if (!at) follows.set(entry.id, anchor);
+  }
   const pos = new Map<string, { x: number; y: number }>();
   const links: LinkItem[] = [];
   for (const item of live(board)) {
@@ -1551,18 +1600,23 @@ export function documentOrder(entries: { id: string; at: number; label?: boolean
     if (!label.label) continue;
     for (const l of links) {
       const other = l.from === label.id ? l.to : l.to === label.id ? l.from : null;
-      if (other && byId.has(other) && !byId.get(other)!.label && !owner.has(other)) owner.set(other, label.id);
+      if (other && byId.has(other) && !byId.get(other)!.label && !owner.has(other) && !follows.has(other)) owner.set(other, label.id);
     }
   }
   const place = (id: string) => pos.get(id) ?? { x: Infinity, y: Infinity };
   const out: string[] = [];
+  const emit = (id: string) => {
+    out.push(id);
+    // Pasted one after another below the same block, they read in the order they were pasted.
+    for (const next of sorted) if (follows.get(next.id) === id) emit(next.id);
+  };
   for (const entry of sorted) {
-    if (owner.has(entry.id)) continue;
-    out.push(entry.id);
+    if (owner.has(entry.id) || follows.has(entry.id)) continue;
+    emit(entry.id);
     if (!entry.label) continue;
     const members = sorted.filter((e) => owner.get(e.id) === entry.id);
     members.sort((a, b) => place(a.id).y - place(b.id).y || place(a.id).x - place(b.id).x || a.at - b.at);
-    out.push(...members.map((m) => m.id));
+    for (const m of members) emit(m.id);
   }
   return out;
 }

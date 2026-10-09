@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons";
 import RichText, { dropCiteAt } from "./RichText";
-import { CITE_OPEN_EVENT, CITE_TYPE, citeChipHtml, setCiteSources } from "@/lib/cite";
+import { CITE_OPEN_EVENT, CITE_TYPE, citeChipHtml, setCiteSources, type Cite } from "@/lib/cite";
 import FlagButton from "./FlagButton";
 import type { FlagInput } from "@/lib/flags";
 import SubjectHistory from "./SubjectHistory";
@@ -35,6 +35,7 @@ import {
   textOf,
   authorsOf,
   cardInfoId,
+  madeAt,
   embedSrc,
   bylineOf,
   contactsOf,
@@ -83,6 +84,8 @@ import { PROVIDER_NAME, recordSpend, shareSpend, type AiProvider } from "@/lib/s
 import { loadSyncCode } from "@/lib/store";
 
 type Props = {
+  /** Whether this device's boards have been read from storage yet: nothing is written on a guess of an empty board. */
+  boardsLoaded?: boolean;
   note: Note;
   board: Board | undefined;
   onBoard: (update: (board: Board | undefined) => Board) => void;
@@ -323,6 +326,51 @@ function useClickToType() {
   }, []);
 }
 
+/**
+ * A story added to the subject from its link alone. Its address names it at
+ * once; the page's own title, outlet, date and author follow if it can be
+ * read. `then` adds anything else that goes with it (a place on the board).
+ */
+function addStoryFromLink(link: string, onBoard: Props["onBoard"], then: (board: Board) => Board = (b) => b, after?: string): { id: string; title: string } {
+  const id = canonicalUrl(link);
+  let host = "";
+  try {
+    host = new URL(link).hostname.replace(/^www\./, "");
+  } catch {
+    /* no host */
+  }
+  const title = titleFromUrl(link) ?? (host || link);
+  onBoard((current) => then(placeNew(addStory(current, { link, title, source: host || undefined, after }), id)));
+  void (async () => {
+    try {
+      const res = await fetch(`/api/article?url=${encodeURIComponent(link)}&x=${EXTRACT_VERSION}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as { title?: string; siteName?: string; publishedAt?: string; byline?: string };
+      if (!data.title) return;
+      // As the card's info, not by rewriting the story: the story's time is when it arrived, which orders the document.
+      onBoard((current) => {
+        const held = current?.[`story:${id}`] as StoryItem | undefined;
+        if (!held || held.deleted) return current ?? {};
+        const info = current?.[cardInfoId(id)];
+        const had = info && info.kind === "cardinfo" && !info.deleted ? info : undefined;
+        return put(current, {
+          id: cardInfoId(id),
+          kind: "cardinfo",
+          card: id,
+          title: had?.title ?? data.title!.replace(/\s+/g, " ").trim().slice(0, 300),
+          source: had?.source ?? (data.siteName?.slice(0, 120) || held.source),
+          publishedAt: had?.publishedAt ?? (data.publishedAt || held.publishedAt),
+          author: had?.author ?? (data.byline?.slice(0, 120) || held.author),
+          at: Date.now(),
+        });
+      });
+    } catch {
+      /* kept under the title its address gives */
+    }
+  })();
+  return { id, title };
+}
+
 export default function SubjectPage(props: Props) {
   const { note, board, onBoard, keyHeaders, hasAiKey, ai } = props;
   const meta = metaOf(board);
@@ -497,12 +545,13 @@ export default function SubjectPage(props: Props) {
   );
   // An insight shows on each tab whose stories it draws on; one about no
   // story in particular shows on the first tab.
-  const insights = items.filter(
+  // With AI suggestions off, what earlier runs found stays saved but out of sight.
+  const insights = meta.aiOff ? [] : items.filter(
     (item): item is InsightItem =>
       item.kind === "insight" &&
       (item.refs.some((ref) => tabCardIds.has(ref)) || (item.refs.length === 0 && currentTab === MAIN_TAB)),
   );
-  const suggestions = items.filter(
+  const suggestions = meta.aiOff ? [] : items.filter(
     (item): item is SuggestItem => item.kind === "suggest" && item.state === "pending",
   );
 
@@ -592,11 +641,14 @@ export default function SubjectPage(props: Props) {
   const [focusBox, setFocusBox] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
 
-  // A note that has writing of its own brings it onto the board, once.
+  // A note that has writing of its own brings it onto the board, once —
+  // and only once the board has been read from storage: run on the empty
+  // board seen before that, it wrote a fresh meta that then outdated the
+  // stored one, losing the subject's settings (offline, AI off, its tab).
   useEffect(() => {
-    if (!meta.migrated) onBoard((current) => migrateNoteWriting(note, current));
+    if (props.boardsLoaded !== false && !meta.migrated) onBoard((current) => migrateNoteWriting(note, current));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [note.id, meta.migrated]);
+  }, [note.id, meta.migrated, props.boardsLoaded]);
 
   const setView = (view: "doc" | "board") => onBoard((current) => put(current, { ...metaOf(current), view }));
 
@@ -671,10 +723,10 @@ export default function SubjectPage(props: Props) {
   const blocksPrintHtml = (printCards: Card[], printBoxes: BoxItem[], out: Output) => {
     const entries = [
       ...printCards
-        .map((card) => ({ id: card.id, at: card.at, html: `<section class="print-block print-story">${cardHtml(card, board, out)}</section>` })),
+        .map((card) => ({ id: card.id, at: card.at, after: card.after, html: `<section class="print-block print-story">${cardHtml(card, board, out)}</section>` })),
       ...printBoxes.map((box) => ({
         id: box.id,
-        at: box.at,
+        at: madeAt(box),
         label: box.label,
         html: box.label ? boxHtml(box, board, out) : `<section class="print-block print-${boxKind(box)}">${boxHtml(box, board, out)}</section>`,
       })),
@@ -685,7 +737,7 @@ export default function SubjectPage(props: Props) {
   const printDoc = (every: boolean) => {
     const chosen = every ? tabs : tabs.filter((tab) => tab.id === currentTab);
     const tabName = tabs.find((tab) => tab.id === currentTab)?.name;
-    const shownInsights = every ? items.filter((item): item is InsightItem => item.kind === "insight") : insights;
+    const shownInsights = every && !meta.aiOff ? items.filter((item): item is InsightItem => item.kind === "insight") : insights;
     const storyCount = allCards.filter((card) => chosen.some((tab) => tabOf(board, card.id, tabs) === tab.id)).length;
     setPrintJob({
       what: every ? `${note.name}, every tab` : tabs.length > 1 ? `${note.name} — ${tabName}` : note.name,
@@ -831,7 +883,7 @@ export default function SubjectPage(props: Props) {
   // Lightweight and automatic: a while after the material changes, and not
   // more often than every quarter of an hour.
   useEffect(() => {
-    if (!hasAiKey || !shouldAutoRun(input, meta)) return;
+    if (!hasAiKey || meta.aiOff || !shouldAutoRun(input, meta)) return;
     const timer = setTimeout(() => void synthesize(), 8000);
     return () => clearTimeout(timer);
   }, [hasAiKey, input, meta, synthesize]);
@@ -926,6 +978,11 @@ export default function SubjectPage(props: Props) {
     suggestions,
     focusBox,
     onOpenArticle: props.onOpenArticle,
+    storyFromLink: (url: string, after: string) => {
+      const link = safeHref(url);
+      if (!link) return null;
+      return { link, title: addStoryFromLink(link, onBoard, undefined, after).title };
+    },
     removeCard,
     removeQuotes,
     setCardNote,
@@ -1049,12 +1106,13 @@ export default function SubjectPage(props: Props) {
         .map((m, n) => ({ id: box.id, n, level: Math.min(3, Number(m[1])), text: textOf(m[2]).trim() }))
         .filter((h) => h.text);
     });
-  // A citation clicked anywhere in the subject's writing goes to its story's card.
+  // A citation clicked anywhere in the subject's writing opens its story in the reader.
   setCiteSources(allCards);
   useEffect(() => {
     const open = (event: Event) => {
-      const id = canonicalUrl((event as CustomEvent<string>).detail);
-      if (cards.some((c) => c.id === id)) goTo({ id, n: -1, level: 1, text: "" });
+      const href = (event as CustomEvent<string>).detail;
+      const card = allCards.find((c) => c.id === canonicalUrl(href));
+      props.onOpenArticle(card?.link ?? href, card?.title ?? "", "");
     };
     window.addEventListener(CITE_OPEN_EVENT, open);
     return () => window.removeEventListener(CITE_OPEN_EVENT, open);
@@ -1198,10 +1256,12 @@ export default function SubjectPage(props: Props) {
               <path d="M15 15l5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
             </svg>
           </button>
-          <button className="btn ghost small" disabled={!hasAiKey || allCards.length < 2 || run.state === "running"}
-            onClick={() => void synthesize()} title={insightsWhyNot ?? "Find connections and suggest reading now"} aria-label="Insights">
-            ✦ <span className="insights-label">Insights</span>
-          </button>
+          {!meta.aiOff && (
+            <button className="btn ghost small" disabled={!hasAiKey || allCards.length < 2 || run.state === "running"}
+              onClick={() => void synthesize()} title={insightsWhyNot ?? "Find connections and suggest reading now"} aria-label="Insights">
+              ✦ <span className="insights-label">Insights</span>
+            </button>
+          )}
           <button
             className={`btn ghost small subject-contacts-btn${contactsOpen ? " on" : ""}`}
             aria-pressed={contactsOpen}
@@ -1249,6 +1309,10 @@ export default function SubjectPage(props: Props) {
                 <button role="menuitemcheckbox" aria-checked={Boolean(meta.offline)}
                   onClick={() => onBoard((current) => put(current, { ...metaOf(current), offline: !metaOf(current).offline }))}>
                   Available offline{meta.offline && <span className="more-check">✓</span>}
+                </button>
+                <button role="menuitemcheckbox" aria-checked={!meta.aiOff} title="Insights and suggested reading in this subject"
+                  onClick={() => onBoard((current) => put(current, { ...metaOf(current), aiOff: !metaOf(current).aiOff }))}>
+                  AI suggestions{!meta.aiOff && <span className="more-check">✓</span>}
                 </button>
                 {props.signedIn && (
                   <>
@@ -1444,6 +1508,8 @@ type Shared = {
   suggestions: SuggestItem[];
   focusBox: string | null;
   onOpenArticle: (link: string, title: string, quote: string) => void;
+  /** A link pasted into a block's writing: the story joins the subject (reading right below that block), and its citation chip goes in. */
+  storyFromLink: (url: string, after: string) => Cite | null;
   removeCard: (card: Card) => void;
   removeQuotes: (ids: string[]) => void;
   setCardNote: (card: Card, html: string) => void;
@@ -1729,6 +1795,7 @@ function StoryCard({
         <RichText
           className="subject-card-note"
           html={composeCardDoc(card.note, card.quotes)}
+          onPasteLink={(url) => shared.storyFromLink(url, card.id)}
           resolveEmbed={shared.resolveEmbed}
           onEmbed={shared.embedBox}
           onDropImage={shared.dropImage}
@@ -1891,7 +1958,7 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
       ) : (
         <RichText html={box.html} placeholder="Write anything…" autoFocus={shared.focusBox === box.id}
           resolveEmbed={shared.resolveEmbed} onEmbed={shared.embedBox} onDropImage={shared.dropImage} onReplaceEmbed={shared.replaceEmbed}
-          onChange={(html) => shared.setBox(box, html)} />
+          onPasteLink={(url) => shared.storyFromLink(url, box.id)} onChange={(html) => shared.setBox(box, html)} />
       )}
       <TagBadges id={box.id} tags={shared.tags} />
     </div>
@@ -2029,8 +2096,8 @@ function DocumentView(
     setMenu(null);
   };
   const entries = [
-    ...shared.cards.map((card) => ({ id: card.id, at: card.at, key: card.id, node: <StoryCard card={card} own={inside.get(card.id) ?? []} shared={shared} /> })),
-    ...shared.boxes.map((box) => ({ id: box.id, at: box.at, label: box.label, key: box.id, node: <TextBox box={box} shared={shared} /> })),
+    ...shared.cards.map((card) => ({ id: card.id, at: card.at, after: card.after, key: card.id, node: <StoryCard card={card} own={inside.get(card.id) ?? []} shared={shared} /> })),
+    ...shared.boxes.map((box) => ({ id: box.id, at: madeAt(box), label: box.label, key: box.id, node: <TextBox box={box} shared={shared} /> })),
   ];
   // Sections read as they do on the whiteboard: each header, then what is linked to it.
   const byId = new Map(entries.map((e) => [e.id, e]));
@@ -2713,39 +2780,7 @@ function Whiteboard(
    */
   const [linkAsk, setLinkAsk] = useState<{ left: number; top: number; at: { x: number; y: number }; value: string; problem?: string } | null>(null);
   const addStoryAt = (link: string, at: { x: number; y: number }) => {
-    const id = canonicalUrl(link);
-    let host = "";
-    try {
-      host = new URL(link).hostname.replace(/^www\./, "");
-    } catch {
-      /* no host */
-    }
-    const title = titleFromUrl(link) ?? host ?? link;
-    onBoard((current) =>
-      put(placeNew(addStory(current, { link, title, source: host || undefined }), id), { id: posId(id), kind: "pos", target: id, x: at.x, y: at.y, w: CARD_W, at: Date.now() }),
-    );
-    void (async () => {
-      try {
-        const res = await fetch(`/api/article?url=${encodeURIComponent(link)}&x=${EXTRACT_VERSION}`);
-        if (!res.ok) return;
-        const data = (await res.json()) as { title?: string; siteName?: string; publishedAt?: string; byline?: string };
-        if (!data.title) return;
-        onBoard((current) => {
-          const held = current?.[`story:${id}`] as StoryItem | undefined;
-          if (!held || held.deleted) return current ?? {};
-          return put(current, {
-            ...held,
-            title: data.title!.slice(0, 300),
-            source: data.siteName?.slice(0, 120) || held.source,
-            publishedAt: data.publishedAt || held.publishedAt,
-            author: data.byline?.slice(0, 120) || held.author,
-            at: Date.now(),
-          });
-        });
-      } catch {
-        /* kept under the title its address gives */
-      }
-    })();
+    const { id } = addStoryFromLink(link, onBoard, (next) => put(next, { id: posId(id), kind: "pos", target: id, x: at.x, y: at.y, w: CARD_W, at: Date.now() }));
   };
   const storyFromClipboard = async (spot: { left: number; top: number; at: { x: number; y: number } }) => {
     let text = "";

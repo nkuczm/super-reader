@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import CropDialog, { copyPicture, pastedWidth } from "./CropDialog";
 import { sanitizeRichText } from "@/lib/subjects";
 import { cleanPastedHtml } from "@/lib/paste";
-import { CITE_OPEN_EVENT, CITE_TYPE, citeChipHtml, citeFor, citeTextHtml, type Cite } from "@/lib/cite";
+import { CITE_OPEN_EVENT, CITE_TYPE, CITES_CHANGED_EVENT, citeChipHtml, citeFor, citeTextHtml, refreshCiteChips, type Cite } from "@/lib/cite";
 import { refreshSubjectChips, subjectChipHtml, subjectsMatching, SUBJECT_OPEN_EVENT, SUBJECTS_CHANGED_EVENT, type SubjectRef } from "@/lib/subject-links";
 
 /** The drag type a drawing or image box carries, for dropping into text. */
@@ -43,10 +43,27 @@ function caretInto(node: HTMLElement, x: number, y: number) {
   }
 }
 
-/** A citation chip at the caret, with a space after it so writing carries on past it. */
+/**
+ * A citation chip at the caret, with a space after it so writing carries on
+ * past it. Put straight into the text: the browser's insertHTML, at the end
+ * of a line, sets an inline chip outside its paragraph.
+ */
 function insertChip(cite: Cite) {
-  document.execCommand("insertHTML", false, citeChipHtml(cite));
-  stepPastChip();
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return;
+  const range = selection.getRangeAt(0);
+  range.deleteContents();
+  const holder = document.createElement("span");
+  holder.innerHTML = citeChipHtml(cite);
+  const chip = holder.firstChild!;
+  range.insertNode(chip);
+  const space = document.createTextNode("\u00a0");
+  chip.parentNode!.insertBefore(space, chip.nextSibling);
+  const after = document.createRange();
+  after.setStart(space, 1);
+  after.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(after);
 }
 
 /**
@@ -116,7 +133,10 @@ export default function RichText({
   onReplaceEmbed,
   toolsBeside,
   quoteSource,
+  onPasteLink,
 }: {
+  /** A lone address pasted at the caret: make it a story of the subject, and return its citation to set in as a chip. */
+  onPasteLink?: (url: string) => Cite | null;
   /** The story this text's quotes come from: copied out, they stay linked to it. */
   quoteSource?: Cite;
   /** Keep the text tools beside the card always (as in a table, where they would otherwise move the table or cover it). */
@@ -216,6 +236,13 @@ export default function RichText({
     refresh();
     window.addEventListener(SUBJECTS_CHANGED_EVENT, refresh);
     return () => window.removeEventListener(SUBJECTS_CHANGED_EVENT, refresh);
+  }, []);
+  // Headline chips follow their story's title once its page has been read.
+  useEffect(() => {
+    const refresh = () => el.current && refreshCiteChips(el.current) && changed();
+    window.addEventListener(CITES_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(CITES_CHANGED_EVENT, refresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   /** A picture in the text under the pointer, and where its corner pin goes. */
   const [pinFor, setPinFor] = useState<{ img: HTMLImageElement; left: number; top: number } | null>(null);
@@ -930,6 +957,15 @@ export default function RichText({
             document.execCommand("createLink", false, plain);
             changed();
             return;
+          }
+          // A link pasted on its own becomes a story in the subject, cited here as a chip.
+          if (onPasteLink && /^https?:\/\/\S+$/i.test(plain)) {
+            const story = onPasteLink(plain);
+            if (story) {
+              insertChip(story);
+              changed();
+              return;
+            }
           }
           const html = event.clipboardData.getData("text/html");
           if (html) {
