@@ -317,3 +317,30 @@ test("transcript comments collect as bullets on one linked card beside it", asyn
   assert.ok(live(two).some((i) => i.kind === "link"));
   assert.deepEqual([(two as Record<string, { x: number }>)["pos:n1"].x], [560]);
 });
+
+test("documentOrder puts a story pasted into a block right below it", async () => {
+  const { documentOrder } = await import("../lib/subjects");
+  const order = documentOrder(
+    [
+      { id: "a", at: 1 },
+      { id: "b", at: 2 },
+      { id: "c", at: 3 },
+      { id: "s1", at: 4, after: "a" },
+      { id: "s2", at: 5, after: "a" },
+      { id: "s3", at: 6, after: "s1" },
+      // Its block is gone (another tab, deleted): it reads where it was added.
+      { id: "lost", at: 7, after: "gone" },
+      // A loop has no way in: both read where they were added.
+      { id: "x", at: 8, after: "y" },
+      { id: "y", at: 9, after: "x" },
+    ],
+    {},
+  );
+  assert.deepEqual(order, ["a", "s1", "s3", "s2", "b", "c", "lost", "x", "y"]);
+});
+
+test("a story added from a pasted link remembers the block it was pasted into", () => {
+  const board = addStory({}, { link: "https://example.com/a-story", title: "A story", after: "box1" }, 10);
+  const [card] = cardsOf({ id: "n", name: "n", entries: [], at: 0 } as never, board);
+  assert.equal(card.after, "box1");
+});

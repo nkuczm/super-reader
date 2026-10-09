@@ -477,6 +477,7 @@ export default function Reader() {
   const [notes, setNotes] = useState<Note[]>([]);
   /** Subject boards, one per note, when Subjects is on (lib/subjects.ts). */
   const [boards, setBoards] = useState<Boards>({});
+  const [boardsLoaded, setBoardsLoaded] = useState(false);
   /** This device had subjects before sign-in was required (see useAccount). */
   const [grandfathered, setGrandfathered] = useState(false);
   const [writingInAccount, setWritingInAccount] = useState(false);
@@ -654,6 +655,7 @@ export default function Reader() {
     setBoards(storedBoards);
     // The full copy is in IndexedDB; whatever happened meanwhile is merged in, not replaced.
     void loadBoardsAsync().then((held) => {
+      setBoardsLoaded(true);
       const merged = mergeBoards(held, boardsRef.current);
       if (sameBoards(merged, boardsRef.current)) return;
       boardsRef.current = merged;
@@ -4131,6 +4133,7 @@ export default function Reader() {
         ) : openNote && settings.subjects ? (
           <SubjectPage
             key={openNote.id}
+            boardsLoaded={boardsLoaded}
             accountStrip={accountStrip}
             signedIn={Boolean(auth.account)}
             onRestored={(doc) => void auth.applyRemote(doc)}

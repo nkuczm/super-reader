@@ -9,6 +9,7 @@ import {
   drawingSvg,
   labelColorOf,
   live,
+  metaOf,
   safeImage,
   sanitizeRichText,
   textOf,
@@ -166,7 +167,7 @@ function BoardThumb({ board, cards }: { board: Board | undefined; cards: Card[] 
     const nodes: Node[] = [
       ...cards.map((card) => ({ id: card.id, kind: "card" as const, card })),
       ...items.filter((item): item is BoxItem => item.kind === "box" && !item.embedded).map((box) => ({ id: box.id, kind: "box" as const, box })),
-      ...items.filter((item): item is InsightItem => item.kind === "insight").map((insight) => ({ id: insight.id, kind: "insight" as const, insight })),
+      ...items.filter((item): item is InsightItem => item.kind === "insight" && !metaOf(board).aiOff).map((insight) => ({ id: insight.id, kind: "insight" as const, insight })),
     ];
     if (!nodes.length) return null;
     const counters = { card: 0, box: 0, insight: 0 };

@@ -15,12 +15,34 @@ export type Cite = { link: string; title: string };
 export const CITE_TYPE = "application/x-super-reader-cite";
 /** A citation clicked: the subject page takes the reader to that story's card. */
 export const CITE_OPEN_EVENT = "super-reader:cite-open";
+/** A story's headline changed (its page was read, its text scanned in): chips on screen follow. */
+export const CITES_CHANGED_EVENT = "super-reader:cites-changed";
 
 /** The stories the subject open now holds, by canonical link. */
 let sources = new Map<string, Cite>();
 
 export function setCiteSources(cards: Cite[]) {
-  sources = new Map(cards.map((c) => [canonicalUrl(c.link), c]));
+  const next = new Map(cards.map((c) => [canonicalUrl(c.link), c]));
+  const retitled = [...next].some(([id, c]) => sources.has(id) && sources.get(id)!.title !== c.title);
+  sources = next;
+  if (retitled && typeof window !== "undefined") queueMicrotask(() => window.dispatchEvent(new Event(CITES_CHANGED_EVENT)));
+}
+
+/**
+ * Bring the headline chips in some writing up to date with their stories'
+ * titles — a story added from a pasted link is named from its address until
+ * its page has been read. True when any chip changed, so the writing is saved.
+ */
+export function refreshCiteChips(root: ParentNode): boolean {
+  let changed = false;
+  for (const chip of root.querySelectorAll<HTMLAnchorElement>("a[data-cite=chip]")) {
+    const source = sources.get(canonicalUrl(chip.getAttribute("href") ?? ""));
+    if (!source || chip.title === source.title) continue;
+    chip.title = source.title;
+    chip.textContent = shortTitle(source.title);
+    changed = true;
+  }
+  return changed;
 }
 
 /** The story an address points to, when it is one in the subject. */

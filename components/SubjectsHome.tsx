@@ -5,7 +5,7 @@ import BoardThumb from "./BoardThumb";
 import { useEffect, useState } from "react";
 import { Icon } from "./icons";
 import type { Note } from "@/lib/notes";
-import { cardsOf, isPinned, live, type Boards } from "@/lib/subjects";
+import { cardsOf, isPinned, live, metaOf, type Boards } from "@/lib/subjects";
 import { sortSubjects, type SortDir, type SubjectSort } from "@/lib/subject-order";
 import { timeAgo } from "./format";
 
@@ -105,8 +105,8 @@ export default function SubjectsHome({
         note,
         cards,
         quotes: cards.reduce((sum, card) => sum + card.quotes.length, 0),
-        insights: items.filter((item) => item.kind === "insight").length,
-        suggested: items.filter((item) => item.kind === "suggest" && item.state === "pending").length,
+        insights: metaOf(board).aiOff ? 0 : items.filter((item) => item.kind === "insight").length,
+        suggested: metaOf(board).aiOff ? 0 : items.filter((item) => item.kind === "suggest" && item.state === "pending").length,
         lastChange,
         id: note.id,
         name: note.name,
