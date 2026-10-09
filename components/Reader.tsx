@@ -124,6 +124,7 @@ import {
   mergeBoards,
   pruneBoards,
   put as putItem,
+  PIN_ID,
   sameBoards,
   saveBoards,
   slimBoardsForSync,
@@ -4091,6 +4092,8 @@ export default function Reader() {
             onCreate={(name) => choose({ type: "note", id: createNote(name) })}
             onRename={(id, name) => commitNotes((current) => renameNote(current, id, name))}
             onDelete={(id) => removeNote(id)}
+            opened={subjectUsed}
+            onPin={(id, pinned) => commitBoard(id, (board) => putItem(board, { id: PIN_ID, kind: "pin", pinned, at: Date.now() }))}
           />
         ) : selection.type === "spend" ? (
           <SpendPage onOpenMenu={() => setMenuOpen(true)} onBack={backToSettings} />
