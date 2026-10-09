@@ -386,11 +386,21 @@ export default function SubjectPage(props: Props) {
   const meta = metaOf(board);
   const [historyOpen, setHistoryOpen] = useState(false);
   useClickToType();
-  // The browser tab is named for the subject while it is open.
+  // The browser tab is named for the subject while it is open — and kept so:
+  // opened straight after a reload, the framework writes the app's own title
+  // into the page head once it has finished loading, over the subject's.
   useEffect(() => {
-    const before = document.title;
-    document.title = note.name ? `${note.name} · Super Reader` : before;
+    if (!note.name) return;
+    const wanted = `${note.name} · Super Reader`;
+    const before = document.title === wanted ? "Super Reader" : document.title;
+    const hold = () => {
+      if (document.title !== wanted) document.title = wanted;
+    };
+    hold();
+    const watch = new MutationObserver(hold);
+    watch.observe(document.head, { childList: true, subtree: true, characterData: true });
     return () => {
+      watch.disconnect();
       document.title = before;
     };
   }, [note.name]);
