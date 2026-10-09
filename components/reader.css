@@ -1821,27 +1821,42 @@
 }
 
 /* ---------- quiet boxes: a subject that reads as one document ---------- */
+/* No frame ever — not on hover, not while typing. The blocks are paragraphs of one page. */
 .quiet-boxes .subject-doc .subject-card,
-.quiet-boxes .subject-doc .subject-box {
-  border-color: transparent; box-shadow: none; background: transparent;
-  transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
-}
+.quiet-boxes .subject-doc .subject-box,
 .quiet-boxes .subject-doc .subject-card:hover,
 .quiet-boxes .subject-doc .subject-box:hover,
 .quiet-boxes .subject-doc .subject-card:focus-within,
 .quiet-boxes .subject-doc .subject-box:focus-within {
-  border-color: var(--border); background: var(--bg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  border-color: transparent; box-shadow: none; background: transparent;
 }
-/* The controls on a story or box show with its border. */
-.quiet-boxes .subject-doc .subject-card-head > :not(.subject-card-title),
-.quiet-boxes .subject-doc .subject-box-head { opacity: 0; transition: opacity 0.15s; }
-.quiet-boxes .subject-doc .subject-card:hover .subject-card-head > *,
-.quiet-boxes .subject-doc .subject-card:focus-within .subject-card-head > *,
+.quiet-boxes .subject-doc { gap: 6px; padding-right: 60px; }
+/* A block's controls wait in the right margin, beside it, and show only when the pointer is on it. */
+.quiet-boxes .subject-doc .subject-card-tools, .quiet-boxes .subject-doc .subject-box-head {
+  position: absolute; top: 4px; left: 100%; margin-left: 6px; z-index: 5;
+  display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 0; width: 30px;
+  opacity: 0; transition: opacity 0.15s;
+}
+.quiet-boxes .subject-doc .subject-card-tools .subject-card-tab { display: none; }
+.quiet-boxes .subject-doc .subject-box-head .subject-box-grip { display: none; }
+.quiet-boxes .subject-doc .subject-card:hover .subject-card-tools,
 .quiet-boxes .subject-doc .subject-box:hover .subject-box-head,
-.quiet-boxes .subject-doc .subject-box:focus-within .subject-box-head { opacity: 1; }
-/* No hover on touch screens: keep the controls reachable there. */
+.quiet-boxes .subject-doc .subject-card:focus-within .subject-card-tools,
+.quiet-boxes .subject-doc .subject-box:focus-within .subject-box-head { opacity: 0.55; }
+.quiet-boxes .subject-doc .subject-card-tools:hover, .quiet-boxes .subject-doc .subject-box-head:hover { opacity: 1; }
+/* The text tools float above the line rather than pushing the page down. */
+.quiet-boxes .subject-doc .rich-tools:not(.docked):not(.side) {
+  position: absolute; left: 0; bottom: 100%; z-index: 30; height: auto; margin: 0 0 4px;
+  padding: 3px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1); pointer-events: none;
+}
+.quiet-boxes .subject-doc .rich:focus-within .rich-tools:not(.docked):not(.side) { pointer-events: auto; margin-bottom: 4px; }
+/* No hover on touch screens: the margin controls stay faintly in view there. */
 @media (hover: none) {
-  .quiet-boxes .subject-doc .subject-card-head > *, .quiet-boxes .subject-doc .subject-box-head { opacity: 0.6; }
+  .quiet-boxes .subject-doc .subject-card-tools, .quiet-boxes .subject-doc .subject-box-head { opacity: 0.45; }
+}
+@media (max-width: 640px) {
+  .quiet-boxes .subject-doc { padding-right: 44px; }
 }
 
 /* ---------- drawings and pictures in a subject ---------- */
@@ -3080,3 +3095,12 @@
 .subject-pick-none { padding: 6px 8px; font-size: 12.5px; color: var(--text-dim); }
 /* Printed, a chip is just its subject's name in bold. */
 @media print { a[data-subject] { background: none !important; border: 0 !important; color: inherit !important; padding: 0 !important; font-weight: 700; } }
+
+/* Every tab's document is the same width: each block spans the column, whatever it holds —
+   a short note, a two-column table, a picture — so moving between tabs never changes the page. */
+.subject-doc > [data-item] > .subject-card, .subject-doc > [data-item] > .subject-box { width: 100%; max-width: none; }
+.subject-doc .subject-box.table-box { width: 100%; max-width: none; min-width: 0; }
+.subject-doc .subject-box.text-box { max-width: none; }
+/* A story card's controls are one group; laid out in the card's head as before unless the document is seamless. */
+.subject-card-tools { display: contents; }
+.quiet-boxes .subject-doc .subject-card-tools { display: flex; }
