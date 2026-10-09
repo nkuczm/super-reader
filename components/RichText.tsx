@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import CropDialog, { copyPicture, pastedWidth } from "./CropDialog";
 import { sanitizeRichText } from "@/lib/subjects";
 import { cleanPastedHtml } from "@/lib/paste";
-import { CITE_OPEN_EVENT, CITE_TYPE, CITES_CHANGED_EVENT, citeChipHtml, citeFor, citeTextHtml, refreshCiteChips, type Cite } from "@/lib/cite";
+import { CITE_OPEN_EVENT, CITE_TYPE, CITES_CHANGED_EVENT, citeCardHtml, citeChipHtml, citeFor, citeTextHtml, refreshCiteChips, type Cite } from "@/lib/cite";
 import { refreshSubjectChips, subjectChipHtml, subjectsMatching, SUBJECT_OPEN_EVENT, SUBJECTS_CHANGED_EVENT, type SubjectRef } from "@/lib/subject-links";
 
 /**
@@ -85,7 +85,8 @@ function insertChip(cite: Cite) {
   const range = selection.getRangeAt(0);
   range.deleteContents();
   const holder = document.createElement("span");
-  holder.innerHTML = citeChipHtml(cite);
+  // On a line (or a bullet) of its own the story goes in as a card; among words, as a chip.
+  holder.innerHTML = onEmptyLine() ? citeCardHtml(cite) : citeChipHtml(cite);
   const chip = holder.firstChild!;
   range.insertNode(chip);
   const space = document.createTextNode("\u00a0");
@@ -97,6 +98,16 @@ function insertChip(cite: Cite) {
   selection.addRange(after);
 }
 
+/** Whether the caret is on a line — a paragraph, a bullet — with nothing else on it. */
+function onEmptyLine(): boolean {
+  const selection = window.getSelection();
+  const at = selection?.anchorNode;
+  if (!selection?.isCollapsed || !at) return false;
+  const holder = (at instanceof Element ? at : at.parentElement)?.closest("li, p, div, h3, blockquote, .rich-body");
+  if (!holder) return false;
+  return !(holder.textContent ?? "").replace(/[\u200b\u00a0\s]/g, "") && !holder.querySelector("img, a[data-cite], a[data-subject]");
+}
+
 /**
  * The browser leaves the caret inside a chip it has just put in, where
  * nothing can be typed: move it out past the chip, and put a space there so
@@ -105,7 +116,7 @@ function insertChip(cite: Cite) {
 function stepPastChip() {
   const selection = window.getSelection();
   const at = selection?.anchorNode;
-  const chip = (at instanceof Element ? at : at?.parentElement)?.closest("a[data-cite=chip], a[data-subject]");
+  const chip = (at instanceof Element ? at : at?.parentElement)?.closest("a[data-cite=chip], a[data-cite=card], a[data-subject]");
   if (!selection || !chip) return;
   const after = document.createRange();
   after.setStartAfter(chip);
@@ -475,6 +486,7 @@ export default function RichText({
     }
     fillEmbeds();
     refreshSubjectChips(node);
+    refreshCiteChips(node);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [html, resolveEmbed]);
 

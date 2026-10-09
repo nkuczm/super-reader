@@ -3158,3 +3158,17 @@
 .transcript-speaker span { opacity: 0; font-size: 11px; transition: opacity 0.12s; }
 .transcript-speaker:hover span, .transcript-speaker:focus-visible span { opacity: 0.7; }
 .transcript-speaker-input { font-size: 12.5px; padding: 2px 8px; border: 1px solid var(--accent); border-radius: 999px; width: 140px; background: var(--bg); color: var(--text); }
+
+/* ---------- a story set into writing as a card ---------- */
+.rich-body a[data-cite="card"] {
+  display: inline-flex; flex-direction: column; gap: 1px; vertical-align: top; max-width: 100%;
+  margin: 2px 0; padding: 7px 12px 7px 11px; border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: 9px; background: var(--bg-sub); color: var(--text); text-decoration: none;
+  font-weight: 650; line-height: 1.35; cursor: pointer; user-select: none;
+}
+.rich-body a[data-cite="card"]::after {
+  content: attr(data-by); font-weight: 400; font-size: 0.86em; color: var(--text-dim);
+}
+.rich-body a[data-cite="card"]:not([data-by])::after, .rich-body a[data-cite="card"][data-by=""]::after { content: none; }
+.rich-body a[data-cite="card"]:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--bg-sub)); }
+.rich-body li > a[data-cite="card"] { margin: 3px 0; }

@@ -642,7 +642,8 @@ export function cardsOf(note: Note, board: Board | undefined): Card[] {
         if (item.title) card.title = item.title;
         card.publishedAt ??= item.publishedAt;
         card.author ??= item.author;
-        card.source ??= item.source;
+        // A story added from its link is named after its address until its page is read; the outlet's own name wins over that.
+        if (item.source && (!card.source || /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(card.source))) card.source = item.source;
       }
     }
     if (item.kind === "cardnote") {
@@ -1093,13 +1094,13 @@ export function sanitizeRichText(html: string): string {
         continue;
       }
       // A story from the subject, cited: a headline chip, or words linked to it.
-      const cite = match[2].match(/data-cite=["']?(chip|text)/)?.[1];
+      const cite = match[2].match(/data-cite=["']?(chip|text|card)/)?.[1];
       const citeHref = cite ? safeHref(match[2].match(/href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i)?.slice(1).find(Boolean)) : null;
       if (cite && citeHref) {
         const title = (match[2].match(/title="([^"]*)"/)?.[1] ?? "").replace(/[<>"]/g, "").slice(0, 300);
         stack.push("a");
-        out.push(cite === "chip"
-          ? `<a data-cite="chip" href="${citeHref}"${title ? ` title="${title}"` : ""} contenteditable="false" target="_blank" rel="noopener noreferrer">`
+        out.push(cite === "chip" || cite === "card"
+          ? `<a data-cite="${cite}" href="${citeHref}"${title ? ` title="${title}"` : ""} contenteditable="false" target="_blank" rel="noopener noreferrer">`
           : `<a data-cite="text" href="${citeHref}" target="_blank" rel="noopener noreferrer">`);
         continue;
       }
