@@ -1012,13 +1012,40 @@ const ALLOWED_TAGS = new Set([
  * short list are unwrapped, and no attribute survives except a highlight.
  */
 /** Whether a span's style paints a real background — not transparent, not white. */
-function isHighlight(style: string): boolean {
+/**
+ * Whether a style's background is a highlight someone chose, rather than the
+ * page showing through. The browser's own list and formatting commands wrap
+ * text in spans that spell out the page's computed colours — in dark mode a
+ * near-black background — and those were being kept as highlights: turning
+ * a list into another kind of list lit its text up yellow. So a background
+ * counts only when it is a colour a highlighter would be: not transparent,
+ * not near-black, not white or the page's off-whites.
+ */
+export function isHighlight(style: string): boolean {
   const value = style.match(/background(?:-color)?\s*:\s*([^;"']+)/i)?.[1]?.trim().toLowerCase();
   if (!value) return false;
-  if (/^(transparent|none|inherit|initial|unset|white|#fff|#ffffff)\b/.test(value)) return false;
-  if (/^rgba?\(\s*255\s*,\s*255\s*,\s*255\s*(,\s*[\d.]+\s*)?\)/.test(value)) return false;
-  if (/^rgba\([^)]*,\s*0(\.0*)?\s*\)/.test(value)) return false;
+  if (/^(transparent|none|inherit|initial|unset|currentcolor|white|black|#fff|#ffffff|#000|#000000)\b/.test(value)) return false;
+  const rgb = parseColor(value);
+  if (!rgb) return true;
+  const [r, g, b, a] = rgb;
+  if (a === 0) return false;
+  const max = Math.max(r, g, b) / 255;
+  const min = Math.min(r, g, b) / 255;
+  const light = (max + min) / 2;
+  const sat = max === min ? 0 : (max - min) / (1 - Math.abs(2 * light - 1));
+  // The page itself: very dark (a dark theme), or white and the greys just off it.
+  if (light < 0.3) return false;
+  if (light > 0.94 && sat < 0.35) return false;
   return true;
+}
+
+function parseColor(value: string): [number, number, number, number] | null {
+  const fn = value.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)/);
+  if (fn) return [Number(fn[1]), Number(fn[2]), Number(fn[3]), fn[4] === undefined ? 1 : Number(fn[4])];
+  const hex = value.match(/^#([0-9a-f]{3}|[0-9a-f]{6})\b/);
+  if (!hex) return null;
+  const h = hex[1].length === 3 ? hex[1].split("").map((c) => c + c).join("") : hex[1];
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16), 1];
 }
 
 export function sanitizeRichText(html: string): string {

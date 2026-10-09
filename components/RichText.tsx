@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import CropDialog, { copyPicture, pastedWidth } from "./CropDialog";
-import { sanitizeRichText } from "@/lib/subjects";
+import { isHighlight, sanitizeRichText } from "@/lib/subjects";
 import { cleanPastedHtml } from "@/lib/paste";
 import { CITE_OPEN_EVENT, CITE_TYPE, CITES_CHANGED_EVENT, citeCardHtml, citeChipHtml, citeFor, citeTextHtml, refreshCiteChips, type Cite } from "@/lib/cite";
 import { refreshSubjectChips, subjectChipHtml, subjectsMatching, SUBJECT_OPEN_EVENT, SUBJECTS_CHANGED_EVENT, type SubjectRef } from "@/lib/subject-links";
@@ -17,6 +17,16 @@ export const ToolsHostContext = createContext<HTMLElement | null>(null);
 
 /** The tools as the fixed bar shows them before any text has been clicked into. */
 export const TOOL_LABELS = ["↶", "↷", "B", "I", "H", "• List", "1. List", "a. List", "☐ Check", "H3", "Link", "◈ Subject"];
+
+/**
+ * Until when an editor takes new HTML even while it is being written in. It
+ * normally will not — what it holds is newer than anything coming in — but
+ * ⌘Z and ⇧⌘Z through the subject's history are changes asked for here.
+ */
+let takeHtmlUntil = 0;
+export function forceNextHtml() {
+  takeHtmlUntil = Date.now() + 1500;
+}
 
 /** The drag type a drawing or image box carries, for dropping into text. */
 export const EMBED_TYPE = "application/x-super-reader-box";
@@ -75,6 +85,40 @@ function caretAtText(root: Node, offset: number) {
 }
 
 /**
+ * From the start of the caret's line to the caret. A line starts after
+ * whatever ends one before it — a list, a break — and not at its
+ * paragraph's start: the browser leaves the line after a list loose in the
+ * same paragraph as the list.
+ */
+function lineToCaret(block: Node, node: Node, offset: number): Range {
+  const range = document.createRange();
+  range.setStart(block, 0);
+  find: for (let at: Node | null = node; at && at !== block; at = at.parentNode) {
+    for (let sib = at.previousSibling; sib; sib = sib.previousSibling) {
+      if (sib.nodeType === Node.ELEMENT_NODE && /^(BR|OL|UL|DIV|P|LI|H3|BLOCKQUOTE|TABLE)$/.test(sib.nodeName)) {
+        range.setStartAfter(sib);
+        break find;
+      }
+    }
+  }
+  range.setEnd(node, offset);
+  return range;
+}
+
+/**
+ * Take away the spans the browser's commands wrap text in to spell out the
+ * page's own colours (a near-black background and light text, in a dark
+ * theme): they mean nothing, and kept they could not follow a change of theme.
+ */
+function unwrapPageColours(root: Element) {
+  for (const span of root.querySelectorAll<HTMLSpanElement>("span[style]")) {
+    const style = span.getAttribute("style") ?? "";
+    if (isHighlight(style) || /font-weight|font-style|text-decoration/i.test(style)) continue;
+    span.replaceWith(...span.childNodes);
+  }
+}
+
+/**
  * Run a list command and put the caret back where it was in its line: the
  * browser's own list commands leave it at the start of the line, so the next
  * key pressed (Enter, say) acted there instead.
@@ -84,13 +128,10 @@ function keepingCaret(run: () => void) {
   const at = sel?.anchorNode;
   const line = (at instanceof Element ? at : at?.parentElement)?.closest("li, p, div, h3, blockquote");
   let offset = -1;
-  if (sel?.isCollapsed && at && line) {
-    const before = document.createRange();
-    before.selectNodeContents(line);
-    before.setEnd(at, sel.anchorOffset);
-    offset = before.toString().length;
-  }
+  if (sel?.isCollapsed && at && line) offset = lineToCaret(line, at, sel.anchorOffset).toString().length;
   run();
+  const root = (window.getSelection()?.anchorNode as Node | null)?.parentElement?.closest(".rich-body");
+  if (root) unwrapPageColours(root);
   if (offset < 0) return;
   const now = window.getSelection()?.anchorNode;
   const target = (now instanceof Element ? now : now?.parentElement)?.closest("li, p, div, h3, blockquote");
@@ -149,7 +190,7 @@ export function markLines(root: HTMLElement) {
     const look = {
       b: all((el) => /^(B|STRONG)$/.test(el.tagName) || /font-weight:\s*(bold|[6-9]00)/.test(el.getAttribute("style") ?? "")),
       i: all((el) => /^(I|EM)$/.test(el.tagName) || /font-style:\s*italic/.test(el.getAttribute("style") ?? "")),
-      hl: all((el) => el.tagName === "MARK" || /background/.test(el.getAttribute("style") ?? "")),
+      hl: all((el) => el.tagName === "MARK" || isHighlight(el.getAttribute("style") ?? "")),
     };
     for (const [key, on] of Object.entries(look)) {
       if (on && !(key in li.dataset)) li.dataset[key] = "";
@@ -540,9 +581,18 @@ export default function RichText({
     if (!node) return;
     const clean = sanitizeRichText(html);
     // Only replace the DOM for a change that did not come from typing here.
-    if (clean !== last.current && document.activeElement !== node) {
+    const focused = document.activeElement === node;
+    if (clean !== last.current && (!focused || Date.now() < takeHtmlUntil)) {
       node.innerHTML = clean;
       last.current = clean;
+      // Written in, it keeps the caret — at the end of what came back.
+      if (focused) {
+        const end = document.createRange();
+        end.selectNodeContents(node);
+        end.collapse(false);
+        window.getSelection()?.removeAllRanges();
+        window.getSelection()?.addRange(end);
+      }
     }
     fillEmbeds();
     refreshSubjectChips(node);
@@ -739,7 +789,7 @@ export default function RichText({
    * B, C); the same again turns it back into lines. `start` is where it
    * counts from, when typed as "3." or "c)".
    */
-  function toggleNumbered(lettered: boolean | "upper", start = 1, paren = false) {
+  function toggleNumbered(lettered: boolean | "upper", start = 1, paren = false, fresh = false) {
     const kind = lettered === "upper" ? "A" : lettered ? "a" : "1";
     const mark = paren ? "paren" : null;
     if (onFormat?.(lettered ? "letteredList" : "insertOrderedList")) return;
@@ -750,12 +800,13 @@ export default function RichText({
     } else {
       if (!list) keepingCaret(() => document.execCommand("insertOrderedList"));
       let ol = orderedAtCaret();
-      // The browser joins a new list onto one just above it. Numbers after
-      // numbers carry on, as in a Doc; a list of the other kind starts afresh.
+      // The browser joins a new list onto one just above it. From the
+      // toolbar, numbers after numbers carry on; a list of the other kind —
+      // or one typed as "1." — starts afresh, as in a Doc.
       const sel = window.getSelection();
       const node = sel?.anchorNode;
       const li = (node && (node.nodeType === 1 ? (node as Element) : node.parentElement))?.closest("li");
-      if (!list && ol && li?.parentElement === ol && li.previousElementSibling && ((ol.getAttribute("type") ?? "1") !== kind || ol.getAttribute("data-mark") !== mark || start > 1)) {
+      if (!list && ol && li?.parentElement === ol && li.previousElementSibling && (fresh || (ol.getAttribute("type") ?? "1") !== kind || ol.getAttribute("data-mark") !== mark || start > 1)) {
         const inLi = document.createRange();
         inLi.selectNodeContents(li);
         inLi.setEnd(sel!.anchorNode!, sel!.anchorOffset);
@@ -793,23 +844,27 @@ export default function RichText({
     if (!root || !sel?.isCollapsed || !sel.anchorNode || sel.anchorNode.nodeType !== Node.TEXT_NODE) return false;
     const block = (sel.anchorNode.parentElement?.closest("p, div, h3, li, blockquote") ?? root) as HTMLElement;
     if (!root.contains(block) || block.closest("li")) return false;
-    const before = document.createRange();
-    before.setStart(block, 0);
-    before.setEnd(sel.anchorNode, sel.anchorOffset);
+    const before = lineToCaret(block, sel.anchorNode, sel.anchorOffset);
     const typed = before.toString().replace(/\u00a0/g, " ").trim();
     const number = typed.match(/^(\d{1,3})[.)]$/);
     const letter = typed.match(/^([a-zA-Z])[.)]$/);
     const bullet = /^[-*•–]$/.test(typed);
     if (!number && !letter && !bullet) return false;
+    // What the next letters typed would look like — bold switched on, say —
+    // so the line goes on in it: the conversion drops the browser's own note of it.
+    const styles = ["bold", "italic", "underline", "strikeThrough"].filter((c) => document.queryCommandState(c));
+    const lit = (sel.anchorNode.parentElement?.closest("mark") ?? null) !== null || isHighlight(sel.anchorNode.parentElement?.closest("span[style]")?.getAttribute("style") ?? "");
     sel.removeAllRanges();
     sel.addRange(before);
     document.execCommand("delete");
     if (bullet) format("insertUnorderedList");
-    else if (number) toggleNumbered(false, Math.max(1, Number(number[1])), typed.endsWith(")"));
+    else if (number) toggleNumbered(false, Math.max(1, Number(number[1])), typed.endsWith(")"), true);
     else {
       const upper = letter![1] === letter![1].toUpperCase();
-      toggleNumbered(upper ? "upper" : true, letter![1].toLowerCase().charCodeAt(0) - 96, typed.endsWith(")"));
+      toggleNumbered(upper ? "upper" : true, letter![1].toLowerCase().charCodeAt(0) - 96, typed.endsWith(")"), true);
     }
+    for (const command of styles) if (!document.queryCommandState(command)) document.execCommand(command);
+    if (lit) document.execCommand("hiliteColor", false, "#fde68a");
     return true;
   }
 
