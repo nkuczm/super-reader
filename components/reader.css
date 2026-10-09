@@ -3147,3 +3147,14 @@
   border-radius: 12px;
 }
 .wb-node.join-target .node-circle { box-shadow: 0 0 0 4px var(--accent); }
+
+/* ---------- a transcript's speakers, renamed once for every line ---------- */
+.transcript-speakers { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 6px 0 4px; }
+.transcript-speakers-label { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); margin-right: 2px; }
+.transcript-speaker {
+  border: 1px solid var(--border); background: var(--bg-sub); border-radius: 999px; padding: 2px 10px;
+  font-size: 12.5px; font-weight: 600; cursor: pointer;
+}
+.transcript-speaker span { opacity: 0; font-size: 11px; transition: opacity 0.12s; }
+.transcript-speaker:hover span, .transcript-speaker:focus-visible span { opacity: 0.7; }
+.transcript-speaker-input { font-size: 12.5px; padding: 2px 8px; border: 1px solid var(--accent); border-radius: 999px; width: 140px; background: var(--bg); color: var(--text); }

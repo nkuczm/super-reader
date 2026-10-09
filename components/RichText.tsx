@@ -658,12 +658,17 @@ export default function RichText({
     return list && el.current?.contains(list) ? (list as HTMLOListElement) : null;
   }
 
-  /** Lines into a numbered list (1, 2, 3) or a lettered one (a, b, c); the same again turns it back into lines. */
-  function toggleNumbered(lettered: boolean) {
+  /**
+   * Lines into a numbered list (1, 2, 3) or a lettered one (a, b, c — or A,
+   * B, C); the same again turns it back into lines. `start` is where it
+   * counts from, when typed as "3." or "c)".
+   */
+  function toggleNumbered(lettered: boolean | "upper", start = 1) {
+    const kind = lettered === "upper" ? "A" : lettered ? "a" : "1";
     if (onFormat?.(lettered ? "letteredList" : "insertOrderedList")) return;
     el.current?.focus();
     const list = orderedAtCaret();
-    if (list && (list.getAttribute("type") === "a") === lettered) {
+    if (list && (list.getAttribute("type") ?? "1") === kind && start === 1) {
       document.execCommand("insertOrderedList");
     } else {
       if (!list) document.execCommand("insertOrderedList");
@@ -673,7 +678,7 @@ export default function RichText({
       const sel = window.getSelection();
       const node = sel?.anchorNode;
       const li = (node && (node.nodeType === 1 ? (node as Element) : node.parentElement))?.closest("li");
-      if (!list && ol && li?.parentElement === ol && li.previousElementSibling && (ol.getAttribute("type") === "a") !== lettered) {
+      if (!list && ol && li?.parentElement === ol && li.previousElementSibling && ((ol.getAttribute("type") ?? "1") !== kind || start > 1)) {
         const inLi = document.createRange();
         inLi.selectNodeContents(li);
         inLi.setEnd(sel!.anchorNode!, sel!.anchorOffset);
@@ -688,15 +693,19 @@ export default function RichText({
         ol = fresh;
         caretAtText(li, offset);
       }
-      if (lettered) ol?.setAttribute("type", "a");
-      else ol?.removeAttribute("type");
+      if (kind === "1") ol?.removeAttribute("type");
+      else ol?.setAttribute("type", kind);
+      if (start > 1) ol?.setAttribute("start", String(start));
+      else ol?.removeAttribute("start");
     }
     changed();
   }
 
   /**
-   * As in a Doc: "1." or "a." then a space at the start of a line starts a
-   * numbered or lettered list, and "-" or "*" a bulleted one. True when it did.
+   * As in a Doc: a number or a letter followed by "." or ")" and then a
+   * space, at the start of a line, starts a numbered or lettered list
+   * counting from there ("3." from 3, "c)" from c, "A." in capitals); "-",
+   * "*" or "•" starts a bulleted one. True when it did.
    */
   function listFromTyping(): boolean {
     const sel = window.getSelection();
@@ -707,14 +716,20 @@ export default function RichText({
     const before = document.createRange();
     before.setStart(block, 0);
     before.setEnd(sel.anchorNode, sel.anchorOffset);
-    const typed = before.toString();
-    const kind = /^1[.)]$/.test(typed) ? "numbered" : /^a[.)]$/.test(typed) ? "lettered" : /^[-*]$/.test(typed) ? "bullets" : null;
-    if (!kind) return false;
+    const typed = before.toString().replace(/\u00a0/g, " ").trim();
+    const number = typed.match(/^(\d{1,3})[.)]$/);
+    const letter = typed.match(/^([a-zA-Z])[.)]$/);
+    const bullet = /^[-*•–]$/.test(typed);
+    if (!number && !letter && !bullet) return false;
     sel.removeAllRanges();
     sel.addRange(before);
     document.execCommand("delete");
-    if (kind === "bullets") format("insertUnorderedList");
-    else toggleNumbered(kind === "lettered");
+    if (bullet) format("insertUnorderedList");
+    else if (number) toggleNumbered(false, Math.max(1, Number(number[1])));
+    else {
+      const upper = letter![1] === letter![1].toUpperCase();
+      toggleNumbered(upper ? "upper" : true, letter![1].toLowerCase().charCodeAt(0) - 96);
+    }
     return true;
   }
 

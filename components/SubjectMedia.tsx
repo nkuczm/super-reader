@@ -605,6 +605,10 @@ export function TranscriptBox({ box, onChange, onComment, aiSearch, flagWith }: 
         <button className="transcript-tab add" title="Add another transcript to this block" aria-label="Add another transcript"
           onClick={() => { write([...tabs, { title: "", turns: [] }]); setActive(tabs.length); setQuery(""); }}>+</button>
       </div>
+      {speakers.length > 0 && (
+        <SpeakerNames speakers={speakers} colorOf={colorOf}
+          onRename={(from, to) => writeTab({ ...tabs[tab], turns: turns.map((t) => (t.s === from ? { ...t, s: to } : t)) })} />
+      )}
       {searching && (
         <div className="transcript-find">
           <button className={`transcript-ai-toggle${aiMode ? " on" : ""}`} aria-pressed={aiMode}
@@ -784,6 +788,48 @@ export function TranscriptBox({ box, onChange, onComment, aiSearch, flagWith }: 
               onChange={(e) => { const f = e.target.files?.[0]; if (f) void readFile(f); e.target.value = ""; }} />
           </label>
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Who speaks, once, at the top: renaming "Speaker 3" here renames them on
+ * every line they speak. Giving two speakers the same name makes them one.
+ */
+function SpeakerNames({ speakers, colorOf, onRename }: {
+  speakers: string[];
+  colorOf: (s?: string) => string | undefined;
+  onRename: (from: string, to: string) => void;
+}) {
+  const [editing, setEditing] = useState<{ name: string; draft: string } | null>(null);
+  const finish = () => {
+    if (!editing) return;
+    const to = editing.draft.replace(/\s+/g, " ").trim().slice(0, 80);
+    if (to && to !== editing.name) onRename(editing.name, to);
+    setEditing(null);
+  };
+  return (
+    <div className="transcript-speakers" onPointerDown={(e) => e.stopPropagation()}>
+      <span className="transcript-speakers-label">Speakers</span>
+      {speakers.map((name) =>
+        editing?.name === name ? (
+          <input key={name} className="transcript-speaker-input" autoFocus aria-label={`Rename ${name}`}
+            value={editing.draft}
+            onFocus={(e) => e.currentTarget.select()}
+            onChange={(e) => setEditing({ name, draft: e.target.value })}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") finish();
+              if (e.key === "Escape") setEditing(null);
+            }}
+            onBlur={finish} />
+        ) : (
+          <button key={name} className="transcript-speaker" style={{ color: colorOf(name) }} title={`Rename ${name} everywhere they speak`}
+            onClick={() => setEditing({ name, draft: name })}>
+            {name}<span aria-hidden="true"> ✎</span>
+          </button>
+        ),
       )}
     </div>
   );

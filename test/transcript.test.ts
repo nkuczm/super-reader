@@ -64,3 +64,37 @@ test("stored shape is bounded", () => {
   assert.deepEqual(safeTranscript({ title: 5, turns: [{ x: "a", s: "" }, { s: "b" }, null] }), { title: "", turns: [{ x: "a" }] });
   assert.equal(titleFromFile("eric-nathan.txt"), "eric nathan");
 });
+
+test("reads a Premiere caption export: timecode range, speaker on its own line, then the words", () => {
+  const text = [
+    "00;00;02;11 - 00;00;02;29", "Speaker 1", "And.", "",
+    "00;00;03;02 - 00;00;05;28", "Speaker 2", "We roll all the cameras already.", "",
+    "00;00;06;01 - 00;00;10;04", "Speaker 2", "Okay. I'm happy to start.", "",
+    "01;42;17;26 - 01;42;30;19", "Speaker 1", "Like how much money can we make.", "",
+  ].join("\r\n");
+  const turns = parseTranscript(text);
+  assert.deepEqual(turns, [
+    { s: "Speaker 1", t: "00:02", x: "And." },
+    { s: "Speaker 2", t: "00:03", x: "We roll all the cameras already. Okay. I'm happy to start." },
+    { s: "Speaker 1", t: "01:42:17", x: "Like how much money can we make." },
+  ]);
+});
+
+test("a cue with no speaker line keeps its words", () => {
+  const turns = parseTranscript("00;00;01;00 - 00;00;02;00\nOkay.\n\n00;00;03;00 - 00;00;04;00\nSpeaker 1\nYes.");
+  assert.deepEqual(turns.map((t) => [t.s, t.x]), [[undefined, "Okay."], ["Speaker 1", "Yes."]]);
+});
+
+test("a turn too long for one is carried on, never cut off", () => {
+  const sentence = "This is one sentence of a long answer. ";
+  const long = `Interviewer: question\nGuest: ${sentence.repeat(1500)}`;
+  const turns = parseTranscript(long);
+  const guest = turns.filter((t) => t.s === "Guest");
+  assert.ok(guest.length >= 3);
+  assert.ok(guest.every((t) => t.x.length <= 20_000));
+  assert.equal(guest.map((t) => t.x).join(" ").split(/\s+/).length, sentence.trim().split(/\s+/).length * 1500);
+  // Each piece ends at a sentence.
+  assert.ok(guest.slice(0, -1).every((t) => t.x.endsWith(".")));
+  // And survives being stored.
+  assert.equal(safeTranscript({ title: "", turns }).turns.length, turns.length);
+});

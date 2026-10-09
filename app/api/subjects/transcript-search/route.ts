@@ -4,7 +4,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import { claudeModel, claudeOptions } from "@/lib/claude-model";
 import { decodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import { DEFAULT_OPENAI_MODEL, PROVIDER_NAME, type AiProvider } from "@/lib/spend";
-import { MAX_TRANSCRIPT_CHARS } from "@/lib/transcript";
+
+/** How much of a transcript one search reads: what it costs is set here, not by how long a transcript may be. */
+const MAX_SEARCH_CHARS = 200_000;
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -86,7 +88,7 @@ export async function POST(request: Request) {
     const who = [typeof turn.s === "string" ? turn.s.slice(0, 80) : "", typeof turn.t === "string" ? `(${turn.t.slice(0, 16)})` : ""].filter(Boolean).join(" ");
     const line = `[${i}] ${who ? `${who}: ` : ""}${turn.x.replace(/\s+/g, " ").slice(0, 20_000)}`;
     size += line.length;
-    if (size > MAX_TRANSCRIPT_CHARS) break;
+    if (size > MAX_SEARCH_CHARS) break;
     lines.push(line);
   }
   const material = `<transcript>\n${lines.join("\n")}\n</transcript>\n\n<find>${body.query.slice(0, 500)}</find>`;
