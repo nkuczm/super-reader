@@ -288,7 +288,22 @@ export type BoardItem =
   | SuggestItem
   | MetaItem
   | TabItem
-  | PlaceItem;
+  | PlaceItem
+  | PinItem;
+
+/**
+ * Whether a subject is pinned to the top of the Subjects list. An item of its
+ * own rather than a field on the meta item: the meta item is rewritten by tab
+ * switches and AI runs on every device, and a copy from a device that had not
+ * yet heard of the pin would take it away.
+ */
+export type PinItem = Base & { kind: "pin"; pinned: boolean };
+export const PIN_ID = "pin";
+
+export const isPinned = (board: Board | undefined) => {
+  const item = board?.[PIN_ID];
+  return Boolean(item && item.kind === "pin" && !item.deleted && item.pinned);
+};
 
 export type Board = Record<string, BoardItem>;
 /** Every subject's board, keyed by the note it belongs to. */
