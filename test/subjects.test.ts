@@ -391,3 +391,15 @@ test("a list typed as 1) or A) keeps its parenthesis", () => {
   // What the screen works out for itself is not saved.
   assert.equal(sanitizeRichText('<ol data-kind="a"><li data-b="" data-hl="">x</li></ol>'), "<ol><li>x</li></ol>");
 });
+
+test("the page's own colours, spelled out by the browser, are not a highlight", () => {
+  // Dark theme: Chrome's list commands wrap the line in the computed background.
+  assert.equal(sanitizeRichText('<ol><li><span style="background-color: rgb(13, 13, 15); color: rgb(244, 244, 245);">two</span></li></ol>'), "<ol><li>two</li></ol>");
+  assert.equal(sanitizeRichText('<span style="background-color: rgb(246, 246, 247)">x</span>'), "x");
+  assert.equal(sanitizeRichText('<span style="background-color: rgba(0, 0, 0, 0)">x</span>'), "x");
+  // Real highlights stay: the app's own, Google Docs' yellow and green, a light grey.
+  assert.equal(sanitizeRichText('<span style="background-color: rgb(253, 230, 138);">x</span>'), "<mark>x</mark>");
+  assert.equal(sanitizeRichText('<span style="background-color:#ffff00">x</span>'), "<mark>x</mark>");
+  assert.equal(sanitizeRichText('<span style="background-color:#b7e1cd">x</span>'), "<mark>x</mark>");
+  assert.equal(sanitizeRichText('<span style="background-color:#d9d9d9">x</span>'), "<mark>x</mark>");
+});

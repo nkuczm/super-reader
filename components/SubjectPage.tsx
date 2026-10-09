@@ -3,8 +3,8 @@
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons";
-import RichText, { dropCiteAt, TOOL_LABELS, ToolsHostContext } from "./RichText";
-import { CITE_OPEN_EVENT, CITE_TYPE, citeChipHtml, inlineCardLinks, setCiteSources, type Cite } from "@/lib/cite";
+import RichText, { dropCiteAt, forceNextHtml, TOOL_LABELS, ToolsHostContext } from "./RichText";
+import { CITE_OPEN_EVENT, CITE_TYPE, citeCardHtml, citeChipHtml, inlineCardLinks, setCiteSources, type Cite } from "@/lib/cite";
 import FlagButton from "./FlagButton";
 import type { FlagInput } from "@/lib/flags";
 import SubjectHistory from "./SubjectHistory";
@@ -157,7 +157,17 @@ function clipboardPicture(e: ClipboardEvent): File | null {
 
 /** A heading in a tab's outline: a section label (n = -1) or the nth heading in a text box. */
 /** One undoable change to a subject's cards. */
-type BoardOp = { undo: (b: Board | undefined) => Board; redo: (b: Board | undefined) => Board };
+type BoardOp = {
+  undo: (b: Board | undefined) => Board;
+  redo: (b: Board | undefined) => Board;
+  /** What the step changes outside the board — a story's quotes live in the note. */
+  also?: { undo: () => void; redo: () => void };
+  /** When it was done (or undone), against the last keystroke: which of the two ⌘Z takes back. */
+  at?: number;
+};
+
+/** When anything in a subject was last typed: ⌘Z in a field undoes the typing if it is newer than the last step. */
+let lastTypedAt = 0;
 
 type OutlineEntry = { id: string; n: number; level: number; text: string };
 
@@ -201,7 +211,7 @@ function blocksFor(board: Board | undefined, cards: Card[], ids: string[], posit
     const item = byId.get(id) ?? byId.get(`story:${id}`);
     const place = { dx: at.x - ox, dy: at.y - oy, w: at.w };
     if (item?.kind === "box") {
-      const { id: _id, at: _at, kind: _kind, embedded: _embedded, ...box } = item as BoxItem;
+      const { id: _id, at: _at, kind: _kind, embedded: _embedded, after: _after, ...box } = item as BoxItem;
       blocks.push({ box, ...place });
       text.push(textOf(box.html || "") || box.caption || box.transcript?.title || "");
     } else if (item?.kind === "story" || cards.some((c) => c.id === id)) {
@@ -667,25 +677,8 @@ export default function SubjectPage(props: Props) {
     setFocusBox(id);
   };
 
-  const removeCard = (card: Card) => {
-    const quoteIds = new Set(card.quotes.map((quote) => quote.id));
-    if (quoteIds.size > 0) {
-      const known = new Set(note.entries.map((entry) => entry.id));
-      props.onCommitEntries(note.entries.filter((entry) => !quoteIds.has(entry.id)), known);
-    }
-    onBoard((current) => {
-      let next = current ?? {};
-      for (const item of live(next)) {
-        if ((item.kind === "story" || item.kind === "suggest") && canonicalUrl(item.link) === card.id) {
-          next = remove(next, item.id);
-        }
-      }
-      for (const item of live(next)) {
-        if (item.kind === "cardnote" && item.card === card.id) next = remove(next, item.id);
-      }
-      return remove(next, posId(card.id));
-    });
-  };
+  // Removing a story, from wherever: undoable, quotes and all.
+  const removeCard = (card: Card) => removeStory(card);
 
   /** A story taken out from the keyboard, as one block: undoable (its quotes aside, which live in the note). */
   const removeStory = (card: Card) => {
@@ -693,21 +686,41 @@ export default function SubjectPage(props: Props) {
     for (const item of live(board)) {
       if ((item.kind === "story" || item.kind === "suggest") && canonicalUrl(item.link) === card.id) ids.push(item.id);
     }
-    removeCards(ids);
-    if (card.quotes.length) removeQuotes(card.quotes.map((quote) => quote.id));
+    const stepped = removeCards(ids);
+    // Its quotes go in the same step, so one ⌘Z brings the whole story back.
+    const also = card.quotes.length ? quotesOut(card.quotes.map((quote) => quote.id)) : null;
+    if (also && stepped) history.current.past.at(-1)!.also = also;
+    else if (also) recordOp({ undo: (b) => b ?? {}, redo: (b) => b ?? {}, also });
   };
 
-  const removeQuotes = (quoteIds: string[]) => {
+  const noteRef = useRef(note);
+  noteRef.current = note;
+  /** Quotes taken out of the note — undoable, alongside whatever board step goes with them. */
+  const quotesOut = (quoteIds: string[]) => {
     const gone = new Set(quoteIds);
-    const known = new Set(note.entries.map((entry) => entry.id));
-    props.onCommitEntries(note.entries.filter((entry) => !gone.has(entry.id)), known);
+    const removed = note.entries.filter((entry) => gone.has(entry.id));
+    if (!removed.length) return null;
+    const take = () => {
+      const entries = noteRef.current.entries;
+      props.onCommitEntries(entries.filter((entry) => !gone.has(entry.id)), new Set(entries.map((entry) => entry.id)));
+    };
+    const give = () => {
+      const entries = noteRef.current.entries.filter((entry) => !gone.has(entry.id));
+      props.onCommitEntries([...entries, ...removed], new Set([...entries, ...removed].map((entry) => entry.id)));
+    };
+    take();
+    return { undo: give, redo: take };
+  };
+  const removeQuotes = (quoteIds: string[]) => {
+    const also = quotesOut(quoteIds);
+    if (also) recordOp({ undo: (b) => b ?? {}, redo: (b) => b ?? {}, also });
   };
 
   const setCardNote = (card: Card, html: string) =>
     onBoard((current) => put(current, { id: cardNoteId(card.id), kind: "cardnote", card: card.id, html, at: Date.now() }));
 
   const decide = (suggestion: SuggestItem, state: "accepted" | "dismissed") =>
-    onBoard((current) => {
+    recorded((current) => {
       const next = put(current, { ...suggestion, state, at: Date.now() });
       // An accepted story joins the tab that is open.
       return state === "accepted" ? placeNew(next, canonicalUrl(suggestion.link)) : next;
@@ -926,6 +939,7 @@ export default function SubjectPage(props: Props) {
    */
   const history = useRef<{ past: BoardOp[]; future: BoardOp[] }>({ past: [], future: [] });
   const recordOp = (op: BoardOp) => {
+    op.at = Date.now();
     history.current.past.push(op);
     if (history.current.past.length > 100) history.current.past.shift();
     history.current.future = [];
@@ -936,21 +950,48 @@ export default function SubjectPage(props: Props) {
       gone.has(i.id)
       || (i.kind === "pos" && gone.has((i as PosItem).target))
       || (i.kind === "link" && (gone.has((i as LinkItem).from) || gone.has((i as LinkItem).to))));
-    if (!items.length) return;
+    if (!items.length) return false;
     // Put back where it was: a story keeps when it first arrived, which orders the document.
     const putBack = (b: Board | undefined) =>
       items.reduce((n, i) => put(n, i.kind === "story" ? { ...i, since: (i as StoryItem).since ?? i.at, at: Date.now() } : { ...i, at: Date.now() }), b ?? {});
     const takeAway = (b: Board | undefined) => items.reduce((n, i) => remove(n, i.id), b ?? {});
     recordOp({ undo: putBack, redo: takeAway });
     onBoard(takeAway);
+    return true;
   };
   /** One step back (or forward) through the subject's changes. */
   const stepHistory = (redo: boolean) => {
     const step = (redo ? history.current.future : history.current.past).pop();
     if (!step) return false;
+    step.at = Date.now();
+    forceNextHtml();
     (redo ? history.current.past : history.current.future).push(step);
     onBoard(redo ? step.redo : step.undo);
+    if (step.also) (redo ? step.also.redo : step.also.undo)();
     return true;
+  };
+  /**
+   * Any change to the board, undoable: each item it touches is kept as it
+   * was, and put back by ⌘Z (an item it made is taken away again).
+   */
+  const recorded = (update: (b: Board | undefined) => Board) => {
+    let done = false;
+    onBoard((current) => {
+      const next = update(current);
+      if (!done) {
+        done = true;
+        const keys = Object.keys(next).filter((k) => next[k] !== current?.[k]);
+        if (keys.length) {
+          const before = keys.map((k) => current?.[k]);
+          const after = keys.map((k) => next[k]);
+          recordOp({
+            undo: (b) => keys.reduce((n, k, i) => (before[i] ? put(n, { ...before[i]!, at: Date.now() }) : remove(n, k)), b ?? {}),
+            redo: (b) => keys.reduce((n, k, i) => put(n, { ...after[i], at: Date.now() }), b ?? {}),
+          });
+        }
+      }
+      return next;
+    });
   };
   /**
    * A change to a card that can be undone: what its fields were is kept
@@ -978,13 +1019,76 @@ export default function SubjectPage(props: Props) {
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || (e.key.toLowerCase() !== "z" && e.key.toLowerCase() !== "y")) return;
-      // Typing has its own undo; so do tables (which share this history) and drawings.
-      if ((e.target as HTMLElement).closest?.("input, textarea, [contenteditable], .drawing, .tbl, .sheet")) return;
-      if (stepHistory(e.shiftKey || e.key.toLowerCase() === "y")) e.preventDefault();
+      const redo = e.shiftKey || e.key.toLowerCase() === "y";
+      // Tables (which share this history) and drawings have their own.
+      if ((e.target as HTMLElement).closest?.(".drawing, .tbl, .sheet")) return;
+      // In text, ⌘Z takes back the typing — unless a step (a block removed,
+      // a story taken out) came after the last keystroke: that is what was
+      // just done, and the caret has usually landed in another block since.
+      if ((e.target as HTMLElement).closest?.("input, textarea, [contenteditable]")) {
+        const next = (redo ? history.current.future : history.current.past).at(-1);
+        if (!next || (next.at ?? 0) <= lastTypedAt) return;
+      }
+      if (stepHistory(redo)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
     };
-    window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
+    const typed = (e: Event) => {
+      if ((e.target as HTMLElement).closest?.("input, textarea, [contenteditable]")) lastTypedAt = Date.now();
+    };
+    // Capture: ahead of a field's own handling of ⌘Z.
+    window.addEventListener("keydown", key, true);
+    document.addEventListener("input", typed, true);
+    return () => {
+      window.removeEventListener("keydown", key, true);
+      document.removeEventListener("input", typed, true);
+    };
   }, [onBoard]);
+
+  const pasteBlocks = (copied: CopiedBlocks, after: string | null) => {
+    recorded((current) => {
+      let next = current ?? {};
+      const now = Date.now();
+      const have = new Set(cardsOf(note, next).map((c) => c.id));
+      const ids: string[] = [];
+      let prev = after;
+      for (const block of copied.items) {
+        let id: string;
+        if (block.story && have.has(canonicalUrl(block.story.link))) {
+          // A subject holds one card per story: on another tab it goes in as a card set into writing.
+          id = newItemId("box");
+          next = put(next, { id, kind: "box", html: `<p>${citeCardHtml({ link: block.story.link, title: block.story.title })}</p>`, ...(prev ? { after: prev } : {}), at: now }, now);
+        } else if (block.story) {
+          id = canonicalUrl(block.story.link);
+          next = addStory(next, { ...block.story, ...(prev ? { after: prev } : {}) }, now);
+          if (block.note) next = put(next, { id: cardNoteId(id), kind: "cardnote", card: id, html: block.note, at: now }, now);
+        } else {
+          id = newItemId("box");
+          next = put(next, { ...block.box!, id, kind: "box", ...(prev ? { after: prev } : {}), at: now }, now);
+        }
+        next = placeNew(next, id, now);
+        ids.push(id);
+        prev = id;
+      }
+      for (const [a, b] of copied.links) {
+        const [from, to] = [ids[a], ids[b]].sort();
+        if (from && to && from !== to) next = put(next, { id: `link:${from}|${to}`, kind: "link", from, to, at: now }, now);
+      }
+      return next;
+    });
+  };
+  const joinBlocks = (into: string, from: string, html: string) =>
+    recorded((current) => {
+      const held = current?.[into];
+      if (!held || held.kind !== "box") return current ?? {};
+      let next = put(current, { ...held, html: sanitizeRichText(html), at: Date.now() });
+      for (const item of live(next)) {
+        if (item.id === from || (item.kind === "pos" && (item as PosItem).target === from)
+          || (item.kind === "link" && ((item as LinkItem).from === from || (item as LinkItem).to === from))) next = remove(next, item.id);
+      }
+      return next;
+    });
 
   const shared = {
     resolveEmbed,
@@ -1008,13 +1112,16 @@ export default function SubjectPage(props: Props) {
     removeQuotes,
     setCardNote,
     decide,
-    dismissInsight: (insight: InsightItem) => onBoard((current) => remove(current, insight.id)),
+    dismissInsight: (insight: InsightItem) => recorded((current) => remove(current, insight.id)),
     // A box deleted meanwhile stays deleted: its editor saving on the way out must not bring it back.
     setBox: (box: BoxItem, html: string) =>
       onBoard((current) => (current?.[box.id]?.deleted ? current : put(current, { ...box, html, at: Date.now() }))),
     removeStory,
+    pasteBlocks,
+    joinBlocks,
+    // Undoable, as every change to a block is: a transcript's tab closed, a picture replaced, a caption cleared.
     updateBox: (box: BoxItem, change: Partial<BoxItem>) =>
-      onBoard((current) => {
+      recorded((current) => {
         const held = current?.[box.id];
         const base = held && held.kind === "box" ? held : box;
         return put(current, { ...base, ...change, at: Date.now() });
@@ -1400,7 +1507,7 @@ export default function SubjectPage(props: Props) {
               onSwitch={(tab) => switchTab(tab)}
               onAdd={(name) => onBoard((current) => addTab(current, name).board)}
               onRename={(tab, name) => onBoard((current) => renameTab(current, tab, name))}
-              onDelete={(tab) => onBoard((current) => deleteTab(current, tab))}
+              onDelete={(tab) => recorded((current) => deleteTab(current, tab))}
               outline={outline}
               onGo={goTo}
             />
@@ -1536,6 +1643,10 @@ type Shared = {
   removeCard: (card: Card) => void;
   /** The same from the keyboard in the document, and undoable. */
   removeStory: (card: Card) => void;
+  /** Blocks from the clipboard, on this tab, reading in order after a block (or at the end). */
+  pasteBlocks: (blocks: CopiedBlocks, after: string | null) => void;
+  /** One text block joined onto the end of another: one step, undone as one. */
+  joinBlocks: (into: string, from: string, html: string) => void;
   removeQuotes: (ids: string[]) => void;
   setCardNote: (card: Card, html: string) => void;
   decide: (suggestion: SuggestItem, state: "accepted" | "dismissed") => void;
@@ -2154,9 +2265,9 @@ function caretTo(target: HTMLElement, end: boolean) {
  */
 function useDocKeys(
   root: HTMLElement | null,
-  shared: Shared & { addBox: (at?: { x: number; y: number }, extra?: Partial<BoxItem>) => void },
-  picked: string | null,
-  setPicked: (id: string | null) => void,
+  shared: Shared & { addBox: (at?: { x: number; y: number }, extra?: Partial<BoxItem>) => void; board: Board | undefined },
+  picked: string[],
+  setPicked: (ids: string[]) => void,
 ) {
   const latest = useRef({ shared, picked });
   latest.current = { shared, picked };
@@ -2167,11 +2278,27 @@ function useDocKeys(
       const all = blocks();
       return all[all.indexOf(block) + by] ?? null;
     };
-    const pick = (block: HTMLElement) => {
+    const blockOf = (id: string) => blocks().find((b) => b.dataset.item === id) ?? null;
+    /** Where a run of selected blocks started, for Shift to extend from. */
+    let anchor: string | null = null;
+    /** Select a block — or, extending, every block from the first one selected to it. */
+    const pick = (block: HTMLElement, extend = false) => {
       (document.activeElement as HTMLElement | null)?.blur?.();
-      setPicked(block.dataset.item!);
+      const all = blocks();
+      const id = block.dataset.item!;
+      if (extend && anchor && latest.current.picked.length) {
+        const [a, b] = [all.findIndex((x) => x.dataset.item === anchor), all.indexOf(block)].sort((x, y) => x - y);
+        setPicked(all.slice(Math.max(0, a), b + 1).map((x) => x.dataset.item!));
+      } else {
+        anchor = id;
+        setPicked([id]);
+      }
       block.focus({ preventScroll: true });
       block.scrollIntoView({ block: "nearest" });
+    };
+    const clear = () => {
+      anchor = null;
+      setPicked([]);
     };
     /** Into a block from above (start) or below (end): its text, or the whole of it when it has none. */
     const enter = (block: HTMLElement | null, end: boolean) => {
@@ -2191,7 +2318,7 @@ function useDocKeys(
     };
     /** Write on right after a block: a new text box that reads below it. */
     const writeAfter = (block: HTMLElement) => {
-      setPicked(null);
+      clear();
       latest.current.shared.addBox(undefined, { after: block.dataset.item });
     };
     /** Join one text block onto the end of another: the writing moves up, the emptied block goes. */
@@ -2202,7 +2329,8 @@ function useDocKeys(
       const mark = document.createRange();
       mark.selectNodeContents(a);
       mark.collapse(false);
-      const moved = [...b.childNodes];
+      // Copied, not moved: the block left behind saves what it holds as it loses focus, and must not save itself empty.
+      const moved = [...b.childNodes].map((n) => n.cloneNode(true));
       a.append(...moved);
       a.focus({ preventScroll: true });
       const sel = window.getSelection();
@@ -2215,49 +2343,68 @@ function useDocKeys(
         at.collapse(true);
         sel?.addRange(at);
       } else sel?.addRange(mark);
-      a.dispatchEvent(new Event("input", { bubbles: true }));
-      removeBlock(from);
+      // One step: undone, the block comes back and the writing leaves the one above.
+      latest.current.shared.joinBlocks(into.dataset.item!, from.dataset.item!, a.innerHTML);
     };
 
     const key = (event: KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
+      if (event.altKey || event.isComposing) return;
       const target = event.target as HTMLElement;
-      const { picked: chosen } = latest.current;
+      const chosen = latest.current.picked;
       const done = () => {
         event.preventDefault();
         event.stopPropagation();
       };
+      // ⌘A on selected blocks: every block of the tab.
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "a" && chosen.length && target.matches?.("[data-item]")) {
+        const all = blocks();
+        anchor = all[0]?.dataset.item ?? null;
+        setPicked(all.map((b) => b.dataset.item!));
+        return done();
+      }
+      if (event.metaKey || event.ctrlKey) return;
 
-      // A whole block selected.
-      if (chosen && target.matches?.("[data-item]")) {
+      // Blocks selected whole.
+      if (chosen.length && target.matches?.("[data-item]")) {
         const block = target;
+        const run = chosen.map(blockOf).filter((b): b is HTMLElement => !!b);
+        const first = run[0] ?? block;
+        const last = run[run.length - 1] ?? block;
         if (event.key === "Backspace" || event.key === "Delete") {
-          const before = neighbour(block, -1);
-          const after = neighbour(block, 1);
-          setPicked(null);
-          removeBlock(block);
-          // The caret goes where the block was: the end of the one above, or the start of the one below.
+          const before = neighbour(first, -1);
+          const after = neighbour(last, 1);
+          clear();
+          for (const b of run) removeBlock(b);
+          // The caret goes where the blocks were: the end of the one above, or the start of the one below.
           requestAnimationFrame(() => (event.key === "Backspace" ? enter(before, true) || enter(after, false) : enter(after, false) || enter(before, true)));
           return done();
         }
         if (event.key === "Enter") {
-          writeAfter(block);
+          writeAfter(last);
           return done();
         }
         if (event.key === "Escape") {
-          setPicked(null);
+          clear();
+          return done();
+        }
+        // Shift and an arrow: the selection grows (or shrinks) a block at a time.
+        if (event.shiftKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+          // The end that moves is the one away from where the selection began.
+          const edge = first.dataset.item === anchor ? last : first;
+          const to = neighbour(edge, event.key === "ArrowUp" ? -1 : 1);
+          if (to) pick(to, true);
           return done();
         }
         if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
-          setPicked(null);
-          enter(neighbour(block, -1), true);
+          clear();
+          enter(neighbour(first, -1), true);
           return done();
         }
         if (event.key === "ArrowDown" || event.key === "ArrowRight") {
-          setPicked(null);
-          const next = neighbour(block, 1);
+          clear();
+          const next = neighbour(last, 1);
           if (next) enter(next, false);
-          else writeAfter(block);
+          else writeAfter(last);
           return done();
         }
         return;
@@ -2278,6 +2425,12 @@ function useDocKeys(
       const before = neighbour(block, -1);
       const after = neighbour(block, 1);
       const isStory = !!block.querySelector(".subject-card");
+
+      // Esc while writing selects the block, to copy, move or remove it whole.
+      if (event.key === "Escape") {
+        pick(block);
+        return done();
+      }
 
       if (event.key === "Backspace" && start) {
         // An emptied block goes; the caret carries on at the end of the one above.
@@ -2340,14 +2493,94 @@ function useDocKeys(
     // Capture: a field's own handlers stop the event going further.
     root.addEventListener("keydown", key, true);
     const away = (event: PointerEvent) => {
-      if (!latest.current.picked) return;
+      if (!latest.current.picked.length) return;
       const hit = (event.target as Element | null)?.closest?.("[data-item]") as HTMLElement | null;
-      if (hit?.dataset.item !== latest.current.picked) setPicked(null);
+      // Shift-click another block: the selection runs to it.
+      if (hit && hit.parentElement === root && event.shiftKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        pick(hit, true);
+        return;
+      }
+      if (!hit || !latest.current.picked.includes(hit.dataset.item!)) clear();
     };
     document.addEventListener("pointerdown", away, true);
+
+    /*
+     * Blocks to the clipboard and back, in the whiteboard's own format, so
+     * they travel between tabs, subjects and the whiteboard alike. Copied:
+     * the selected blocks, in the order the document reads them. Pasted:
+     * right after the block selected or being written in, on this tab.
+     */
+    const selectedNow = (event: Event) => {
+      const ids = latest.current.picked;
+      if (!ids.length) return [];
+      // Only while the selection is what has focus — not text being written in a block.
+      const t = event.target as HTMLElement | null;
+      return t && (t === document.body || t.matches?.("[data-item]")) ? ids : [];
+    };
+    const positions = () => {
+      const spots = new Map<string, { x: number; y: number; w: number }>();
+      const all = blocks();
+      for (const item of live(latest.current.shared.board)) {
+        if (item.kind === "pos") spots.set((item as PosItem).target, { x: (item as PosItem).x, y: (item as PosItem).y, w: (item as PosItem).w || CARD_W });
+      }
+      // A block never placed on the whiteboard: stacked, in reading order.
+      all.forEach((b, i) => {
+        const id = b.dataset.item!;
+        if (!spots.has(id)) spots.set(id, { x: 0, y: i * 220, w: CARD_W });
+      });
+      return spots;
+    };
+    const copy = (event: ClipboardEvent, cut: boolean) => {
+      const ids = selectedNow(event);
+      if (!ids.length) return;
+      const { shared: s } = latest.current;
+      const copied = blocksFor(s.board, s.cards, ids, positions());
+      if (!copied) return;
+      event.preventDefault();
+      const json = JSON.stringify(copied);
+      blockClipboard = json;
+      event.clipboardData?.setData(BLOCKS_TYPE, json);
+      event.clipboardData?.setData("text/plain", copied.text);
+      if (cut) {
+        const run = ids.map(blockOf).filter((b): b is HTMLElement => !!b);
+        clear();
+        for (const b of run) removeBlock(b);
+      }
+    };
+    const paste = (event: ClipboardEvent) => {
+      const t = event.target as HTMLElement | null;
+      const inDoc = t && root.contains(t);
+      // In the document, on nothing in particular (an empty tab, say), or on selected blocks.
+      const nowhere = !t || t === document.body || t === document.documentElement;
+      if (!inDoc && !nowhere && !latest.current.picked.length) return;
+      // Writing in a table or transcript keeps its own paste.
+      if (t?.closest?.(".tbl, .transcript, .sheet, input, textarea")) return;
+      const custom = event.clipboardData?.getData(BLOCKS_TYPE);
+      const plain = event.clipboardData?.getData("text/plain") ?? "";
+      // Without the custom type (some browsers drop it), the blocks last copied here — if the text is theirs.
+      const fallback = !custom && blockClipboard && readBlocks(blockClipboard) && plain.trim() === (JSON.parse(blockClipboard) as CopiedBlocks).text.trim() ? blockClipboard : null;
+      const copied = readBlocks(custom || fallback);
+      if (!copied) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const picked = latest.current.picked;
+      const host = picked.length ? blockOf(picked[picked.length - 1]) : t?.closest<HTMLElement>("[data-item]") ?? null;
+      clear();
+      latest.current.shared.pasteBlocks(copied, host?.parentElement === root ? host.dataset.item! : null);
+    };
+    const onCopy = (e: ClipboardEvent) => copy(e, false);
+    const onCut = (e: ClipboardEvent) => copy(e, true);
+    document.addEventListener("copy", onCopy, true);
+    document.addEventListener("cut", onCut, true);
+    document.addEventListener("paste", paste, true);
     return () => {
       root.removeEventListener("keydown", key, true);
       document.removeEventListener("pointerdown", away, true);
+      document.removeEventListener("copy", onCopy, true);
+      document.removeEventListener("cut", onCut, true);
+      document.removeEventListener("paste", paste, true);
     };
   }, [root, setPicked]);
 }
@@ -2406,7 +2639,7 @@ function DocumentView(
   const [toolsHost, setToolsHost] = useState<HTMLDivElement | null>(null);
   // The document written from the keyboard; a story, table or picture selected whole.
   const [docEl, setDocEl] = useState<HTMLDivElement | null>(null);
-  const [picked, setPicked] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string[]>([]);
   useDocKeys(docEl, shared, picked, setPicked);
   // A story set into the writing as a card reads there, not again as a block of its own.
   const inlined = new Set(shared.boxes.flatMap((box) => (box.html ? inlineCardLinks(box.html) : [])));
@@ -2467,9 +2700,13 @@ function DocumentView(
       )}
       {stack.map((entry) => (
         <div key={entry.key} data-item={entry.key} tabIndex={-1}
-          className={[shared.tags.lit ? (shared.tags.lit.has(entry.id) ? "tag-lit" : "tag-dim") : "", picked === entry.key ? "doc-picked" : ""].filter(Boolean).join(" ") || undefined}>
+          className={[shared.tags.lit ? (shared.tags.lit.has(entry.id) ? "tag-lit" : "tag-dim") : "", picked.includes(entry.key) ? "doc-picked" : ""].filter(Boolean).join(" ") || undefined}>
           {entry.node}
-          {picked === entry.key && <div className="doc-picked-hint" aria-live="polite">Backspace removes it · Enter writes below it · Esc</div>}
+          {picked[picked.length - 1] === entry.key && (
+            <div className="doc-picked-hint" aria-live="polite">
+              {picked.length > 1 ? `${picked.length} blocks · ` : ""}⌘C copies · ⌘X cuts · Backspace removes · Enter writes below · Esc
+            </div>
+          )}
         </div>
       ))}
       {apart.length > 0 && (
