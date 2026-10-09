@@ -63,3 +63,12 @@ test("a normal source is healthy, and an unfollowed one is forgotten", () => {
   assert.equal(assess(log.s1, NOW).verdict, "healthy");
   assert.deepEqual(recordRuns(log, {}, new Set()), {});
 });
+
+test("a feed that delivers stories none of which reach the list is broken, not healthy", async () => {
+  const { assess, recordRuns } = await import("../lib/health");
+  const now = Date.now();
+  const log = recordRuns({}, { s: { at: now, ok: true, fetched: 250, held: 0 } }, new Set(["s"]));
+  const verdict = assess(log.s, now);
+  assert.equal(verdict.verdict, "broken");
+  assert.match(verdict.reason, /250 stories, but none reached your list/);
+});

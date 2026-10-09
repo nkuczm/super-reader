@@ -131,6 +131,7 @@ import {
   type Board,
   type Boards,
 } from "@/lib/subjects";
+import { attributeStories, inAnySource, inSource } from "@/lib/attribute";
 import { loadHealth, recordRuns, saveHealth, type HealthLog } from "@/lib/health";
 import { listenForClientErrors } from "@/lib/client-errors";
 import { encodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
@@ -208,7 +209,8 @@ import {
 } from "@/lib/highlights";
 import "./reader.css";
 
-type Loaded = Article & { sourceId: string };
+/** A story as held: filed under one source, and also in any other that delivered it (lib/attribute.ts). */
+type Loaded = Article & { sourceId: string; alsoIn?: string[] };
 
 /**
  * The reader's own API keys travel in a header rather than the URL, so a key
@@ -1693,25 +1695,11 @@ export default function Reader() {
       const res = await fetch(`/api/feed?${params}`, { headers: keyHeadersFrom(apiKeysRef.current) });
       const data = await res.json();
 
-      const byUrl = new Map(sources.map((s) => [s.feedUrl, s.id]));
-      const merged: Loaded[] = [];
-      for (const result of data.results ?? []) {
-        const sourceId = byUrl.get(result.feedUrl);
-        if (!sourceId) continue;
-        for (const article of result.articles as Article[]) {
-          merged.push({ ...article, sourceId, id: `${sourceId}:${article.id}` });
-        }
-      }
       // One article, once. Two of a paper's feeds carry the same story with
       // different tracking parameters, which is how the list ended up showing
-      // the same WSJ piece twice in a row.
-      const seen = new Set<string>();
-      const unique = merged.filter((article) => {
-        const key = canonicalUrl(article.link);
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
+      // the same WSJ piece twice in a row. Once, but in every source that
+      // delivered it — filed under its publisher's own (lib/attribute.ts).
+      const unique: Loaded[] = attributeStories<Article>(data.results ?? [], sources, canonicalUrl);
 
       /**
        * Merged into what was already held, not swapped for it. A feed is a
@@ -1735,13 +1723,11 @@ export default function Reader() {
       // What each source delivered, for the status page.
       const heldBySource = new Map<string, number>();
       for (const article of ordered) {
-        heldBySource.set(article.sourceId, (heldBySource.get(article.sourceId) ?? 0) + 1);
+        for (const id of [article.sourceId, ...(article.alsoIn ?? [])]) heldBySource.set(id, (heldBySource.get(id) ?? 0) + 1);
       }
       const runs: Parameters<typeof recordRuns>[1] = {};
       const at = Date.now();
-      for (const result of data.results ?? []) {
-        const sourceId = byUrl.get(result.feedUrl);
-        if (!sourceId) continue;
+      for (const result of data.results ?? []) for (const sourceId of sources.filter((s) => s.feedUrl === result.feedUrl).map((s) => s.id)) {
         const list = (result.articles ?? []) as Article[];
         const newest = list.reduce((best, a) => Math.max(best, timeOf(a) || 0), 0);
         runs[sourceId] = {
@@ -2826,11 +2812,11 @@ export default function Reader() {
     if (selection.type === "alerts" || selection.type === "status" || selection.type === "spend" || selection.type === "subjects") return [];
     if (selection.type === "team") return teamAsArticles(selection.id);
     if (selection.type === "source") {
-      return articles.filter((a) => a.sourceId === selection.id);
+      return articles.filter((a) => inSource(a, selection.id));
     }
     const feed = feeds.find((f) => f.id === selection.id);
     const ids = new Set(feed?.sources.map((s) => s.id));
-    return articles.filter((a) => ids.has(a.sourceId));
+    return articles.filter((a) => inAnySource(a, ids));
   }, [articles, feeds, selection, savedAsArticles, downloadedAsArticles, teamAsArticles, manualAsArticles]);
 
   /**
@@ -3220,9 +3206,11 @@ export default function Reader() {
   const bySource = useMemo(() => {
     const groups = new Map<string, Loaded[]>();
     for (const article of articles) {
-      const list = groups.get(article.sourceId) ?? [];
-      list.push(article);
-      groups.set(article.sourceId, list);
+      for (const id of [article.sourceId, ...(article.alsoIn ?? [])]) {
+        const list = groups.get(id) ?? [];
+        list.push(article);
+        groups.set(id, list);
+      }
     }
     return groups;
   }, [articles]);
@@ -3741,7 +3729,7 @@ export default function Reader() {
 
           {feeds.map((feed) => {
             const ids = new Set(feed.sources.map((s) => s.id));
-            const count = unread(articles.filter((a) => ids.has(a.sourceId)));
+            const count = unread(articles.filter((a) => inAnySource(a, ids)));
             return (
               <div
                 className={`feed-group${

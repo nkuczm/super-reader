@@ -357,7 +357,15 @@ Each of these is a bug that shipped. Do not undo them.
 7. **Order the discovery ladder deliberately.** Subreddits before URLs
    (`reddit.com/...` would be scraped as a page); X before URLs (login wall);
    topics last.
-8. **Report what a filter removed.** Collection fails silently by nature. A
+8. **A story two sources deliver belongs to both.** It is shown once, but it
+   is filed under its publisher's own source and carries the others in
+   `alsoIn` (`lib/attribute.ts`). The dedupe used to hand it to whichever
+   source came first in the refresh, so a news search for "OpenAI" listed
+   before `openai.com/news/rss.xml` took every story from it: the OpenAI
+   source showed nothing while its feed answered 250 stories, and Source
+   status called it healthy because it judged the fetch, not what was held
+   (9 Oct 2026). A good fetch with nothing held is now *broken*.
+9. **Report what a filter removed.** Collection fails silently by nature. A
    count of what was dropped, and why, is the difference between noticing and
    not. `keepArticles()` returns both halves for this reason.
 

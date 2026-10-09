@@ -135,7 +135,8 @@ function median(values: number[]) {
  * The verdict, from the most serious down:
  *
  * - broken: nothing is arriving and nothing is cached — the reader sees an
- *   empty source.
+ *   empty source. Also when the feed delivers but nothing it delivered is
+ *   held: an empty source all the same.
  * - losing-access: the publisher is refusing or has removed the feed (401,
  *   403, 404, 410…) on the recent refreshes — the "source that died after it
  *   was added" of COLLECTION.md §6. Still showing cached stories, which is
@@ -171,6 +172,16 @@ export function assess(health: SourceHealth | undefined, now = Date.now()): Asse
       ...base,
       verdict: "broken",
       reason: last.error ? `No stories, none cached. Last error: ${last.error}` : "The feed returned nothing and nothing is cached.",
+    };
+  }
+  // The feed answers with stories and none of them reach the list: an empty
+  // source to the reader, whatever the fetch says. It used to read as
+  // healthy, because a good fetch was all this looked at.
+  if (last.ok && last.fetched > 0 && last.held === 0) {
+    return {
+      ...base,
+      verdict: "broken",
+      reason: `The feed returned ${last.fetched} ${last.fetched === 1 ? "story" : "stories"}, but none reached your list.`,
     };
   }
   if (refusals.length >= Math.min(2, recent.length) && refusals.length > 0) {
