@@ -2585,7 +2585,7 @@ function Whiteboard(
    * others moving with it — a selection, or a section label's own items —
    * from where each started, by the same distance.
    */
-  const [drag, setDrag] = useState<{ id: string; x: number; y: number; dx: number; dy: number; group: Map<string, { x: number; y: number; w: number }> } | null>(null);
+  const [drag, setDrag] = useState<{ id: string; x: number; y: number; dx: number; dy: number; group: Map<string, { x: number; y: number; w: number }>; join?: string | null } | null>(null);
   /** Nodes picked by dragging a box over them, to move together. */
   const [selected, setSelected] = useState<Set<string>>(new Set());
   /** The right-click menu on a block: where it opened, and for which. */
@@ -2815,6 +2815,22 @@ function Whiteboard(
     return null;
   };
 
+  /**
+   * The section label a dragged block would join: the one under the pointer
+   * first — a wide block (a transcript, a table) held by its corner has its
+   * middle far off to the side of the label it is being dropped on — then
+   * the one under the block's own top edge.
+   */
+  const joinTarget = (id: string, at: { x: number; y: number; w: number }, pointer: { x: number; y: number }) => {
+    if (labelIds.has(id)) return null;
+    for (const label of labelIds) {
+      if (label === id) continue;
+      const r = nodeEls.current.get(label)?.getBoundingClientRect();
+      if (r && pointer.x >= r.left && pointer.x <= r.right && pointer.y >= r.top - 16 && pointer.y <= r.bottom + 16) return label;
+    }
+    return labelUnder(at.x + at.w / 2, at.y + 20, id);
+  };
+
   const startDrag = (id: string) => (event: React.PointerEvent) => {
     if (event.button !== 0) return;
     if (connecting !== false) {
@@ -2871,7 +2887,9 @@ function Whiteboard(
       if (!moved && Math.hypot(e.clientX - origin.px, e.clientY - origin.py) < 5) return;
       moved = true;
       last = { x: origin.x + (e.clientX - origin.px) / view.zoom, y: origin.y + (e.clientY - origin.py) / view.zoom };
-      setDrag({ id, ...last, dx: last.x - origin.x, dy: last.y - origin.y, group });
+      // The label it would join lights up, so a drop onto a section is never a guess.
+      const join = group.size === 0 ? joinTarget(id, { ...last, w: origin.w }, { x: e.clientX, y: e.clientY }) : null;
+      setDrag({ id, ...last, dx: last.x - origin.x, dy: last.y - origin.y, group, join });
     };
     const up = (e?: PointerEvent) => {
       window.removeEventListener("pointermove", move);
@@ -2903,7 +2921,7 @@ function Whiteboard(
         ]);
         return;
       }
-      const target = moved && !labelIds.has(id) ? labelUnder(last.x + origin.w / 2, last.y + 20, id) : null;
+      const target = moved && e ? joinTarget(id, { ...last, w: origin.w }, { x: e.clientX, y: e.clientY }) : null;
       if (target) {
         const label = positions.get(target)!;
         const linked = new Set(
@@ -3644,7 +3662,7 @@ function Whiteboard(
                   if (el) nodeEls.current.set(node.id, el);
                   else nodeEls.current.delete(node.id);
                 }}
-                className={`wb-node kind-${node.kind}${connecting === node.id ? " picked" : ""}${drag?.id === node.id || drag?.group.has(node.id) ? " dragging" : ""}${selected.has(node.id) ? " selected" : ""}${shared.tags.lit?.has(node.id) ? " tag-lit" : ""}`}
+                className={`wb-node kind-${node.kind}${connecting === node.id ? " picked" : ""}${drag?.id === node.id || drag?.group.has(node.id) ? " dragging" : ""}${drag?.join === node.id ? " join-target" : ""}${selected.has(node.id) ? " selected" : ""}${shared.tags.lit?.has(node.id) ? " tag-lit" : ""}`}
                 style={{
                   left: pos.x, top: pos.y, width: pos.w,
                   // Every card blurs as the board zooms out; a section's cards also fade under its colour.
