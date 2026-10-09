@@ -1138,7 +1138,10 @@ export function sanitizeRichText(html: string): string {
         // Lettered (a, b, c or A, B, C), and where it counts from.
         const type = match[2].match(/\btype=["']?([aA])\b/)?.[1];
         const start = Number(match[2].match(/\bstart=["']?(\d{1,3})\b/)?.[1]);
-        out.push(`<ol${type ? ` type="${type}"` : ""}${start > 1 ? ` start="${start}"` : ""}>`);
+        // And "1)" rather than "1.", when typed that way.
+        const paren = /\bdata-mark=["']?paren\b/.test(match[2]);
+        // (With its kind spelled out, which a printed page's stylesheet can match: it cannot tell type "a" from "A".)
+        out.push(`<ol${type ? ` type="${type}"` : ""}${start > 1 ? ` start="${start}"` : ""}${paren ? ` data-mark="paren" data-kind="${type ?? "1"}"` : ""}>`);
       }
       else if (tag === "li" && /\bdata-checked=["']?true/.test(match[2])) out.push(`<li data-checked="true">`);
       else out.push(`<${tag}>`);
