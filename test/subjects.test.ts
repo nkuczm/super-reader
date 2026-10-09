@@ -366,3 +366,21 @@ test("lettered and numbered lists keep their kind and where they count from", ()
   assert.equal(sanitizeRichText('<ol start="4" onclick="x"><li>x</li></ol>'), '<ol start="4"><li>x</li></ol>');
   assert.equal(sanitizeRichText('<ol type="i"><li>x</li></ol>'), "<ol><li>x</li></ol>");
 });
+
+test("an outlet's own name replaces the address a pasted story was first named by", async () => {
+  const { cardInfoId } = await import("../lib/subjects");
+  let board = addStory({}, { link: "https://citypaper.example/a", title: "A", source: "citypaper.example" }, 1);
+  board = put(board, { id: cardInfoId("https://citypaper.example/a"), kind: "cardinfo", card: "https://citypaper.example/a", source: "City Paper", at: 2 } as never, 2);
+  assert.equal(cardsOf({ id: "n", name: "n", entries: [], at: 0 } as never, board)[0].source, "City Paper");
+  // A real outlet name stays.
+  let named = addStory({}, { link: "https://x.example/b", title: "B", source: "The Times" }, 1);
+  named = put(named, { id: cardInfoId("https://x.example/b"), kind: "cardinfo", card: "https://x.example/b", source: "x.example", at: 2 } as never, 2);
+  assert.equal(cardsOf({ id: "n", name: "n", entries: [], at: 0 } as never, named)[0].source, "The Times");
+});
+
+test("a story set into writing as a card survives sanitising, and is found there", async () => {
+  const { inlineCardLinks } = await import("../lib/cite");
+  const html = sanitizeRichText('<ul><li><a data-cite="card" href="https://e.com/a?utm_source=x" title="A story" contenteditable="false" data-by="E · Jo" onclick="x">A story</a></li></ul>');
+  assert.equal(html, '<ul><li><a data-cite="card" href="https://e.com/a?utm_source=x" title="A story" contenteditable="false" target="_blank" rel="noopener noreferrer">A story</a></li></ul>');
+  assert.deepEqual(inlineCardLinks(html), ["https://e.com/a"]);
+});

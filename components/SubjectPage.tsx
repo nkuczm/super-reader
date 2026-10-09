@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons";
 import RichText, { dropCiteAt, TOOL_LABELS, ToolsHostContext } from "./RichText";
-import { CITE_OPEN_EVENT, CITE_TYPE, citeChipHtml, setCiteSources, type Cite } from "@/lib/cite";
+import { CITE_OPEN_EVENT, CITE_TYPE, citeChipHtml, inlineCardLinks, setCiteSources, type Cite } from "@/lib/cite";
 import FlagButton from "./FlagButton";
 import type { FlagInput } from "@/lib/flags";
 import SubjectHistory from "./SubjectHistory";
@@ -512,17 +512,21 @@ export default function SubjectPage(props: Props) {
           if (!res.ok || cancelled) continue;
           const data = (await res.json()) as { publishedAt?: string; byline?: string; siteName?: string };
           if (!data.publishedAt && !data.byline && !data.siteName) continue;
-          onBoard((current) =>
-            put(current, {
+          // Filling gaps only: a headline already read for the card (from a pasted link, a scan) is kept.
+          onBoard((current) => {
+            const info = current?.[cardInfoId(card.id)];
+            const had = info && info.kind === "cardinfo" && !info.deleted ? info : undefined;
+            return put(current, {
+              ...had,
               id: cardInfoId(card.id),
               kind: "cardinfo",
               card: card.id,
-              publishedAt: data.publishedAt,
-              author: data.byline?.slice(0, 120),
-              source: data.siteName?.slice(0, 120),
+              publishedAt: had?.publishedAt ?? data.publishedAt,
+              author: had?.author ?? data.byline?.slice(0, 120),
+              source: had?.source ?? data.siteName?.slice(0, 120),
               at: Date.now(),
-            }),
-          );
+            });
+          });
         } catch {
           /* the article could not be read; the byline keeps what it has */
         }
@@ -728,8 +732,11 @@ export default function SubjectPage(props: Props) {
   const [printJob, setPrintJob] = useState<PrintJob | null>(null);
   const tabBoxes = (tabId: string) =>
     items.filter((item): item is BoxItem => item.kind === "box" && !item.embedded && tabOf(board, item.id, tabs) === tabId);
-  const tabPrintHtml = (tabId: string, out: Output) =>
-    blocksPrintHtml(allCards.filter((card) => tabOf(board, card.id, tabs) === tabId), tabBoxes(tabId), out);
+  const tabPrintHtml = (tabId: string, out: Output) => {
+    // As the document reads: a story set into the writing as a card is printed there only.
+    const inlined = new Set(tabBoxes(tabId).flatMap((box) => (box.html ? inlineCardLinks(box.html) : [])));
+    return blocksPrintHtml(allCards.filter((card) => tabOf(board, card.id, tabs) === tabId && !inlined.has(card.id)), tabBoxes(tabId), out);
+  };
   /** Stories and boxes as printed, in document order: each section heading, then what is filed under it. */
   const blocksPrintHtml = (printCards: Card[], printBoxes: BoxItem[], out: Output) => {
     const entries = [
@@ -2401,8 +2408,10 @@ function DocumentView(
   const [docEl, setDocEl] = useState<HTMLDivElement | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
   useDocKeys(docEl, shared, picked, setPicked);
+  // A story set into the writing as a card reads there, not again as a block of its own.
+  const inlined = new Set(shared.boxes.flatMap((box) => (box.html ? inlineCardLinks(box.html) : [])));
   const entries = [
-    ...shared.cards.map((card) => ({ id: card.id, at: card.at, after: card.after, key: card.id, node: <StoryCard card={card} own={inside.get(card.id) ?? []} shared={shared} /> })),
+    ...shared.cards.filter((card) => !inlined.has(card.id)).map((card) => ({ id: card.id, at: card.at, after: card.after, key: card.id, node: <StoryCard card={card} own={inside.get(card.id) ?? []} shared={shared} /> })),
     ...shared.boxes.map((box) => ({ id: box.id, at: madeAt(box), label: box.label, after: box.after, key: box.id, node: <TextBox box={box} shared={shared} /> })),
   ];
   // Sections read as they do on the whiteboard: each header, then what is linked to it.
