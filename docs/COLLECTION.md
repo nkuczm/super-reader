@@ -10,7 +10,7 @@ Everything numbered here was measured against the live deployment on the date
 given, not assumed. When a measurement is stale, re-run it rather than trusting
 the number.
 
-**What this covers:** `lib/discover.ts`, `lib/harvest.ts`, `lib/sitemap.ts`,
+**What this covers:** `lib/discover.ts`, `lib/article-link.ts`, `lib/harvest.ts`, `lib/sitemap.ts`,
 `lib/structured.ts`, `lib/sitesearch.ts`, `lib/authentic.ts`,
 `lib/relevance.ts`, `lib/coverage.ts`, `lib/bundle.ts`, `lib/window.ts`,
 `lib/publishers.ts`, `lib/scrape.ts`, `lib/feed.ts`, `app/api/feed/route.ts`,
@@ -227,6 +227,28 @@ Readability scores any class containing `com-` as a comment block, and
 `tidyForReadability()` in `lib/article.ts` now takes the `intercom-` prefix
 off class names before scoring and removes breadcrumb trails and
 related-articles lists. `EXTRACT_VERSION` went to 6 to drop the cached copies.
+
+### A link to one story (9 Oct 2026)
+
+Discovery read any path below the domain as a section, so a pasted
+article was looked for a feed at its own address (none exists) and then
+scraped as a listing — which on an article page is its related-stories
+rail and navigation: §6's "heuristic that picks nav". An article is not a
+source; the outlet that published it is. `lib/article-link.ts` now
+recognises one — by the page's own markup (JSON-LD `NewsArticle` and
+kin, or `og:type=article` with a publish date or an article-shaped
+address), or, when the page cannot be read, by an address that is
+unmistakably a story (a dated path, or a long hyphenated headline slug).
+The feed is then looked for where the story sits: its section (the path
+above it, dates and containers like `/stories/` taken off — recorded as
+`section` only if a feed actually answers there), then the site's
+declared and conventional feeds, the outlet directory, and a declared
+sitemap. The story page is never scraped, and a story's own comment feed
+is never taken for the outlet's. The preview says which story the feed
+was found from.
+
+`news.stanford.edu/stories/2026/10/bladder-cancer-urine-test-research`
+was the case, and is also a wall — see §8.
 
 ### What those numbers mean
 
@@ -539,6 +561,18 @@ them rather than re-discovering them:
   cached copies. A pasted link to such a site is still kept, titled from its
   address, and opens on the site. Passing the check means running the
   site's JavaScript challenge as a browser would — see below; we don't.
+
+- **Stanford News (news.stanford.edu)** — measured 9 Oct 2026 from a
+  preview deployment: every path — an article, `robots.txt`, `/rss`,
+  `/feed`, `/rss.xml`, `/feed.xml`, `/stories/rss`, `/sitemap.xml`,
+  `/sitemap_index.xml`, `/news-sitemap.xml` — answers **403** from
+  `server: cloudflare` with a ~6KB page titled "Just a moment…" ("Enable
+  JavaScript and cookies to continue"): Cloudflare's JavaScript challenge.
+  Nothing on the host is discoverable from a server. Google News carries
+  it: `site:news.stanford.edu when:7d` returned 12 items, the newest 45
+  minutes old (headlines and Google's links only, as with AP). Bing's
+  `site:` search returned none. The reader's own browser passes the
+  check, so the extension's "scan it in" reads its articles.
 
 - **YouTube transcripts** — measured 3 Oct 2026 from the deployment: the
   watch page answers a server **200** with 1.26 MB, but its player response
