@@ -75,6 +75,29 @@ function caretAtText(root: Node, offset: number) {
 }
 
 /**
+ * Run a list command and put the caret back where it was in its line: the
+ * browser's own list commands leave it at the start of the line, so the next
+ * key pressed (Enter, say) acted there instead.
+ */
+function keepingCaret(run: () => void) {
+  const sel = window.getSelection();
+  const at = sel?.anchorNode;
+  const line = (at instanceof Element ? at : at?.parentElement)?.closest("li, p, div, h3, blockquote");
+  let offset = -1;
+  if (sel?.isCollapsed && at && line) {
+    const before = document.createRange();
+    before.selectNodeContents(line);
+    before.setEnd(at, sel.anchorOffset);
+    offset = before.toString().length;
+  }
+  run();
+  if (offset < 0) return;
+  const now = window.getSelection()?.anchorNode;
+  const target = (now instanceof Element ? now : now?.parentElement)?.closest("li, p, div, h3, blockquote");
+  if (target && (target.textContent ?? "").length >= offset) caretAtText(target, offset);
+}
+
+/**
  * A citation chip at the caret, with a space after it so writing carries on
  * past it. Put straight into the text: the browser's insertHTML, at the end
  * of a line, sets an inline chip outside its paragraph.
@@ -96,6 +119,43 @@ function insertChip(cite: Cite) {
   after.collapse(true);
   selection.removeAllRanges();
   selection.addRange(after);
+}
+
+/**
+ * A list's number or bullet takes the look of its line, as in a Doc: bold,
+ * italic or highlighted when the whole line is. Worked out from the line on
+ * screen (data-b, data-i, data-hl) and never saved — the line's own
+ * formatting is the record. Each numbered list also says its kind
+ * (data-kind 1, a or A), since the stylesheet cannot tell "a" from "A" by
+ * the type attribute: HTML matches that one without regard to case.
+ */
+export function markLines(root: HTMLElement) {
+  for (const ol of root.querySelectorAll<HTMLOListElement>("ol")) {
+    const kind = ol.getAttribute("type") === "A" ? "A" : ol.getAttribute("type") === "a" ? "a" : "1";
+    if (ol.dataset.kind !== kind) ol.dataset.kind = kind;
+  }
+  for (const li of root.querySelectorAll<HTMLLIElement>("li")) {
+    const texts: Text[] = [];
+    const walker = document.createTreeWalker(li, NodeFilter.SHOW_TEXT, {
+      // The line's own words: not those of a list nested under it.
+      acceptNode: (n) => (n.parentElement?.closest("li") === li && n.nodeValue?.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
+    });
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) texts.push(n as Text);
+    const all = (test: (el: Element) => boolean) =>
+      texts.length > 0 && texts.every((t) => {
+        for (let el = t.parentElement; el && el !== li; el = el.parentElement) if (test(el)) return true;
+        return false;
+      });
+    const look = {
+      b: all((el) => /^(B|STRONG)$/.test(el.tagName) || /font-weight:\s*(bold|[6-9]00)/.test(el.getAttribute("style") ?? "")),
+      i: all((el) => /^(I|EM)$/.test(el.tagName) || /font-style:\s*italic/.test(el.getAttribute("style") ?? "")),
+      hl: all((el) => el.tagName === "MARK" || /background/.test(el.getAttribute("style") ?? "")),
+    };
+    for (const [key, on] of Object.entries(look)) {
+      if (on && !(key in li.dataset)) li.dataset[key] = "";
+      if (!on && key in li.dataset) delete li.dataset[key];
+    }
+  }
 }
 
 /** Whether the caret is on a line — a paragraph, a bullet — with nothing else on it. */
@@ -487,6 +547,7 @@ export default function RichText({
     fillEmbeds();
     refreshSubjectChips(node);
     refreshCiteChips(node);
+    markLines(node);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [html, resolveEmbed]);
 
@@ -548,7 +609,10 @@ export default function RichText({
   }
 
   function changed() {
-    if (el.current) keepQuotesTight(el.current);
+    if (el.current) {
+      keepQuotesTight(el.current);
+      markLines(el.current);
+    }
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => {
       timer.current = null;
@@ -675,22 +739,23 @@ export default function RichText({
    * B, C); the same again turns it back into lines. `start` is where it
    * counts from, when typed as "3." or "c)".
    */
-  function toggleNumbered(lettered: boolean | "upper", start = 1) {
+  function toggleNumbered(lettered: boolean | "upper", start = 1, paren = false) {
     const kind = lettered === "upper" ? "A" : lettered ? "a" : "1";
+    const mark = paren ? "paren" : null;
     if (onFormat?.(lettered ? "letteredList" : "insertOrderedList")) return;
     el.current?.focus();
     const list = orderedAtCaret();
-    if (list && (list.getAttribute("type") ?? "1") === kind && start === 1) {
-      document.execCommand("insertOrderedList");
+    if (list && (list.getAttribute("type") ?? "1") === kind && list.getAttribute("data-mark") === mark && start === 1) {
+      keepingCaret(() => document.execCommand("insertOrderedList"));
     } else {
-      if (!list) document.execCommand("insertOrderedList");
+      if (!list) keepingCaret(() => document.execCommand("insertOrderedList"));
       let ol = orderedAtCaret();
       // The browser joins a new list onto one just above it. Numbers after
       // numbers carry on, as in a Doc; a list of the other kind starts afresh.
       const sel = window.getSelection();
       const node = sel?.anchorNode;
       const li = (node && (node.nodeType === 1 ? (node as Element) : node.parentElement))?.closest("li");
-      if (!list && ol && li?.parentElement === ol && li.previousElementSibling && ((ol.getAttribute("type") ?? "1") !== kind || start > 1)) {
+      if (!list && ol && li?.parentElement === ol && li.previousElementSibling && ((ol.getAttribute("type") ?? "1") !== kind || ol.getAttribute("data-mark") !== mark || start > 1)) {
         const inLi = document.createRange();
         inLi.selectNodeContents(li);
         inLi.setEnd(sel!.anchorNode!, sel!.anchorOffset);
@@ -709,6 +774,9 @@ export default function RichText({
       else ol?.setAttribute("type", kind);
       if (start > 1) ol?.setAttribute("start", String(start));
       else ol?.removeAttribute("start");
+      // "1)" rather than "1.": the list is numbered the way it was typed.
+      if (mark) ol?.setAttribute("data-mark", mark);
+      else ol?.removeAttribute("data-mark");
     }
     changed();
   }
@@ -737,10 +805,10 @@ export default function RichText({
     sel.addRange(before);
     document.execCommand("delete");
     if (bullet) format("insertUnorderedList");
-    else if (number) toggleNumbered(false, Math.max(1, Number(number[1])));
+    else if (number) toggleNumbered(false, Math.max(1, Number(number[1])), typed.endsWith(")"));
     else {
       const upper = letter![1] === letter![1].toUpperCase();
-      toggleNumbered(upper ? "upper" : true, letter![1].toLowerCase().charCodeAt(0) - 96);
+      toggleNumbered(upper ? "upper" : true, letter![1].toLowerCase().charCodeAt(0) - 96, typed.endsWith(")"));
     }
     return true;
   }
@@ -751,9 +819,9 @@ export default function RichText({
     el.current?.focus();
     const list = listAtCaret();
     if (list?.hasAttribute("data-check")) {
-      document.execCommand("insertUnorderedList");
+      keepingCaret(() => document.execCommand("insertUnorderedList"));
     } else {
-      if (!list) document.execCommand("insertUnorderedList");
+      if (!list) keepingCaret(() => document.execCommand("insertUnorderedList"));
       listAtCaret()?.setAttribute("data-check", "");
     }
     changed();
@@ -802,7 +870,8 @@ export default function RichText({
   function format(command: string, value?: string) {
     if (command !== "undo" && command !== "redo" && onFormat?.(command, value)) return;
     el.current?.focus();
-    document.execCommand(command, false, value);
+    if (/^insert(Un)?orderedList$/.test(command)) keepingCaret(() => document.execCommand(command, false, value));
+    else document.execCommand(command, false, value);
     changed();
   }
 
@@ -1282,6 +1351,26 @@ export default function RichText({
             event.stopPropagation();
             toggleChecklist();
             return;
+          }
+          // Enter on an empty bullet steps out of the list (or out one level), as in a Doc. The
+          // browser does this itself only for a bullet that is truly bare: one left holding the
+          // bold or highlight of the line above kept making new bullets instead.
+          if (event.key === "Enter" && !event.shiftKey && window.getSelection()?.isCollapsed) {
+            const node = window.getSelection()?.anchorNode;
+            const li = (node && (node.nodeType === 1 ? (node as Element) : node.parentElement))?.closest("li");
+            if (li && el.current?.contains(li) && !(li.textContent ?? "").replace(/[\u200b\u00a0\s]/g, "") && !li.querySelector("img, a, ul, ol")) {
+              event.preventDefault();
+              event.stopPropagation();
+              li.innerHTML = "<br>";
+              const at = document.createRange();
+              at.setStart(li, 0);
+              at.collapse(true);
+              window.getSelection()?.removeAllRanges();
+              window.getSelection()?.addRange(at);
+              document.execCommand("outdent");
+              changed();
+              return;
+            }
           }
           // A new line in a checklist starts unticked, whatever the line before was.
           if (event.key === "Enter" && listAtCaret()?.hasAttribute("data-check")) {

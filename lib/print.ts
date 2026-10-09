@@ -65,6 +65,12 @@ strong, b { font-weight: 700; }
 ul, ol { margin: 0 0 8pt; padding-left: 16pt; }
 li { margin: 0 0 3pt; padding-left: 2pt; }
 li > ul, li > ol { margin: 3pt 0 0; }
+@counter-style decimal-paren { system: extends decimal; suffix: ") "; }
+@counter-style lower-alpha-paren { system: extends lower-alpha; suffix: ") "; }
+@counter-style upper-alpha-paren { system: extends upper-alpha; suffix: ") "; }
+ol[data-mark="paren"][data-kind="1"] { list-style-type: decimal-paren; }
+ol[data-mark="paren"][data-kind="a"] { list-style-type: lower-alpha-paren; }
+ol[data-mark="paren"][data-kind="A"] { list-style-type: upper-alpha-paren; }
 ul[data-check] { list-style: none; padding-left: 2pt; }
 ul[data-check] > li::before { content: "☐"; display: inline-block; width: 13pt; }
 ul[data-check] > li[data-checked="true"]::before { content: "☑"; }

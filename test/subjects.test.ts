@@ -384,3 +384,10 @@ test("a story set into writing as a card survives sanitising, and is found there
   assert.equal(html, '<ul><li><a data-cite="card" href="https://e.com/a?utm_source=x" title="A story" contenteditable="false" target="_blank" rel="noopener noreferrer">A story</a></li></ul>');
   assert.deepEqual(inlineCardLinks(html), ["https://e.com/a"]);
 });
+
+test("a list typed as 1) or A) keeps its parenthesis", () => {
+  assert.equal(sanitizeRichText('<ol data-mark="paren"><li>x</li></ol>'), '<ol data-mark="paren" data-kind="1"><li>x</li></ol>');
+  assert.equal(sanitizeRichText('<ol type="A" start="2" data-mark="paren" data-kind="A"><li>x</li></ol>'), '<ol type="A" start="2" data-mark="paren" data-kind="A"><li>x</li></ol>');
+  // What the screen works out for itself is not saved.
+  assert.equal(sanitizeRichText('<ol data-kind="a"><li data-b="" data-hl="">x</li></ol>'), "<ol><li>x</li></ol>");
+});
