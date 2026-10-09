@@ -45,7 +45,7 @@ function heightOf(node: Node): number {
   }
   if (node.kind === "insight") return 110;
   const box = node.box;
-  if (box.label) return 56;
+  if (box.label) return box.labelShape === "node" ? 170 : 56;
   if (safeImage(box.image)) return 230;
   if (box.drawing) return 40 + Math.min(1200, Number(box.height) || 300) / 2;
   if (box.table) return 60 + Math.min(8, safeGrid(box.table).length) * 30;
@@ -85,6 +85,9 @@ function Block({ node }: { node: Node }) {
     return <div className="bt-box bt-insight"><span className="bt-tag">✦ Insight</span> {node.insight.text}</div>;
   }
   const box = node.box;
+  if (box.label && box.labelShape === "node") {
+    return <div className="bt-node-circle" style={{ "--label-color": labelColorOf(box) } as React.CSSProperties}>{textOf(box.html).trim()}</div>;
+  }
   if (box.label) {
     return <div className="bt-label" style={{ "--label-color": labelColorOf(box) } as React.CSSProperties}>{textOf(box.html).trim()}</div>;
   }

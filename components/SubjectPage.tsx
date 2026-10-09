@@ -78,7 +78,7 @@ import {
   tabsOf,
   type Tab,
 } from "@/lib/subjects";
-import { edgePath, layoutBoard, settle, GAP } from "@/lib/board-layout";
+import { chainedLabelLinks, edgePath, layoutBoard, settle, GAP } from "@/lib/board-layout";
 import { PROVIDER_NAME, recordSpend, shareSpend, type AiProvider } from "@/lib/spend";
 import { loadSyncCode } from "@/lib/store";
 
@@ -141,6 +141,8 @@ const INSIGHT_LABEL: Record<InsightItem["type"], string> = {
  * suggested reading last. The whiteboard lays the same cards out on a canvas
  * where they can be moved and joined with lines.
  */
+/** A node's diameter on the whiteboard when it is made. */
+const NODE_SIZE = 170;
 const NEW_TABLE = () => [["", "", ""], ["", "", ""], ["", "", ""]];
 
 /** Blocks copied on the whiteboard, as the clipboard carries them between subjects. */
@@ -602,7 +604,7 @@ export default function SubjectPage(props: Props) {
     const id = newItemId("box");
     onBoard((current) => {
       let next = placeNew(put(current, { id, kind: "box", html: "", ...extra, at: Date.now() }), id);
-      if (at) next = put(next, { id: posId(id), kind: "pos", target: id, x: at.x, y: at.y, w: props.boxWidth || 280, at: Date.now() });
+      if (at) next = put(next, { id: posId(id), kind: "pos", target: id, x: at.x, y: at.y, w: extra.labelShape === "node" ? NODE_SIZE : props.boxWidth || 280, at: Date.now() });
       return next;
     });
     setFocusBox(id);
@@ -1758,7 +1760,7 @@ function StoryCard({
 function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dragHandle?: (e: React.PointerEvent) => void }) {
   const [styling, setStyling] = useState(false);
   return (
-    <div className={`subject-box${box.table ? " table-box" : ""}${box.label ? " label-box" : ""}${!box.label && !box.drawing && !box.table && !box.transcript && box.image === undefined && box.caption === undefined ? " text-box" : ""}`}>
+    <div className={`subject-box${box.table ? " table-box" : ""}${box.label ? " label-box" : ""}${box.label && box.labelShape === "node" && dragHandle ? " node-box" : ""}${!box.label && !box.drawing && !box.table && !box.transcript && box.image === undefined && box.caption === undefined ? " text-box" : ""}`}>
       <div className="subject-box-head" onPointerDown={dragHandle}>
         <span className="subject-box-grip" aria-hidden="true">⋮⋮</span>
         {productionOf(box) && (
@@ -1802,6 +1804,17 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
                       aria-label={`Colour ${c}`} onClick={() => shared.updateBox(box, { labelColor: c })} />
                   ))}
                 </span>
+                {/* A node is a whiteboard shape: offered there, and read as a heading in the document. */}
+                {dragHandle && (
+                  <span className="seg label-style-seg">
+                    {(["heading", "node"] as const).map((shape) => (
+                      <button key={shape} className={(box.labelShape === "node" ? "node" : "heading") === shape ? "on" : ""}
+                        onClick={() => shared.updateBox(box, { labelShape: shape === "node" ? "node" : undefined })}>
+                        {shape === "node" ? "◯ Node" : "Heading"}
+                      </button>
+                    ))}
+                  </span>
+                )}
                 <span className="seg label-style-seg">
                   {(["underline", "fill"] as const).map((st) => (
                     <button key={st} className={(box.labelStyle ?? "underline") === st ? "on" : ""}
@@ -1826,7 +1839,25 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
           {Icon.close}
         </button>
       </div>
-      {box.label ? (
+      {box.label && box.labelShape === "node" && dragHandle ? (
+        // A node: the label in a circle, which also drags it; lines leave from all round it.
+        <div className={`node-circle${box.labelStyle === "fill" ? " fill" : ""}`} style={{ "--label-color": labelColorOf(box) } as React.CSSProperties}
+          onPointerDown={dragHandle}>
+          <input
+            className="section-label node-label"
+            defaultValue={textOf(box.html)}
+            placeholder="Node"
+            autoFocus={shared.focusBox === box.id}
+            aria-label="Node label"
+            onPointerDown={(e) => e.stopPropagation()}
+            onBlur={(e) => {
+              const text = e.currentTarget.value.trim().slice(0, 120);
+              if (text !== textOf(box.html)) shared.setBox(box, escapeHtml(text));
+            }}
+            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+          />
+        </div>
+      ) : box.label ? (
         <input
           className={`section-label${box.labelStyle === "fill" ? " fill" : ""}`}
           style={{ "--label-color": labelColorOf(box) } as React.CSSProperties}
@@ -2330,7 +2361,18 @@ function Whiteboard(
     return () => observer.disconnect();
   });
 
-  const userLinks = live(board).filter((item): item is LinkItem => item.kind === "link");
+  const allUserLinks = live(board).filter((item): item is LinkItem => item.kind === "link");
+  const isLabelItem = (id: string) => {
+    const item = board?.[id];
+    return Boolean(item && item.kind === "box" && item.label && !item.deleted);
+  };
+  const isNode = (id: string) => {
+    const item = board?.[id];
+    return Boolean(item && item.kind === "box" && item.label && item.labelShape === "node" && !item.deleted);
+  };
+  // Cards chained to one another under the same label are drawn as a chain, not a fan from the label.
+  const repeated = chainedLabelLinks(allUserLinks, isLabelItem, (id) => positions.get(id));
+  const userLinks = allUserLinks.filter((link) => !repeated.has(link.id));
   // The AI's links are shown for what the pointer is on, or all of them when
   // asked: drawn together they cross every card on the board.
   const aiLinks = shared.insights
@@ -3018,7 +3060,7 @@ function Whiteboard(
     const a = positions.get(from);
     const b = positions.get(to);
     if (!a || !b) return null;
-    const { d, mid } = edgePath(a, b);
+    const { d, mid } = edgePath(a, b, { a: isNode(from), b: isNode(to) });
     return (
       <g key={key} className={className}>
         {/* A wide invisible stroke to point at: hovering the line shows its ×. */}
@@ -3106,6 +3148,10 @@ function Whiteboard(
           </button>
           <button role="menuitem" onClick={() => { shared.addBox(menu.at, { label: true, html: "" }); setMenu(null); }}>
             <span className="wb-menu-icon">H</span> Section label
+          </button>
+          <button role="menuitem" title="A section as a circle: connect things to it from every side"
+            onClick={() => { shared.addBox({ x: menu.at.x - NODE_SIZE / 2, y: menu.at.y - NODE_SIZE / 2 }, { label: true, labelShape: "node", html: "" }); setMenu(null); }}>
+            <span className="wb-menu-icon">◯</span> Node
           </button>
           <button role="menuitem" onClick={() => { shared.addBox(menu.at); setMenu(null); }}>
             <span className="wb-menu-icon">¶</span> Text box
