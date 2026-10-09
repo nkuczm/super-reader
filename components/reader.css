@@ -1593,6 +1593,8 @@
 .subject-tab.on .subject-tab-name { background: var(--accent-soft); color: var(--accent); }
 .subject-tab-close { border: 0; background: none; color: var(--text-dim); font-size: 16px; padding: 0 6px; cursor: pointer; }
 .subject-tab-close:hover { color: var(--danger); }
+.subject-tab-rename { font-size: 13px; }
+.subject-tab-rename:hover { color: var(--accent); }
 .subject-tab-add {
   border: 1px dashed var(--border); background: none; color: var(--text-dim); width: 28px; height: 28px;
   border-radius: 8px; font-size: 16px; cursor: pointer; flex-shrink: 0;
@@ -1845,12 +1847,12 @@
 .quiet-boxes .subject-doc .subject-box:focus-within .subject-box-head { opacity: 0.55; }
 .quiet-boxes .subject-doc .subject-card-tools:hover, .quiet-boxes .subject-doc .subject-box-head:hover { opacity: 1; }
 /* The text tools float above the line rather than pushing the page down. */
-.quiet-boxes .subject-doc .rich-tools:not(.docked):not(.side) {
+.quiet-boxes .subject-doc .rich-tools:not(.docked):not(.side):not(.hosted) {
   position: absolute; left: 0; bottom: 100%; z-index: 30; height: auto; margin: 0 0 4px;
   padding: 3px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1); pointer-events: none;
 }
-.quiet-boxes .subject-doc .rich:focus-within .rich-tools:not(.docked):not(.side) { pointer-events: auto; margin-bottom: 4px; }
+.quiet-boxes .subject-doc .rich:focus-within .rich-tools:not(.docked):not(.side):not(.hosted) { pointer-events: auto; margin-bottom: 4px; }
 /* No hover on touch screens: the margin controls stay faintly in view there. */
 @media (hover: none) {
   .quiet-boxes .subject-doc .subject-card-tools, .quiet-boxes .subject-doc .subject-box-head { opacity: 0.45; }
@@ -3104,3 +3106,37 @@
 /* A story card's controls are one group; laid out in the card's head as before unless the document is seamless. */
 .subject-card-tools { display: contents; }
 .quiet-boxes .subject-doc .subject-card-tools { display: flex; }
+
+/* ---------- the document's fixed bar of text tools ---------- */
+/* One place for the tools, whichever block is being written in: they never move with the caret. */
+.doc-toolbar {
+  position: sticky; top: 0; z-index: 40; display: flex; align-items: center; height: 40px; overflow: hidden;
+  margin: 0 -8px; padding: 4px 8px; background: color-mix(in srgb, var(--bg) 96%, transparent);
+  backdrop-filter: blur(6px); border-bottom: 1px solid var(--border);
+}
+.doc-toolbar .rich-tools.hosted {
+  opacity: 1; height: auto; margin: 0; overflow: visible; flex-shrink: 0; gap: 2px; align-items: center;
+}
+/* Two editors handing over focus: only the newest set of tools shows. */
+.doc-toolbar .rich-tools.hosted:not(:last-child) { display: none; }
+.doc-toolbar .rich-undo { min-width: 28px; }
+.doc-toolbar .rich-undo + .rich-undo { margin-right: 6px; }
+.doc-toolbar-idle { display: flex; gap: 2px; align-items: center; }
+.doc-toolbar-idle span {
+  border: 1px solid var(--border); background: var(--bg-sub); color: var(--text); border-radius: 6px;
+  padding: 2px 7px; font-size: 12px; min-width: 26px; text-align: center; line-height: normal; opacity: 0.4;
+}
+.doc-toolbar-idle span:nth-child(2) { margin-right: 6px; }
+.doc-toolbar:has(.rich-tools.hosted) .doc-toolbar-idle { display: none; }
+/* On a touch screen the tools ride above the keyboard instead. */
+@media (pointer: coarse) { .doc-toolbar { display: none; } }
+
+/* ---------- a block selected whole in the document ---------- */
+.subject-doc > [data-item] { position: relative; outline: none; }
+.subject-doc > .doc-picked > .subject-card, .subject-doc > .doc-picked > .subject-box {
+  box-shadow: 0 0 0 2px var(--accent); border-radius: 10px; background: color-mix(in srgb, var(--accent) 6%, var(--bg));
+}
+.doc-picked-hint {
+  position: absolute; right: 10px; top: 8px; z-index: 5; font-size: 11.5px; color: var(--accent);
+  background: var(--bg); padding: 1px 6px; border-radius: 6px; pointer-events: none;
+}

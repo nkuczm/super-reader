@@ -3,7 +3,7 @@
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons";
-import RichText, { dropCiteAt } from "./RichText";
+import RichText, { dropCiteAt, TOOL_LABELS, ToolsHostContext } from "./RichText";
 import { CITE_OPEN_EVENT, CITE_TYPE, citeChipHtml, setCiteSources, type Cite } from "@/lib/cite";
 import FlagButton from "./FlagButton";
 import type { FlagInput } from "@/lib/flags";
@@ -617,6 +617,7 @@ export default function SubjectPage(props: Props) {
     return () => window.removeEventListener("keydown", key);
   }, []);
   const findOnBoard = meta.view === "board" && !tagDoc;
+  const contactsShown = contactsOpen && meta.view === "board";
   const goToFound = useCallback((target: FindTarget) => {
     if (findOnBoard) {
       window.dispatchEvent(new CustomEvent("super-reader:find-goto", { detail: target }));
@@ -682,6 +683,16 @@ export default function SubjectPage(props: Props) {
     });
   };
 
+  /** A story taken out from the keyboard, as one block: undoable (its quotes aside, which live in the note). */
+  const removeStory = (card: Card) => {
+    const ids = [card.id, cardNoteId(card.id), cardInfoId(card.id)];
+    for (const item of live(board)) {
+      if ((item.kind === "story" || item.kind === "suggest") && canonicalUrl(item.link) === card.id) ids.push(item.id);
+    }
+    removeCards(ids);
+    if (card.quotes.length) removeQuotes(card.quotes.map((quote) => quote.id));
+  };
+
   const removeQuotes = (quoteIds: string[]) => {
     const gone = new Set(quoteIds);
     const known = new Set(note.entries.map((entry) => entry.id));
@@ -727,6 +738,7 @@ export default function SubjectPage(props: Props) {
       ...printBoxes.map((box) => ({
         id: box.id,
         at: madeAt(box),
+        after: box.after,
         label: box.label,
         html: box.label ? boxHtml(box, board, out) : `<section class="print-block print-${boxKind(box)}">${boxHtml(box, board, out)}</section>`,
       })),
@@ -740,7 +752,7 @@ export default function SubjectPage(props: Props) {
     const shownInsights = every && !meta.aiOff ? items.filter((item): item is InsightItem => item.kind === "insight") : insights;
     const storyCount = allCards.filter((card) => chosen.some((tab) => tabOf(board, card.id, tabs) === tab.id)).length;
     setPrintJob({
-      what: every ? `${note.name}, every tab` : tabs.length > 1 ? `${note.name} — ${tabName}` : note.name,
+      what: every ? note.name : tabs.length > 1 ? `${note.name} — ${tabName}` : note.name,
       transcripts: chosen.some((tab) => tabBoxes(tab.id).some((box) => box.transcript)),
       build: ({ fullTranscripts }) => {
         const out: Output = { print: true, fullTranscripts };
@@ -918,7 +930,9 @@ export default function SubjectPage(props: Props) {
       || (i.kind === "pos" && gone.has((i as PosItem).target))
       || (i.kind === "link" && (gone.has((i as LinkItem).from) || gone.has((i as LinkItem).to))));
     if (!items.length) return;
-    const putBack = (b: Board | undefined) => items.reduce((n, i) => put(n, { ...i, at: Date.now() }), b ?? {});
+    // Put back where it was: a story keeps when it first arrived, which orders the document.
+    const putBack = (b: Board | undefined) =>
+      items.reduce((n, i) => put(n, i.kind === "story" ? { ...i, since: (i as StoryItem).since ?? i.at, at: Date.now() } : { ...i, at: Date.now() }), b ?? {});
     const takeAway = (b: Board | undefined) => items.reduce((n, i) => remove(n, i.id), b ?? {});
     recordOp({ undo: putBack, redo: takeAway });
     onBoard(takeAway);
@@ -988,7 +1002,10 @@ export default function SubjectPage(props: Props) {
     setCardNote,
     decide,
     dismissInsight: (insight: InsightItem) => onBoard((current) => remove(current, insight.id)),
-    setBox: (box: BoxItem, html: string) => onBoard((current) => put(current, { ...box, html, at: Date.now() })),
+    // A box deleted meanwhile stays deleted: its editor saving on the way out must not bring it back.
+    setBox: (box: BoxItem, html: string) =>
+      onBoard((current) => (current?.[box.id]?.deleted ? current : put(current, { ...box, html, at: Date.now() }))),
+    removeStory,
     updateBox: (box: BoxItem, change: Partial<BoxItem>) =>
       onBoard((current) => {
         const held = current?.[box.id];
@@ -1262,17 +1279,20 @@ export default function SubjectPage(props: Props) {
               ✦ <span className="insights-label">Insights</span>
             </button>
           )}
-          <button
-            className={`btn ghost small subject-contacts-btn${contactsOpen ? " on" : ""}`}
-            aria-pressed={contactsOpen}
-            aria-label="Contacts"
-            onClick={() => setContactsOpen((o) => !o)}
-            title="People to interview for this subject"
-          >
-            <span className="contacts-icon" aria-hidden="true">👥</span>
-            <span className="contacts-label">Contacts</span>
-            {contactCount > 0 && <span className="count">{contactCount}</span>}
-          </button>
+          {/* Contacts are a whiteboard thing: the document is for writing. */}
+          {meta.view === "board" && (
+            <button
+              className={`btn ghost small subject-contacts-btn${contactsOpen ? " on" : ""}`}
+              aria-pressed={contactsOpen}
+              aria-label="Contacts"
+              onClick={() => setContactsOpen((o) => !o)}
+              title="People to interview for this subject"
+            >
+              <span className="contacts-icon" aria-hidden="true">👥</span>
+              <span className="contacts-label">Contacts</span>
+              {contactCount > 0 && <span className="count">{contactCount}</span>}
+            </button>
+          )}
           <MoreMenu>
             {(close) => (
               <>
@@ -1295,12 +1315,8 @@ export default function SubjectPage(props: Props) {
                 </div>
                 <button role="menuitem" title="Copy this tab as formatted text, for Google Docs and the like"
                   onClick={() => { close(); void copyTab(); }}>Copy this tab</button>
-                <button role="menuitem" title="Print this tab as the document reads, or save it as a PDF"
-                  onClick={() => { close(); printDoc(false); }}>{tabs.length > 1 ? "Print this tab" : "Print"}</button>
-                {tabs.length > 1 && (
-                  <button role="menuitem" title="Print every tab, one after another"
-                    onClick={() => { close(); printDoc(true); }}>Print every tab</button>
-                )}
+                <button role="menuitem" title={tabs.length > 1 ? "Print the whole document, each tab starting a new page — or save it as a PDF" : "Print the document, or save it as a PDF"}
+                  onClick={() => { close(); printDoc(true); }}>Print</button>
                 {props.onToggleHideBoxes && (
                   <button role="menuitemcheckbox" aria-checked={Boolean(props.hideBoxes)} onClick={props.onToggleHideBoxes}>
                     Hide boxes{props.hideBoxes && <span className="more-check">✓</span>}
@@ -1357,7 +1373,7 @@ export default function SubjectPage(props: Props) {
         />
       )}
       {aiStatus && <div className="subject-ai-bar">{aiStatus}</div>}
-      <div className={`subject-body${contactsOpen ? " with-contacts" : ""}`}>
+      <div className={`subject-body${contactsShown ? " with-contacts" : ""}`}>
       <div className={`subject-main${railOpen ? " rail-open" : " rail-closed"}${props.hideBoxes ? " quiet-boxes" : ""}`}
         style={props.boxWidth ? ({ "--box-w": `${props.boxWidth}px` } as React.CSSProperties) : undefined}>
       {railOpen && (
@@ -1446,7 +1462,7 @@ export default function SubjectPage(props: Props) {
         <DocumentView {...shared} board={board} addBox={addBox} pickImage={pickImage} />
       )}
       </div>
-      {contactsOpen && (
+      {contactsShown && (
         <aside className="contacts-panel" aria-label="Contacts">
         <div className="contacts-panel-head">
           <h2>Contacts</h2>
@@ -1511,6 +1527,8 @@ type Shared = {
   /** A link pasted into a block's writing: the story joins the subject (reading right below that block), and its citation chip goes in. */
   storyFromLink: (url: string, after: string) => Cite | null;
   removeCard: (card: Card) => void;
+  /** The same from the keyboard in the document, and undoable. */
+  removeStory: (card: Card) => void;
   removeQuotes: (ids: string[]) => void;
   setCardNote: (card: Card, html: string) => void;
   decide: (suggestion: SuggestItem, state: "accepted" | "dismissed") => void;
@@ -1768,15 +1786,20 @@ function StoryCard({
             ))}
           </select>
         )}
-        <TagButton id={card.id} tags={shared.tags} label="story" />
-        <button className="icon-btn subtle print-btn" aria-label="Print this story and its notes" title="Print this story and its notes"
-          onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.printItem(card.id)}>
-          {Icon.print}
-        </button>
-        <button className="icon-btn subtle" aria-label="Remove story from subject" title="Remove from subject"
-          onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.removeCard(card)}>
-          {Icon.close}
-        </button>
+        {/* In the document a story is removed from the keyboard, and contacts are tagged on the whiteboard. */}
+        {dragHandle && (
+          <>
+            <TagButton id={card.id} tags={shared.tags} label="story" />
+            <button className="icon-btn subtle print-btn" aria-label="Print this story and its notes" title="Print this story and its notes"
+              onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.printItem(card.id)}>
+              {Icon.print}
+            </button>
+            <button className="icon-btn subtle" aria-label="Remove story from subject" title="Remove from subject"
+              onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.removeCard(card)}>
+              {Icon.close}
+            </button>
+          </>
+        )}
         </span>
       </div>
       {bylineOf(card) && <div className="subject-card-source">{bylineOf(card)}</div>}
@@ -1822,13 +1845,16 @@ function StoryCard({
           </div>
         ))}
       </div>
-      <TagBadges id={card.id} tags={shared.tags} />
+      {dragHandle && <TagBadges id={card.id} tags={shared.tags} />}
     </div>
   );
 }
 
 function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dragHandle?: (e: React.PointerEvent) => void }) {
   const [styling, setStyling] = useState(false);
+  // In the document a block is edited from the keyboard — Backspace takes it
+  // away — and contacts are tagged on the whiteboard: none of its side buttons.
+  const inDoc = !dragHandle;
   return (
     <div className={`subject-box${box.table ? " table-box" : ""}${box.label ? " label-box" : ""}${box.label && box.labelShape === "node" && dragHandle ? " node-box" : ""}${!box.label && !box.drawing && !box.table && !box.transcript && box.image === undefined && box.caption === undefined ? " text-box" : ""}`}>
       <div className="subject-box-head" onPointerDown={dragHandle}>
@@ -1900,17 +1926,21 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
             )}
           </span>
         )}
-        <TagButton id={box.id} tags={shared.tags} label={box.label ? "section" : boxKind(box) === "image" ? "picture" : boxKind(box)} />
-        {!box.label && (
-          <button className="icon-btn subtle print-btn" aria-label={`Print this ${boxKind(box) === "image" ? "picture" : boxKind(box)}`}
-            title="Print this on its own" onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.printItem(box.id)}>
-            {Icon.print}
-          </button>
+        {!inDoc && (
+          <>
+            <TagButton id={box.id} tags={shared.tags} label={box.label ? "section" : boxKind(box) === "image" ? "picture" : boxKind(box)} />
+            {!box.label && (
+              <button className="icon-btn subtle print-btn" aria-label={`Print this ${boxKind(box) === "image" ? "picture" : boxKind(box)}`}
+                title="Print this on its own" onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.printItem(box.id)}>
+                {Icon.print}
+              </button>
+            )}
+            <button className="icon-btn subtle" aria-label="Delete text box" onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => shared.removeBox(box)}>
+              {Icon.close}
+            </button>
+          </>
         )}
-        <button className="icon-btn subtle" aria-label="Delete text box" onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => shared.removeBox(box)}>
-          {Icon.close}
-        </button>
       </div>
       {box.label && box.labelShape === "node" && dragHandle ? (
         // A node: the label in a circle, which also drags it; lines leave from all round it.
@@ -1960,7 +1990,7 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
           resolveEmbed={shared.resolveEmbed} onEmbed={shared.embedBox} onDropImage={shared.dropImage} onReplaceEmbed={shared.replaceEmbed}
           onPasteLink={(url) => shared.storyFromLink(url, box.id)} onChange={(html) => shared.setBox(box, html)} />
       )}
-      <TagBadges id={box.id} tags={shared.tags} />
+      {!inDoc && <TagBadges id={box.id} tags={shared.tags} />}
     </div>
   );
 }
@@ -2046,6 +2076,276 @@ function splitInsights(insights: InsightItem[]) {
 }
 
 /* ---------------------------------------------------------------------- */
+/* Writing the document from the keyboard                                  */
+/* ---------------------------------------------------------------------- */
+
+/** What can take the caret in a block of the document. */
+function editorOf(block: Element): HTMLElement | null {
+  return block.querySelector<HTMLElement>(".subject-box.text-box .rich-body, .subject-card-note .rich-body, input.section-label");
+}
+const isText = (block: Element) => Boolean(block.querySelector(".subject-box.text-box"));
+const isLabelBlock = (block: Element) => Boolean(block.querySelector("input.section-label"));
+
+/** Text from the start (or to the end) of an editor, to the caret: nothing but the caret's own empty line means it is at that edge. */
+function atEdge(body: HTMLElement, end: boolean): boolean {
+  const sel = window.getSelection();
+  if (!sel?.isCollapsed || !sel.rangeCount || !sel.anchorNode || !body.contains(sel.anchorNode)) return false;
+  const range = document.createRange();
+  range.selectNodeContents(body);
+  if (end) range.setStart(sel.anchorNode, sel.anchorOffset);
+  else range.setEnd(sel.anchorNode, sel.anchorOffset);
+  const part = range.cloneContents();
+  if ((part.textContent ?? "").replace(/[​ ]/g, "").length) return false;
+  if (part.querySelector("img, a[data-cite], a[data-subject]")) return false;
+  return part.querySelectorAll("p, div, h3, blockquote, li").length <= 1;
+}
+
+/** The caret on the first (or last) line of an editor, for the arrows. */
+function onEdgeLine(body: HTMLElement, last: boolean): boolean {
+  const sel = window.getSelection();
+  if (!sel?.isCollapsed || !sel.rangeCount) return false;
+  if (atEdge(body, last)) return true;
+  const rects = sel.getRangeAt(0).getClientRects();
+  const caret = rects[0] ?? (sel.anchorNode instanceof Element ? sel.anchorNode : sel.anchorNode?.parentElement)?.getBoundingClientRect();
+  if (!caret) return false;
+  const box = body.getBoundingClientRect();
+  const line = parseFloat(getComputedStyle(body).lineHeight) || 22;
+  return last ? box.bottom - caret.bottom < line * 0.8 : caret.top - box.top < line * 0.8;
+}
+
+const isEmptyText = (body: HTMLElement) =>
+  !(body.textContent ?? "").replace(/[​ \s]/g, "") && !body.querySelector("img, a[data-cite], a[data-subject]");
+
+function caretTo(target: HTMLElement, end: boolean) {
+  target.focus({ preventScroll: true });
+  if (target instanceof HTMLInputElement) {
+    const at = end ? target.value.length : 0;
+    target.setSelectionRange(at, at);
+  } else {
+    const range = document.createRange();
+    range.selectNodeContents(target);
+    range.collapse(!end);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  }
+  target.scrollIntoView({ block: "nearest" });
+}
+
+/**
+ * The document written as one document. Blocks are still the whiteboard's
+ * blocks underneath — text boxes, stories, tables — but the keyboard crosses
+ * between them as though they were paragraphs:
+ *
+ * - Backspace at the start of a text block joins it to the text block above,
+ *   and an emptied block goes altogether.
+ * - A story, table, picture or transcript is one piece: Backspace into it
+ *   (or at the start of a story's notes) selects it, and Backspace again
+ *   takes it away — undoable, as any deletion here is. Enter on a selected
+ *   block starts a new text block right below it.
+ * - The arrows run on from the top or bottom line of one block into the next.
+ */
+function useDocKeys(
+  root: HTMLElement | null,
+  shared: Shared & { addBox: (at?: { x: number; y: number }, extra?: Partial<BoxItem>) => void },
+  picked: string | null,
+  setPicked: (id: string | null) => void,
+) {
+  const latest = useRef({ shared, picked });
+  latest.current = { shared, picked };
+  useEffect(() => {
+    if (!root) return;
+    const blocks = () => [...root.querySelectorAll<HTMLElement>(":scope > [data-item]")];
+    const neighbour = (block: HTMLElement, by: number) => {
+      const all = blocks();
+      return all[all.indexOf(block) + by] ?? null;
+    };
+    const pick = (block: HTMLElement) => {
+      (document.activeElement as HTMLElement | null)?.blur?.();
+      setPicked(block.dataset.item!);
+      block.focus({ preventScroll: true });
+      block.scrollIntoView({ block: "nearest" });
+    };
+    /** Into a block from above (start) or below (end): its text, or the whole of it when it has none. */
+    const enter = (block: HTMLElement | null, end: boolean) => {
+      if (!block) return false;
+      const editor = editorOf(block);
+      // A story is entered at its notes; a table or picture is selected whole.
+      if (editor) caretTo(editor, end);
+      else pick(block);
+      return true;
+    };
+    const removeBlock = (block: HTMLElement) => {
+      const { shared: s } = latest.current;
+      const id = block.dataset.item!;
+      const card = s.cards.find((c) => c.id === id);
+      if (card) s.removeStory(card);
+      else s.removeCards([id]);
+    };
+    /** Write on right after a block: a new text box that reads below it. */
+    const writeAfter = (block: HTMLElement) => {
+      setPicked(null);
+      latest.current.shared.addBox(undefined, { after: block.dataset.item });
+    };
+    /** Join one text block onto the end of another: the writing moves up, the emptied block goes. */
+    const join = (into: HTMLElement, from: HTMLElement) => {
+      const a = editorOf(into);
+      const b = editorOf(from);
+      if (!a || !b || a instanceof HTMLInputElement || b instanceof HTMLInputElement) return;
+      const mark = document.createRange();
+      mark.selectNodeContents(a);
+      mark.collapse(false);
+      const moved = [...b.childNodes];
+      a.append(...moved);
+      a.focus({ preventScroll: true });
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      // The caret where the two met.
+      const first = moved[0];
+      if (first) {
+        const at = document.createRange();
+        at.setStart(first, 0);
+        at.collapse(true);
+        sel?.addRange(at);
+      } else sel?.addRange(mark);
+      a.dispatchEvent(new Event("input", { bubbles: true }));
+      removeBlock(from);
+    };
+
+    const key = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
+      const target = event.target as HTMLElement;
+      const { picked: chosen } = latest.current;
+      const done = () => {
+        event.preventDefault();
+        event.stopPropagation();
+      };
+
+      // A whole block selected.
+      if (chosen && target.matches?.("[data-item]")) {
+        const block = target;
+        if (event.key === "Backspace" || event.key === "Delete") {
+          const before = neighbour(block, -1);
+          const after = neighbour(block, 1);
+          setPicked(null);
+          removeBlock(block);
+          // The caret goes where the block was: the end of the one above, or the start of the one below.
+          requestAnimationFrame(() => (event.key === "Backspace" ? enter(before, true) || enter(after, false) : enter(after, false) || enter(before, true)));
+          return done();
+        }
+        if (event.key === "Enter") {
+          writeAfter(block);
+          return done();
+        }
+        if (event.key === "Escape") {
+          setPicked(null);
+          return done();
+        }
+        if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+          setPicked(null);
+          enter(neighbour(block, -1), true);
+          return done();
+        }
+        if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+          setPicked(null);
+          const next = neighbour(block, 1);
+          if (next) enter(next, false);
+          else writeAfter(block);
+          return done();
+        }
+        return;
+      }
+
+      const block = target.closest<HTMLElement>("[data-item]");
+      if (!block || block.parentElement !== root) return;
+      // Inside a table, a transcript or a drawing the keys are theirs.
+      if (target.closest(".tbl, .transcript, .sheet, .drawing")) return;
+      const editor = editorOf(block);
+      if (!editor || !editor.contains(target) && editor !== target) return;
+      const label = editor instanceof HTMLInputElement ? editor : null;
+      const body = label ? null : editor;
+      // A list's own Backspace (out of the list) and the subject picker come first.
+      const inList = !!window.getSelection()?.anchorNode?.parentElement?.closest("li");
+      const start = label ? label.selectionStart === 0 && label.selectionEnd === 0 : !inList && atEdge(body!, false);
+      const end = label ? label.selectionStart === label.value.length : !inList && atEdge(body!, true);
+      const before = neighbour(block, -1);
+      const after = neighbour(block, 1);
+      const isStory = !!block.querySelector(".subject-card");
+
+      if (event.key === "Backspace" && start) {
+        // An emptied block goes; the caret carries on at the end of the one above.
+        const empty = label ? !label.value.trim() : isText(block) && isEmptyText(body!);
+        if (empty && (before || after)) {
+          removeBlock(block);
+          if (before) enter(before, true);
+          else enter(after, false);
+          return done();
+        }
+        if (isStory) {
+          pick(block);
+          return done();
+        }
+        if (!before) return;
+        if (isText(block) && isText(before)) {
+          join(before, block);
+          return done();
+        }
+        if (editorOf(before) && !before.querySelector(".subject-card")) enter(before, true);
+        else pick(before);
+        return done();
+      }
+      if (event.key === "Delete" && end) {
+        const empty = label ? !label.value.trim() : isText(block) && isEmptyText(body!);
+        if (empty && (before || after)) {
+          removeBlock(block);
+          if (after) enter(after, false);
+          else enter(before, true);
+          return done();
+        }
+        if (!after) return;
+        if (isText(block) && isText(after)) {
+          join(block, after);
+          return done();
+        }
+        pick(after);
+        return done();
+      }
+      const upward = event.key === "ArrowUp" || (event.key === "ArrowLeft" && start);
+      const downward = event.key === "ArrowDown" || (event.key === "ArrowRight" && end);
+      if (upward && (label || event.key === "ArrowLeft" || onEdgeLine(body!, false)) && before) {
+        enter(before, true);
+        return done();
+      }
+      if (downward && (label || event.key === "ArrowRight" || onEdgeLine(body!, true))) {
+        if (after) enter(after, false);
+        // Below the last block: somewhere to keep writing.
+        else if (!isText(block)) writeAfter(block);
+        else return;
+        return done();
+      }
+      if (event.key === "Enter" && label) {
+        // A section header, then its first line of writing.
+        if (after && isText(after)) enter(after, false);
+        else writeAfter(block);
+        return done();
+      }
+    };
+    // Capture: a field's own handlers stop the event going further.
+    root.addEventListener("keydown", key, true);
+    const away = (event: PointerEvent) => {
+      if (!latest.current.picked) return;
+      const hit = (event.target as Element | null)?.closest?.("[data-item]") as HTMLElement | null;
+      if (hit?.dataset.item !== latest.current.picked) setPicked(null);
+    };
+    document.addEventListener("pointerdown", away, true);
+    return () => {
+      root.removeEventListener("keydown", key, true);
+      document.removeEventListener("pointerdown", away, true);
+    };
+  }, [root, setPicked]);
+}
+
+/* ---------------------------------------------------------------------- */
 /* Document view                                                           */
 /* ---------------------------------------------------------------------- */
 
@@ -2095,16 +2395,23 @@ function DocumentView(
     run();
     setMenu(null);
   };
+  // One fixed bar of text tools at the top of the document, for whichever block is being written in.
+  const [toolsHost, setToolsHost] = useState<HTMLDivElement | null>(null);
+  // The document written from the keyboard; a story, table or picture selected whole.
+  const [docEl, setDocEl] = useState<HTMLDivElement | null>(null);
+  const [picked, setPicked] = useState<string | null>(null);
+  useDocKeys(docEl, shared, picked, setPicked);
   const entries = [
     ...shared.cards.map((card) => ({ id: card.id, at: card.at, after: card.after, key: card.id, node: <StoryCard card={card} own={inside.get(card.id) ?? []} shared={shared} /> })),
-    ...shared.boxes.map((box) => ({ id: box.id, at: madeAt(box), label: box.label, key: box.id, node: <TextBox box={box} shared={shared} /> })),
+    ...shared.boxes.map((box) => ({ id: box.id, at: madeAt(box), label: box.label, after: box.after, key: box.id, node: <TextBox box={box} shared={shared} /> })),
   ];
   // Sections read as they do on the whiteboard: each header, then what is linked to it.
   const byId = new Map(entries.map((e) => [e.id, e]));
   const stack = documentOrder(entries, shared.board).map((id) => byId.get(id)!);
 
   return (
-    <div className="subject-doc" onContextMenu={open} onDoubleClick={open}
+    <ToolsHostContext.Provider value={toolsHost}>
+    <div className="subject-doc" ref={setDocEl} onContextMenu={open} onDoubleClick={open}
       // Press and hold on empty space: the same menu, for a touch screen.
       onTouchStart={(e) => {
         if (e.target !== e.currentTarget || e.touches.length !== 1) return;
@@ -2123,6 +2430,11 @@ function DocumentView(
         if (h && t && Math.hypot(t.clientX - h.x, t.clientY - h.y) > 8) { clearTimeout(h.timer); holdRef.current = null; }
       }}
       onTouchEnd={() => { if (holdRef.current) clearTimeout(holdRef.current.timer); holdRef.current = null; }}>
+      <div className="doc-toolbar" ref={setToolsHost} role="toolbar" aria-label="Text tools" onMouseDown={(e) => e.preventDefault()}>
+        <div className="doc-toolbar-idle" aria-hidden="true">
+          {TOOL_LABELS.map((label) => <span key={label}>{label}</span>)}
+        </div>
+      </div>
       {menu && (
         <div className="wb-menu doc-menu" role="menu" style={{ left: menu.left, top: menu.top }} onPointerDown={(e) => e.stopPropagation()}>
           <button role="menuitem" onClick={pick(() => shared.addBox())}><span className="wb-menu-icon">¶</span> Text box</button>
@@ -2145,8 +2457,11 @@ function DocumentView(
         </p>
       )}
       {stack.map((entry) => (
-        <div key={entry.key} data-item={entry.key}
-          className={shared.tags.lit ? (shared.tags.lit.has(entry.id) ? "tag-lit" : "tag-dim") : undefined}>{entry.node}</div>
+        <div key={entry.key} data-item={entry.key} tabIndex={-1}
+          className={[shared.tags.lit ? (shared.tags.lit.has(entry.id) ? "tag-lit" : "tag-dim") : "", picked === entry.key ? "doc-picked" : ""].filter(Boolean).join(" ") || undefined}>
+          {entry.node}
+          {picked === entry.key && <div className="doc-picked-hint" aria-live="polite">Backspace removes it · Enter writes below it · Esc</div>}
+        </div>
       ))}
       {apart.length > 0 && (
         <div className="subject-insights-card">
@@ -2166,6 +2481,7 @@ function DocumentView(
         <SuggestionCard key={suggestion.id} suggestion={suggestion} shared={shared} />
       ))}
     </div>
+    </ToolsHostContext.Provider>
   );
 }
 
@@ -3497,6 +3813,12 @@ function TabBar({
             >
               {tab.name}
             </button>
+            {tab.id === current && (
+              <button className="subject-tab-close subject-tab-rename" aria-label={`Rename tab ${tab.name}`} title="Rename"
+                onClick={() => setEditing({ id: tab.id, draft: tab.name })}>
+                ✎
+              </button>
+            )}
             {tab.id !== MAIN_TAB && tab.id === current && (
               <button className="subject-tab-close" aria-label={`Close tab ${tab.name}`} onClick={() => setConfirming(tab.id)}>
                 ×
