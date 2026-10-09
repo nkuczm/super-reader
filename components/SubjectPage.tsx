@@ -1686,6 +1686,8 @@ function StoryCard({
           </div>,
           document.body,
         )}
+        {/* The card's controls, as one group: in a seamless document they sit in the margin, not on the card. */}
+        <span className="subject-card-tools">
         {shared.tabs.length > 1 && (
           <select
             className="subject-card-tab"
@@ -1709,6 +1711,7 @@ function StoryCard({
           onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.removeCard(card)}>
           {Icon.close}
         </button>
+        </span>
       </div>
       {bylineOf(card) && <div className="subject-card-source">{bylineOf(card)}</div>}
       {youtubeThumbnail(card.link) && (
