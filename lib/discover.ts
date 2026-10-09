@@ -1,5 +1,6 @@
 import { fetchText, parseFeed, looksLikeFeed, faviconFor } from "./feed";
 import { scrapePage } from "./scrape";
+import { articleOnPage, articleSectionPath, isPerStoryFeed, looksLikeArticlePath } from "./article-link";
 import {
   looksLikeSitemap,
   parseSitemap,
@@ -410,13 +411,15 @@ export async function discover(
   let declared: string[] = [];
   let pageBase = url;
   let pageBody: string | null = null;
+  let pageError: string | null = null;
   try {
     const { body, finalUrl } = await fetchText(url);
     pageBase = finalUrl;
     pageBody = body;
     declared = feedLinksInHtml(body, finalUrl);
-  } catch {
+  } catch (error) {
     /* page unreachable — still try the conventional paths */
+    pageError = error instanceof Error ? error.message : String(error);
   }
 
   const origin = new URL(pageBase).origin;
@@ -484,6 +487,72 @@ export async function discover(
     }
     return null;
   };
+
+  // 2b. A link to one story. The story is not a source; the outlet that
+  //     published it is — so look where the story sits (its section, then
+  //     its site), and never read the story's own page as a list of stories.
+  //     See lib/article-link.ts.
+  const story = hasSection
+    ? pageBody
+      ? articleOnPage(pageBody, pageBase)
+      : looksLikeArticlePath(url)
+        ? {}
+        : null
+    : null;
+  if (story) {
+    const fromArticle = { url: pageBase, ...(story.title ? { title: story.title } : {}) };
+    const tagged = (found: DiscoverResult | null) => (found ? { ...found, fromArticle } : null);
+    const storyFeeds = declared.filter((feed) => !isPerStoryFeed(feed, pageBase));
+    const section = scope === "site" ? "" : articleSectionPath(pageBase);
+    if (section) {
+      const inSection = (candidate: string) => {
+        try {
+          return new URL(candidate).pathname.replace(/\/$/, "").startsWith(section);
+        } catch {
+          return false;
+        }
+      };
+      const found = tagged(
+        await tryAll([...COMMON_PATHS.map((path) => `${origin}${section}${path}`), ...storyFeeds.filter(inSection)], "section"),
+      );
+      if (found) return found;
+    }
+    const site = tagged(
+      await tryAll([...storyFeeds, ...anchors, ...COMMON_PATHS.map((path) => `${origin}${path}`), ...NEWSROOM_PATHS.map((path) => `${origin}${path}`)], "site"),
+    );
+    if (site) return site;
+    const outlet = frontOutletForHost(asUrl.hostname);
+    if (outlet) {
+      try {
+        const { meta, total, articles } = await tryFeed(outlet.feedUrl, limit);
+        if (articles.length > 0) {
+          return {
+            ...meta,
+            kind: "feed",
+            scope: outlet.front || !outlet.section ? "site" : "section",
+            total,
+            title: outlet.front || !outlet.section ? outlet.name : `${outlet.name} · ${outlet.section}`,
+            siteUrl: outlet.siteUrl,
+            feedUrl: outlet.feedUrl,
+            favicon: faviconFor(outlet.siteUrl),
+            articles: await enrichArticles(articles, { siteDescription: meta.description }),
+            fromArticle,
+          };
+        }
+      } catch {
+        /* the directory entry is stale too */
+      }
+    }
+    const mapped = await fromDeclaredSitemap(origin, section, limit, undefined);
+    if (mapped) return { ...mapped, fromArticle };
+    const host = asUrl.hostname.replace(/^www\./, "");
+    const refused = pageError && /^(401|403|429|503)\b/.test(pageError);
+    throw new Error(
+      refused
+        ? `That's a link to one story, and ${host} refused the app's requests (${pageError!.split(" ")[0]}), so its feed can't be read. Use Paste story to keep this story.`
+        : `That's a link to one story, and no feed could be found for ${host}. Use Paste story to keep this story, or try the site's address.`,
+    );
+  }
 
   const sectionFeed = await tryAll(sectionCandidates, "section");
   if (sectionFeed) return sectionFeed;

@@ -2938,3 +2938,10 @@
   .subject-find, .subject-find.on-board { left: 10px; right: 10px; transform: none; top: calc(56px + var(--safe-top, 0px)); }
   .subject-find input { width: auto; flex: 1; min-width: 0; font-size: 16px; }
 }
+
+/* A story's link was pasted: say whose feed this is instead. */
+.from-article {
+  margin: 8px 0 4px; padding: 8px 10px; border-radius: 9px; background: var(--accent-soft);
+  font-size: 13px; line-height: 1.45; color: var(--text);
+}
+.from-article em { font-style: normal; font-weight: 600; }

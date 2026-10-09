@@ -220,6 +220,13 @@ export default function AddSourceDialog({
                   </span>
                 </div>
               </div>
+              {preview.fromArticle && (
+                <p className="from-article">
+                  That link is one story{preview.fromArticle.title ? <> — <em>{preview.fromArticle.title}</em></> : null}.
+                  {" "}This follows {preview.scope === "section" ? "the section it was published in" : "the outlet that published it"}.
+                  {" "}To keep just the story, use <strong>Paste story</strong>.
+                </p>
+              )}
               {tab === "paste" && pastedASection(query) && (
                 <div className="scope-row">
                   <span>Covering</span>
@@ -229,7 +236,7 @@ export default function AddSourceDialog({
                       onClick={() => runPreview("auto")}
                       disabled={loading}
                     >
-                      This section
+                      {preview.fromArticle ? "Its section" : "This section"}
                     </button>
                     <button
                       className={preview.scope === "site" ? "on" : ""}

@@ -43,4 +43,9 @@ export type DiscoverResult = SourceMeta & {
   /** Whether this covers just the pasted section or the whole site. */
   scope: "section" | "site";
   articles: Article[];
+  /**
+   * Set when what was pasted was one story: the feed found is the outlet's
+   * (or its section's), and this is the story it was found from.
+   */
+  fromArticle?: { url: string; title?: string };
 };
