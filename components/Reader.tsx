@@ -161,6 +161,7 @@ import SourceIcon from "./SourceIcon";
 import { Icon } from "./icons";
 import { timeAgo, hostOf } from "./format";
 import type { ReadableArticle } from "@/lib/article";
+import { setSubjectDirectory, SUBJECT_OPEN_EVENT } from "@/lib/subject-links";
 import { sortNewestFirst, timeOf } from "@/lib/sort";
 import type { RankedArticle } from "@/lib/pulse";
 import type { PickedSource } from "./OutletCatalog";
@@ -2185,6 +2186,20 @@ export default function Reader() {
     },
     [commitBoard],
   );
+
+  // Subjects link to each other with chips (lib/subject-links.ts): every
+  // subject, most recently used first, for "[[" to offer; a chip clicked opens its subject.
+  useEffect(() => {
+    setSubjectDirectory(notesByUse.map((note) => ({ id: note.id, name: note.name })), selection.type === "note" ? selection.id : null);
+  }, [notesByUse, selection]);
+  useEffect(() => {
+    const open = (event: Event) => {
+      const id = (event as CustomEvent<string>).detail;
+      if (notesRef.current.some((note) => note.id === id)) choose({ type: "note", id });
+    };
+    window.addEventListener(SUBJECT_OPEN_EVENT, open);
+    return () => window.removeEventListener(SUBJECT_OPEN_EVENT, open);
+  });
 
   /** The article being read, added to a subject whole — no quote needed. */
   const addReadingToSubject = useCallback(

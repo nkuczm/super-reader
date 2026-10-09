@@ -6,6 +6,7 @@ import CropDialog, { copyPicture, pastedWidth } from "./CropDialog";
 import { sanitizeRichText } from "@/lib/subjects";
 import { cleanPastedHtml } from "@/lib/paste";
 import { CITE_OPEN_EVENT, CITE_TYPE, citeChipHtml, citeFor, citeTextHtml, type Cite } from "@/lib/cite";
+import { refreshSubjectChips, subjectChipHtml, subjectsMatching, SUBJECT_OPEN_EVENT, SUBJECTS_CHANGED_EVENT, type SubjectRef } from "@/lib/subject-links";
 
 /** The drag type a drawing or image box carries, for dropping into text. */
 export const EMBED_TYPE = "application/x-super-reader-box";
@@ -56,7 +57,7 @@ function insertChip(cite: Cite) {
 function stepPastChip() {
   const selection = window.getSelection();
   const at = selection?.anchorNode;
-  const chip = (at instanceof Element ? at : at?.parentElement)?.closest("a[data-cite=chip]");
+  const chip = (at instanceof Element ? at : at?.parentElement)?.closest("a[data-cite=chip], a[data-subject]");
   if (!selection || !chip) return;
   const after = document.createRange();
   after.setStartAfter(chip);
@@ -155,6 +156,67 @@ export default function RichText({
   const [inLink, setInLink] = useState<{ href: string; top: number; left: number } | null>(null);
   /** Making a link: the text it goes on, and the address being typed. */
   const [linking, setLinking] = useState<{ range: Range; value: string } | null>(null);
+  /**
+   * Linking a subject: "[[" typed (or the toolbar's Subject button) opens a
+   * list of subjects under the caret, filtered by what is typed after it.
+   */
+  const [subjectPick, setSubjectPick] = useState<{ query: string; left: number; top: number; index: number } | null>(null);
+  /** What is typed just before the caret, when it is "[[" and a name being looked for. */
+  const subjectQuery = () => {
+    const sel = window.getSelection();
+    const node = sel?.anchorNode;
+    if (!sel?.isCollapsed || !node || node.nodeType !== Node.TEXT_NODE || !el.current?.contains(node)) return null;
+    const m = (node.textContent ?? "").slice(0, sel.anchorOffset).match(/\[\[([^[\]\n]{0,40})$/);
+    return m ? { node: node as Text, offset: sel.anchorOffset, query: m[1] } : null;
+  };
+  const watchSubjectPick = () => {
+    const found = subjectQuery();
+    const box = wrap.current?.getBoundingClientRect();
+    if (!found || !box) {
+      setSubjectPick(null);
+      return;
+    }
+    const caret = document.createRange();
+    caret.setStart(found.node, found.offset);
+    const r = caret.getBoundingClientRect();
+    setSubjectPick((p) => ({ query: found.query, left: Math.max(0, r.left - box.left), top: r.bottom - box.top + 4, index: p && p.query === found.query ? p.index : 0 }));
+  };
+  const insertSubject = (subject: SubjectRef) => {
+    const found = subjectQuery();
+    const sel = window.getSelection();
+    if (!sel) return;
+    // Put straight into the text where "[[name" was typed: the browser's
+    // insertHTML, at the end of a line, sets an inline chip outside its paragraph.
+    const range = document.createRange();
+    if (found) {
+      range.setStart(found.node, found.offset - found.query.length - 2);
+      range.setEnd(found.node, found.offset);
+    } else if (sel.rangeCount && el.current?.contains(sel.anchorNode)) {
+      range.setStart(sel.getRangeAt(0).startContainer, sel.getRangeAt(0).startOffset);
+    } else return;
+    range.deleteContents();
+    const holder = document.createElement("span");
+    holder.innerHTML = subjectChipHtml(subject);
+    const chip = holder.firstChild!;
+    range.insertNode(chip);
+    const space = document.createTextNode("\u00a0");
+    chip.parentNode!.insertBefore(space, chip.nextSibling);
+    const after = document.createRange();
+    after.setStart(space, 1);
+    after.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(after);
+    refreshSubjectChips(el.current!);
+    setSubjectPick(null);
+    changed();
+  };
+  // Chips show their subject's name as it is now, and say when it is gone.
+  useEffect(() => {
+    const refresh = () => el.current && refreshSubjectChips(el.current);
+    refresh();
+    window.addEventListener(SUBJECTS_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(SUBJECTS_CHANGED_EVENT, refresh);
+  }, []);
   /** A picture in the text under the pointer, and where its corner pin goes. */
   const [pinFor, setPinFor] = useState<{ img: HTMLImageElement; left: number; top: number } | null>(null);
   const wrap = useRef<HTMLDivElement | null>(null);
@@ -354,6 +416,7 @@ export default function RichText({
       last.current = clean;
     }
     fillEmbeds();
+    refreshSubjectChips(node);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [html, resolveEmbed]);
 
@@ -607,6 +670,11 @@ export default function RichText({
       <button type="button" title="Checklist (⌘⇧9)" onClick={toggleChecklist}>☐ Check</button>
       <button type="button" title="Heading" onClick={() => format("formatBlock", "h3")}>H3</button>
       <button type="button" title="Link (⌘K)" onClick={startLink}>Link</button>
+      <button type="button" title="Link another subject — or type [[" onClick={() => {
+        el.current?.focus();
+        document.execCommand("insertText", false, "[[");
+        watchSubjectPick();
+      }}>◈ Subject</button>
       {docked && (
         <button type="button" className="rich-done" title="Done — close the keyboard"
           aria-label="Done — close the keyboard"
@@ -698,6 +766,22 @@ export default function RichText({
           )}
         </form>
       )}
+      {subjectPick && (() => {
+        const options = subjectsMatching(subjectPick.query);
+        return (
+          <div className="subject-pick" role="listbox" aria-label="Link a subject" style={{ left: subjectPick.left, top: subjectPick.top }}
+            onMouseDown={(event) => event.preventDefault()}>
+            <div className="subject-pick-head">Link a subject{subjectPick.query ? ` · “${subjectPick.query}”` : ""}</div>
+            {options.map((s, i) => (
+              <button key={s.id} type="button" role="option" aria-selected={i === subjectPick.index}
+                className={i === subjectPick.index ? "on" : ""} onClick={() => insertSubject(s)}>
+                <span aria-hidden="true">◈</span> {s.name}
+              </button>
+            ))}
+            {options.length === 0 && <div className="subject-pick-none">No subject matches.</div>}
+          </div>
+        );
+      })()}
       {inLink && !linking && (
         <a className="quote-chip link-chip" style={{ top: inLink.top, left: inLink.left }} href={inLink.href}
           target="_blank" rel="noopener noreferrer" onMouseDown={(event) => event.preventDefault()}>
@@ -712,6 +796,7 @@ export default function RichText({
         data-placeholder={placeholder}
         onInput={(event) => {
           if ((event.nativeEvent as InputEvent).inputType === "insertText") typeArrow();
+          watchSubjectPick();
           changed();
         }}
         onTouchStart={(event) => {
@@ -738,9 +823,20 @@ export default function RichText({
           format(dx > 0 ? "indent" : "outdent");
         }}
         onBlur={() => {
+          setSubjectPick(null);
           if (timer.current) clearTimeout(timer.current);
           timer.current = null;
           flush();
+        }}
+        onMouseDown={(event) => {
+          // A subject chip opens its subject on press: by the time a click
+          // arrived, focusing the text would have brought up its toolbar and
+          // moved the chip from under the pointer.
+          const subjectChip = (event.target as HTMLElement).closest?.<HTMLElement>("a[data-subject]");
+          if (!subjectChip || event.button !== 0) return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (!subjectChip.classList.contains("missing")) window.dispatchEvent(new CustomEvent(SUBJECT_OPEN_EVENT, { detail: subjectChip.dataset.subject }));
         }}
         onDoubleClick={(event) => {
           const img = (event.target as HTMLElement).closest?.("img.rt-embed") as HTMLImageElement | null;
@@ -765,6 +861,11 @@ export default function RichText({
             if (item.getAttribute("data-checked") === "true") item.removeAttribute("data-checked");
             else item.setAttribute("data-checked", "true");
             changed();
+            return;
+          }
+          // A subject chip is opened on press (below); its click has nothing left to do.
+          if ((event.target as HTMLElement).closest?.("a[data-subject]")) {
+            event.preventDefault();
             return;
           }
           if (followCite(event.target, event)) return;
@@ -936,6 +1037,28 @@ export default function RichText({
           changed();
         }}
         onKeyDown={(event) => {
+          // The subject list under the caret takes the arrows, Enter and Escape while it is open.
+          if (subjectPick) {
+            const options = subjectsMatching(subjectPick.query);
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault();
+              const n = Math.max(1, options.length);
+              setSubjectPick({ ...subjectPick, index: (subjectPick.index + (event.key === "ArrowDown" ? 1 : n - 1)) % n });
+              return;
+            }
+            if ((event.key === "Enter" || event.key === "Tab") && options[subjectPick.index]) {
+              event.preventDefault();
+              event.stopPropagation();
+              insertSubject(options[subjectPick.index]);
+              return;
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              setSubjectPick(null);
+              return;
+            }
+          }
           // With a picture picked, ⌘C copies the picture and Delete removes it.
           if (pickedImg && el.current?.contains(pickedImg)) {
             const key = event.key.toLowerCase();

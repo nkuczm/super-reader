@@ -1045,6 +1045,13 @@ export function sanitizeRichText(html: string): string {
     // A quote is a link to its passage, by the quote's id — never an href, so
     // nothing synced can smuggle a destination in.
     if (tag === "a" && !closing) {
+      // A link to another subject (lib/subject-links.ts): by its id alone, never an address.
+      const subjectId = match[2].match(/data-subject=(?:"([A-Za-z0-9_-]{1,40})"|'([A-Za-z0-9_-]{1,40})'|([A-Za-z0-9_-]{1,40})(?=[\s/>]|$))/)?.slice(1).find(Boolean);
+      if (subjectId) {
+        stack.push("a");
+        out.push(`<a data-subject="${subjectId}" contenteditable="false">`);
+        continue;
+      }
       const id = match[2].match(/data-quote=["']?([A-Za-z0-9_-]{1,40})/)?.[1];
       if (id) {
         stack.push("a");
