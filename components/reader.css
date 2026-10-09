@@ -2910,3 +2910,31 @@
 .wb-canvas.connecting .wb-node > * { pointer-events: none; user-select: none; -webkit-user-select: none; }
 .wb-canvas.connecting .wb-node:hover > .subject-card,
 .wb-canvas.connecting .wb-node:hover > .subject-box { outline: 2px dashed var(--accent); outline-offset: 2px; }
+
+/* ---------- find in a subject (⌘F) ---------- */
+.subject-find {
+  position: fixed; top: calc(62px + var(--safe-top, 0px)); right: 22px; z-index: 45;
+  display: flex; align-items: center; gap: 4px;
+  padding: 5px 6px 5px 10px; border: 1px solid var(--border); border-radius: 11px;
+  background: var(--bg); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.16); color: var(--text-dim);
+}
+/* On the whiteboard the top-right corner holds the board's own tools; find sits top-centre instead. */
+.subject-find.on-board { right: auto; left: calc(50% + 134px); transform: translateX(-50%); }
+.subject-find input {
+  width: 220px; border: 0; outline: 0; background: transparent; color: var(--text);
+  font-size: 14px; padding: 5px 4px;
+}
+.subject-find-count { min-width: 64px; font-size: 12px; color: var(--text-dim); text-align: right; white-space: nowrap; padding-right: 4px; }
+.subject-find .icon-btn { opacity: 1; width: 28px; height: 28px; padding: 0; display: inline-grid; place-items: center; }
+.subject-find .icon-btn:disabled { opacity: 0.35; }
+.subject-find-btn { width: auto; }
+.subject-find-btn.on { color: var(--accent); border-color: var(--accent); }
+/* Every match amber; the one you are on, stronger. */
+::highlight(subject-find) { background-color: rgba(250, 204, 21, 0.45); color: inherit; }
+::highlight(subject-find-on) { background-color: #f59e0b; color: #111; }
+.find-input-hit { background: rgba(250, 204, 21, 0.3) !important; border-radius: 4px; }
+.find-input-hit.on { background: #f59e0b !important; color: #111 !important; }
+@media (max-width: 640px) {
+  .subject-find, .subject-find.on-board { left: 10px; right: 10px; transform: none; top: calc(56px + var(--safe-top, 0px)); }
+  .subject-find input { width: auto; flex: 1; min-width: 0; font-size: 16px; }
+}
