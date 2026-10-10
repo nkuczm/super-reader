@@ -28,6 +28,43 @@ const LOAD_EVERY_MS = 3 * 60 * 1000;
 /** Google Docs backups: at most this often. Each reads the changed subjects, pictures and all, from the database. */
 const BACKUP_DELAY_MS = 20 * 60 * 1000;
 
+/**
+ * Who was signed in the last time the server said. The app opens with no
+ * connection (the service worker serves it), and the question "who is signed
+ * in?" then has no answer — which used to be taken as "nobody": writing done
+ * on a train was kept on the phone but never sent, not even once the phone
+ * was back online, until the app happened to be closed and opened again.
+ */
+const KNOWN_KEY = "super-reader:account:v1";
+
+function knownAccount(): AccountInfo | null {
+  try {
+    const held = JSON.parse(localStorage.getItem(KNOWN_KEY) ?? "null");
+    if (!held || typeof held.id !== "string" || typeof held.email !== "string") return null;
+    return {
+      id: held.id,
+      email: held.email,
+      ...(typeof held.name === "string" ? { name: held.name } : {}),
+      ...(typeof held.picture === "string" ? { picture: held.picture } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function rememberAccount(account: AccountInfo | null) {
+  try {
+    if (account) localStorage.setItem(KNOWN_KEY, JSON.stringify(account));
+    else localStorage.removeItem(KNOWN_KEY);
+  } catch {
+    /* asked again next time */
+  }
+}
+
+/** The same person, so a confirmation does not start everything over. */
+const sameAccount = (a: AccountInfo | null, b: AccountInfo | null) =>
+  a === b || (!!a && !!b && a.id === b.id && a.email === b.email && a.name === b.name && a.picture === b.picture);
+
 export function useAccount(params: {
   ready: boolean;
   writing: Writing;
@@ -46,6 +83,7 @@ export function useAccount(params: {
   const loaded = useRef(false);
   /** Bumped to make the autosave look again without a new edit. */
   const [nudge, setNudge] = useState(0);
+  const retrySave = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** What the account is known to hold, so only changes are sent. */
   const base = useRef<Base>(emptyBase());
   /** The last change read from the account: the next look asks only for what came after. */
@@ -66,16 +104,66 @@ export function useAccount(params: {
   const [attempt, setAttempt] = useState(0);
   const failures = useRef(0);
 
+  /** The server has said who is signed in, this visit. Until it has, it is asked again whenever the connection may be back. */
+  const reached = useRef(false);
+  const [askAgain, setAskAgain] = useState(0);
+  const askFailures = useRef(0);
   useEffect(() => {
     if (!ready) return;
+    let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | null = null;
     fetch("/api/auth/me", { cache: "no-store" })
-      .then((res) => res.json())
-      .then((data) => {
-        setEnabled(Boolean(data.enabled));
-        setAccount(data.account ?? null);
+      .then((res) => {
+        if (!res.ok) throw new Error(`auth ${res.status}`);
+        return res.json();
       })
-      .catch(() => {})
-      .finally(() => setChecked(true));
+      .then((data) => {
+        if (cancelled) return;
+        reached.current = true;
+        askFailures.current = 0;
+        const who: AccountInfo | null = data.enabled ? (data.account ?? null) : null;
+        setEnabled(Boolean(data.enabled));
+        setAccount((current) => (sameAccount(current, who) ? current : who));
+        rememberAccount(who);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // No answer — offline, most often. Whoever was signed in when the
+        // server last answered still is: their writing stays theirs, and is
+        // sent as soon as the account can be reached.
+        const known = knownAccount();
+        if (known) {
+          setEnabled(true);
+          setAccount((current) => current ?? known);
+          setStatus((current) => (current === "idle" ? "offline" : current));
+        }
+        const delay = Math.min(5 * 60_000, 15_000 * 2 ** askFailures.current);
+        askFailures.current += 1;
+        retry = setTimeout(() => setAskAgain((n) => n + 1), delay);
+      })
+      .finally(() => {
+        if (!cancelled) setChecked(true);
+      });
+    return () => {
+      cancelled = true;
+      if (retry) clearTimeout(retry);
+    };
+  }, [ready, askAgain]);
+  // Back online, or back in the app: ask straight away rather than at the next retry.
+  useEffect(() => {
+    if (!ready) return;
+    const onBack = () => {
+      if (reached.current || document.visibilityState === "hidden") return;
+      setAskAgain((n) => n + 1);
+    };
+    window.addEventListener("online", onBack);
+    window.addEventListener("focus", onBack);
+    document.addEventListener("visibilitychange", onBack);
+    return () => {
+      window.removeEventListener("online", onBack);
+      window.removeEventListener("focus", onBack);
+      document.removeEventListener("visibilitychange", onBack);
+    };
   }, [ready]);
 
   const fetchImages = useCallback(async (hashes: string[]) => {
@@ -100,10 +188,17 @@ export function useAccount(params: {
     const since = cursor.current ? `?since=${encodeURIComponent(cursor.current)}` : "";
     const res = await fetch(`/api/subjects${since}`, { cache: "no-store" });
     if (res.status === 401) {
+      rememberAccount(null);
       setAccount(null);
       return;
     }
-    if (!res.ok) throw new Error("Could not load subjects");
+    if (!res.ok) {
+      // The account answered, and could not give the changes: the next look
+      // reads the whole copy. A cursor that keeps failing would otherwise
+      // keep this device from ever seeing another's writing.
+      if (res.status >= 500) cursor.current = null;
+      throw new Error("Could not load subjects");
+    }
     const data = await res.json();
     if (Number(data.of) > 1) {
       // Too big for one answer: the rest of the parts, then all of it as one.
@@ -166,23 +261,35 @@ export function useAccount(params: {
       }
     };
     start();
-    // Another device's changes, on coming back to the tab — not more often
-    // than every few minutes; straight away if the account was never reached.
-    const onFocus = () => {
+    // Another device's changes, on coming back to the app — not more often
+    // than every few minutes; straight away if the account was never reached
+    // or the connection has just come back. And whatever was written here
+    // while it could not be sent goes now, not at the next retry. An app
+    // opened from a phone's home screen comes back with "visibilitychange",
+    // and not always with "focus".
+    const look = (always: boolean) => {
       if (!loaded.current) {
         if (starting.current) return;
         if (retry) clearTimeout(retry);
         setAttempt((n) => n + 1);
         return;
       }
-      if (Date.now() - lastLoad.current < LOAD_EVERY_MS) return;
+      setNudge((n) => n + 1);
+      if (!always && Date.now() - lastLoad.current < LOAD_EVERY_MS) return;
       load().catch(() => {});
     };
+    const onFocus = () => look(false);
+    const onShown = () => document.visibilityState === "visible" && look(false);
+    const onOnline = () => look(true);
     window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onShown);
+    window.addEventListener("online", onOnline);
     return () => {
       cancelled = true;
       if (retry) clearTimeout(retry);
       window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onShown);
+      window.removeEventListener("online", onOnline);
     };
   }, [ready, account, load, attempt]);
 
@@ -273,13 +380,20 @@ export function useAccount(params: {
         if (!backupTimer.current) backupTimer.current = setTimeout(backup, BACKUP_DELAY_MS);
       } catch (error) {
         if (error instanceof SignedOut) {
+          rememberAccount(null);
           setAccount(null);
           setStatus("error");
           return;
         }
         // Still safe on this device; the change stays unsent, and goes with the next try.
+        // One retry waiting at a time, however many saves failed while offline.
         setStatus(navigator.onLine ? "error" : "offline");
-        setTimeout(() => setNudge((n) => n + 1), 30_000);
+        if (!retrySave.current) {
+          retrySave.current = setTimeout(() => {
+            retrySave.current = null;
+            setNudge((n) => n + 1);
+          }, 30_000);
+        }
       }
     }, SAVE_DELAY_MS);
     return () => clearTimeout(timer);
@@ -313,22 +427,16 @@ export function useAccount(params: {
         lastBackup.current = Date.now();
       }
     };
-    const onOnline = () => {
-      load().catch(() => {});
-    };
     document.addEventListener("visibilitychange", onHide);
-    window.addEventListener("online", onOnline);
-    return () => {
-      document.removeEventListener("visibilitychange", onHide);
-      window.removeEventListener("online", onOnline);
-    };
-  }, [account, load, flushNow]);
+    return () => document.removeEventListener("visibilitychange", onHide);
+  }, [account, flushNow]);
 
   const signOut = useCallback(async () => {
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     loaded.current = false;
     base.current = emptyBase();
     cursor.current = null;
+    rememberAccount(null);
     setAccount(null);
     setStatus("idle");
   }, []);

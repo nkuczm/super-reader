@@ -403,3 +403,19 @@ test("the page's own colours, spelled out by the browser, are not a highlight", 
   assert.equal(sanitizeRichText('<span style="background-color:#b7e1cd">x</span>'), "<mark>x</mark>");
   assert.equal(sanitizeRichText('<span style="background-color:#d9d9d9">x</span>'), "<mark>x</mark>");
 });
+
+test("a subject's colour travels with it, and survives another device rewriting the subject's settings", async () => {
+  const { COLOR_ID, LABEL_COLORS, mergeBoards, put, subjectColorOf } = await import("../lib/subjects");
+  const blue = LABEL_COLORS[0];
+  const phone = { s: put({}, { id: COLOR_ID, kind: "color", color: blue, at: 0 }, 100) };
+  // The desktop switches the subject's view after the colour was chosen, never having heard of it.
+  const desktop = { s: put({}, { id: "meta", kind: "meta", view: "board", at: 0 }, 200) };
+  const merged = mergeBoards(phone, desktop);
+  assert.equal(subjectColorOf(merged.s), blue);
+  // Taken off again: a change of its own, which wins as the newer one.
+  const cleared = { s: put(merged.s, { id: COLOR_ID, kind: "color", at: 0 }, 300) };
+  assert.equal(subjectColorOf(mergeBoards(cleared, phone).s), undefined);
+  // Only the palette's colours: anything else synced in is no colour at all.
+  assert.equal(subjectColorOf({ [COLOR_ID]: { id: COLOR_ID, kind: "color", color: "red;background:url(x)", at: 1 } }), undefined);
+  assert.equal(subjectColorOf(undefined), undefined);
+});
