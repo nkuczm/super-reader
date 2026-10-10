@@ -215,12 +215,34 @@ export function DrawingPad({ box, onChange }: { box: BoxItem; onChange: (next: P
   );
 }
 
-export function ImageView({ box, onChange, onRemove }: { box: BoxItem; onChange: (next: Partial<BoxItem>) => void; onRemove?: () => void }) {
+/** "Add caption" chosen from a picture's menu: its caption field opens, ready to type in. */
+export const CAPTION_EVENT = "super-reader:caption";
+
+export function ImageView({ box, onChange, onRemove, dragHandle }: {
+  box: BoxItem;
+  onChange: (next: Partial<BoxItem>) => void;
+  onRemove?: () => void;
+  /** On the whiteboard: the whole picture moves the card; dropped on writing, it is set in there. */
+  dragHandle?: (e: React.PointerEvent) => void;
+}) {
   const src = safeImage(box.image);
   const [note, setNote] = useState<string | null>(null);
+  // The caption shows once there is one — or once it is asked for, from the menu.
+  const [captioning, setCaptioning] = useState(false);
+  const caption = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    const open = (e: Event) => {
+      if ((e as CustomEvent<string>).detail !== box.id) return;
+      setCaptioning(true);
+      requestAnimationFrame(() => caption.current?.focus());
+    };
+    window.addEventListener(CAPTION_EVENT, open);
+    return () => window.removeEventListener(CAPTION_EVENT, open);
+  }, [box.id]);
+  const showCaption = !dragHandle || captioning || Boolean(box.caption?.trim());
   return (
     // Click the picture, then ⌘C copies it and ⌘X cuts it, to paste into a table, a text box or another app.
-    <figure className="subject-image" tabIndex={-1}
+    <figure className={`subject-image${dragHandle ? " on-board" : ""}`} tabIndex={-1} onPointerDown={dragHandle}
       onKeyDown={(e) => {
         const key = e.key.toLowerCase();
         if (!src || !(e.metaKey || e.ctrlKey) || (key !== "c" && key !== "x")) return;
@@ -235,20 +257,31 @@ export function ImageView({ box, onChange, onRemove }: { box: BoxItem; onChange:
       }}
       onClick={(e) => (e.target as HTMLElement).tagName === "IMG" && (e.currentTarget as HTMLElement).focus()}>
       {note && <span className="rt-img-copied">{note}</span>}
-      <EmbedGrip id={box.id} />
       {src ? (
+        // In the document the picture itself is dragged into writing; on the whiteboard the card is.
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={src} alt={box.caption || ""} />
+        <img src={src} alt={box.caption || ""} draggable={!dragHandle}
+          onDragStart={(event) => {
+            event.dataTransfer.setData(EMBED_TYPE, box.id);
+            event.dataTransfer.effectAllowed = "move";
+          }} />
       ) : (
         <p className="sub">This picture is kept on the device it was added from.</p>
       )}
-      <input
-        className="subject-image-caption"
-        placeholder="Add a caption…"
-        defaultValue={box.caption ?? ""}
-        onPointerDown={(e) => e.stopPropagation()}
-        onBlur={(e) => e.target.value !== (box.caption ?? "") && onChange({ caption: e.target.value.slice(0, 300) })}
-      />
+      {showCaption && (
+        <input
+          ref={caption}
+          className="subject-image-caption"
+          placeholder="Add a caption…"
+          defaultValue={box.caption ?? ""}
+          onPointerDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+          onBlur={(e) => {
+            if (e.target.value !== (box.caption ?? "")) onChange({ caption: e.target.value.slice(0, 300) });
+            if (!e.target.value.trim()) setCaptioning(false);
+          }}
+        />
+      )}
     </figure>
   );
 }
