@@ -131,6 +131,8 @@ export function ensureAccountSchema() {
           PRIMARY KEY (account_id, subject_id)
         )
       `;
+      // When a backup of the subject last failed: it waits behind the others next time.
+      await sql`ALTER TABLE subject_backups ADD COLUMN IF NOT EXISTS tried_at TIMESTAMPTZ`;
     })().catch((error) => {
       ready = null;
       throw error;
@@ -796,13 +798,23 @@ export async function restorePrefsVersion(accountId: string, id: string): Promis
 export async function backupState(accountId: string, subjectId: string) {
   await ensureAccountSchema();
   const rows = await getSql()`
-    SELECT file_id, signature, backed_at FROM subject_backups
+    SELECT file_id, signature, backed_at, tried_at FROM subject_backups
     WHERE account_id = ${accountId} AND subject_id = ${subjectId}
   `;
   const row = rows[0];
+  const time = (v: unknown) => (v ? new Date(v as string).getTime() : 0);
   return row
-    ? { fileId: row.file_id as string | null, signature: row.signature as string | null, backedAt: row.backed_at ? new Date(row.backed_at).getTime() : 0 }
-    : { fileId: null, signature: null, backedAt: 0 };
+    ? { fileId: row.file_id as string | null, signature: row.signature as string | null, backedAt: time(row.backed_at), triedAt: time(row.tried_at) }
+    : { fileId: null, signature: null, backedAt: 0, triedAt: 0 };
+}
+
+/** A backup of this subject failed just now: the others go first next time. */
+export async function recordBackupFailure(accountId: string, subjectId: string) {
+  await getSql()`
+    INSERT INTO subject_backups (account_id, subject_id, tried_at)
+    VALUES (${accountId}, ${subjectId}, now())
+    ON CONFLICT (account_id, subject_id) DO UPDATE SET tried_at = now()
+  `;
 }
 
 export async function recordBackup(accountId: string, subjectId: string, fileId: string, signature: string) {

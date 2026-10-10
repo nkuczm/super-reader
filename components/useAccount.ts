@@ -96,6 +96,7 @@ export function useAccount(params: {
   const backupDue = useRef(false);
   const backupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastBackup = useRef(0);
+  const backupFailures = useRef(0);
   const applyRef = useRef(applyWriting);
   applyRef.current = applyWriting;
   const accountRef = useRef(account);
@@ -299,16 +300,34 @@ export function useAccount(params: {
     if (!backupDue.current) return;
     backupDue.current = false;
     lastBackup.current = Date.now();
+    // Asked again by itself: for the subjects a backup had no time left for, or after one that failed.
+    const again = (ms: number) => {
+      backupDue.current = true;
+      if (backupTimer.current) clearTimeout(backupTimer.current);
+      backupTimer.current = setTimeout(() => void backupRef.current(), ms);
+    };
     try {
       const res = await fetch("/api/subjects/backup", { method: "POST" });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error ?? "Backup to Google Docs failed");
+      if (!res.ok) {
+        throw new Error(
+          data.error ?? (res.status === 504 ? "Backing up to Google Drive took too long — trying again in a few minutes." : "Backup to Google Docs failed"),
+        );
+      }
+      // Subjects it had no time for: the rest straight after, while each round gets something done.
+      const more = Number(data.more) > 0;
+      const progress = Number(data.backedUp) > 0;
+      if (more && progress) again(3000);
       if (data.problem) throw new Error(data.problem);
+      if (more && !progress) throw new Error("Google Drive is slow to take the backups — trying again shortly.");
+      backupFailures.current = 0;
       setBackupProblem(null);
-      setBackedUpAt(Date.now());
+      if (!more) setBackedUpAt(Date.now());
     } catch (error) {
-      backupDue.current = true;
       setBackupProblem(error instanceof Error ? error.message : "Backup to Google Docs failed");
+      // Failing again and again is asked about less and less often: 5 minutes, then 10, 20, up to an hour.
+      if (!backupTimer.current) again(Math.min(60, 5 * 2 ** backupFailures.current++) * 60_000);
+      else backupDue.current = true;
     }
   }, []);
 
