@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { DEFAULT_DRAWING_HEIGHT, DRAWING_WIDTH, escapeHtml, newItemId, safeImage, safeStrokes, type BoxItem, type Stroke } from "@/lib/subjects";
+import { captionHtmlOf, DEFAULT_DRAWING_HEIGHT, DRAWING_WIDTH, escapeHtml, newItemId, safeImage, safeStrokes, type BoxItem, type Stroke } from "@/lib/subjects";
 import { EMBED_TYPE } from "./RichText";
 import FlagButton from "./FlagButton";
 import { copyPicture } from "./CropDialog";
@@ -215,38 +215,54 @@ export function DrawingPad({ box, onChange }: { box: BoxItem; onChange: (next: P
   );
 }
 
-/** "Add caption" chosen from a picture's menu: its caption field opens, ready to type in. */
+/** "Add caption" chosen from a picture's menu: its caption opens, ready to type in. */
 export const CAPTION_EVENT = "super-reader:caption";
 
-export function ImageView({ box, onChange, onRemove, dragHandle }: {
+/** Into writing, the caret at its end. */
+function focusEnd(el: HTMLElement | null | undefined) {
+  if (!el) return;
+  el.focus();
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  range.collapse(false);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+export function ImageView({ box, onRemove, dragHandle, caption }: {
   box: BoxItem;
-  onChange: (next: Partial<BoxItem>) => void;
   onRemove?: () => void;
   /** On the whiteboard: the whole picture moves the card; dropped on writing, it is set in there. */
   dragHandle?: (e: React.PointerEvent) => void;
+  /**
+   * The caption: written like any text box — lists, links, highlights and
+   * all — and drawn by the caller, which holds the subject's writing tools.
+   */
+  caption: React.ReactNode;
 }) {
   const src = safeImage(box.image);
   const [note, setNote] = useState<string | null>(null);
-  // The caption shows once there is one — or once it is asked for, from the menu.
+  // On the whiteboard the caption shows once there is one — or once it is asked for, from the menu.
   const [captioning, setCaptioning] = useState(false);
-  const caption = useRef<HTMLInputElement | null>(null);
+  const captionEl = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const open = (e: Event) => {
       if ((e as CustomEvent<string>).detail !== box.id) return;
       setCaptioning(true);
-      requestAnimationFrame(() => caption.current?.focus());
+      requestAnimationFrame(() => focusEnd(captionEl.current?.querySelector<HTMLElement>(".rich-body")));
     };
     window.addEventListener(CAPTION_EVENT, open);
     return () => window.removeEventListener(CAPTION_EVENT, open);
   }, [box.id]);
-  const showCaption = !dragHandle || captioning || Boolean(box.caption?.trim());
+  const showCaption = !dragHandle || captioning || Boolean(captionHtmlOf(box));
   return (
     // Click the picture, then ⌘C copies it and ⌘X cuts it, to paste into a table, a text box or another app.
     <figure className={`subject-image${dragHandle ? " on-board" : ""}`} tabIndex={-1} onPointerDown={dragHandle}
       onKeyDown={(e) => {
         const key = e.key.toLowerCase();
         if (!src || !(e.metaKey || e.ctrlKey) || (key !== "c" && key !== "x")) return;
-        if ((e.target as HTMLElement).closest("input, textarea")) return;
+        if ((e.target as HTMLElement).closest("input, textarea, [contenteditable]")) return;
         e.preventDefault();
         e.stopPropagation();
         void copyPicture(src).then((ok) => {
@@ -269,18 +285,18 @@ export function ImageView({ box, onChange, onRemove, dragHandle }: {
         <p className="sub">This picture is kept on the device it was added from.</p>
       )}
       {showCaption && (
-        <input
-          ref={caption}
-          className="subject-image-caption"
-          placeholder="Add a caption…"
-          defaultValue={box.caption ?? ""}
-          onPointerDown={(e) => e.stopPropagation()}
-          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        // Straight on the board under the picture, unless a background is asked for.
+        <div ref={captionEl} className={`subject-image-caption${box.captionBackground ? " with-background" : ""}`}
           onBlur={(e) => {
-            if (e.target.value !== (box.caption ?? "")) onChange({ caption: e.target.value.slice(0, 300) });
-            if (!e.target.value.trim()) setCaptioning(false);
-          }}
-        />
+            // Left empty on the whiteboard, it goes away again.
+            if (!dragHandle || e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+            const el = e.currentTarget;
+            requestAnimationFrame(() => {
+              if (!(el.textContent ?? "").replace(/[\u200b\s]/g, "") && !el.querySelector("img")) setCaptioning(false);
+            });
+          }}>
+          {caption}
+        </div>
       )}
     </figure>
   );

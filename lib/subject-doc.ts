@@ -13,6 +13,7 @@ import { firstWords, remainderNote, TRANSCRIPT_PREVIEW_WORDS, wordsIn } from "./
 import type { Note } from "./notes";
 import {
   bylineOf,
+  captionHtmlOf,
   cardsOf,
   contactsOf,
   safeImage,
@@ -87,8 +88,10 @@ export function boxHtml(box: BoxItem, board?: Board, out: Output = {}): string {
   if (box.label) return `<h2 class="section">${escapeHtml(textOf(box.html).trim())}</h2>`;
   const image = safeImage(box.image);
   if (image) {
-    if (out.print) return `<figure><img src="${image}" alt="">${box.caption ? `<figcaption>${escapeHtml(box.caption)}</figcaption>` : ""}</figure>`;
-    return `<p><img src="${image}" alt="" style="max-width:100%"></p>${box.caption ? `<p><i>${escapeHtml(box.caption)}</i></p>` : ""}`;
+    // The caption reads as the writing it is, under the picture — not a line of small italics.
+    const caption = captionHtmlOf(box) ? unlinkQuotes(captionHtmlOf(box), board, out) : "";
+    if (out.print) return `<figure><img src="${image}" alt=""></figure>${caption}`;
+    return `<p><img src="${image}" alt="" style="max-width:100%"></p>${caption}`;
   }
   if (box.transcript) return out.print ? transcriptHtml(box.transcript, box.transcriptTabs, { full: out.fullTranscripts }) : transcriptHtml(box.transcript, box.transcriptTabs);
   if (box.table) return tableCardHtml(box);

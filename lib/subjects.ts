@@ -62,7 +62,14 @@ export type BoxItem = Base & {
   height?: number;
   /** An image, as a downscaled data: URL. */
   image?: string;
+  /**
+   * A picture's caption as plain text: for its alt text, the outline, and
+   * copies of the app from before captions were written like text boxes.
+   * The caption itself is the picture's `html` — see captionHtmlOf.
+   */
   caption?: string;
+  /** A picture's caption drawn on a card of its own, rather than straight on the board. */
+  captionBackground?: boolean;
   /** Set into a text box's text, so it is shown there rather than on its own. */
   embedded?: boolean;
   /** A section label: one line of big header text, which stories gather under. */
@@ -1608,6 +1615,16 @@ export function youtubeThumbnail(link: string): string | null {
     id = url.searchParams.get("v") ?? url.pathname.match(/^\/(?:shorts|live|embed|v)\/([^/?#]+)/)?.[1] ?? null;
   }
   return id && /^[A-Za-z0-9_-]{6,20}$/.test(id) ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null;
+}
+
+/**
+ * A picture's caption: written like a text box (the picture's own `html`,
+ * which it otherwise has no use for), or, from before that, a line of plain
+ * text — shown as a paragraph, and written over the first time it is edited.
+ */
+export function captionHtmlOf(box: Pick<BoxItem, "html" | "caption">): string {
+  if (box.html && (textOf(box.html).replace(/[\u200b\s•]/g, "") || /<img\b/i.test(box.html))) return box.html;
+  return box.caption?.trim() ? `<p>${escapeHtml(box.caption.trim())}</p>` : "";
 }
 
 /** The colours a section label can take. */
