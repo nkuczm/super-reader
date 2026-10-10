@@ -3257,13 +3257,20 @@
 }
 .rich-tools button.rt-btn.menu { display: inline-flex; align-items: center; justify-content: center; gap: 1px; width: 38px; }
 .rich-tools button.rt-btn:hover:not(:disabled) { background: var(--bg-hover); }
-.rich-tools button.rt-btn.on { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+/* On — bold where the caret is, a list it is in — is plain to see: filled and outlined in the accent. */
+.rich-tools button.rt-btn.on, .rich-tools button.rt-btn.on:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg)); color: var(--accent);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+/* A tool whose menu is open reads as pressed too. */
+.rich-tools button.rt-btn.open { background: var(--bg-hover); box-shadow: inset 0 0 0 1.5px var(--border); }
+.rich-tools button.rt-btn.on.open { box-shadow: inset 0 0 0 1.5px var(--accent); }
 .rich-tools button.rt-btn:disabled { cursor: default; opacity: 0.38; }
 .rich-tools button.rt-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .rt-btn svg { display: block; }
 .rt-chev { opacity: 0.55; margin-left: -1px; }
-.rt-glyph { font: 700 15px/1 Georgia, "Times New Roman", serif; }
-.rt-glyph.rt-italic { font-weight: 400; font-style: italic; font-size: 16px; }
+.rt-glyph { font: 800 15px/1 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+.rt-glyph.rt-italic { font-weight: 500; font-style: italic; font-size: 15px; }
 .rt-sep { flex-shrink: 0; width: 1px; height: 18px; margin: 0 5px; background: var(--border); }
 /* In a card: a slim floating strip above the writing, wrapping whole buttons in a narrow card. */
 .rich:focus-within .rich-tools:not(.docked):not(.hosted):not(.side) {
