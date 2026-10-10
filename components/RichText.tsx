@@ -15,8 +15,91 @@ import { refreshSubjectChips, subjectChipHtml, subjectsMatching, SUBJECT_OPEN_EV
  */
 export const ToolsHostContext = createContext<HTMLElement | null>(null);
 
-/** The tools as the fixed bar shows them before any text has been clicked into. */
-export const TOOL_LABELS = ["↶", "↷", "B", "I", "H", "• List", "1. List", "a. List", "☐ Check", "H3", "Link", "◈ Subject"];
+/* ---------------------------------------------------------------------- */
+/* The text tools                                                          */
+/* ---------------------------------------------------------------------- */
+
+/** The kinds of list a line can be in. */
+type ListKind = "bullet" | "check" | "1" | "1)" | "a" | "a)" | "A" | "A)";
+/** What the caret is in, for the tools to show as on. */
+type ToolState = { b?: boolean; i?: boolean; hl?: boolean; h?: boolean; list?: ListKind | null };
+type ToolAction = "undo" | "redo" | "bold" | "italic" | "highlight" | "heading" | "list" | "link";
+
+const svg = (children: React.ReactNode) => (
+  <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {children}
+  </svg>
+);
+const ICON = {
+  undo: svg(<><path d="M6 3.5 3 6.5l3 3" /><path d="M3.5 6.5H10a3.5 3.5 0 0 1 0 7H7.5" /></>),
+  redo: svg(<><path d="M10 3.5l3 3-3 3" /><path d="M12.5 6.5H6a3.5 3.5 0 0 0 0 7h2.5" /></>),
+  highlight: svg(<><path d="m9.5 3 3.5 3.5-5.5 5.5H4v-3.5z" /><rect x="2" y="13.4" width="12" height="2" rx="1" fill="#facc15" stroke="none" /></>),
+  bullet: svg(<><circle cx="3" cy="4" r="0.9" fill="currentColor" stroke="none" /><circle cx="3" cy="8" r="0.9" fill="currentColor" stroke="none" /><circle cx="3" cy="12" r="0.9" fill="currentColor" stroke="none" /><path d="M6.5 4h7M6.5 8h7M6.5 12h7" /></>),
+  number: svg(<><text x="1.2" y="6.6" fontSize="6.2" fontWeight="700" fill="currentColor" stroke="none" fontFamily="system-ui, sans-serif">1</text><text x="1.2" y="13.8" fontSize="6.2" fontWeight="700" fill="currentColor" stroke="none" fontFamily="system-ui, sans-serif">2</text><path d="M7 4.5h6.5M7 11.5h6.5" /></>),
+  letter: svg(<><text x="1" y="6.6" fontSize="6.6" fontWeight="700" fill="currentColor" stroke="none" fontFamily="system-ui, sans-serif">a</text><text x="1" y="13.8" fontSize="6.6" fontWeight="700" fill="currentColor" stroke="none" fontFamily="system-ui, sans-serif">b</text><path d="M7 4.5h6.5M7 11.5h6.5" /></>),
+  check: svg(<><rect x="2" y="2.5" width="4.5" height="4.5" rx="1" /><path d="m3.1 4.8 1 1 1.6-1.9" /><rect x="2" y="9.5" width="4.5" height="4.5" rx="1" /><path d="M9 4.8h5M9 11.8h5" /></>),
+  link: svg(<><path d="M6.8 9.2a3 3 0 0 0 4.3 0l2-2a3 3 0 0 0-4.3-4.3l-.7.7" /><path d="M9.2 6.8a3 3 0 0 0-4.3 0l-2 2a3 3 0 0 0 4.3 4.3l.7-.7" /></>),
+  subject: svg(<><path d="M8 1.8 14.2 8 8 14.2 1.8 8z" /><path d="M8 5.4 10.6 8 8 10.6 5.4 8z" /></>),
+  chevron: <svg className="rt-chev" viewBox="0 0 10 10" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m2.5 4 2.5 2.5L7.5 4" /></svg>,
+};
+const LIST_ICON: Record<ListKind, React.ReactNode> = {
+  bullet: ICON.bullet, check: ICON.check, "1": ICON.number, "1)": ICON.number, a: ICON.letter, "a)": ICON.letter, A: ICON.letter, "A)": ICON.letter,
+};
+
+/**
+ * The buttons themselves — one size, grouped, each lit when what it does
+ * applies where the caret is. The four list buttons are one, whose menu
+ * holds every kind; a web link and a subject link share one too.
+ */
+function ToolButtons({ state = {}, run, history, onHistory }: {
+  state?: ToolState;
+  /** Absent: shown but not yet usable (nothing is being written in). */
+  run?: (action: ToolAction, at: DOMRect) => void;
+  /** Undo and redo at the front (the fixed bars, which have no other place for them). */
+  history?: boolean;
+  /** With nothing being written in, undo and redo still step through the subject's changes. */
+  onHistory?: (redo: boolean) => void;
+}) {
+  const button = (action: ToolAction, label: string, content: React.ReactNode, on = false, menu = false) => {
+    const go = run ?? (onHistory && (action === "undo" || action === "redo") ? () => onHistory(action === "redo") : undefined);
+    return (
+    <button type="button" className={`rt-btn${on ? " on" : ""}${menu ? " menu" : ""}`} aria-label={label} title={label}
+      aria-pressed={menu ? undefined : on} aria-haspopup={menu ? "menu" : undefined} disabled={!go}
+      onClick={(e) => go?.(action, e.currentTarget.getBoundingClientRect())}>
+      {content}
+      {menu && ICON.chevron}
+    </button>
+    );
+  };
+  return (
+    <>
+      {history && (
+        <>
+          {button("undo", "Undo (⌘Z)", ICON.undo)}
+          {button("redo", "Redo (⇧⌘Z)", ICON.redo)}
+          <span className="rt-sep" aria-hidden="true" />
+        </>
+      )}
+      {button("bold", "Bold (⌘B)", <b className="rt-glyph">B</b>, state.b)}
+      {button("italic", "Italic (⌘I)", <i className="rt-glyph rt-italic">I</i>, state.i)}
+      {button("highlight", "Highlight — again to remove", ICON.highlight, state.hl)}
+      <span className="rt-sep" aria-hidden="true" />
+      {button("list", "Lists", LIST_ICON[state.list ?? "bullet"], Boolean(state.list), true)}
+      {button("heading", "Heading — again for normal text", <b className="rt-glyph">H</b>, state.h)}
+      <span className="rt-sep" aria-hidden="true" />
+      {button("link", "Link — a web address or another subject", ICON.link, false, true)}
+    </>
+  );
+}
+
+/** The document's fixed bar before any text has been clicked into: the same tools, waiting. */
+export function ToolbarIdle({ onHistory }: { onHistory?: (redo: boolean) => void }) {
+  return (
+    <div className="rich-tools rt-idle">
+      <ToolButtons history onHistory={onHistory} />
+    </div>
+  );
+}
 
 /**
  * Until when an editor takes new HTML even while it is being written in. It
@@ -947,37 +1030,143 @@ export default function RichText({
     changed();
   }
 
+  /** What the caret is in, so the tools can show it: bold, a heading, which kind of list. */
+  const [toolState, setToolState] = useState<ToolState>({});
+  useEffect(() => {
+    if (!focused) return;
+    const read = () => {
+      const sel = window.getSelection();
+      const node = sel?.anchorNode;
+      const at = node && (node.nodeType === 1 ? (node as Element) : node.parentElement);
+      if (!at || !el.current?.contains(at)) return;
+      const ol = at.closest("ol");
+      const ul = at.closest("ul");
+      const inner = ol && ul ? (ol.contains(ul) ? ul : ol) : (ol ?? ul);
+      let list: ListKind | null = null;
+      if (inner?.tagName === "UL") list = inner.hasAttribute("data-check") ? "check" : "bullet";
+      else if (inner) {
+        const type = inner.getAttribute("type") === "A" ? "A" : inner.getAttribute("type") === "a" ? "a" : "1";
+        list = `${type}${inner.getAttribute("data-mark") === "paren" ? ")" : ""}` as ListKind;
+      }
+      const lit = at.closest("mark") || [...el.current.querySelectorAll("span[style]")].some((span) => span.contains(at) && isHighlight(span.getAttribute("style") ?? ""));
+      const next: ToolState = {
+        b: document.queryCommandState("bold"),
+        i: document.queryCommandState("italic"),
+        hl: Boolean(lit),
+        h: Boolean(at.closest("h3")),
+        list,
+      };
+      setToolState((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
+    };
+    read();
+    document.addEventListener("selectionchange", read);
+    return () => document.removeEventListener("selectionchange", read);
+  }, [focused]);
+
+  /** A tool's own menu — the kinds of list, the kinds of link — under its button. */
+  const [toolMenu, setToolMenu] = useState<{ kind: "list" | "link"; left: number; top: number } | null>(null);
+  useEffect(() => {
+    if (!focused) setToolMenu(null);
+  }, [focused]);
+  useEffect(() => {
+    if (!toolMenu) return;
+    const away = (e: Event) => !(e.target as Element | null)?.closest?.(".rt-menu, .rt-btn.menu") && setToolMenu(null);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setToolMenu(null);
+    document.addEventListener("pointerdown", away, true);
+    document.addEventListener("keydown", esc, true);
+    return () => {
+      document.removeEventListener("pointerdown", away, true);
+      document.removeEventListener("keydown", esc, true);
+    };
+  }, [toolMenu]);
+
+  const runTool = (action: ToolAction, at: DOMRect) => {
+    if (action === "undo" || action === "redo") {
+      // As ⌘Z / ⇧⌘Z: the subject decides whether that is the typing or a change to the board
+      // (a block deleted, a card moved) — whichever was the more recent. Otherwise, the typing.
+      const press = new KeyboardEvent("keydown", { key: "z", metaKey: true, ctrlKey: true, shiftKey: action === "redo", bubbles: true, cancelable: true });
+      el.current?.dispatchEvent(press);
+      if (!press.defaultPrevented) format(action);
+      return;
+    }
+    if (action === "bold" || action === "italic") return format(action);
+    if (action === "highlight") return toggleHighlight();
+    if (action === "heading") return format("formatBlock", toolState.h ? "p" : "h3");
+    const kind = action;
+    setToolMenu((open) => (open?.kind === kind ? null : { kind, left: Math.min(at.left, window.innerWidth - 230), top: at.bottom + 6 }));
+  };
+  /** A kind of list: on, or — chosen again — off. */
+  const setList = (kind: ListKind) => {
+    if (kind === "bullet") format("insertUnorderedList");
+    else if (kind === "check") toggleChecklist();
+    else toggleNumbered(kind.startsWith("A") ? "upper" : kind.startsWith("a"), 1, kind.endsWith(")"));
+  };
+  const LISTS: [ListKind, string, string][] = [
+    ["bullet", "Bulleted", "⌘⇧8"],
+    ["1", "Numbered  1.", "⌘⇧7"],
+    ["1)", "Numbered  1)", ""],
+    ["a", "Lettered  a.", ""],
+    ["A", "Lettered  A.", ""],
+    ["check", "Checklist", "⌘⇧9"],
+  ];
+  const menu = toolMenu && typeof document !== "undefined" && createPortal(
+    <div className="rt-menu" role="menu" style={{ left: toolMenu.left, top: toolMenu.top }} onMouseDown={(e) => e.preventDefault()}>
+      {toolMenu.kind === "list" ? (
+        <>
+          {LISTS.map(([kind, label, keys]) => (
+            <button key={kind} type="button" role="menuitemradio" aria-checked={toolState.list === kind}
+              className={toolState.list === kind ? "on" : undefined}
+              onClick={() => { setToolMenu(null); if (toolState.list !== kind) setList(kind); }}>
+              <span className="rt-menu-icon">{LIST_ICON[kind]}</span>
+              <span className="rt-menu-label">{label}</span>
+              <span className="rt-menu-keys">{keys}</span>
+            </button>
+          ))}
+          {toolState.list && (
+            <>
+              <span className="rt-menu-sep" aria-hidden="true" />
+              <button type="button" role="menuitem" onClick={() => { setToolMenu(null); setList(toolState.list!); }}>
+                <span className="rt-menu-icon" />
+                <span className="rt-menu-label">Remove list</span>
+                <span className="rt-menu-keys" />
+              </button>
+            </>
+          )}
+        </>
+      ) : (
+        <>
+          <button type="button" role="menuitem" onClick={() => { setToolMenu(null); startLink(); }}>
+            <span className="rt-menu-icon">{ICON.link}</span>
+            <span className="rt-menu-label">Web link</span>
+            <span className="rt-menu-keys">⌘K</span>
+          </button>
+          <button type="button" role="menuitem" onClick={() => {
+            setToolMenu(null);
+            el.current?.focus();
+            document.execCommand("insertText", false, "[[");
+            watchSubjectPick();
+          }}>
+            <span className="rt-menu-icon">{ICON.subject}</span>
+            <span className="rt-menu-label">Another subject</span>
+            <span className="rt-menu-keys">[[</span>
+          </button>
+        </>
+      )}
+    </div>,
+    document.body,
+  );
+
   const toolbar = (
     <div ref={tools} className={`rich-tools${docked ? " docked" : hosted ? " hosted" : side ? " side" : ""}`}
       style={docked ? { top: vvTop } : side ? { left: side.left, top: side.top } : undefined}
       onMouseDown={(event) => event.preventDefault()}>
-      {(docked || hosted) && (
-        <>
-          <button type="button" className="rich-undo" title="Undo" aria-label="Undo" onClick={() => format("undo")}>↶</button>
-          <button type="button" className="rich-undo" title="Redo" aria-label="Redo" onClick={() => format("redo")}>↷</button>
-        </>
-      )}
-      <button type="button" title="Bold (⌘B)" onClick={() => format("bold")}><b>B</b></button>
-      <button type="button" title="Italic (⌘I)" onClick={() => format("italic")}><i>I</i></button>
-      <button type="button" title="Highlight (again to remove)" onClick={toggleHighlight}>
-        <mark>H</mark>
-      </button>
-      <button type="button" title="Bulleted list (⌘⇧8)" onClick={() => format("insertUnorderedList")}>• List</button>
-      <button type="button" title="Numbered list (⌘⇧7) — or type 1. and a space" onClick={() => toggleNumbered(false)}>1. List</button>
-      <button type="button" title="Lettered list — or type a. and a space" onClick={() => toggleNumbered(true)}>a. List</button>
-      <button type="button" title="Checklist (⌘⇧9)" onClick={toggleChecklist}>☐ Check</button>
-      <button type="button" title="Heading" onClick={() => format("formatBlock", "h3")}>H3</button>
-      <button type="button" title="Link (⌘K)" onClick={startLink}>Link</button>
-      <button type="button" title="Link another subject — or type [[" onClick={() => {
-        el.current?.focus();
-        document.execCommand("insertText", false, "[[");
-        watchSubjectPick();
-      }}>◈ Subject</button>
+      <ToolButtons state={toolState} run={runTool} history={docked || hosted} />
       {docked && (
         <button type="button" className="rich-done" title="Done — close the keyboard"
           aria-label="Done — close the keyboard"
             onClick={() => { (document.activeElement as HTMLElement | null)?.blur?.(); setDocked(false); }}>✓</button>
       )}
+      {menu}
     </div>
   );
 
