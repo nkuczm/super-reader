@@ -3057,7 +3057,9 @@
 .subject-tile.colored:hover { border-color: var(--subject-color); }
 .subject-tile.colored::before { content: ""; position: absolute; inset: 0 0 auto; height: 5px; background: var(--subject-color); z-index: 1; pointer-events: none; }
 .subject-tile.colored .subject-tile-preview, .subject-tile.colored .bt-page { background-color: color-mix(in srgb, var(--subject-color) 11%, var(--bg-sub)); }
-.subject-tile.colored .subject-tile-meta { background: color-mix(in srgb, var(--subject-color) 9%, var(--bg)); }
+/* The whole tile is tinted, not just its name: a tile stretched to the height of a taller one in its row stays coloured to the bottom. */
+.subject-tile.colored { background: color-mix(in srgb, var(--subject-color) 9%, var(--bg)); }
+.subject-tile.colored .subject-tile-edit { background: transparent; }
 .subject-tile.colored .subject-tile-name, .subjects-list-row.colored .subjects-list-name { color: color-mix(in srgb, var(--subject-color) 72%, var(--text)); }
 .subjects-list-row.colored { box-shadow: inset 3px 0 0 var(--subject-color); }
 .subjects-list-row.colored .subjects-list-name::before {
