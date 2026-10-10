@@ -3226,3 +3226,32 @@
 .rich-body ol[data-kind="1"][data-mark="paren"] > li[data-hl]::before { content: counter(list-item, decimal) ")"; }
 .rich-body ol[data-kind="a"][data-mark="paren"] > li[data-hl]::before { content: counter(list-item, lower-alpha) ")"; }
 .rich-body ol[data-kind="A"][data-mark="paren"] > li[data-hl]::before { content: counter(list-item, upper-alpha) ")"; }
+
+/* ---------- a picture on the whiteboard: just the picture ---------- */
+/* No bar, no buttons: held anywhere it moves; its corner sizes it; its menu does the rest. */
+.wb-node .subject-box.image-box { padding: 0; border: 0; background: transparent; box-shadow: none; }
+.subject-image.on-board { cursor: grab; touch-action: none; }
+.subject-image.on-board:active { cursor: grabbing; }
+.subject-image.on-board img { border-radius: 6px; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.12); -webkit-user-drag: none; user-select: none; }
+.wb-node.selected .subject-image.on-board img { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Sized from the corner, not the side. */
+.wb-resize.corner { top: auto; bottom: -7px; right: -7px; width: 16px; height: 16px; cursor: nwse-resize; }
+.wb-resize.corner::after {
+  content: ""; position: absolute; inset: 3px; margin: 0; width: auto; height: auto; border-radius: 3px;
+  background: var(--bg); border: 2px solid var(--accent);
+}
+@media (hover: none) { .wb-resize.corner { width: 24px; height: 24px; right: -12px; bottom: -12px; } }
+/* A card's menu on a touch screen, where there is no right-click. */
+.wb-more { display: none; }
+@media (hover: none) {
+  .wb-more {
+    display: grid; place-items: center; position: absolute; top: 4px; right: 4px; z-index: 6; width: 28px; height: 28px;
+    border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, var(--bg) 92%, transparent);
+    color: var(--text-dim); font-size: 16px; line-height: 1; padding: 0;
+  }
+  .wb-node .subject-box.image-box ~ .wb-more { top: 6px; right: 6px; }
+}
+.wb-menu button.danger { color: var(--danger); }
+/* In a narrow card the text tools wrap a button at a time, never breaking one's label. */
+.rich-tools:not(.docked):not(.hosted):not(.side) { flex-wrap: wrap; }
+.rich-tools button { white-space: nowrap; }

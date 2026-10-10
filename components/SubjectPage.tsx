@@ -3,7 +3,7 @@
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons";
-import RichText, { dropCiteAt, forceNextHtml, TOOL_LABELS, ToolsHostContext } from "./RichText";
+import RichText, { dropCiteAt, dropEmbedAt, forceNextHtml, TOOL_LABELS, ToolsHostContext } from "./RichText";
 import { CITE_OPEN_EVENT, CITE_TYPE, citeCardHtml, citeChipHtml, inlineCardLinks, setCiteSources, type Cite } from "@/lib/cite";
 import FlagButton from "./FlagButton";
 import type { FlagInput } from "@/lib/flags";
@@ -11,7 +11,7 @@ import SubjectHistory from "./SubjectHistory";
 import { EXTRACT_VERSION } from "@/lib/offline";
 import SubjectContacts from "./SubjectContacts";
 import { tableWidth } from "./TableBox";
-import { DrawingPad, ImageView, TableBox, TranscriptBox, shrinkImage, DRAWING_HEIGHT, type AiSearch } from "./SubjectMedia";
+import { CAPTION_EVENT, DrawingPad, ImageView, TableBox, TranscriptBox, shrinkImage, DRAWING_HEIGHT, type AiSearch } from "./SubjectMedia";
 import { boxHtml, boxKind, cardHtml, cardNotesHtml, tableCardHtml, transcriptHtml, type Output } from "@/lib/subject-doc";
 import { printedOn, printPage } from "@/lib/print";
 import { safeTranscript } from "@/lib/transcript";
@@ -181,8 +181,17 @@ function flashEl(el: HTMLElement) {
   setTimeout(() => el.classList.remove("outline-flash"), 1400);
 }
 
+/** The picture files in a drag from the desktop, Finder or a screenshot's preview. */
+const droppedPictures = (data: DataTransfer | null) =>
+  [...(data?.files ?? [])].filter((file) => file.type.startsWith("image/")).slice(0, 12);
+const draggingFiles = (data: DataTransfer | null) => Boolean(data?.types.includes("Files"));
+
 /** A card's width, within what the board allows. */
-const clampW = (w: number) => Math.round(Math.min(900, Math.max(200, w)));
+const clampW = (w: number, min = 200) => Math.round(Math.min(900, Math.max(min, w)));
+/** A picture card goes as small as a picture set into text or a table can. */
+const PICTURE_MIN_W = 60;
+/** A node goes down to about a third of the smallest a card can be. */
+const NODE_MIN_W = 66;
 
 const BLOCKS_TYPE = "web application/x-super-reader-blocks";
 /** The last blocks copied, for a browser that will not carry a custom clipboard type. */
@@ -388,6 +397,19 @@ export default function SubjectPage(props: Props) {
   const meta = metaOf(board);
   const [historyOpen, setHistoryOpen] = useState(false);
   useClickToType();
+  // A file let go anywhere in a subject but on somewhere that takes it must not replace the app with the file.
+  useEffect(() => {
+    const hold = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+    };
+    window.addEventListener("dragover", hold);
+    window.addEventListener("drop", hold);
+    return () => {
+      window.removeEventListener("dragover", hold);
+      window.removeEventListener("drop", hold);
+    };
+  }, []);
+
   // The browser tab is named for the subject while it is open — and kept so:
   // opened straight after a reload, the framework writes the app's own title
   // into the page head once it has finished loading, over the subject's.
@@ -429,7 +451,7 @@ export default function SubjectPage(props: Props) {
     }
   };
   const embedBox = (id: string) =>
-    onBoard((current) => {
+    recorded((current) => {
       const item = current?.[id];
       return item && item.kind === "box" ? put(current, { ...item, embedded: true, at: Date.now() }) : (current ?? {});
     });
@@ -603,7 +625,7 @@ export default function SubjectPage(props: Props) {
   const taggedBlocks = useCallback((person: ContactItem | undefined) => [...taggedWith(board, person)].filter((id) => blockIds.has(id)), [board, blockIds]);
   const toggleTags = useCallback(
     (person: ContactItem, ids: string[], on: boolean) =>
-      onBoard((current) => {
+      recorded((current) => {
         const held = current?.[person.id];
         return put(current, withTags(held && held.kind === "contact" && !held.deleted ? held : person, ids, on));
       }),
@@ -611,7 +633,7 @@ export default function SubjectPage(props: Props) {
   );
   /** Someone new, typed into the tag picker: added to Contacts and tagged at once. */
   const addTagged = (name: string, ids: string[]) =>
-    onBoard((current) => {
+    recorded((current) => {
       const id = contactId(name);
       const held = current?.[id];
       const person: ContactItem = held && held.kind === "contact" && !held.deleted
@@ -681,7 +703,7 @@ export default function SubjectPage(props: Props) {
 
   const addBox = (at?: { x: number; y: number }, extra: Partial<BoxItem> = {}) => {
     const id = newItemId("box");
-    onBoard((current) => {
+    recorded((current) => {
       let next = placeNew(put(current, { id, kind: "box", html: "", ...extra, at: Date.now() }), id);
       if (at) next = put(next, { id: posId(id), kind: "pos", target: id, x: at.x, y: at.y, w: extra.labelShape === "node" ? NODE_SIZE : props.boxWidth || 280, at: Date.now() });
       return next;
@@ -691,6 +713,12 @@ export default function SubjectPage(props: Props) {
 
   // Removing a story, from wherever: undoable, quotes and all.
   const removeCard = (card: Card) => removeStory(card);
+  /** A block that reads right after another in the document (or at the end): its id. */
+  const addBoxAfter = (extra: Partial<BoxItem>, after?: string) => {
+    const id = newItemId("box");
+    recorded((current) => placeNew(put(current, { id, kind: "box", html: "", ...extra, ...(after ? { after } : {}), at: Date.now() }), id));
+    return id;
+  };
 
   /** A story taken out from the keyboard, as one block: undoable (its quotes aside, which live in the note). */
   const removeStory = (card: Card) => {
@@ -883,7 +911,7 @@ export default function SubjectPage(props: Props) {
   };
 
   const switchTab = (tab: string) => onBoard((current) => put(current, { ...metaOf(current), activeTab: tab }));
-  const moveCard = (target: string, tab: string) => onBoard((current) => placeOn(current, target, tab));
+  const moveCard = (target: string, tab: string) => recorded((current) => placeOn(current, target, tab));
 
   /* -------------------------------------------------------------------- */
   /* The AI run                                                            */
@@ -981,6 +1009,17 @@ export default function SubjectPage(props: Props) {
     onBoard(redo ? step.redo : step.undo);
     if (step.also) (redo ? step.also.redo : step.also.undo)();
     return true;
+  };
+  /** The last few steps as one: a gesture that made several changes is taken back by one ⌘Z. */
+  const mergeSteps = (n: number) => {
+    if (n < 2 || history.current.past.length < n) return;
+    const ops = history.current.past.splice(-n);
+    const alsos = ops.map((o) => o.also).filter((a): a is NonNullable<BoardOp["also"]> => !!a);
+    recordOp({
+      undo: (b) => ops.reduceRight((x, o) => o.undo(x), b ?? {}),
+      redo: (b) => ops.reduce((x, o) => o.redo(x), b ?? {}),
+      ...(alsos.length ? { also: { undo: () => [...alsos].reverse().forEach((a) => a.undo()), redo: () => alsos.forEach((a) => a.redo()) } } : {}),
+    });
   };
   /**
    * Any change to the board, undoable: each item it touches is kept as it
@@ -1129,6 +1168,9 @@ export default function SubjectPage(props: Props) {
     setBox: (box: BoxItem, html: string) =>
       onBoard((current) => (current?.[box.id]?.deleted ? current : put(current, { ...box, html, at: Date.now() }))),
     removeStory,
+    addBoxAfter,
+    recorded,
+    mergeSteps,
     pasteBlocks,
     joinBlocks,
     // Undoable, as every change to a block is: a transcript's tab closed, a picture replaced, a caption cleared.
@@ -1234,7 +1276,7 @@ export default function SubjectPage(props: Props) {
       return data.matches ?? [];
     }) as AiSearch,
     noteTranscript: (box: BoxItem, itemHtml: string) =>
-      onBoard((current) => addTranscriptNote(current, box.id, itemHtml, newItemId("box"))),
+      recorded((current) => addTranscriptNote(current, box.id, itemHtml, newItemId("box"))),
   };
 
   /**
@@ -1517,8 +1559,8 @@ export default function SubjectPage(props: Props) {
               tabs={tabs}
               current={currentTab}
               onSwitch={(tab) => switchTab(tab)}
-              onAdd={(name) => onBoard((current) => addTab(current, name).board)}
-              onRename={(tab, name) => onBoard((current) => renameTab(current, tab, name))}
+              onAdd={(name) => recorded((current) => addTab(current, name).board)}
+              onRename={(tab, name) => recorded((current) => renameTab(current, tab, name))}
               onDelete={(tab) => recorded((current) => deleteTab(current, tab))}
               outline={outline}
               onGo={goTo}
@@ -1600,9 +1642,9 @@ export default function SubjectPage(props: Props) {
           running={run.state === "running"}
           canRun={hasAiKey && allCards.length >= 1}
           onRun={() => void synthesize()}
-          onSave={(contact) => onBoard((current) => put(current, { ...contact, at: Date.now() }))}
+          onSave={(contact) => recorded((current) => put(current, { ...contact, at: Date.now() }))}
           onRemove={(contact) =>
-            onBoard((current) =>
+            recorded((current) =>
               // Removed from the stories' people stays removed, so a later run
               // does not bring them back; your own are simply deleted.
               contact.origin === "you"
@@ -1611,7 +1653,7 @@ export default function SubjectPage(props: Props) {
             )
           }
           onAdd={(name, role) =>
-            onBoard((current) =>
+            recorded((current) =>
               put(current, {
                 id: contactId(name),
                 kind: "contact",
@@ -1655,6 +1697,12 @@ type Shared = {
   removeCard: (card: Card) => void;
   /** The same from the keyboard in the document, and undoable. */
   removeStory: (card: Card) => void;
+  /** A block reading right after another in the document: its id. */
+  addBoxAfter: (extra: Partial<BoxItem>, after?: string) => string;
+  /** Any change to the board, as an undoable step. */
+  recorded: (update: (b: Board | undefined) => Board) => void;
+  /** The last few steps taken back together. */
+  mergeSteps: (n: number) => void;
   /** Blocks from the clipboard, on this tab, reading in order after a block (or at the end). */
   pasteBlocks: (blocks: CopiedBlocks, after: string | null) => void;
   /** One text block joined onto the end of another: one step, undone as one. */
@@ -1917,18 +1965,12 @@ function StoryCard({
           </select>
         )}
         {/* In the document a story is removed from the keyboard, and contacts are tagged on the whiteboard. */}
+        {/* Tagging a contact and printing are in the card's menu (right-click, or ⋯ on a touch screen). */}
         {dragHandle && (
-          <>
-            <TagButton id={card.id} tags={shared.tags} label="story" />
-            <button className="icon-btn subtle print-btn" aria-label="Print this story and its notes" title="Print this story and its notes"
-              onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.printItem(card.id)}>
-              {Icon.print}
-            </button>
-            <button className="icon-btn subtle" aria-label="Remove story from subject" title="Remove from subject"
-              onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.removeCard(card)}>
-              {Icon.close}
-            </button>
-          </>
+          <button className="icon-btn subtle" aria-label="Remove story from subject" title="Remove from subject"
+            onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.removeCard(card)}>
+            {Icon.close}
+          </button>
         )}
         </span>
       </div>
@@ -2048,6 +2090,16 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
   // In the document a block is edited from the keyboard — Backspace takes it
   // away — and contacts are tagged on the whiteboard: none of its side buttons.
   const inDoc = !dragHandle;
+  // A picture on the whiteboard is just the picture: held anywhere to move it, its
+  // corner to size it, its menu (right-click, or ⋯) for a caption, printing or tagging.
+  if (dragHandle && !box.label && !box.drawing && !box.table && !box.transcript && (box.image !== undefined || box.caption !== undefined)) {
+    return (
+      <div className="subject-box image-box">
+        <ImageView box={box} onChange={(change) => shared.updateBox(box, change)} onRemove={() => shared.removeBox(box)} dragHandle={dragHandle} />
+        <TagBadges id={box.id} tags={shared.tags} />
+      </div>
+    );
+  }
   return (
     <div className={`subject-box${box.table ? " table-box" : ""}${box.label ? " label-box" : ""}${box.label && box.labelShape === "node" && dragHandle ? " node-box" : ""}${!box.label && !box.drawing && !box.table && !box.transcript && box.image === undefined && box.caption === undefined ? " text-box" : ""}`}>
       <div className="subject-box-head" onPointerDown={dragHandle}>
@@ -2119,20 +2171,12 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
             )}
           </span>
         )}
+        {/* Tagging a contact and printing are in the card's menu (right-click, or ⋯ on a touch screen). */}
         {!inDoc && (
-          <>
-            <TagButton id={box.id} tags={shared.tags} label={box.label ? "section" : boxKind(box) === "image" ? "picture" : boxKind(box)} />
-            {!box.label && (
-              <button className="icon-btn subtle print-btn" aria-label={`Print this ${boxKind(box) === "image" ? "picture" : boxKind(box)}`}
-                title="Print this on its own" onPointerDown={(e) => e.stopPropagation()} onClick={() => shared.printItem(box.id)}>
-                {Icon.print}
-              </button>
-            )}
-            <button className="icon-btn subtle" aria-label="Delete text box" onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => shared.removeBox(box)}>
-              {Icon.close}
-            </button>
-          </>
+          <button className="icon-btn subtle" aria-label="Delete text box" onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => shared.removeBox(box)}>
+            {Icon.close}
+          </button>
         )}
       </div>
       {box.label && box.labelShape === "node" && dragHandle ? (
@@ -2717,6 +2761,33 @@ function DocumentView(
   return (
     <ToolsHostContext.Provider value={toolsHost}>
     <div className="subject-doc" ref={setDocEl} onContextMenu={open} onDoubleClick={open}
+      // A picture dragged in from the desktop or a screenshot's preview: added right below the
+      // block it is let go on, or at the end. (Over writing, the writing takes it in instead.)
+      onDragOver={(event) => {
+        if (!draggingFiles(event.dataTransfer)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+      }}
+      onDrop={(event) => {
+        const files = droppedPictures(event.dataTransfer);
+        if (!files.length) return;
+        event.preventDefault();
+        const blocks = [...event.currentTarget.querySelectorAll<HTMLElement>(":scope > [data-item]")];
+        const under = (event.target as HTMLElement).closest<HTMLElement>("[data-item]")
+          ?? blocks.filter((b) => b.getBoundingClientRect().top < event.clientY).at(-1) ?? null;
+        void (async () => {
+          let after = under?.dataset.item;
+          for (const file of files) {
+            try {
+              const image = await shrinkImage(file);
+              const id = shared.addBoxAfter({ image, caption: "" }, after);
+              after = id;
+            } catch {
+              /* not a picture this browser can open */
+            }
+          }
+        })();
+      }}
       // Press and hold on empty space: the same menu, for a touch screen.
       onTouchStart={(e) => {
         if (e.target !== e.currentTarget || e.touches.length !== 1) return;
@@ -2988,7 +3059,7 @@ function Whiteboard(
             const w = tableWidth(table) + 26;
             if (saved) return { id: node.id, placed: true, x: saved.x, y: saved.y, w, h };
           }
-          const width = table ? tableWidth(table) + 26 : resize?.id === node.id ? resize.w : resize?.others.has(node.id) ? clampW(resize.others.get(node.id)!.w + resize.dw) : (saved?.w ?? (node.kind === "box" && shared.boxWidth ? shared.boxWidth : CARD_W));
+          const width = table ? tableWidth(table) + 26 : resize?.id === node.id ? resize.w : resize?.others.has(node.id) ? clampW(resize.others.get(node.id)!.w + resize.dw, minWidthOf(node.id)) : (saved?.w ?? (node.kind === "box" && shared.boxWidth ? shared.boxWidth : CARD_W));
           if (saved) return { id: node.id, placed: true, x: saved.x, y: saved.y, w: width, h };
           const n = counters[node.kind]++;
           const x =
@@ -3011,6 +3082,9 @@ function Whiteboard(
    * Widen or narrow a card by dragging its right edge. Saved as the card's
    * width with its place; anything it now overlaps moves down out of the way.
    */
+  const isPicture = (id: string) => shared.boxes.some((b) => b.id === id && !b.label && !b.drawing && !b.table && !b.transcript && (b.image !== undefined || b.caption !== undefined));
+  const minWidthOf = (id: string) =>
+    isPicture(id) ? PICTURE_MIN_W : shared.boxes.some((b) => b.id === id && b.label && b.labelShape === "node") ? NODE_MIN_W : 200;
   const startResize = (id: string) => (event: React.PointerEvent) => {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -3019,6 +3093,7 @@ function Whiteboard(
     if (!start) return;
     const origin = { px: event.clientX, w: start.w };
     let w = start.w;
+    const min = minWidthOf(id);
     // Resizing one of a selection resizes them all, by as much.
     const others = new Map<string, { x: number; y: number; w: number }>();
     if (selected.has(id)) {
@@ -3028,7 +3103,7 @@ function Whiteboard(
       }
     }
     const move = (e: PointerEvent) => {
-      w = clampW(origin.w + (e.clientX - origin.px) / view.zoom);
+      w = clampW(origin.w + (e.clientX - origin.px) / view.zoom, min);
       setResize({ id, w, dw: w - origin.w, others });
     };
     const up = () => {
@@ -3039,7 +3114,7 @@ function Whiteboard(
         const dw = w - origin.w;
         place([
           { id, x: start.x, y: start.y, w },
-          ...[...others].map(([other, r]) => ({ id: other, x: r.x, y: r.y, w: clampW(r.w + dw) })),
+          ...[...others].map(([other, r]) => ({ id: other, x: r.x, y: r.y, w: clampW(r.w + dw, minWidthOf(other)) })),
         ]);
       }
     };
@@ -3140,6 +3215,35 @@ function Whiteboard(
     return labelUnder(at.x + at.w / 2, at.y + 20, id);
   };
 
+  /**
+   * A picture or drawing card dropped into writing on the board: set in there,
+   * the card leaving the board. One step: undone, the writing is as it was and
+   * the card back where it stood.
+   */
+  const embedOnDrop = (id: string, x: number, y: number) => {
+    const own = nodeEls.current.get(id);
+    const host = document.elementsFromPoint(x, y).map((el) => el.closest<HTMLElement>(".rich-body")).find((el) => el && !own?.contains(el));
+    const hostNode = host?.closest(".wb-node");
+    const target = [...nodeEls.current].find(([, el]) => el === hostNode)?.[0];
+    if (!host || !target) return false;
+    const keys = [id, target, cardNoteId(target)];
+    const before = keys.map((k) => board?.[k]);
+    if (!dropEmbedAt(x, y, id, own)) return false;
+    onBoard((current) => {
+      const item = current?.[id];
+      return item && item.kind === "box" ? put(current, { ...item, embedded: true, at: Date.now() }) : (current ?? {});
+    });
+    let after: (Board[string] | undefined)[] = [];
+    shared.recordOp({
+      undo: (b) => {
+        after = keys.map((k) => b?.[k]);
+        return keys.reduce((n, k, i) => (before[i] ? put(n, { ...before[i]!, at: Date.now() }) : n[k] && !n[k].deleted ? remove(n, k) : n), b ?? {});
+      },
+      redo: (b) => keys.reduce((n, k, i) => (after[i] ? put(n, { ...after[i]!, at: Date.now() }) : n), b ?? {}),
+    });
+    return true;
+  };
+
   const startDrag = (id: string) => (event: React.PointerEvent) => {
     if (event.button !== 0) return;
     if (connecting !== false) {
@@ -3152,7 +3256,7 @@ function Whiteboard(
           const [from, to] = [connecting, id].sort();
           const linkId = `link:${from}|${to}`;
           // Connecting two already-connected cards disconnects them.
-          onBoard((current) =>
+          shared.recorded((current) =>
             current?.[linkId] && !current[linkId].deleted
               ? remove(current, linkId)
               : put(current, { id: linkId, kind: "link", from, to, at: Date.now() }),
@@ -3217,6 +3321,9 @@ function Whiteboard(
       // A story let go over some writing is cited there, and stays where it was.
       const story = moved && e && group.size === 0 ? shared.cards.find((c) => c.id === id) : undefined;
       if (story && dropCiteAt(e!.clientX, e!.clientY, { link: story.link, title: story.title }, nodeEls.current.get(id))) return;
+      // A picture or drawing let go over writing is set into it — and ⌘Z puts the card back as it was.
+      const art = moved && e && group.size === 0 ? shared.boxes.find((b) => b.id === id && !b.label && (b.image !== undefined || b.drawing)) : undefined;
+      if (art && embedOnDrop(art.id, e!.clientX, e!.clientY)) return;
       // Anything dropped onto a section label joins that section: it lines up
       // under the label, below the stories already there, and is connected
       // to it.
@@ -3245,7 +3352,9 @@ function Whiteboard(
         }
         const [from, to] = [target, id].sort();
         place([{ id, x: label.x, y, w: origin.w }]);
-        onBoard((current) => put(current, { id: `link:${from}|${to}`, kind: "link", from, to, at: Date.now() }));
+        shared.recorded((current) => put(current, { id: `link:${from}|${to}`, kind: "link", from, to, at: Date.now() }));
+        // Lined up and linked in one gesture: one ⌘Z takes both back.
+        shared.mergeSteps(2);
         return;
       }
       if (moved && (last.x !== start.x || last.y !== start.y)) {
@@ -3784,7 +3893,7 @@ function Whiteboard(
               <button role="menuitem" title="Put everything back in tidy columns"
                 onClick={() => {
                   close();
-                  onBoard((current) => {
+                  shared.recorded((current) => {
                     let next = current ?? {};
                     for (const item of live(next)) if (item.kind === "pos") next = remove(next, item.id);
                     return next;
@@ -3803,6 +3912,10 @@ function Whiteboard(
       {nodeMenu && (() => {
         // The block right-clicked, or the whole selection if it is part of one.
         const ids = selected.has(nodeMenu.id) ? [...selected] : [nodeMenu.id];
+        // One block's own actions: its caption, printing it on its own.
+        const one = ids.length === 1 ? ids[0] : null;
+        const oneBox = one ? shared.boxes.find((b) => b.id === one) : undefined;
+        const printable = Boolean(one && (shared.cards.some((c) => c.id === one) || (oneBox && !oneBox.label)));
         const linked = live(board).filter(
           (i): i is LinkItem => i.kind === "link" && (ids.includes((i as LinkItem).from) || ids.includes((i as LinkItem).to)),
         );
@@ -3817,13 +3930,37 @@ function Whiteboard(
               <span className="wb-menu-icon">👤</span>
               {ids.length > 1 ? `Tag a contact on ${ids.length} blocks…` : "Tag a contact…"}
             </button>
+            {one && isPicture(one) && (
+              <button role="menuitem" onClick={() => { window.dispatchEvent(new CustomEvent(CAPTION_EVENT, { detail: one })); setNodeMenu(null); }}>
+                <span className="wb-menu-icon">✎</span>
+                {shared.boxes.find((b) => b.id === one)?.caption?.trim() ? "Edit caption" : "Add caption"}
+              </button>
+            )}
+            {one && printable && (
+              <button role="menuitem" onClick={() => { shared.printItem(one); setNodeMenu(null); }}>
+                <span className="wb-menu-icon">⎙</span>
+                Print{shared.cards.some((c) => c.id === one) ? " with notes" : ""}
+              </button>
+            )}
             <button role="menuitem" disabled={linked.length === 0}
               onClick={() => {
-                onBoard((current) => linked.reduce((next, l) => remove(next, l.id), current ?? {}));
+                shared.recorded((current) => linked.reduce((next, l) => remove(next, l.id), current ?? {}));
                 setNodeMenu(null);
               }}>
               <span className="wb-menu-icon">⤫</span>
               {linked.length === 0 ? "No connections" : `Unlink (${linked.length} connection${linked.length === 1 ? "" : "s"})`}
+            </button>
+            <button role="menuitem" className="danger"
+              onClick={() => {
+                const cards = shared.cards.filter((c) => ids.includes(c.id));
+                for (const card of cards) shared.removeStory(card);
+                const rest = ids.filter((x) => !cards.some((c) => c.id === x));
+                if (rest.length) shared.removeCards(rest);
+                setSelected(new Set());
+                setNodeMenu(null);
+              }}>
+              <span className="wb-menu-icon">✕</span>
+              {ids.length > 1 ? `Delete ${ids.length} blocks` : "Delete"}
             </button>
           </div>
         );
@@ -3935,12 +4072,31 @@ function Whiteboard(
           const box = event.currentTarget.getBoundingClientRect();
           setMenu({ left: event.clientX - box.left, top: event.clientY - box.top, at: toBoard(event.clientX, event.clientY) });
         }}
+        // A picture dragged in from the desktop, Finder or a screenshot's preview lands where it is let go.
+        // (Let go over writing, the writing takes it in instead.)
+        onDragOver={(event) => {
+          if (!draggingFiles(event.dataTransfer)) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+        }}
+        onDrop={(event) => {
+          const files = droppedPictures(event.dataTransfer);
+          if (!files.length) return;
+          event.preventDefault();
+          markBoardUsed();
+          const at = toBoard(event.clientX, event.clientY);
+          files.forEach((file, i) => {
+            void shrinkImage(file)
+              .then((image) => shared.addBox({ x: Math.round(at.x - 140 + i * 28), y: Math.round(at.y - 80 + i * 28) }, { image, caption: "" }))
+              .catch(() => {});
+          });
+        }}
       >
         <div className="wb-layer" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}>
           <svg className="wb-lines" width={1} height={1} style={haze > 0 && !lowPower ? { filter: `blur(${blurPx / view.zoom}px)`, transition: "filter 0.35s ease" } : undefined}>
             {aiLinks.map((link) => line(link.id, link.from, link.to, "wb-line ai"))}
             {userLinks.map((link) =>
-              line(link.id, link.from, link.to, "wb-line", () => onBoard((current) => remove(current, link.id))),
+              line(link.id, link.from, link.to, "wb-line", () => shared.recorded((current) => remove(current, link.id))),
             )}
           </svg>
           {marquee && (
@@ -3997,14 +4153,27 @@ function Whiteboard(
                 }}
               >
                 {node.render(startDrag(node.id))}
+                {/* A picture scales from its corner; other cards widen from their side. */}
                 <div
-                  className="wb-resize"
+                  className={`wb-resize${isPicture(node.id) ? " corner" : ""}`}
                   role="separator"
                   aria-orientation="vertical"
-                  aria-label="Drag to make this card wider or narrower"
+                  aria-label={isPicture(node.id) ? "Drag the corner to make this picture bigger or smaller" : "Drag to make this card wider or narrower"}
                   title="Drag to resize"
                   onPointerDown={startResize(node.id)}
                 />
+                {/* On a touch screen, where there is no right-click: the card's menu. */}
+                {(node.kind === "card" || node.kind === "box") && (
+                  <button className="wb-more" aria-label="Card menu" title="More"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      const r = e.currentTarget.getBoundingClientRect();
+                      const box = canvas.current!.getBoundingClientRect();
+                      setNodeMenu({ id: node.id, left: r.right - box.left - 180, top: r.bottom - box.top + 4 });
+                    }}>
+                    ⋯
+                  </button>
+                )}
               </div>
             );
           })}

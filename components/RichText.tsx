@@ -242,6 +242,23 @@ export function dropCiteAt(x: number, y: number, cite: Cite, except?: Element | 
   return true;
 }
 
+/**
+ * A picture or drawing card let go over some writing — a text box, a story's
+ * notes, a table cell — is set into it where it landed, and the writing is
+ * saved at once. The writing it went into, or null if there was none there.
+ */
+export function dropEmbedAt(x: number, y: number, id: string, except?: Element | null): HTMLElement | null {
+  const node = document.elementsFromPoint(x, y)
+    .map((el) => el.closest<HTMLElement>(".rich-body"))
+    .find((el): el is HTMLElement => !!el && !except?.contains(el));
+  if (!node) return null;
+  caretInto(node, x, y);
+  document.execCommand("insertHTML", false, `<img data-embed="${id.replace(/[^A-Za-z0-9_:-]/g, "")}">`);
+  // Saved now, not after a pause: an undo straight away must find it saved.
+  node.blur();
+  return node;
+}
+
 /** A click on a citation: its card, or the story itself with ⌘/Ctrl. True when handled. */
 export function followCite(target: EventTarget | null, event: { metaKey: boolean; ctrlKey: boolean; preventDefault: () => void }): boolean {
   const cite = (target as HTMLElement | null)?.closest?.<HTMLAnchorElement>("a[data-cite]");
