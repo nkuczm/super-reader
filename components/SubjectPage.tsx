@@ -21,6 +21,7 @@ import type { Writing } from "./useAccount";
 import type { Note, NoteEntry } from "@/lib/notes";
 import { omissionsHtml, putFactNotes, researchOf, scriptQuotes, scriptRows, type FactCheckResult, type SourceTarget } from "@/lib/factcheck";
 import { addTranscriptNote, documentOrder, LABEL_COLORS, labelColorOf, safeHref, youtubeThumbnail, type StoryItem } from "@/lib/subjects";
+import { dragGroup } from "@/lib/drag-group";
 import { NODE_FONT_MAX, NODE_FONT_MIN, nodeFontSize } from "@/lib/node-fit";
 import { titleFromUrl } from "@/lib/manual";
 import {
@@ -3172,17 +3173,17 @@ function Whiteboard(
     const origin = { px: event.clientX, py: event.clientY, x: start.x, y: start.y, w: start.w };
     let last = { x: start.x, y: start.y };
     // What moves with it: the rest of a selection it is part of, and
-    // everything connected to any section label that moves.
-    const movers = new Set<string>(selected.has(id) ? selected : [id]);
-    if (!selected.has(id) && selected.size) setSelected(new Set());
+    // what hangs from any section label or node that moves: a label carries
+    // what is linked to it; a node, only the nodes smaller than it (lib/drag-group.ts).
     const links = live(board).filter((i): i is LinkItem => i.kind === "link");
-    for (const mover of [...movers]) {
-      if (!labelIds.has(mover)) continue;
-      for (const l of links) {
-        if (l.from === mover) movers.add(l.to);
-        if (l.to === mover) movers.add(l.from);
-      }
-    }
+    const nodeIds = new Set(shared.boxes.filter((b) => b.label && b.labelShape === "node").map((b) => b.id));
+    const movers = dragGroup(
+      selected.has(id) ? selected : [id],
+      links,
+      (other) => (nodeIds.has(other) ? "node" : labelIds.has(other) ? "label" : "block"),
+      (other) => positions.get(other)?.w ?? 0,
+    );
+    if (!selected.has(id) && selected.size) setSelected(new Set());
     movers.delete(id);
     const group = new Map<string, { x: number; y: number; w: number }>();
     for (const other of movers) {
