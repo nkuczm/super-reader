@@ -6,6 +6,7 @@ import { nodeFontSize } from "@/lib/node-fit";
 import { safeGrid } from "@/lib/sheet";
 import { safeTranscript } from "@/lib/transcript";
 import {
+  captionHtmlOf,
   bylineOf,
   drawingSvg,
   labelColorOf,
@@ -100,7 +101,9 @@ function Block({ node, w }: { node: Node; w: number }) {
       <div className="bt-box bt-picture">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={image} alt="" />
-        {box.caption && <div className="bt-caption">{box.caption}</div>}
+        {captionHtmlOf(box) && (
+          <div className="bt-text bt-caption" dangerouslySetInnerHTML={{ __html: sanitizeRichText(captionHtmlOf(box)).replace(/<img[^>]*>/g, "") }} />
+        )}
       </div>
     );
   }

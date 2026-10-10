@@ -27,6 +27,7 @@ import { titleFromUrl } from "@/lib/manual";
 import {
   addStory,
   applySynthesis,
+  captionHtmlOf,
   cardNoteId,
   cardsOf,
   composeCardDoc,
@@ -1169,6 +1170,14 @@ export default function SubjectPage(props: Props) {
     // A box deleted meanwhile stays deleted: its editor saving on the way out must not bring it back.
     setBox: (box: BoxItem, html: string) =>
       onBoard((current) => (current?.[box.id]?.deleted ? current : put(current, { ...box, html, at: Date.now() }))),
+    // A picture's caption is its html, with a plain-text copy for its alt text and older copies of the app.
+    setCaption: (box: BoxItem, html: string) =>
+      onBoard((current) => {
+        const held = current?.[box.id];
+        if (held?.deleted) return current ?? {};
+        const base = held && held.kind === "box" ? held : box;
+        return put(current, { ...base, html, caption: textOf(html).replace(/\s+/g, " ").trim().slice(0, 300), at: Date.now() });
+      }),
     removeStory,
     addBoxAfter,
     recorded,
@@ -1723,6 +1732,7 @@ type Shared = {
   decide: (suggestion: SuggestItem, state: "accepted" | "dismissed") => void;
   dismissInsight: (insight: InsightItem) => void;
   setBox: (box: BoxItem, html: string) => void;
+  setCaption: (box: BoxItem, html: string) => void;
   resolveEmbed: (id: string) => string | undefined;
   embedBox: (id: string) => void;
   dropImage: (file: File) => Promise<string | null>;
@@ -2108,6 +2118,15 @@ function NodeLabel({ box, shared }: { box: BoxItem; shared: Shared }) {
   );
 }
 
+/** A picture's caption: a text box under it, with everything a text box can do. */
+function PictureCaption({ box, shared }: { box: BoxItem; shared: Shared }) {
+  return (
+    <RichText html={captionHtmlOf(box)} placeholder="Add a caption…"
+      resolveEmbed={shared.resolveEmbed} onEmbed={shared.embedBox} onDropImage={shared.dropImage} onReplaceEmbed={shared.replaceEmbed}
+      onPasteLink={(url) => shared.storyFromLink(url, box.id)} onChange={(html) => shared.setCaption(box, html)} />
+  );
+}
+
 function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dragHandle?: (e: React.PointerEvent) => void }) {
   const [styling, setStyling] = useState(false);
   // In the document a block is edited from the keyboard — Backspace takes it
@@ -2118,7 +2137,7 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
   if (dragHandle && !box.label && !box.drawing && !box.table && !box.transcript && (box.image !== undefined || box.caption !== undefined)) {
     return (
       <div className="subject-box image-box">
-        <ImageView box={box} onChange={(change) => shared.updateBox(box, change)} onRemove={() => shared.removeBox(box)} dragHandle={dragHandle} />
+        <ImageView box={box} onRemove={() => shared.removeBox(box)} dragHandle={dragHandle} caption={<PictureCaption box={box} shared={shared} />} />
         <TagBadges id={box.id} tags={shared.tags} />
       </div>
     );
@@ -2232,7 +2251,7 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
       ) : box.drawing ? (
         <DrawingPad box={box} onChange={(change) => shared.updateBox(box, change)} />
       ) : box.image !== undefined || box.caption !== undefined ? (
-        <ImageView box={box} onChange={(change) => shared.updateBox(box, change)} onRemove={() => shared.removeBox(box)} />
+        <ImageView box={box} onRemove={() => shared.removeBox(box)} caption={<PictureCaption box={box} shared={shared} />} />
       ) : (
         <RichText html={box.html} placeholder="Write anything…" autoFocus={shared.focusBox === box.id}
           resolveEmbed={shared.resolveEmbed} onEmbed={shared.embedBox} onDropImage={shared.dropImage} onReplaceEmbed={shared.replaceEmbed}
@@ -3986,7 +4005,15 @@ function Whiteboard(
             {one && isPicture(one) && (
               <button role="menuitem" onClick={() => { window.dispatchEvent(new CustomEvent(CAPTION_EVENT, { detail: one })); setNodeMenu(null); }}>
                 <span className="wb-menu-icon">✎</span>
-                {shared.boxes.find((b) => b.id === one)?.caption?.trim() ? "Edit caption" : "Add caption"}
+                {oneBox && captionHtmlOf(oneBox) ? "Edit caption" : "Add caption"}
+              </button>
+            )}
+            {/* A caption sits straight on the board; a card behind it is a choice. */}
+            {one && isPicture(one) && oneBox && captionHtmlOf(oneBox) && (
+              <button role="menuitemcheckbox" aria-checked={Boolean(oneBox.captionBackground)}
+                onClick={() => { shared.updateBox(oneBox, { captionBackground: !oneBox.captionBackground }); setNodeMenu(null); }}>
+                <span className="wb-menu-icon">{oneBox.captionBackground ? "✓" : "▢"}</span>
+                Caption background
               </button>
             )}
             {one && printable && (

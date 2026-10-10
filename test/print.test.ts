@@ -83,3 +83,21 @@ test("the printed page escapes its header and carries the page stylesheet", () =
   assert.match(page, /@page/);
   assert.match(page, /<footer class="print-foot">https:\/\/x.example\/a<\/footer>/);
 });
+
+test("a picture's caption is written like a text box, and printed and exported as writing", async () => {
+  const { captionHtmlOf } = await import("../lib/subjects");
+  const png = "data:image/png;base64,iVBORw0KGgo=";
+  const rich = { id: "p", kind: "box", at: 1, image: png, caption: "Mayor at the podium", html: "<p><b>Mayor</b> at the podium</p><ul><li>March 3</li></ul>" } as BoxItem;
+  assert.equal(captionHtmlOf(rich), rich.html);
+  // From before: a line of plain text, shown as a paragraph — never as markup.
+  assert.equal(captionHtmlOf({ html: "", caption: "Fish & <chips>" }), "<p>Fish &amp; &lt;chips&gt;</p>");
+  // Emptied, it is no caption at all, whatever its plain copy once said.
+  assert.equal(captionHtmlOf({ html: "<p>​</p>", caption: "" }), "");
+  for (const out of [{}, { print: true }]) {
+    const html = boxHtml(rich, undefined, out);
+    assert.match(html, /<img src="data:image\/png/);
+    assert.match(html, /<b>Mayor<\/b> at the podium/, "its formatting kept");
+    assert.match(html, /<li>March 3<\/li>/);
+    assert.doesNotMatch(html, /<i>Mayor|figcaption/, "not a line of small italics");
+  }
+});
