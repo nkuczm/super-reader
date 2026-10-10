@@ -51,8 +51,10 @@ const LIST_ICON: Record<ListKind, React.ReactNode> = {
  * applies where the caret is. The four list buttons are one, whose menu
  * holds every kind; a web link and a subject link share one too.
  */
-function ToolButtons({ state = {}, run, history, onHistory }: {
+function ToolButtons({ state = {}, run, history, onHistory, open }: {
   state?: ToolState;
+  /** The tool whose menu is open: its button shows as pressed while it is. */
+  open?: ToolAction | null;
   /** Absent: shown but not yet usable (nothing is being written in). */
   run?: (action: ToolAction, at: DOMRect) => void;
   /** Undo and redo at the front (the fixed bars, which have no other place for them). */
@@ -63,8 +65,8 @@ function ToolButtons({ state = {}, run, history, onHistory }: {
   const button = (action: ToolAction, label: string, content: React.ReactNode, on = false, menu = false) => {
     const go = run ?? (onHistory && (action === "undo" || action === "redo") ? () => onHistory(action === "redo") : undefined);
     return (
-    <button type="button" className={`rt-btn${on ? " on" : ""}${menu ? " menu" : ""}`} aria-label={label} title={label}
-      aria-pressed={menu ? undefined : on} aria-haspopup={menu ? "menu" : undefined} disabled={!go}
+    <button type="button" className={`rt-btn${on ? " on" : ""}${menu ? " menu" : ""}${open === action ? " open" : ""}`} aria-label={label} title={label}
+      aria-pressed={menu ? undefined : on} aria-haspopup={menu ? "menu" : undefined} aria-expanded={menu ? open === action : undefined} disabled={!go}
       onClick={(e) => go?.(action, e.currentTarget.getBoundingClientRect())}>
       {content}
       {menu && ICON.chevron}
@@ -1032,6 +1034,7 @@ export default function RichText({
 
   /** What the caret is in, so the tools can show it: bold, a heading, which kind of list. */
   const [toolState, setToolState] = useState<ToolState>({});
+  const readTools = useRef<() => void>(() => {});
   useEffect(() => {
     if (!focused) return;
     const read = () => {
@@ -1050,7 +1053,8 @@ export default function RichText({
       }
       const lit = at.closest("mark") || [...el.current.querySelectorAll("span[style]")].some((span) => span.contains(at) && isHighlight(span.getAttribute("style") ?? ""));
       const next: ToolState = {
-        b: document.queryCommandState("bold"),
+        // A heading is drawn bold; Bold shows as on there only for words made bold.
+        b: at.closest("h3") ? Boolean(at.closest("b, strong")) : document.queryCommandState("bold"),
         i: document.queryCommandState("italic"),
         hl: Boolean(lit),
         h: Boolean(at.closest("h3")),
@@ -1058,9 +1062,19 @@ export default function RichText({
       };
       setToolState((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
     };
+    readTools.current = read;
     read();
+    // Bold switched on with nothing selected moves no caret, so no selection change says so:
+    // read again after each key and each click as well.
+    const soon = () => requestAnimationFrame(read);
     document.addEventListener("selectionchange", read);
-    return () => document.removeEventListener("selectionchange", read);
+    document.addEventListener("keyup", soon, true);
+    document.addEventListener("mouseup", soon, true);
+    return () => {
+      document.removeEventListener("selectionchange", read);
+      document.removeEventListener("keyup", soon, true);
+      document.removeEventListener("mouseup", soon, true);
+    };
   }, [focused]);
 
   /** A tool's own menu — the kinds of list, the kinds of link — under its button. */
@@ -1089,9 +1103,10 @@ export default function RichText({
       if (!press.defaultPrevented) format(action);
       return;
     }
-    if (action === "bold" || action === "italic") return format(action);
-    if (action === "highlight") return toggleHighlight();
-    if (action === "heading") return format("formatBlock", toolState.h ? "p" : "h3");
+    const after = () => requestAnimationFrame(() => readTools.current());
+    if (action === "bold" || action === "italic") return (format(action), after());
+    if (action === "highlight") return (toggleHighlight(), after());
+    if (action === "heading") return (format("formatBlock", toolState.h ? "p" : "h3"), after());
     const kind = action;
     setToolMenu((open) => (open?.kind === kind ? null : { kind, left: Math.min(at.left, window.innerWidth - 230), top: at.bottom + 6 }));
   };
@@ -1100,6 +1115,7 @@ export default function RichText({
     if (kind === "bullet") format("insertUnorderedList");
     else if (kind === "check") toggleChecklist();
     else toggleNumbered(kind.startsWith("A") ? "upper" : kind.startsWith("a"), 1, kind.endsWith(")"));
+    requestAnimationFrame(() => readTools.current());
   };
   const LISTS: [ListKind, string, string][] = [
     ["bullet", "Bulleted", "⌘⇧8"],
@@ -1160,7 +1176,7 @@ export default function RichText({
     <div ref={tools} className={`rich-tools${docked ? " docked" : hosted ? " hosted" : side ? " side" : ""}`}
       style={docked ? { top: vvTop } : side ? { left: side.left, top: side.top } : undefined}
       onMouseDown={(event) => event.preventDefault()}>
-      <ToolButtons state={toolState} run={runTool} history={docked || hosted} />
+      <ToolButtons state={toolState} run={runTool} history={docked || hosted} open={toolMenu?.kind ?? null} />
       {docked && (
         <button type="button" className="rich-done" title="Done — close the keyboard"
           aria-label="Done — close the keyboard"
