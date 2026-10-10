@@ -52,9 +52,9 @@ function findAll(root: HTMLElement, needle: string, board: boolean): Hit[] {
       if (n.nodeType === Node.ELEMENT_NODE) {
         const el = n as Element;
         if (el.matches(SKIP)) return NodeFilter.FILTER_REJECT;
-        // A label's words live in its value, not in text nodes.
-        if (el.matches("input.section-label")) {
-          const input = el as HTMLInputElement;
+        // A label's words live in its value, not in text nodes (a node's name is a textarea).
+        if (el.matches("input.section-label, textarea.section-label")) {
+          const input = el as HTMLInputElement | HTMLTextAreaElement;
           if (input.value.toLowerCase().includes(needle)) hits.push({ range: null, el: input, node: nodeOf(input), order: order++ });
           return NodeFilter.FILTER_REJECT;
         }

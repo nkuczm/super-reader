@@ -2,6 +2,7 @@
 
 import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { layoutBoard, GAP } from "@/lib/board-layout";
+import { nodeFontSize } from "@/lib/node-fit";
 import { safeGrid } from "@/lib/sheet";
 import { safeTranscript } from "@/lib/transcript";
 import {
@@ -67,7 +68,7 @@ function edgeToward(from: Rect, to: Rect) {
 }
 
 /** What a block shows in the thumbnail: its own content, read-only, nothing interactive. */
-function Block({ node }: { node: Node }) {
+function Block({ node, w }: { node: Node; w: number }) {
   if (node.kind === "card") {
     const { card } = node;
     const byline = bylineOf(card);
@@ -87,7 +88,8 @@ function Block({ node }: { node: Node }) {
   }
   const box = node.box;
   if (box.label && box.labelShape === "node") {
-    return <div className="bt-node-circle" style={{ "--label-color": labelColorOf(box) } as React.CSSProperties}>{textOf(box.html).trim()}</div>;
+    const name = textOf(box.html).trim();
+    return <div className="bt-node-circle" style={{ "--label-color": labelColorOf(box), fontSize: nodeFontSize(name, w) } as React.CSSProperties}>{name}</div>;
   }
   if (box.label) {
     return <div className="bt-label" style={{ "--label-color": labelColorOf(box) } as React.CSSProperties}>{textOf(box.html).trim()}</div>;
@@ -227,7 +229,7 @@ function BoardThumb({ board, cards }: { board: Board | undefined; cards: Card[] 
           </svg>
           {view.shown.map(({ node, rect }) => (
             <div key={node.id} className="bt-node" style={{ left: rect.x - view.x, top: rect.y - view.y, width: rect.w, maxHeight: rect.h }}>
-              <Block node={node} />
+              <Block node={node} w={rect.w} />
             </div>
           ))}
         </div>
