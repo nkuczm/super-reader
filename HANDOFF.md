@@ -202,6 +202,16 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   the changes since the last outweigh it, not every 256 KB — with a
   document of a few megabytes, every few saves used to copy all of it, and
   each copy is kept thirty days.
+- **A Drive backup stops in time to answer.** It rewrote every changed
+  subject one after another, each upload allowed 20 seconds, inside a
+  60-second function; past that the function is killed and answers nothing,
+  so the device could only say "Not backed up to Drive" and ask again for
+  the same work (10 Oct 2026). Now three upload at once, none is started
+  with under 12 seconds of a 45-second budget left, the answer says how many
+  are `more`, and the device asks again for those. A subject whose last
+  attempt failed (`tried_at`) goes behind the rest, and repeated failures
+  are retried at 5, 10, 20 … 60 minutes. Each run logs its timings and sizes
+  (`backup {…}`, no names) — read those before guessing why one is slow.
 - **The stamp lives in a ref as well as state.** An effect that depends on the
   value it sets re-stamps on every render, and the debounced push never
   survives long enough to fire — which looks exactly like sync being broken.

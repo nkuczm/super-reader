@@ -123,11 +123,17 @@ const UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
 const DOC = "application/vnd.google-apps.document";
 const FOLDER = "application/vnd.google-apps.folder";
 
-async function drive(accessToken: string, url: string, init: RequestInit = {}) {
+/**
+ * One call to Drive. It gives up after 20 seconds, or at `deadline` (a time,
+ * in ms) if that comes first: a backup has to answer before its function is
+ * stopped, and one stopped mid-way answers nothing at all.
+ */
+async function drive(accessToken: string, url: string, init: RequestInit = {}, deadline?: number) {
+  const wait = Math.max(1000, Math.min(20000, deadline ? deadline - Date.now() : 20000));
   const res = await fetch(url, {
     ...init,
     headers: { authorization: `Bearer ${accessToken}`, ...(init.headers ?? {}) },
-    signal: AbortSignal.timeout(20000),
+    signal: AbortSignal.timeout(wait),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) console.error("drive request failed", res.status, JSON.stringify(data?.error ?? data).slice(0, 500));
@@ -165,8 +171,8 @@ export async function createFolder(accessToken: string, name: string): Promise<s
 }
 
 /** Whether a file this app made is still there (not deleted or trashed). */
-export async function fileAlive(accessToken: string, fileId: string): Promise<boolean> {
-  const { ok, data } = await drive(accessToken, `${DRIVE}/${encodeURIComponent(fileId)}?fields=id,trashed`);
+export async function fileAlive(accessToken: string, fileId: string, deadline?: number): Promise<boolean> {
+  const { ok, data } = await drive(accessToken, `${DRIVE}/${encodeURIComponent(fileId)}?fields=id,trashed`, {}, deadline);
   return ok && !data.trashed;
 }
 
@@ -179,7 +185,7 @@ function multipart(metadata: object, html: string) {
 }
 
 /** A new Google Doc from HTML; Drive converts it. */
-export async function createDoc(accessToken: string, params: { name: string; html: string; folder?: string }) {
+export async function createDoc(accessToken: string, params: { name: string; html: string; folder?: string }, deadline?: number) {
   const { body, contentType } = multipart(
     { name: params.name, mimeType: DOC, ...(params.folder ? { parents: [params.folder] } : {}) },
     params.html,
@@ -188,18 +194,19 @@ export async function createDoc(accessToken: string, params: { name: string; htm
     method: "POST",
     headers: { "content-type": contentType },
     body,
-  });
+  }, deadline);
   if (!ok || !data.id) throw new Error(driveProblem(status, data, "create the Google Doc"));
   return { id: data.id as string, url: (data.webViewLink as string) ?? `https://docs.google.com/document/d/${data.id}/edit` };
 }
 
 /** Replace a Doc's contents (and title) with new HTML. */
-export async function updateDoc(accessToken: string, fileId: string, params: { name: string; html: string }) {
+export async function updateDoc(accessToken: string, fileId: string, params: { name: string; html: string }, deadline?: number) {
   const { body, contentType } = multipart({ name: params.name }, params.html);
   const { ok, status, data } = await drive(
     accessToken,
     `${UPLOAD}/${encodeURIComponent(fileId)}?uploadType=multipart&fields=id`,
     { method: "PATCH", headers: { "content-type": contentType }, body },
+    deadline,
   );
   if (!ok) throw new Error(driveProblem(status, data, "update the Google Doc"));
 }
