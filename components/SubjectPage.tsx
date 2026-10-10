@@ -1878,6 +1878,13 @@ function TagBadges({ id, tags }: { id: string; tags: Tags }) {
   );
 }
 
+/**
+ * Start a connection on the whiteboard from this block (detail: its id), as
+ * its first end. Sent from a menu that lives inside the block — a story's
+ * headline — which the whiteboard's own state cannot be reached from.
+ */
+const CONNECT_EVENT = "super-reader:connect-from";
+
 function StoryCard({
   card,
   own,
@@ -1941,6 +1948,11 @@ function StoryCard({
           <div className="cite-menu" role="menu" style={{ left: citeMenu.x, top: citeMenu.y }}>
             {citeMenu.copied ? <span className="cite-menu-done">Copied — paste it into any text</span> : (
               <>
+                {dragHandle && (
+                  <button role="menuitem" onClick={() => { setCiteMenu(null); window.dispatchEvent(new CustomEvent(CONNECT_EVENT, { detail: card.id })); }}>
+                    Connect
+                  </button>
+                )}
                 <button role="menuitem" onClick={() => void copyCite()}>Cite source</button>
                 <button role="menuitem" onClick={() => { setCiteMenu(null); shared.onOpenArticle(card.link, card.title, ""); }}>Open story</button>
               </>
@@ -2989,6 +3001,24 @@ function Whiteboard(
   /** A card being resized, and any others selected with it — each by the same amount. */
   const [resize, setResize] = useState<{ id: string; w: number; dw: number; others: Map<string, { x: number; y: number; w: number }> } | null>(null);
   const [connecting, setConnecting] = useState<string | null | false>(false);
+  // A block's own menu (a story's headline) starts a connection from it.
+  useEffect(() => {
+    const from = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail;
+      if (typeof id === "string") setConnecting(id);
+    };
+    window.addEventListener(CONNECT_EVENT, from);
+    return () => window.removeEventListener(CONNECT_EVENT, from);
+  }, []);
+  // Escape lets go of a connection half made.
+  useEffect(() => {
+    if (connecting === false) return;
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setConnecting(false);
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [connecting]);
+  /** Whether the press that opened a menu began in text already being written in. */
+  const typingAtPress = useRef(false);
   // Connecting turns every card into a plain block: whatever was being typed in lets go.
   useEffect(() => {
     if (connecting === false) return;
@@ -3832,6 +3862,22 @@ function Whiteboard(
         })
     : [];
   const grouped = new Set(sections.flatMap((sec) => sec.rects.map((r) => r.id)));
+  /**
+   * Zoomed out, a node's circle and a section's title are drawn over the
+   * board, larger than the block they stand for, and let every click through
+   * to what is under them. A right-click on one is meant for that header.
+   */
+  const farHeaderAt = (x: number, y: number): string | null => {
+    if (!far || !canvas.current) return null;
+    for (const el of canvas.current.querySelectorAll<HTMLElement>("[data-far]")) {
+      if (Number(el.style.opacity || 1) < 0.3) continue;
+      const r = el.getBoundingClientRect();
+      if (x < r.left || x > r.right || y < r.top || y > r.bottom) continue;
+      if (el.classList.contains("wb-far-node") && Math.hypot(x - (r.left + r.right) / 2, y - (r.top + r.bottom) / 2) > r.width / 2) continue;
+      return el.dataset.far ?? null;
+    }
+    return null;
+  };
   // Headers that would collide are nudged apart, top to bottom, after measuring.
   const titleEls = useRef(new Map<string, HTMLDivElement>());
   useLayoutEffect(() => {
@@ -3921,6 +3967,11 @@ function Whiteboard(
         );
         return (
           <div className="wb-menu" role="menu" style={{ left: nodeMenu.left, top: nodeMenu.top }} onPointerDown={(e) => e.stopPropagation()}>
+            {/* This block is the first end; the next one clicked is the second. */}
+            <button role="menuitem" onClick={() => { setConnecting(nodeMenu.id); setNodeMenu(null); }}>
+              <span className="wb-menu-icon">↔</span>
+              Connect
+            </button>
             <button role="menuitem"
               onClick={(e) => {
                 const r = e.currentTarget.getBoundingClientRect();
@@ -4070,6 +4121,11 @@ function Whiteboard(
           event.preventDefault();
           markBoardUsed();
           const box = event.currentTarget.getBoundingClientRect();
+          const header = farHeaderAt(event.clientX, event.clientY);
+          if (header) {
+            setNodeMenu({ id: header, left: event.clientX - box.left, top: event.clientY - box.top });
+            return;
+          }
           setMenu({ left: event.clientX - box.left, top: event.clientY - box.top, at: toBoard(event.clientX, event.clientY) });
         }}
         // A picture dragged in from the desktop, Finder or a screenshot's preview lands where it is let go.
@@ -4138,16 +4194,23 @@ function Whiteboard(
                     : {}),
                 }}
                 onContextMenu={(event) => {
-                  // Typing keeps the browser's own menu (spelling, copy and paste).
-                  if ((event.target as HTMLElement).closest(".rich-body, input, textarea")) return;
+                  // Writing keeps the browser's own menu (spelling, copy and paste): text that
+                  // was being typed in when the right-click began, or has words selected in it.
+                  // Anywhere else on a block — its words included — opens the block's menu.
+                  const field = (event.target as HTMLElement).closest(".rich-body, input, textarea");
+                  const selection = window.getSelection();
+                  const marked = Boolean(field && selection && !selection.isCollapsed && field.contains(selection.anchorNode));
+                  if (field && (typingAtPress.current || marked)) return;
                   event.preventDefault();
                   event.stopPropagation();
                   const box = canvas.current!.getBoundingClientRect();
-                  setNodeMenu({ id: node.id, left: event.clientX - box.left, top: event.clientY - box.top });
+                  setNodeMenu({ id: farHeaderAt(event.clientX, event.clientY) ?? node.id, left: event.clientX - box.left, top: event.clientY - box.top });
                 }}
                 onPointerEnter={() => setFocus(node.id)}
                 onPointerLeave={() => setFocus((current) => (current === node.id ? null : current))}
                 onPointerDownCapture={(event) => {
+                  const field = (event.target as HTMLElement).closest(".rich-body, input, textarea");
+                  typingAtPress.current = Boolean(field && document.activeElement && field.contains(document.activeElement));
                   // In connect mode, any click on a node picks it.
                   if (connecting !== false) startDrag(node.id)(event);
                 }}
@@ -4185,7 +4248,7 @@ function Whiteboard(
             // As large as the circle allows, as in the circle itself — and no larger than reads on screen.
             const nodeType = Math.min(nodeFontSize(sec.text, d, d * 0.21, d * 0.08), 15 / view.zoom);
               return (
-                <div key={`node-${sec.id}`} className="wb-far-node" aria-hidden="true"
+                <div key={`node-${sec.id}`} className="wb-far-node" aria-hidden="true" data-far={sec.id}
                   style={{
                     left: sec.node.x + sec.node.w / 2, top: sec.node.y + sec.node.w / 2, width: d, height: d,
                     background: sec.color, fontSize: nodeType,
@@ -4199,7 +4262,7 @@ function Whiteboard(
             const fit = ((sec.box.x1 - sec.box.x0) * view.zoom * 0.9) / Math.max(4, Math.max(...sec.text.split(/\s+/).map((w) => w.length)) * 0.6);
             const px = Math.min(40, Math.max(22, fit));
             return (
-              <div key={`title-${sec.id}`} className="wb-far-title" aria-hidden="true"
+              <div key={`title-${sec.id}`} className="wb-far-title" aria-hidden="true" data-far={sec.id}
                 style={{
                   left: cx, top: cy, opacity: Math.min(1, haze * 1.4),
                   fontSize: px / view.zoom,
