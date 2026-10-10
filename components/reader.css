@@ -3210,13 +3210,13 @@
 /* A bold or italic line, a bold or italic number. */
 .rich-body li[data-b]::marker, .rich-body li[data-b]::before { font-weight: 700; }
 .rich-body li[data-i]::marker, .rich-body li[data-i]::before { font-style: italic; }
-/* A highlighted line, a highlighted number: a marker cannot take a background, so it is drawn. */
-.rich-body ol > li[data-hl], .rich-body ul:not([data-check]) > li[data-hl] { list-style-type: none; position: relative; }
-.rich-body ol > li[data-hl]::before, .rich-body ul:not([data-check]) > li[data-hl]::before {
+/* A highlighted line, a highlighted number: a marker cannot take a background, so it is drawn.
+   Not a bullet, though — a highlighted bullet point keeps a plain bullet. */
+.rich-body ol > li[data-hl] { list-style-type: none; position: relative; }
+.rich-body ol > li[data-hl]::before {
   position: absolute; right: 100%; margin-right: 0.3em; padding: 0 0.15em; border-radius: 2px;
   background: #fde68a; color: #1f2937; white-space: nowrap;
 }
-.rich-body ul:not([data-check]) > li[data-hl]::before { content: "•"; }
 .rich-body ol[data-kind="1"] > li[data-hl]::before { content: counter(list-item, decimal) "."; }
 .rich-body ol[data-kind="a"] > li[data-hl]::before { content: counter(list-item, lower-alpha) "."; }
 .rich-body ol[data-kind="A"] > li[data-hl]::before { content: counter(list-item, upper-alpha) "."; }
