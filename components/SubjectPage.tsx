@@ -3,7 +3,7 @@
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons";
-import RichText, { dropCiteAt, dropEmbedAt, forceNextHtml, TOOL_LABELS, ToolsHostContext } from "./RichText";
+import RichText, { dropCiteAt, dropEmbedAt, forceNextHtml, ToolbarIdle, ToolsHostContext } from "./RichText";
 import { CITE_OPEN_EVENT, CITE_TYPE, citeCardHtml, citeChipHtml, inlineCardLinks, setCiteSources, type Cite } from "@/lib/cite";
 import FlagButton from "./FlagButton";
 import type { FlagInput } from "@/lib/flags";
@@ -396,6 +396,8 @@ export default function SubjectPage(props: Props) {
   const { note, board, onBoard, keyHeaders, hasAiKey, ai } = props;
   const meta = metaOf(board);
   const [historyOpen, setHistoryOpen] = useState(false);
+  /** The bar of text tools under the header, which every box in the subject writes its tools into. */
+  const [formatHost, setFormatHost] = useState<HTMLDivElement | null>(null);
   useClickToType();
   // A file let go anywhere in a subject but on somewhere that takes it must not replace the app with the file.
   useEffect(() => {
@@ -1541,6 +1543,14 @@ export default function SubjectPage(props: Props) {
         />
       )}
       {aiStatus && <div className="subject-ai-bar">{aiStatus}</div>}
+      {/* One bar of text tools under the header, as in a Doc, for whichever box is being
+          written in — document or whiteboard — so none of them pops up tools of its own. */}
+      <div className="doc-toolbar subject-format-bar" ref={setFormatHost} role="toolbar" aria-label="Text tools" onMouseDown={(e) => e.preventDefault()}>
+        <div className="doc-toolbar-idle">
+          <ToolbarIdle onHistory={(redo) => void stepHistory(redo)} />
+        </div>
+      </div>
+      <ToolsHostContext.Provider value={formatHost}>
       <div className={`subject-body${contactsShown ? " with-contacts" : ""}`}>
       <div className={`subject-main${railOpen ? " rail-open" : " rail-closed"}${props.hideBoxes ? " quiet-boxes" : ""}`}
         style={props.boxWidth ? ({ "--box-w": `${props.boxWidth}px` } as React.CSSProperties) : undefined}>
@@ -1675,6 +1685,7 @@ export default function SubjectPage(props: Props) {
         </aside>
       )}
       </div>
+      </ToolsHostContext.Provider>
     </div>
   );
 }
@@ -2754,8 +2765,6 @@ function DocumentView(
     run();
     setMenu(null);
   };
-  // One fixed bar of text tools at the top of the document, for whichever block is being written in.
-  const [toolsHost, setToolsHost] = useState<HTMLDivElement | null>(null);
   // The document written from the keyboard; a story, table or picture selected whole.
   const [docEl, setDocEl] = useState<HTMLDivElement | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
@@ -2771,7 +2780,6 @@ function DocumentView(
   const stack = documentOrder(entries, shared.board).map((id) => byId.get(id)!);
 
   return (
-    <ToolsHostContext.Provider value={toolsHost}>
     <div className="subject-doc" ref={setDocEl} onContextMenu={open} onDoubleClick={open}
       // A picture dragged in from the desktop or a screenshot's preview: added right below the
       // block it is let go on, or at the end. (Over writing, the writing takes it in instead.)
@@ -2818,11 +2826,6 @@ function DocumentView(
         if (h && t && Math.hypot(t.clientX - h.x, t.clientY - h.y) > 8) { clearTimeout(h.timer); holdRef.current = null; }
       }}
       onTouchEnd={() => { if (holdRef.current) clearTimeout(holdRef.current.timer); holdRef.current = null; }}>
-      <div className="doc-toolbar" ref={setToolsHost} role="toolbar" aria-label="Text tools" onMouseDown={(e) => e.preventDefault()}>
-        <div className="doc-toolbar-idle" aria-hidden="true">
-          {TOOL_LABELS.map((label) => <span key={label}>{label}</span>)}
-        </div>
-      </div>
       {menu && (
         <div className="wb-menu doc-menu" role="menu" style={{ left: menu.left, top: menu.top }} onPointerDown={(e) => e.stopPropagation()}>
           <button role="menuitem" onClick={pick(() => shared.addBox())}><span className="wb-menu-icon">¶</span> Text box</button>
@@ -2873,7 +2876,6 @@ function DocumentView(
         <SuggestionCard key={suggestion.id} suggestion={suggestion} shared={shared} />
       ))}
     </div>
-    </ToolsHostContext.Provider>
   );
 }
 
