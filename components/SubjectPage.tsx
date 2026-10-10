@@ -63,6 +63,7 @@ import {
   type Card,
   type InsightItem,
   type LinkItem,
+  type PlaceItem,
   type PosItem,
   type SuggestItem,
   type SynthesisResult,
@@ -1121,7 +1122,8 @@ export default function SubjectPage(props: Props) {
           id = newItemId("box");
           next = put(next, { ...block.box!, id, kind: "box", ...(prev ? { after: prev } : {}), at: now }, now);
         }
-        next = placeNew(next, id, now);
+        // The tab being looked at, even for a card cut from another one (its old place is still on record).
+        next = placeOn(next, id, activeTabOf(next), now);
         ids.push(id);
         prev = id;
       }
@@ -3527,14 +3529,23 @@ function Whiteboard(
       const rect = canvas.current?.getBoundingClientRect();
       const at = pointer.current ?? toBoard((rect?.left ?? 0) + 80, (rect?.top ?? 0) + 80);
       const fresh = new Set<string>();
+      const have = new Set(shared.allCards.map((c) => c.id));
       let recorded = false;
       onBoard((current) => {
         let next = current ?? {};
         const ids: string[] = [];
         const now = Date.now();
+        // Onto the tab being looked at: not the first tab (which is where a block with no
+        // place of its own reads as being), nor the tab a card cut from elsewhere was on.
+        const tab = activeTabOf(next);
         for (const block of blocks.items) {
           let id: string;
-          if (block.story) {
+          if (block.story && have.has(canonicalUrl(block.story.link))) {
+            // A subject holds one card per story: a copy of one it already has goes in as
+            // a card set into writing, as in the document — rather than moving the original.
+            id = newItemId("box");
+            next = put(next, { id, kind: "box", html: `<p>${citeCardHtml({ link: block.story.link, title: block.story.title })}</p>`, at: now });
+          } else if (block.story) {
             id = canonicalUrl(block.story.link);
             next = addStory(next, block.story, now);
             if (block.note) next = put(next, { id: cardNoteId(id), kind: "cardnote", card: id, html: block.note, at: now });
@@ -3542,6 +3553,7 @@ function Whiteboard(
             id = newItemId("box");
             next = put(next, { ...block.box!, id, kind: "box", at: now });
           }
+          next = placeOn(next, id, tab, now);
           ids.push(id);
           fresh.add(id);
           next = put(next, { id: posId(id), kind: "pos", target: id, x: Math.round(at.x + block.dx), y: Math.round(at.y + block.dy), w: block.w, at: now });
@@ -3553,7 +3565,7 @@ function Whiteboard(
         // Undoable: what the paste added is taken away again.
         if (!recorded) {
           recorded = true;
-          const added = live(next).filter((i) => fresh.has(i.id) || (i.kind === "pos" && fresh.has((i as PosItem).target))
+          const added = live(next).filter((i) => fresh.has(i.id) || ((i.kind === "pos" || i.kind === "place") && fresh.has((i as PosItem | PlaceItem).target))
             || (i.kind === "link" && (fresh.has((i as LinkItem).from) || fresh.has((i as LinkItem).to))));
           shared.recordOp({
             undo: (bd) => added.reduce((n, i) => remove(n, i.id), bd ?? {}),

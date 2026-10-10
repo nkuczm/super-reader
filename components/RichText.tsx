@@ -249,7 +249,8 @@ function insertChip(cite: Cite) {
 
 /**
  * A list's number or bullet takes the look of its line, as in a Doc: bold,
- * italic or highlighted when the whole line is. Worked out from the line on
+ * italic or highlighted when the whole line is — except that a bullet is
+ * never highlighted, only its words (asked for). Worked out from the line on
  * screen (data-b, data-i, data-hl) and never saved — the line's own
  * formatting is the record. Each numbered list also says its kind
  * (data-kind 1, a or A), since the stylesheet cannot tell "a" from "A" by
