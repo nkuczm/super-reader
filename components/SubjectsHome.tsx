@@ -5,7 +5,7 @@ import BoardThumb from "./BoardThumb";
 import { useEffect, useState } from "react";
 import { Icon } from "./icons";
 import type { Note } from "@/lib/notes";
-import { cardsOf, isPinned, live, metaOf, type Boards } from "@/lib/subjects";
+import { cardsOf, isPinned, LABEL_COLOR_NAMES, LABEL_COLORS, live, metaOf, subjectColorOf, type Boards } from "@/lib/subjects";
 import { sortSubjects, type SortDir, type SubjectSort } from "@/lib/subject-order";
 import { timeAgo } from "./format";
 
@@ -28,6 +28,26 @@ const LIST_ICON = (
   </svg>
 );
 
+/** The colour button: the subject's colour, or every colour when it has none. */
+const colorDot = (color: string | undefined) => (
+  <span className={`subject-color-dot${color ? "" : " none"}`} style={color ? { background: color } : undefined} aria-hidden="true" />
+);
+
+/** The colours to choose from, and none. Choosing one closes the choice. */
+function ColorChoices({ name, color, onPick }: { name: string; color: string | undefined; onPick: (color: string | null) => void }) {
+  return (
+    <span className="subject-colors" role="group" aria-label={`Colour for ${name}`}>
+      {LABEL_COLORS.map((c) => (
+        <button key={c} className={`label-swatch${color === c ? " on" : ""}`} style={{ background: c }}
+          aria-label={LABEL_COLOR_NAMES[c] ?? c} title={LABEL_COLOR_NAMES[c]} aria-pressed={color === c} onClick={() => onPick(c)} />
+      ))}
+      <button className={`label-swatch none${color ? "" : " on"}`} aria-label="No colour" title="No colour" aria-pressed={!color} onClick={() => onPick(null)}>
+        {Icon.close}
+      </button>
+    </span>
+  );
+}
+
 const shortDate = (t: number) =>
   new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short", ...(new Date(t).getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}) });
 
@@ -36,7 +56,7 @@ const shortDate = (t: number) =>
  * tiles with a picture of each board, or as a list with its dates side by
  * side — sorted by when each was last opened, last edited or made, or by
  * name, with pinned subjects always first. Layout and order are this
- * device's; pins travel with the subject.
+ * device's; pins and colours travel with the subject.
  */
 export default function SubjectsHome({
   notes,
@@ -49,12 +69,15 @@ export default function SubjectsHome({
   accountStrip,
   opened,
   onPin,
+  onColor,
 }: {
   notes: Note[];
   boards: Boards;
   /** When each subject was last opened or added to, on this device. */
   opened: Record<string, number>;
   onPin: (id: string, pinned: boolean) => void;
+  /** A colour for the subject's tile and name; null for none. */
+  onColor: (id: string, color: string | null) => void;
   onOpen: (id: string) => void;
   onCreate: (name: string) => void;
   onRename: (id: string, name: string) => void;
@@ -66,6 +89,12 @@ export default function SubjectsHome({
   /** The tile being renamed, and the tile asking whether to delete. */
   const [renaming, setRenaming] = useState<{ id: string; draft: string } | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
+  /** The subject whose colours are being offered. */
+  const [coloring, setColoring] = useState<string | null>(null);
+  const pick = (id: string) => (color: string | null) => {
+    onColor(id, color);
+    setColoring(null);
+  };
   const [name, setName] = useState("");
   const [layout, setLayout] = useState<{ view: "grid" | "list"; by: SubjectSort; dir: SortDir }>({ view: "grid", by: "opened", dir: "desc" });
   useEffect(() => {
@@ -99,7 +128,7 @@ export default function SubjectsHome({
       const lastChange = Math.max(
         note.updatedAt ?? note.at,
         ...note.entries.map((entry) => entry.at),
-        ...items.filter((item) => item.kind !== "meta" && item.kind !== "pin").map((item) => item.at),
+        ...items.filter((item) => item.kind !== "meta" && item.kind !== "pin" && item.kind !== "color").map((item) => item.at),
       );
       return {
         note,
@@ -111,6 +140,7 @@ export default function SubjectsHome({
         id: note.id,
         name: note.name,
         pinned: isPinned(board),
+        color: subjectColorOf(board),
         created: note.at,
         opened: opened[note.id] ?? 0,
         edited: lastChange,
@@ -183,8 +213,9 @@ export default function SubjectsHome({
           ) : (
             <button className="subjects-list-add" onClick={() => setNaming(true)}>{Icon.plus} New subject</button>
           )}
-          {tiles.map(({ note, cards, quotes, pinned, created, opened: openedAt, edited }) => (
-            <div key={note.id} role="row" className={`subjects-list-row${pinned ? " pinned" : ""}`}>
+          {tiles.map(({ note, cards, quotes, pinned, color, created, opened: openedAt, edited }) => (
+            <div key={note.id} role="row" className={`subjects-list-row${pinned ? " pinned" : ""}${color ? " colored" : ""}`}
+              style={color ? ({ "--subject-color": color } as React.CSSProperties) : undefined}>
               <span role="cell" className="col-pin">
                 <button className={`icon-btn subtle pin-btn${pinned ? " on" : ""}`} aria-pressed={pinned}
                   aria-label={pinned ? `Unpin ${note.name}` : `Pin ${note.name} to the top`} title={pinned ? "Unpin" : "Pin to the top"}
@@ -225,11 +256,18 @@ export default function SubjectsHome({
                   </span>
                 ) : (
                   <>
-                    <button className="icon-btn" aria-label={`Rename ${note.name}`} onClick={() => { setConfirming(null); setRenaming({ id: note.id, draft: note.name }); }}>{Icon.pencil}</button>
-                    <button className="icon-btn danger" aria-label={`Delete ${note.name}`} onClick={() => { setRenaming(null); setConfirming(note.id); }}>{Icon.trash}</button>
+                    <button className="icon-btn" aria-label={`Colour for ${note.name}`} aria-expanded={coloring === note.id} title="Colour"
+                      onClick={() => { setConfirming(null); setRenaming(null); setColoring(coloring === note.id ? null : note.id); }}>{colorDot(color)}</button>
+                    <button className="icon-btn" aria-label={`Rename ${note.name}`} onClick={() => { setConfirming(null); setColoring(null); setRenaming({ id: note.id, draft: note.name }); }}>{Icon.pencil}</button>
+                    <button className="icon-btn danger" aria-label={`Delete ${note.name}`} onClick={() => { setRenaming(null); setColoring(null); setConfirming(note.id); }}>{Icon.trash}</button>
                   </>
                 )}
               </span>
+              {coloring === note.id && (
+                <span role="cell" className="subjects-list-colors">
+                  <ColorChoices name={note.name} color={color} onPick={pick(note.id)} />
+                </span>
+              )}
             </div>
           ))}
         </div>
@@ -262,8 +300,9 @@ export default function SubjectsHome({
           )}
         </div>
 
-        {tiles.map(({ note, cards, quotes, insights, suggested, lastChange, pinned }) => (
-          <div key={note.id} className={`subject-tile${pinned ? " pinned" : ""}`}>
+        {tiles.map(({ note, cards, quotes, insights, suggested, lastChange, pinned, color }) => (
+          <div key={note.id} className={`subject-tile${pinned ? " pinned" : ""}${color ? " colored" : ""}`}
+            style={color ? ({ "--subject-color": color } as React.CSSProperties) : undefined}>
             <button className={`icon-btn pin-btn tile-pin${pinned ? " on" : ""}`} aria-pressed={pinned}
               aria-label={pinned ? `Unpin ${note.name}` : `Pin ${note.name} to the top`} title={pinned ? "Unpin" : "Pin to the top"}
               onClick={() => onPin(note.id, !pinned)}>{PIN_ICON}</button>
@@ -306,6 +345,13 @@ export default function SubjectsHome({
                   <button className="btn ghost small" type="button" onClick={() => setRenaming(null)}>Cancel</button>
                 </div>
               </form>
+            ) : coloring === note.id ? (
+              <div className="subject-tile-edit">
+                <ColorChoices name={note.name} color={color} onPick={pick(note.id)} />
+                <div className="subject-tile-edit-row">
+                  <button className="btn ghost small" onClick={() => setColoring(null)}>Done</button>
+                </div>
+              </div>
             ) : confirming === note.id ? (
               <div className="subject-tile-edit" role="alertdialog" aria-label={`Delete ${note.name}?`}>
                 <p>Delete “{note.name}”? Its quotes and board go with it.</p>
@@ -320,9 +366,22 @@ export default function SubjectsHome({
               <div className="subject-tile-actions">
                 <button
                   className="icon-btn"
+                  aria-label={`Colour for ${note.name}`}
+                  title="Colour"
+                  onClick={() => {
+                    setConfirming(null);
+                    setRenaming(null);
+                    setColoring(note.id);
+                  }}
+                >
+                  {colorDot(color)}
+                </button>
+                <button
+                  className="icon-btn"
                   aria-label={`Rename ${note.name}`}
                   onClick={() => {
                     setConfirming(null);
+                    setColoring(null);
                     setRenaming({ id: note.id, draft: note.name });
                   }}
                 >
@@ -333,6 +392,7 @@ export default function SubjectsHome({
                   aria-label={`Delete ${note.name}`}
                   onClick={() => {
                     setRenaming(null);
+                    setColoring(null);
                     setConfirming(note.id);
                   }}
                 >

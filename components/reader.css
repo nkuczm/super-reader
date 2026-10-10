@@ -3003,7 +3003,7 @@
 
 .subjects-list { margin: 4px 20px 40px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 .subjects-list-head, .subjects-list-row {
-  display: grid; grid-template-columns: 40px minmax(0, 1fr) 96px 112px 112px 76px; align-items: center; column-gap: 8px;
+  display: grid; grid-template-columns: 40px minmax(0, 1fr) 96px 112px 112px 92px; align-items: center; column-gap: 8px;
 }
 .subjects-list-head { padding: 6px 8px; border-bottom: 1px solid var(--border); background: var(--bg-soft, var(--bg-hover)); }
 .subjects-list-head button {
@@ -3037,7 +3037,7 @@
 @media (max-width: 720px) {
   .subjects-list { margin: 4px 12px 32px; }
   /* Narrow: the date being sorted by stays, the others go. */
-  .subjects-list-head, .subjects-list-row { grid-template-columns: 34px minmax(0, 1fr) 88px 64px; }
+  .subjects-list-head, .subjects-list-row { grid-template-columns: 34px minmax(0, 1fr) 88px 86px; }
   .subjects-list .col-created, .subjects-list .col-opened, .subjects-list .col-edited { display: none; }
   .subjects-list.by-created .col-created, .subjects-list.by-opened .col-opened, .subjects-list.by-edited .col-edited,
   .subjects-list.by-name .col-opened { display: block; }
@@ -3045,6 +3045,26 @@
   .subjects-toolbar { padding: 4px 12px 6px; }
 }
 @media (pointer: coarse) { .tile-pin, .subjects-list-row .col-actions .icon-btn { opacity: 1; } }
+
+/* A subject's colour: a band across the top of its tile, its page tinted, its name in the colour — and in the list, a dot and the name. */
+.subject-color-dot { display: block; width: 16px; height: 16px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12); }
+.subject-color-dot.none { background: conic-gradient(#dc2626, #ea580c, #ca8a04, #16a34a, #0d9488, #2563eb, #7c3aed, #db2777, #dc2626); opacity: 0.8; }
+.subject-colors { display: grid; grid-template-columns: repeat(5, 22px); gap: 6px; }
+.subject-colors .label-swatch { width: 22px; height: 22px; }
+.subject-colors .label-swatch.none { display: grid; place-items: center; background: var(--bg); color: var(--text-dim); }
+.subject-colors .label-swatch.none svg { width: 12px; height: 12px; }
+.subject-tile.colored { border-color: color-mix(in srgb, var(--subject-color) 50%, var(--border)); }
+.subject-tile.colored:hover { border-color: var(--subject-color); }
+.subject-tile.colored::before { content: ""; position: absolute; inset: 0 0 auto; height: 5px; background: var(--subject-color); z-index: 1; pointer-events: none; }
+.subject-tile.colored .subject-tile-preview, .subject-tile.colored .bt-page { background-color: color-mix(in srgb, var(--subject-color) 11%, var(--bg-sub)); }
+.subject-tile.colored .subject-tile-meta { background: color-mix(in srgb, var(--subject-color) 9%, var(--bg)); }
+.subject-tile.colored .subject-tile-name, .subjects-list-row.colored .subjects-list-name { color: color-mix(in srgb, var(--subject-color) 72%, var(--text)); }
+.subjects-list-row.colored { box-shadow: inset 3px 0 0 var(--subject-color); }
+.subjects-list-row.colored .subjects-list-name::before {
+  content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 7px; border-radius: 50%; background: var(--subject-color); vertical-align: 1px;
+}
+.subjects-list-colors { grid-column: 1 / -1; display: flex; justify-content: flex-end; padding: 4px 4px 6px; }
+.subjects-list-colors .subject-colors { grid-template-columns: repeat(10, 22px); }
 
 /* ---------- a section as a node: a circle lines leave from on every side ---------- */
 .subject-box.node-box, .subject-box.node-box:hover, .subject-box.node-box:focus-within {

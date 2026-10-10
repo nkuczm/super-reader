@@ -303,7 +303,8 @@ export type BoardItem =
   | MetaItem
   | TabItem
   | PlaceItem
-  | PinItem;
+  | PinItem
+  | ColorItem;
 
 /**
  * Whether a subject is pinned to the top of the Subjects list. An item of its
@@ -318,6 +319,21 @@ export const isPinned = (board: Board | undefined) => {
   const item = board?.[PIN_ID];
   return Boolean(item && item.kind === "pin" && !item.deleted && item.pinned);
 };
+
+/**
+ * A subject's colour on the Subjects page — its tile and its name — chosen
+ * from the section labels' colours; none when absent. An item of its own for
+ * the reason the pin is: the meta item is rewritten on every device, and a
+ * copy from one that had not yet heard of the colour would take it away.
+ */
+export type ColorItem = Base & { kind: "color"; color?: string };
+export const COLOR_ID = "color";
+
+export function subjectColorOf(board: Board | undefined): string | undefined {
+  const item = board?.[COLOR_ID];
+  if (!item || item.kind !== "color" || item.deleted) return undefined;
+  return item.color && LABEL_COLORS.includes(item.color) ? item.color : undefined;
+}
 
 export type Board = Record<string, BoardItem>;
 /** Every subject's board, keyed by the note it belongs to. */
@@ -1596,6 +1612,11 @@ export function youtubeThumbnail(link: string): string | null {
 
 /** The colours a section label can take. */
 export const LABEL_COLORS = ["#2563eb", "#7c3aed", "#db2777", "#dc2626", "#ea580c", "#ca8a04", "#16a34a", "#0d9488", "#475569"];
+/** What each of them is called, for a reader who cannot see the swatch. */
+export const LABEL_COLOR_NAMES: Record<string, string> = {
+  "#2563eb": "Blue", "#7c3aed": "Purple", "#db2777": "Pink", "#dc2626": "Red", "#ea580c": "Orange",
+  "#ca8a04": "Yellow", "#16a34a": "Green", "#0d9488": "Teal", "#475569": "Slate",
+};
 
 /** A label's colour, if it is one of ours; otherwise the theme's accent. */
 export function labelColorOf(box: { labelColor?: string }): string {

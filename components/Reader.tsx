@@ -125,6 +125,7 @@ import {
   pruneBoards,
   put as putItem,
   PIN_ID,
+  COLOR_ID,
   sameBoards,
   saveBoards,
   slimBoardsForSync,
@@ -4099,6 +4100,7 @@ export default function Reader() {
             onDelete={(id) => removeNote(id)}
             opened={subjectUsed}
             onPin={(id, pinned) => commitBoard(id, (board) => putItem(board, { id: PIN_ID, kind: "pin", pinned, at: Date.now() }))}
+            onColor={(id, color) => commitBoard(id, (board) => putItem(board, { id: COLOR_ID, kind: "color", ...(color ? { color } : {}), at: Date.now() }))}
           />
         ) : selection.type === "spend" ? (
           <SpendPage onOpenMenu={() => setMenuOpen(true)} onBack={backToSettings} />

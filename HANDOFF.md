@@ -181,6 +181,27 @@ or is cancelled. `fuser -k <port>/tcp` first if tests behave oddly.
   how a desktop left closed for a week overwrote a phone — and a local change
   stamps `max(now, lastSeen + 1)`, because a stamp pulled from a device whose
   clock runs ahead would otherwise freeze this one out of syncing forever.
+- **An app opened with no connection still knows who is signed in.**
+  `useAccount` keeps the last account `/api/auth/me` confirmed in
+  localStorage. The service worker opens the app offline, and `/api/auth/me`
+  failing used to be read as "signed out" for the rest of the visit: writing
+  done on a train stayed on the phone and was never sent, even once the
+  phone was back online, until the home-screen app was closed and reopened
+  (10 Oct 2026). It is now asked again on `online`, `focus` and
+  `visibilitychange` — an iOS home-screen app comes back with the last, not
+  always the first — and a reconnect sends unsent writing at once. Verified
+  in a browser: before, zero saves after reconnecting; after, the writing
+  arrives.
+- **A device catching up sizes the changes before reading them.**
+  `changesSince` read up to 201 whole rows, snapshots included, and only
+  then decided they were too much: past 64 MB Neon refuses the answer, the
+  request failed, the cursor never moved, and that device saw nothing from
+  the others until reloaded (19 failures, 8–9 Oct 2026). It now reads the
+  rows' lengths first and hands back the whole copy past `CHANGES_BYTES`;
+  the client also drops its cursor after a 5xx. A snapshot is written once
+  the changes since the last outweigh it, not every 256 KB — with a
+  document of a few megabytes, every few saves used to copy all of it, and
+  each copy is kept thirty days.
 - **The stamp lives in a ref as well as state.** An effect that depends on the
   value it sets re-stamps on every render, and the debounced push never
   survives long enough to fire — which looks exactly like sync being broken.

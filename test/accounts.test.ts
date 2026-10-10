@@ -143,6 +143,57 @@ test("a device catches up by reading only the changes after its cursor", async (
   assert.equal(await changesSince("g-2", "1; DROP TABLE accounts"), null, "a malformed cursor gets the whole copy instead");
 });
 
+test("a device far behind is sized up before anything is read, and gets the whole copy", async () => {
+  await upsertAccount({ id: "g-11", email: "eleven@example.com" }, "r");
+  await writeSubjects("g-11", doc("s", "first", 1));
+  const { cursor } = await readSubjects("g-11");
+  // A day of writing elsewhere: changes only, no snapshot among them, and
+  // more of them than one answer should carry.
+  const { CHANGES_BYTES } = await import("../lib/accounts");
+  const { sealJson } = await import("../lib/secure");
+  const each = 400_000;
+  for (let i = 0; i < Math.ceil(CHANGES_BYTES / each) + 1; i++) {
+    const change = box("s", `b${i}`, 10 + i, { html: `<p>${String(i % 10).repeat(each)}</p>` });
+    await db.query("INSERT INTO subject_changes (account_id, kind, payload) VALUES ('g-11', 'delta', $1)", [sealJson(change)]);
+  }
+  // Only sizes are read to decide: never the payloads it then turns down.
+  const seen: string[] = [];
+  const run = (spy: boolean): Sql => async (strings, ...values) => {
+    const text = strings.reduce((acc, part, i) => acc + part + (i < values.length ? `$${i + 1}` : ""), "");
+    if (spy) seen.push(text);
+    return (await db.query(text, values as any[])).rows as Record<string, any>[];
+  };
+  setSqlForTesting(run(true));
+  try {
+    assert.equal(await changesSince("g-11", cursor!), null, "too much to replay: the whole document instead");
+  } finally {
+    setSqlForTesting(run(false));
+  }
+  assert.ok(seen.length > 0);
+  assert.ok(!seen.some((q) => /\bpayload\b/.test(q.replace(/length\(payload\)/g, ""))), "no payload was read");
+  // A few small changes still come as changes. (The first save folds the big ones into a snapshot.)
+  await writeSubjects("g-11", box("s", "settle", 98));
+  const { cursor: now } = await readSubjects("g-11");
+  await writeSubjects("g-11", box("s", "late", 99, { html: "<p>late</p>" }));
+  assert.deepEqual(Object.keys((await changesSince("g-11", now!))!.doc.boards.s), ["late"]);
+  // And the whole document is what a device far behind then reads, all of it there.
+  assert.ok((await readSubjects("g-11")).doc.boards.s.b0);
+});
+
+test("a snapshot comes once the changes outweigh it, not every few saves of a big document", async () => {
+  await upsertAccount({ id: "g-12", email: "twelve@example.com" }, "r");
+  // A document bigger than the fixed threshold on its own.
+  await writeSubjects("g-12", doc("s", "x".repeat(600_000), 1));
+  for (let i = 0; i < 6; i++) await writeSubjects("g-12", box("s", `b${i}`, 10 + i, { html: `<p>${"y".repeat(60_000)}</p>` }));
+  const snaps = await db.query<{ n: number }>("SELECT count(*)::int AS n FROM subject_changes WHERE account_id = 'g-12' AND kind = 'snap'");
+  assert.equal(snaps.rows[0].n, 1, "six edits of 60 KB do not copy a 600 KB document again");
+  for (let i = 6; i < 14; i++) await writeSubjects("g-12", box("s", `b${i}`, 10 + i, { html: `<p>${"y".repeat(60_000)}</p>` }));
+  const later = await db.query<{ n: number }>("SELECT count(*)::int AS n FROM subject_changes WHERE account_id = 'g-12' AND kind = 'snap'");
+  assert.equal(later.rows[0].n, 2, "once they outweigh it, one new snapshot");
+  const { doc: whole } = await readSubjects("g-12");
+  assert.equal(Object.keys(whole.boards.s).length, 14);
+});
+
 test("a picture is stored once, sent once, and comes back by reference", async () => {
   await writeSubjects("g-2", box("s1", "pic", 60, { image: PNG }));
   await writeSubjects("g-2", box("s1", "pic2", 61, { image: PNG }));

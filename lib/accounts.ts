@@ -498,12 +498,16 @@ export async function writeSubjects(
   }
   const id = await insertChange(accountId, "delta", change);
   const since = await sql`
-    SELECT count(*)::int AS n, coalesce(sum(length(payload)), 0)::bigint AS bytes
+    SELECT count(*)::int AS n, coalesce(sum(length(payload)), 0)::bigint AS bytes,
+      (SELECT length(payload) FROM subject_changes WHERE account_id = ${accountId} AND kind = 'snap' ORDER BY id DESC LIMIT 1)::bigint AS snap
     FROM subject_changes
     WHERE account_id = ${accountId} AND kind = 'delta'
       AND id > (SELECT max(id) FROM subject_changes WHERE account_id = ${accountId} AND kind = 'snap')
   `;
-  if (since[0].n >= SNAPSHOT_EVERY || Number(since[0].bytes) > SNAPSHOT_BYTES) {
+  // A new snapshot once the changes since the last outweigh it. A fixed
+  // threshold rewrote a document of several megabytes every few saves, and
+  // every one of those copies is kept for thirty days.
+  if (since[0].n >= SNAPSHOT_EVERY || Number(since[0].bytes) > Math.max(SNAPSHOT_BYTES, Number(since[0].snap) || 0)) {
     const { doc: whole } = await readSubjects(accountId);
     await insertChange(accountId, "snap", whole);
     await compactChanges(accountId);
@@ -542,22 +546,46 @@ async function stateAt(accountId: string, id: string): Promise<SubjectsDoc | nul
   return doc;
 }
 
-/** Everything that changed after `since`, merged — or null when only the whole document will do. */
+/** Changes past this much (as stored) are not worth replaying: the whole document is read instead. */
+export const CHANGES_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Everything that changed after `since`, merged — or null when only the whole
+ * document will do.
+ *
+ * What lies past the cursor is sized up before any of it is read. It used to
+ * be read whole — up to 201 rows, snapshots and all — and only then judged
+ * too much: a device that came back after a day of writing elsewhere asked
+ * for more than the database will return in one answer (64 MB), the request
+ * failed, its cursor never moved, and it never saw another device's writing
+ * until it was reloaded (8–9 Oct 2026, 19 times).
+ */
 export async function changesSince(accountId: string, since: string): Promise<{ doc: SubjectsDoc; cursor: string } | null> {
   await ensureAccountSchema();
   if (!/^\d+$/.test(since)) return null;
-  const rows = await getSql()`
-    SELECT id, kind, payload, saved_at FROM subject_changes
+  const sql = getSql();
+  const sizes = await sql`
+    SELECT id, kind, length(payload)::bigint AS bytes FROM subject_changes
     WHERE account_id = ${accountId} AND id > ${since}
     ORDER BY id LIMIT 201
   `;
-  if (rows.length > 200 || rows.some((r) => r.kind === "snap")) return null;
+  if (sizes.length > 200 || sizes.some((r) => r.kind === "snap")) return null;
+  if (sizes.reduce((sum, r) => sum + Number(r.bytes), 0) > CHANGES_BYTES) return null;
   // The cursor names a change this account has (or had): a stale or foreign one gets the whole document.
-  const known = await getSql()`SELECT 1 FROM subject_changes WHERE account_id = ${accountId} AND id <= ${since} LIMIT 1`;
+  const known = await sql`SELECT 1 FROM subject_changes WHERE account_id = ${accountId} AND id <= ${since} LIMIT 1`;
   if (!known[0]) return null;
+  if (!sizes.length) return { doc: EMPTY_DOC, cursor: since };
+  const last = String(sizes[sizes.length - 1].id);
+  const rows = await sql`
+    SELECT id, kind, payload, saved_at FROM subject_changes
+    WHERE account_id = ${accountId} AND id > ${since} AND id <= ${last}
+    ORDER BY id
+  `;
+  // A snapshot written between the two reads: the whole document, as above.
+  if (rows.some((r) => r.kind === "snap")) return null;
   let doc: SubjectsDoc = EMPTY_DOC;
   for (const row of rows) doc = mergeDocs(openJson<SubjectsDoc>(row.payload), doc, new Date(row.saved_at).getTime());
-  return { doc, cursor: rows.length ? String(rows[rows.length - 1].id) : since };
+  return { doc, cursor: last };
 }
 
 /**
