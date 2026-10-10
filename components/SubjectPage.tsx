@@ -21,6 +21,7 @@ import type { Writing } from "./useAccount";
 import type { Note, NoteEntry } from "@/lib/notes";
 import { omissionsHtml, putFactNotes, researchOf, scriptQuotes, scriptRows, type FactCheckResult, type SourceTarget } from "@/lib/factcheck";
 import { addTranscriptNote, documentOrder, LABEL_COLORS, labelColorOf, safeHref, youtubeThumbnail, type StoryItem } from "@/lib/subjects";
+import { NODE_FONT_MAX, NODE_FONT_MIN, nodeFontSize } from "@/lib/node-fit";
 import { titleFromUrl } from "@/lib/manual";
 import {
   addStory,
@@ -1978,6 +1979,69 @@ function StoryCard({
   );
 }
 
+/**
+ * A node's name, written in its circle: wrapped onto as many lines as it
+ * needs, the type stepping down from its full size only as far as it must to
+ * fit — and never below NODE_FONT_MIN, past which the name runs on (and
+ * scrolls, while it is written in) rather than becoming too small to read.
+ * Fitted again as it is typed and when the node is resized.
+ */
+function NodeLabel({ box, shared }: { box: BoxItem; shared: Shared }) {
+  const field = useRef<HTMLTextAreaElement | null>(null);
+  const fit = useCallback(() => {
+    const el = field.current;
+    const circle = el?.parentElement;
+    if (!el || !circle) return;
+    const pad = parseFloat(getComputedStyle(circle).paddingTop) || 0;
+    const room = circle.clientHeight - pad * 2;
+    if (room <= 0) return;
+    // A first guess from the letters, then measured: down half a pixel at a time until it fits.
+    let size = Math.min(NODE_FONT_MAX, nodeFontSize(el.value || el.placeholder, circle.clientWidth) + 2);
+    for (;;) {
+      el.style.fontSize = `${size}px`;
+      el.style.height = "auto";
+      if (el.scrollHeight <= room || size <= NODE_FONT_MIN) break;
+      size = Math.max(NODE_FONT_MIN, size - 0.5);
+    }
+    el.style.height = `${Math.min(el.scrollHeight, room)}px`;
+    el.style.overflowY = el.scrollHeight > room ? "auto" : "hidden";
+    el.toggleAttribute("data-over", el.scrollHeight > room);
+  }, []);
+  useLayoutEffect(() => {
+    fit();
+    const circle = field.current?.parentElement;
+    if (!circle) return;
+    const watch = new ResizeObserver(fit);
+    watch.observe(circle);
+    return () => watch.disconnect();
+  }, [fit]);
+  return (
+    <textarea
+      ref={field}
+      className="section-label node-label"
+      defaultValue={textOf(box.html)}
+      placeholder="Node"
+      rows={1}
+      autoFocus={shared.focusBox === box.id}
+      aria-label="Node label"
+      onPointerDown={(e) => e.stopPropagation()}
+      onInput={fit}
+      onBlur={(e) => {
+        const text = e.currentTarget.value.replace(/\s+/g, " ").trim().slice(0, 120);
+        if (text !== textOf(box.html)) shared.setBox(box, escapeHtml(text));
+        e.currentTarget.scrollTop = 0;
+      }}
+      onKeyDown={(e) => {
+        // A name is one line of words, wrapped to the circle: Enter is done.
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
+
 function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dragHandle?: (e: React.PointerEvent) => void }) {
   const [styling, setStyling] = useState(false);
   // In the document a block is edited from the keyboard — Backspace takes it
@@ -2074,19 +2138,7 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
         // A node: the label in a circle, which also drags it; lines leave from all round it.
         <div className="node-circle" style={{ "--label-color": labelColorOf(box) } as React.CSSProperties}
           onPointerDown={dragHandle}>
-          <input
-            className="section-label node-label"
-            defaultValue={textOf(box.html)}
-            placeholder="Node"
-            autoFocus={shared.focusBox === box.id}
-            aria-label="Node label"
-            onPointerDown={(e) => e.stopPropagation()}
-            onBlur={(e) => {
-              const text = e.currentTarget.value.trim().slice(0, 120);
-              if (text !== textOf(box.html)) shared.setBox(box, escapeHtml(text));
-            }}
-            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-          />
+          <NodeLabel box={box} shared={shared} />
         </div>
       ) : box.label ? (
         <input
@@ -3960,11 +4012,13 @@ function Whiteboard(
             // A node stays a circle zoomed out: at least a readable size on screen, its name inside.
             if (sec.node) {
               const d = Math.max(sec.node.w, 56 / view.zoom);
+            // As large as the circle allows, as in the circle itself — and no larger than reads on screen.
+            const nodeType = Math.min(nodeFontSize(sec.text, d, d * 0.21, d * 0.08), 15 / view.zoom);
               return (
                 <div key={`node-${sec.id}`} className="wb-far-node" aria-hidden="true"
                   style={{
                     left: sec.node.x + sec.node.w / 2, top: sec.node.y + sec.node.w / 2, width: d, height: d,
-                    background: sec.color, fontSize: Math.min(d * 0.21, 15 / view.zoom),
+                    background: sec.color, fontSize: nodeType,
                   }}>
                   {sec.text}
                 </div>
