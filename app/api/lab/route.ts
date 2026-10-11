@@ -12,47 +12,16 @@ export const maxDuration = 60;
  * Removed again before this branch is merged.
  */
 const CANDIDATES: [string, string][] = [
-  ["oa-jneurosci", "https://api.openalex.org/works?filter=primary_location.source.issn:0270-6474,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=3"],
-  ["oa-neuroimage", "https://api.openalex.org/works?filter=primary_location.source.issn:1053-8119,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=3"],
-  ["oa-brain", "https://api.openalex.org/works?filter=primary_location.source.issn:0006-8950,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=3"],
-  ["oa-cercor", "https://api.openalex.org/works?filter=primary_location.source.issn:1047-3211,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=3"],
-  ["oa-mind", "https://api.openalex.org/works?filter=primary_location.source.issn:0026-4423,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=3"],
-  ["oa-philreview", "https://api.openalex.org/works?filter=primary_location.source.issn:0031-8108,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=3"],
-  ["oa-jphil", "https://api.openalex.org/works?filter=primary_location.source.issn:0022-362X,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=3"],
-  ["oa-ethics", "https://api.openalex.org/works?filter=primary_location.source.issn:0014-1704,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=3"],
-  ["oa-philstudies", "https://api.openalex.org/works?filter=primary_location.source.issn:0031-8116,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=3"],
-  ["oa-synthese", "https://api.openalex.org/works?filter=primary_location.source.issn:0039-7857,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=3"],
-  ["oa-erkenntnis", "https://api.openalex.org/works?filter=primary_location.source.issn:0165-0106,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=3"],
-  ["oa-ajp", "https://api.openalex.org/works?filter=primary_location.source.issn:0004-8402,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=3"],
-  ["oa-imprint", "https://api.openalex.org/works?filter=primary_location.source.issn:1533-628X,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=3"],
-  ["oa-ergo", "https://api.openalex.org/works?filter=primary_location.source.issn:2330-4014,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=3"],
-  ["oa-philsci", "https://api.openalex.org/works?filter=primary_location.source.issn:0031-8248,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=3"],
-  ["oa-bjps", "https://api.openalex.org/works?filter=primary_location.source.issn:0007-0882,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=3"],
-  ["oa-pq", "https://api.openalex.org/works?filter=primary_location.source.issn:0031-8094,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=3"],
-  ["oa-psychsci", "https://api.openalex.org/works?filter=primary_location.source.issn:0956-7976,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=3"],
-  ["oa-jocn", "https://api.openalex.org/works?filter=primary_location.source.issn:0898-929X,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=3"],
-  ["oa-plos-one", "https://api.openalex.org/works?filter=primary_location.source.issn:1932-6203,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=3"],
+  ["oa-one", "https://api.openalex.org/works?filter=primary_location.source.issn:0031-8094,to_publication_date:2026-10-11&sort=publication_date:desc&per-page=3"],
   ["oa-doi", "https://api.openalex.org/works/doi:10.1038/nature14539"],
-  ["oa-doi-new", "https://api.openalex.org/works/doi:10.1111/nous.70071"],
-  ["oa-search-precise", "https://api.openalex.org/works?filter=title_and_abstract.search:predictive%20coding,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=5"],
-  ["oa-field-phil", "https://api.openalex.org/works?filter=primary_topic.subfield.id:1211,to_publication_date:2026-10-11,type:article|preprint|review&sort=publication_date:desc&per-page=5"],
-  ["oa-biorxiv-neuro", "https://api.openalex.org/works?filter=primary_location.source.id:S4306402567,primary_topic.field.id:28,to_publication_date:2026-10-11&sort=publication_date:desc&per-page=5"],
-  ["crossref-pii", "https://api.crossref.org/works?filter=alternative-id:S0896627326007282&rows=1"],
-  ["crossref-work", "https://api.crossref.org/works/10.1111/nous.70071"],
-  ["biorxiv-api-3d-neuro", "https://api.biorxiv.org/details/biorxiv/3d/0?category=neuroscience"],
-  ["biorxiv-api-n", "https://api.biorxiv.org/details/biorxiv/30/0?category=neuroscience"],
-  ["biorxiv-api-doi", "https://api.biorxiv.org/details/biorxiv/10.64898/2026.09.28.755022"],
-  ["medrxiv-api-3d", "https://api.biorxiv.org/details/medrxiv/3d/0?category=neurology"],
-  ["arxiv-api-cat", "https://export.arxiv.org/api/query?search_query=cat:q-bio.NC&sortBy=submittedDate&sortOrder=descending&max_results=20"],
-  ["arxiv-api-cat-ai", "https://export.arxiv.org/api/query?search_query=cat:cs.AI&sortBy=submittedDate&sortOrder=descending&max_results=20"],
-  ["tics-cell", "https://www.cell.com/trends/cognitive-sciences/inpress.rss"],
-  ["cell-inpress", "https://www.cell.com/cell/inpress.rss"],
-  ["cellreports-inpress", "https://www.cell.com/cell-reports/inpress.rss"],
-  ["neuron-current-2", "https://www.cell.com/neuron/current.rss"],
-  ["biorxiv-rss-guess", "https://www.biorxiv.org/rss/subject/neuroscience"],
-  ["philpapers-api", "https://philpapers.org/rec/CHAFTH"],
-  ["tandf-ajp-feed", "https://www.tandfonline.com/feed/rss/rajp20"],
-  ["oup-mind-feed", "https://academic.oup.com/rss/site_5280/3164.xml"],
+  ["biorxiv-range-neuro", "https://api.biorxiv.org/details/biorxiv/2026-10-07/2026-10-11/0?category=neuroscience"],
+  ["biorxiv-range-neuro-2", "https://api.biorxiv.org/details/biorxiv/2026-10-07/2026-10-11/100?category=neuroscience"],
+  ["medrxiv-range", "https://api.biorxiv.org/details/medrxiv/2026-10-07/2026-10-11/0?category=neurology"],
+  ["s2-search", "https://api.semanticscholar.org/graph/v1/paper/search?query=predictive+coding&fields=title,publicationDate,venue,externalIds&limit=5&sort=publicationDate:desc"],
+  ["s2-bulk", "https://api.semanticscholar.org/graph/v1/paper/search/bulk?query=predictive+coding&fields=title,publicationDate,venue&sort=publicationDate:desc"],
+  ["crossref-journal-pq", "https://api.crossref.org/journals/0031-8094/works?sort=published&order=desc&rows=3&filter=until-pub-date:2026-10-11"],
+  ["crossref-journal-ergo", "https://api.crossref.org/journals/2330-4014/works?sort=published&order=desc&rows=3&filter=until-pub-date:2026-10-11"],
+  ["crossref-journal-philsci", "https://api.crossref.org/journals/0031-8248/works?sort=published&order=desc&rows=3&filter=until-pub-date:2026-10-11"],
 ];
 
 const meta = (html: string, name: string) =>
@@ -61,10 +30,11 @@ const meta = (html: string, name: string) =>
 async function probe(id: string, url: string) {
   const started = Date.now();
   try {
-    if (url.includes("api.crossref.org") || url.includes("api.openalex.org") || url.includes("api.biorxiv.org")) {
+    if (url.includes("api.crossref.org") || url.includes("api.openalex.org") || url.includes("api.biorxiv.org") || url.includes("semanticscholar")) {
       const res = await fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15000) });
       const body = await res.json().catch(() => null);
-      const items = body?.message?.items ?? body?.results ?? body?.collection;
+      const items = body?.message?.items ?? body?.results ?? body?.collection ?? body?.data;
+      if (res.status !== 200) return { id, status: res.status, body: JSON.stringify(body).slice(0, 900), headers: Object.fromEntries([...res.headers].filter(([k]) => /rate|retry|limit/i.test(k))) };
       return {
         id, status: res.status, ms: Date.now() - started,
         keys: body ? Object.keys(body).slice(0, 8) : null,
@@ -72,7 +42,8 @@ async function probe(id: string, url: string) {
         sample: Array.isArray(items)
           ? items.slice(0, 3).map((i: any) => ({
               title: String(Array.isArray(i.title) ? i.title[0] : i.display_name ?? i.title ?? "").slice(0, 90),
-              date: i.published?.["date-parts"]?.[0] ?? i.publication_date ?? i.date,
+              date: i.published?.["date-parts"]?.[0] ?? i.publication_date ?? i.date ?? i.publicationDate,
+              version: i.version,
               link: i.URL ?? i.doi ?? i.primary_location?.landing_page_url,
               source: i["container-title"]?.[0] ?? i.primary_location?.source?.display_name ?? i.category,
               abstract: Boolean(i.abstract || i.abstract_inverted_index),
@@ -83,6 +54,8 @@ async function probe(id: string, url: string) {
         source: body?.primary_location?.source ? { id: body.primary_location.source.id, name: body.primary_location.source.display_name, issnL: body.primary_location.source.issn_l } : undefined,
         crossItem: body?.message?.items?.[0] ? { issn: body.message.items[0].ISSN, container: body.message.items[0]["container-title"] } : undefined,
         messages: body?.messages?.[0],
+        last: Array.isArray(items) && items.length ? { date: items[items.length - 1].date, title: String(items[items.length - 1].title ?? "").slice(0, 60) } : undefined,
+        total: body?.total ?? body?.meta?.count ?? body?.message?.["total-results"],
       };
     }
     const { body, finalUrl } = await fetchText(url, 15000);
