@@ -126,6 +126,12 @@ export type ApiProvider = {
    * separate limits.
    */
   fallback?: Pick<ApiProvider, "request" | "items" | "article">;
+  /**
+   * Read every page nextPage offers (up to four), however many records the
+   * first held: for an API whose first page is its oldest, stopping once
+   * "enough" had arrived showed a week-old preprint as the newest.
+   */
+  readAllPages?: boolean;
   /** The name this source gets, given what the user asked for. */
   title: (params: ApiParams) => string;
   /** How to get an article's text from the API rather than from the page. */
@@ -885,7 +891,7 @@ export const API_PROVIDERS: ApiProvider[] = [
         key: "q",
         label: "Words",
         placeholder: "predictive coding",
-        hint: "Found in a paper's title or abstract. Leave empty to follow a whole field.",
+        hint: "Found in a paper's title or abstract; put a phrase in quotes. Leave empty to follow a whole field.",
       },
       {
         key: "area",
@@ -907,7 +913,10 @@ export const API_PROVIDERS: ApiProvider[] = [
         url: `https://api.openalex.org/works?filter=${filters.join(",")}&sort=publication_date:desc&per-page=${Math.min(limit, 50)}`,
       };
     },
-    items: (body) => body?.results ?? [],
+    // Not Zenodo: anyone can deposit anything there, and a search sorted by date
+    // brings it to the top — three of the first twelve for "predictive coding"
+    // in neuroscience on 11 Oct 2026, one by an author named "Your Name".
+    items: (body) => (body?.results ?? []).filter((work: any) => !/\/10\.5281\/zenodo\./i.test(String(work?.doi ?? ""))),
     article: openAlexArticle,
     title: ({ q, area }) => {
       const field = OPENALEX_AREAS.find((a) => a.value === area)?.label;
@@ -951,6 +960,7 @@ export const API_PROVIDERS: ApiProvider[] = [
           `?category=${encodeURIComponent(subject.trim().toLowerCase())}`,
       };
     },
+    readAllPages: true,
     nextPage: (body, url) => {
       const status = body?.messages?.[0];
       const total = Number(status?.total);
@@ -1358,7 +1368,7 @@ export async function fetchApiSource(
   const read = async (way: Pick<ApiProvider, "items" | "article">, first: ApiRequest) => {
     const items: any[] = [];
     let pageUrl: string | null = first.url;
-    for (let page = 0; pageUrl && page < 4 && items.length < limit; page += 1) {
+    for (let page = 0; pageUrl && page < 4 && (provider.readAllPages || items.length < limit); page += 1) {
       const body = await fetchJson({ ...first, url: pageUrl });
       items.push(...(way.items?.(body) ?? []));
       pageUrl = provider.nextPage?.(body, pageUrl) ?? null;

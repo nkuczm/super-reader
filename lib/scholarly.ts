@@ -205,6 +205,10 @@ export function outletRoute(outlet: Outlet): ScholarlyRoute {
     siteUrl: outlet.siteUrl,
     faviconHost: asUrl(outlet.siteUrl)?.hostname.replace(/^www\./, "") ?? "openalex.org",
     scope: "section",
+    // Followed by ISSN: say so, rather than describe the API that answers.
+    ...(outlet.feedUrl.startsWith("api:journal?")
+      ? { note: `The newest papers in ${outlet.name}, from OpenAlex's index of what publishers register — ${asUrl(outlet.siteUrl)?.hostname.replace(/^www\./, "")} will not serve a feed to a server.` }
+      : {}),
   };
 }
 

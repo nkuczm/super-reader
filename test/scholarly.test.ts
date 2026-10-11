@@ -209,3 +209,26 @@ test("bioRxiv: first versions only, read from the newest end of the range", asyn
   assert.equal(provider.nextPage!(page(27), url.replace("/0?", "/27?")), null, "not back onto the first page");
   assert.deepEqual(provider.items!({ collection: [{ version: "1" }, { version: "2" }, { version: "1" }] }).length, 2);
 });
+
+test("a short bioRxiv preview still reaches the newest page, not just the first (oldest) one", async () => {
+  globalThis.fetch = (async (input: any) => {
+    const cursor = Number(String(input).match(/\/(\d+)\?category/)?.[1]);
+    // 90 records, oldest first: record n posted on day n/30 of the range.
+    const collection = Array.from({ length: 30 }, (_, i) => {
+      const n = cursor + i;
+      return { doi: `10.1101/2026.10.0${1 + Math.floor(n / 30)}.${n}`, title: `Preprint ${n}`, version: "1", date: `2026-10-0${1 + Math.floor(n / 30)}`, authors: "A, B" };
+    });
+    return new Response(JSON.stringify({ messages: [{ cursor, total: 90 }], collection }), { status: 200 });
+  }) as typeof fetch;
+  const { articles } = await fetchApiSource("api:rxiv?server=biorxiv&subject=neuroscience", 5);
+  assert.equal(articles.length, 5);
+  assert.ok(articles.every((a) => a.publishedAt?.startsWith("2026-10-03")), "the five newest, from the last page");
+});
+
+test("an OpenAlex search leaves out Zenodo deposits, which a date sort brings to the top", () => {
+  const provider = getApiProvider("openalex")!;
+  const kept = provider.items!({ results: [{ doi: "https://doi.org/10.5281/zenodo.23288943" }, { doi: "https://doi.org/10.1038/s41598-026-70108-1" }, { doi: null }] });
+  assert.equal(kept.length, 2);
+  assert.throws(() => provider.request({ q: "", area: "" }, { limit: 10, key: null }), /words to look for, or a field/);
+  assert.match(provider.request({ q: "predictive coding", area: "neuroscience" }, { limit: 10, key: null }).url, /title_and_abstract\.search:predictive%20coding,primary_topic\.field\.id:28,/);
+});
