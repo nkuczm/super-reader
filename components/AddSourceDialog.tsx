@@ -122,10 +122,10 @@ export default function AddSourceDialog({
           <h2>Add a source</h2>
           <p>
             {tab === "paste"
-              ? "Paste a website, a Substack, an RSS URL, a subreddit like r/AskHistorians, an X account like @OpenAI — or just type a topic. Sites without a feed are read straight from the page."
+              ? "Paste a website, a Substack, an RSS URL, a paper's link or DOI (you'll get its journal), an arXiv or bioRxiv listing, a subreddit like r/AskHistorians, an X account like @OpenAI — or just type a topic. Sites without a feed are read straight from the page."
               : tab === "outlets"
-                ? "Pick from the directory — newsrooms, wires, trade press, major subreddits. Tick as many as you like, or take a whole beat in one tap."
-                : "Follow a data API — court opinions, federal rules, filings, papers. Fill in what you want and it becomes a source like any other."}
+                ? "Pick from the directory — newsrooms, wires, trade press, journals and preprint servers, major subreddits. Tick as many as you like, or take a whole beat in one tap."
+                : "Follow a data API — court opinions, federal rules, filings, new papers by journal or by search. Fill in what you want and it becomes a source like any other."}
           </p>
           <div className="scope-switch dialog-tabs">
             <button

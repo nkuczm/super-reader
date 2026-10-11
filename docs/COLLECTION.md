@@ -10,7 +10,7 @@ Everything numbered here was measured against the live deployment on the date
 given, not assumed. When a measurement is stale, re-run it rather than trusting
 the number.
 
-**What this covers:** `lib/discover.ts`, `lib/article-link.ts`, `lib/harvest.ts`, `lib/sitemap.ts`,
+**What this covers:** `lib/discover.ts`, `lib/article-link.ts`, `lib/scholarly.ts`, `lib/harvest.ts`, `lib/sitemap.ts`,
 `lib/structured.ts`, `lib/sitesearch.ts`, `lib/authentic.ts`,
 `lib/relevance.ts`, `lib/coverage.ts`, `lib/bundle.ts`, `lib/window.ts`,
 `lib/publishers.ts`, `lib/scrape.ts`, `lib/feed.ts`, `app/api/feed/route.ts`,
@@ -249,6 +249,69 @@ was found from.
 
 `news.stanford.edu/stories/2026/10/bladder-cancer-urine-test-research`
 was the case, and is also a wall — see §8.
+
+### Research: journals, preprints and papers by link (11 Oct 2026)
+
+Asked for: neuroscience and philosophy journals, arXiv, "perhaps Google
+Scholar", addable from the directory or by pasting a link. Measured from a
+preview deployment with a temporary probe, three rounds, removed the same day.
+
+**Publishers will not show a server a paper.** nature.com answers an article
+with a "Client Challenge"; jneurosci.org, cell.com, Wiley, Oxford
+(academic.oup.com), ScienceDirect and PhilPapers answer 403 to their pages;
+bioRxiv answered 429. So a pasted paper cannot be read to learn its journal,
+and `lib/scholarly.ts` works from what the link says: an arXiv id or listing,
+a bioRxiv collection or DOI, a DOI in any of the shapes publishers put one
+(doi.org, `/doi/…`, Springer's `/article/10…`, PLOS's `?id=`, Nature's and
+eLife's article ids), an Elsevier PII, or an address under a journal the
+directory holds. The journal is then looked up — one Crossref call, which a
+paste can afford — never fetched.
+
+**Their feeds mostly do answer**, and the directory holds the ones measured:
+
+| Route | Result |
+|---|---|
+| Nature (neuro, nrn, nathumbehav, subject feeds) | 8–30 items, newest 8–11 Oct |
+| Cell Press `inpress.rss` (Neuron, Cell, Curr Biol, TINS, TICS) | 16–94 items, dated |
+| ScienceDirect `rss.sciencedirect.com/publication/science/<issn>` | answers, **every item undated** — not used |
+| Wiley `/feed/<issn>/most-recent` (Noûs, PPR, Mind & Language, Compass) | 9–51 items |
+| Taylor & Francis `/feed/rss/<code>` (AJP) | 107 items |
+| eLife, PLOS, eNeuro, J Neurophysiology, Science and PNAS eTOCs | answer, dated |
+| jneurosci.org RSS, PNAS topic feed | 403 / error page |
+| Springer `search.rss` | two journals answered, Synthese got a bot check — not used |
+| bioRxiv/medRxiv `connect.*rxiv.org/*_xml/<subject>` | 404 — gone |
+| PhilPapers, PhilArchive, NDPR feeds | 403 / 404 |
+| arXiv RSS, every category | **0 items** on a Sunday: it lists only the latest announcement |
+
+What fills the gaps, all measured the same day:
+
+- **arXiv's API** answered every category with its newest twenty. Categories
+  are followed through it (`api:arxiv?q=cat:…`), not RSS.
+- **bioRxiv's API**, by date range and subject: 237 neuroscience records in
+  five days, 155 of them new papers, oldest first, thirty a page. The
+  provider reads the newest end and keeps first versions only.
+- **OpenAlex** by ISSN, for journals whose feeds refuse: J Neurosci,
+  NeuroImage, Brain, Cerebral Cortex, Mind, Phil Review, J Phil, Ethics, Phil
+  Studies, Synthese, Erkenntnis, BJPS — each with that week's papers.
+  **But it rate-limits a burst**: the twelfth request of a quick run got 429
+  (its error names credits and a daily budget), and the same request answered
+  minutes later. So: two requests at a time per service, one retry after the
+  pause asked for, and **Crossref as the fallback** for a journal (it answered
+  for Phil Quarterly, Ergo and Philosophy of Science while OpenAlex was
+  refusing). Crossref also rate-limits concurrency (two of four parallel calls
+  got 429), which is why it is the fallback and the single paste-time lookup,
+  not the backbone.
+- **Google Scholar has no API and no feed**, and refuses automated access;
+  its alerts are email only. OpenAlex's search (`api:openalex`, title and
+  abstract, optionally one field) is the open stand-in. Semantic Scholar's
+  search needs a key (429 without one) and its date sort led with
+  future-dated records.
+- Philosophers' Imprint is left out: OpenAlex lists its new papers as
+  "Title Pending".
+
+None of this is in the ranking panel, and research categories are kept out of
+`frontOutletForHost`: a bare `jneurosci.org` is found by the research rung,
+and some of these entries are API sources, not feeds.
 
 ### What those numbers mean
 
@@ -593,6 +656,13 @@ them rather than re-discovering them:
   the caption track or the "Show transcript" panel off the page
   (`extension/extract.js`, `__superReaderYoutube`), or the reader pastes the
   panel's text, whose times `lib/youtube.ts` turns into links into the video.
+
+- **Scholarly publishers' pages** — measured 11 Oct 2026: nature.com
+  articles (bot check), jneurosci.org, cell.com, Wiley, Oxford, ScienceDirect,
+  PhilPapers and PhilArchive all refuse a server. Their feeds mostly answer;
+  where they don't, a journal is followed by ISSN (§2, "Research").
+- **Google Scholar** — no API, no feed, and it refuses automated access by
+  design. Not integrated; OpenAlex stands in for it.
 
 When adding a publisher that walls us, put it in the known-publisher table with
 a route that works, or leave it out. Do not ship an entry that 403s.

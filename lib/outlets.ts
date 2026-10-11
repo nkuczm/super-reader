@@ -38,7 +38,11 @@ export type OutletCategory =
   | "local"
   | "culture"
   | "sports"
-  | "aggregator";
+  | "aggregator"
+  // Research, not news: journals, preprint servers and the people who read them.
+  | "neuroscience"
+  | "philosophy"
+  | "research";
 
 /**
  * Three newsrooms are missing on purpose: Reuters, USA Today and PBS
@@ -65,7 +69,18 @@ export type Outlet = {
   tier: 1 | 2 | 3;
   panel?: boolean;
   front?: boolean;
+  /**
+   * A journal's ISSNs, print and online: how a pasted DOI — whose page the
+   * publisher will not show a server — is matched to the journal's feed.
+   */
+  issn?: string[];
 };
+
+/** A journal's newest papers by ISSN, where its own feed does not answer (lib/apis.ts, "journal"). */
+// Spelled exactly as buildApiSourceUrl spells them, since sources are matched by that string.
+const journal = (issn: string, name: string) => `api:journal?${new URLSearchParams({ issn, name })}`;
+/** An arXiv category, through arXiv's API: its RSS is empty at weekends. */
+const arxiv = (cat: string) => `api:arxiv?${new URLSearchParams({ q: `cat:${cat}` })}`;
 
 /* eslint-disable prettier/prettier */
 export const OUTLETS: Outlet[] = [
@@ -178,7 +193,7 @@ export const OUTLETS: Outlet[] = [
   { id: "bleepingcomputer", name: "BleepingComputer", section: "All", feedUrl: "https://www.bleepingcomputer.com/feed/", siteUrl: "https://www.bleepingcomputer.com", category: "tech", region: "US", tier: 3 },
 
   // ---- Science and health --------------------------------------------------
-  { id: "nature-news", name: "Nature", section: "News", feedUrl: "https://www.nature.com/nature.rss", siteUrl: "https://www.nature.com", category: "science", region: "Global", tier: 2, panel: true },
+  { id: "nature-news", name: "Nature", section: "News", feedUrl: "https://www.nature.com/nature.rss", siteUrl: "https://www.nature.com", category: "science", region: "Global", tier: 2, panel: true, issn: ["0028-0836", "1476-4687"] },
   { id: "science-news", name: "Science", section: "News", feedUrl: "https://www.science.org/rss/news_current.xml", siteUrl: "https://www.science.org/news", category: "science", region: "Global", tier: 2, panel: true },
   { id: "quanta", name: "Quanta Magazine", section: "All", feedUrl: "https://www.quantamagazine.org/feed/", siteUrl: "https://www.quantamagazine.org", category: "science", region: "US", tier: 3 },
   { id: "newscientist", name: "New Scientist", section: "Home", feedUrl: "https://www.newscientist.com/feed/home/", siteUrl: "https://www.newscientist.com", category: "science", region: "UK", tier: 3 },
@@ -256,6 +271,74 @@ export const OUTLETS: Outlet[] = [
   { id: "oregonian", name: "The Oregonian", section: "All", feedUrl: "https://www.oregonlive.com/arc/outboundfeeds/rss/", siteUrl: "https://www.oregonlive.com", category: "local", region: "US", tier: 3 },
   { id: "azcentral", name: "The Arizona Republic", section: "All", feedUrl: "https://rssfeeds.azcentral.com/phoenix/local", siteUrl: "https://www.azcentral.com", category: "local", region: "US", tier: 3 },
   { id: "nevadaindependent", name: "The Nevada Independent", section: "All", feedUrl: "https://thenevadaindependent.com/feed", siteUrl: "https://thenevadaindependent.com", category: "local", region: "US", tier: 3 },
+
+  // ---- Research: journals, preprints and the people who read them --------
+  // Every feed here was read from the deployment on 11 Oct 2026, each with
+  // that week's papers (docs/COLLECTION.md §2). Where a journal's own feed
+  // refused (jneurosci.org, Oxford, Springer's bot check) or was undated
+  // (ScienceDirect), its newest papers come by ISSN instead. None of these
+  // is in the ranking panel: a paper is not a news story.
+  { id: "nature-neuro", name: "Nature Neuroscience", feedUrl: "https://www.nature.com/neuro.rss", siteUrl: "https://www.nature.com/neuro", category: "neuroscience", region: "Global", tier: 3, issn: ["1097-6256", "1546-1726"] },
+  { id: "nature-nrn", name: "Nature Reviews Neuroscience", feedUrl: "https://www.nature.com/nrn.rss", siteUrl: "https://www.nature.com/nrn", category: "neuroscience", region: "Global", tier: 3, issn: ["1471-003X", "1471-0048"] },
+  { id: "nature-subject-neuro", name: "Nature journals", section: "Neuroscience", feedUrl: "https://www.nature.com/subjects/neuroscience.rss", siteUrl: "https://www.nature.com/subjects/neuroscience", category: "neuroscience", region: "Global", tier: 3 },
+  { id: "ncomms-neuro", name: "Nature Communications", section: "Neuroscience", feedUrl: "https://www.nature.com/subjects/neuroscience/ncomms.rss", siteUrl: "https://www.nature.com/subjects/neuroscience/ncomms", category: "neuroscience", region: "Global", tier: 3 },
+  { id: "nathumbehav", name: "Nature Human Behaviour", feedUrl: "https://www.nature.com/nathumbehav.rss", siteUrl: "https://www.nature.com/nathumbehav", category: "neuroscience", region: "Global", tier: 3, issn: ["2397-3374"] },
+  { id: "neuron", name: "Neuron", feedUrl: "https://www.cell.com/neuron/inpress.rss", siteUrl: "https://www.cell.com/neuron", category: "neuroscience", region: "US", tier: 3, issn: ["0896-6273", "1097-4199"] },
+  { id: "tins", name: "Trends in Neurosciences", feedUrl: "https://www.cell.com/trends/neurosciences/inpress.rss", siteUrl: "https://www.cell.com/trends/neurosciences", category: "neuroscience", region: "US", tier: 3, issn: ["0166-2236", "1878-108X"] },
+  { id: "tics", name: "Trends in Cognitive Sciences", feedUrl: "https://www.cell.com/trends/cognitive-sciences/inpress.rss", siteUrl: "https://www.cell.com/trends/cognitive-sciences", category: "neuroscience", region: "US", tier: 3, issn: ["1364-6613", "1879-307X"] },
+  { id: "jneurosci", name: "The Journal of Neuroscience", feedUrl: journal("0270-6474", "The Journal of Neuroscience"), siteUrl: "https://www.jneurosci.org", category: "neuroscience", region: "US", tier: 3, issn: ["0270-6474", "1529-2401"] },
+  { id: "eneuro", name: "eNeuro", feedUrl: "https://www.eneuro.org/rss/current.xml", siteUrl: "https://www.eneuro.org", category: "neuroscience", region: "US", tier: 3, issn: ["2373-2822"] },
+  { id: "elife-neuro", name: "eLife", section: "Neuroscience", feedUrl: "https://elifesciences.org/rss/subject/neuroscience.xml", siteUrl: "https://elifesciences.org/subjects/neuroscience", category: "neuroscience", region: "Global", tier: 3 },
+  { id: "plos-compbio", name: "PLOS Computational Biology", feedUrl: "https://journals.plos.org/ploscompbiol/feed/atom", siteUrl: "https://journals.plos.org/ploscompbiol", category: "neuroscience", region: "Global", tier: 3, issn: ["1553-734X", "1553-7358"] },
+  { id: "jneurophys", name: "Journal of Neurophysiology", feedUrl: "https://journals.physiology.org/action/showFeed?type=etoc&feed=rss&jc=jn", siteUrl: "https://journals.physiology.org/journal/jn", category: "neuroscience", region: "US", tier: 3, issn: ["0022-3077", "1522-1598"] },
+  { id: "neuroimage", name: "NeuroImage", feedUrl: journal("1053-8119", "NeuroImage"), siteUrl: "https://www.sciencedirect.com/journal/neuroimage", category: "neuroscience", region: "Global", tier: 3, issn: ["1053-8119", "1095-9572"] },
+  { id: "brain", name: "Brain", feedUrl: journal("0006-8950", "Brain"), siteUrl: "https://academic.oup.com/brain", category: "neuroscience", region: "UK", tier: 3, issn: ["0006-8950", "1460-2156"] },
+  { id: "cercor", name: "Cerebral Cortex", feedUrl: journal("1047-3211", "Cerebral Cortex"), siteUrl: "https://academic.oup.com/cercor", category: "neuroscience", region: "Global", tier: 3, issn: ["1047-3211", "1460-2199"] },
+  { id: "biorxiv-neuro", name: "bioRxiv", section: "Neuroscience", feedUrl: "api:rxiv?server=biorxiv&subject=neuroscience", siteUrl: "https://www.biorxiv.org/collection/neuroscience", category: "neuroscience", region: "Global", tier: 3 },
+  { id: "medrxiv-neuro", name: "medRxiv", section: "Neurology", feedUrl: "api:rxiv?server=medrxiv&subject=neurology", siteUrl: "https://www.medrxiv.org/collection/neurology", category: "neuroscience", region: "Global", tier: 3 },
+  { id: "arxiv-qbio-nc", name: "arXiv", section: "Neurons and Cognition", feedUrl: arxiv("q-bio.NC"), siteUrl: "https://arxiv.org/list/q-bio.NC/recent", category: "neuroscience", region: "Global", tier: 3 },
+  { id: "neurosciencenews", name: "Neuroscience News", feedUrl: "https://neurosciencenews.com/feed/", siteUrl: "https://neurosciencenews.com", category: "neuroscience", region: "US", tier: 3 },
+  { id: "transmitter", name: "The Transmitter", feedUrl: "https://www.thetransmitter.org/feed/", siteUrl: "https://www.thetransmitter.org", category: "neuroscience", region: "US", tier: 3 },
+
+  { id: "sep", name: "Stanford Encyclopedia of Philosophy", section: "New and revised entries", feedUrl: "https://plato.stanford.edu/rss/sep.xml", siteUrl: "https://plato.stanford.edu", category: "philosophy", region: "US", tier: 3 },
+  { id: "dailynous", name: "Daily Nous", feedUrl: "https://dailynous.com/feed/", siteUrl: "https://dailynous.com", category: "philosophy", region: "US", tier: 3 },
+  { id: "aeon", name: "Aeon", section: "Essays", feedUrl: "https://aeon.co/feed.rss", siteUrl: "https://aeon.co", category: "philosophy", region: "Global", tier: 3 },
+  { id: "psyche", name: "Psyche", feedUrl: "https://psyche.co/feed.rss", siteUrl: "https://psyche.co", category: "philosophy", region: "Global", tier: 3 },
+  { id: "brainsblog", name: "The Brains Blog", feedUrl: "https://philosophyofbrains.com/feed", siteUrl: "https://philosophyofbrains.com", category: "philosophy", region: "Global", tier: 3 },
+  { id: "peasoup", name: "PEA Soup", feedUrl: "https://peasoupblog.com/feed/", siteUrl: "https://peasoupblog.com", category: "philosophy", region: "Global", tier: 3 },
+  { id: "leiter", name: "Leiter Reports", feedUrl: "https://leiterreports.com/feed/", siteUrl: "https://leiterreports.com", category: "philosophy", region: "US", tier: 3 },
+  { id: "nous", name: "Noûs", feedUrl: "https://onlinelibrary.wiley.com/feed/14680068/most-recent", siteUrl: "https://onlinelibrary.wiley.com/journal/14680068", category: "philosophy", region: "Global", tier: 3, issn: ["0029-4624", "1468-0068"] },
+  { id: "ppr", name: "Philosophy and Phenomenological Research", feedUrl: "https://onlinelibrary.wiley.com/feed/19331592/most-recent", siteUrl: "https://onlinelibrary.wiley.com/journal/19331592", category: "philosophy", region: "Global", tier: 3, issn: ["0031-8205", "1933-1592"] },
+  { id: "mindlang", name: "Mind & Language", feedUrl: "https://onlinelibrary.wiley.com/feed/14680017/most-recent", siteUrl: "https://onlinelibrary.wiley.com/journal/14680017", category: "philosophy", region: "Global", tier: 3, issn: ["0268-1064", "1468-0017"] },
+  { id: "philcompass", name: "Philosophy Compass", feedUrl: "https://onlinelibrary.wiley.com/feed/17479991/most-recent", siteUrl: "https://onlinelibrary.wiley.com/journal/17479991", category: "philosophy", region: "Global", tier: 3, issn: ["1747-9991"] },
+  { id: "ajp", name: "Australasian Journal of Philosophy", feedUrl: "https://www.tandfonline.com/feed/rss/rajp20", siteUrl: "https://www.tandfonline.com/journals/rajp20", category: "philosophy", region: "Global", tier: 3, issn: ["0004-8402", "1471-6828"] },
+  { id: "mind", name: "Mind", feedUrl: journal("0026-4423", "Mind"), siteUrl: "https://academic.oup.com/mind", category: "philosophy", region: "UK", tier: 3, issn: ["0026-4423", "1460-2113"] },
+  { id: "pq", name: "The Philosophical Quarterly", feedUrl: journal("0031-8094", "The Philosophical Quarterly"), siteUrl: "https://academic.oup.com/pq", category: "philosophy", region: "UK", tier: 3, issn: ["0031-8094", "1467-9213"] },
+  { id: "philreview", name: "The Philosophical Review", feedUrl: journal("0031-8108", "The Philosophical Review"), siteUrl: "https://read.dukeupress.edu/the-philosophical-review", category: "philosophy", region: "US", tier: 3, issn: ["0031-8108", "1558-1470"] },
+  { id: "jphil", name: "The Journal of Philosophy", feedUrl: journal("0022-362X", "The Journal of Philosophy"), siteUrl: "https://www.pdcnet.org/jphil", category: "philosophy", region: "US", tier: 3, issn: ["0022-362X", "1939-8549"] },
+  { id: "ethics", name: "Ethics", feedUrl: journal("0014-1704", "Ethics"), siteUrl: "https://www.journals.uchicago.edu/journal/et", category: "philosophy", region: "US", tier: 3, issn: ["0014-1704", "1539-297X"] },
+  { id: "philstudies", name: "Philosophical Studies", feedUrl: journal("0031-8116", "Philosophical Studies"), siteUrl: "https://link.springer.com/journal/11098", category: "philosophy", region: "Global", tier: 3, issn: ["0031-8116", "1573-0883"] },
+  { id: "synthese", name: "Synthese", feedUrl: journal("0039-7857", "Synthese"), siteUrl: "https://link.springer.com/journal/11229", category: "philosophy", region: "Global", tier: 3, issn: ["0039-7857", "1573-0964"] },
+  { id: "erkenntnis", name: "Erkenntnis", feedUrl: journal("0165-0106", "Erkenntnis"), siteUrl: "https://link.springer.com/journal/10670", category: "philosophy", region: "Global", tier: 3, issn: ["0165-0106", "1572-8420"] },
+  { id: "ergo", name: "Ergo", feedUrl: journal("2330-4014", "Ergo"), siteUrl: "https://journals.publishing.umich.edu/ergo", category: "philosophy", region: "Global", tier: 3, issn: ["2330-4014"] },
+  { id: "philsci", name: "Philosophy of Science", feedUrl: journal("0031-8248", "Philosophy of Science"), siteUrl: "https://www.cambridge.org/core/journals/philosophy-of-science", category: "philosophy", region: "Global", tier: 3, issn: ["0031-8248", "1539-767X"] },
+  { id: "bjps", name: "The British Journal for the Philosophy of Science", feedUrl: journal("0007-0882", "The British Journal for the Philosophy of Science"), siteUrl: "https://www.journals.uchicago.edu/journal/bjps", category: "philosophy", region: "UK", tier: 3, issn: ["0007-0882", "1464-3537"] },
+  { id: "arxiv-hist-ph", name: "arXiv", section: "History and Philosophy of Physics", feedUrl: arxiv("physics.hist-ph"), siteUrl: "https://arxiv.org/list/physics.hist-ph/recent", category: "philosophy", region: "Global", tier: 3 },
+
+  { id: "science-journal", name: "Science", section: "Table of contents", feedUrl: "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=science", siteUrl: "https://www.science.org/journal/science", category: "research", region: "US", tier: 3, issn: ["0036-8075", "1095-9203"] },
+  { id: "pnas", name: "PNAS", feedUrl: "https://www.pnas.org/action/showFeed?type=etoc&feed=rss&jc=pnas", siteUrl: "https://www.pnas.org", category: "research", region: "US", tier: 3, issn: ["0027-8424", "1091-6490"] },
+  { id: "cell", name: "Cell", feedUrl: "https://www.cell.com/cell/inpress.rss", siteUrl: "https://www.cell.com/cell", category: "research", region: "US", tier: 3, issn: ["0092-8674", "1097-4172"] },
+  { id: "curbio", name: "Current Biology", feedUrl: "https://www.cell.com/current-biology/inpress.rss", siteUrl: "https://www.cell.com/current-biology", category: "research", region: "US", tier: 3, issn: ["0960-9822", "1879-0445"] },
+  { id: "elife", name: "eLife", feedUrl: "https://elifesciences.org/rss/recent.xml", siteUrl: "https://elifesciences.org", category: "research", region: "Global", tier: 3, issn: ["2050-084X"] },
+  { id: "plos-biology", name: "PLOS Biology", feedUrl: "https://journals.plos.org/plosbiology/feed/atom", siteUrl: "https://journals.plos.org/plosbiology", category: "research", region: "Global", tier: 3, issn: ["1544-9173", "1545-7885"] },
+  { id: "arxiv-cs-ai", name: "arXiv", section: "Artificial Intelligence", feedUrl: arxiv("cs.AI"), siteUrl: "https://arxiv.org/list/cs.AI/recent", category: "research", region: "Global", tier: 3 },
+  { id: "arxiv-cs-lg", name: "arXiv", section: "Machine Learning", feedUrl: arxiv("cs.LG"), siteUrl: "https://arxiv.org/list/cs.LG/recent", category: "research", region: "Global", tier: 3 },
+  { id: "arxiv-cs-cl", name: "arXiv", section: "Computation and Language", feedUrl: arxiv("cs.CL"), siteUrl: "https://arxiv.org/list/cs.CL/recent", category: "research", region: "Global", tier: 3 },
+  { id: "arxiv-stat-ml", name: "arXiv", section: "Machine Learning (Statistics)", feedUrl: arxiv("stat.ML"), siteUrl: "https://arxiv.org/list/stat.ML/recent", category: "research", region: "Global", tier: 3 },
+  { id: "arxiv-cs-cy", name: "arXiv", section: "Computers and Society", feedUrl: arxiv("cs.CY"), siteUrl: "https://arxiv.org/list/cs.CY/recent", category: "research", region: "Global", tier: 3 },
+  { id: "arxiv-quant-ph", name: "arXiv", section: "Quantum Physics", feedUrl: arxiv("quant-ph"), siteUrl: "https://arxiv.org/list/quant-ph/recent", category: "research", region: "Global", tier: 3 },
+  { id: "arxiv-astro-ph", name: "arXiv", section: "Astrophysics", feedUrl: arxiv("astro-ph"), siteUrl: "https://arxiv.org/list/astro-ph/recent", category: "research", region: "Global", tier: 3 },
+  { id: "arxiv-econ-gn", name: "arXiv", section: "General Economics", feedUrl: arxiv("econ.GN"), siteUrl: "https://arxiv.org/list/econ.GN/recent", category: "research", region: "Global", tier: 3 },
 ];
 /* eslint-enable prettier/prettier */
 
@@ -349,6 +432,10 @@ export const PACKS: { id: string; name: string; blurb: string; outlets: string[]
   { id: "investigative", name: "Investigative", blurb: "Long-lead reporting and document work.", outlets: ["propublica", "marshallproject", "bellingcat", "icij", "intercept"] },
   { id: "health", name: "Health", blurb: "Medicine, public health and the money in both.", outlets: ["statnews", "kffhealth", "cdc-newsroom"], subreddits: ["medicine"] },
   { id: "culture", name: "Culture", blurb: "Film, music and television.", outlets: ["variety", "hollywoodreporter", "deadline", "pitchfork", "rollingstone"], subreddits: ["movies", "television"] },
+  { id: "neuroscience", name: "Neuroscience", blurb: "The journals, the preprints and the people who report on both.", outlets: ["nature-neuro", "neuron", "jneurosci", "elife-neuro", "tics", "biorxiv-neuro", "arxiv-qbio-nc", "transmitter"] },
+  { id: "philosophy", name: "Philosophy", blurb: "The journals, the encyclopedia and the profession's own news.", outlets: ["sep", "dailynous", "nous", "ppr", "mind", "philreview", "philstudies", "aeon"] },
+  { id: "ai-papers", name: "AI papers", blurb: "New arXiv submissions in AI, machine learning and language.", outlets: ["arxiv-cs-ai", "arxiv-cs-lg", "arxiv-cs-cl", "arxiv-stat-ml"] },
+  { id: "journals", name: "Flagship journals", blurb: "The general science journals, as they publish.", outlets: ["nature-news", "science-journal", "pnas", "cell", "elife", "plos-biology"] },
 ];
 
 /**
@@ -368,6 +455,8 @@ export function frontOutletForHost(host: string): Outlet | null {
   if (!wanted) return null;
 
   const matches = OUTLETS.filter((outlet) => {
+    // Research is found by its own rung (lib/scholarly.ts); some of it is not a feed at all.
+    if (outlet.category === "neuroscience" || outlet.category === "philosophy" || outlet.category === "research") return false;
     let outletHost: string;
     try {
       outletHost = new URL(outlet.siteUrl).hostname.replace(/^www\./, "").toLowerCase();

@@ -16,6 +16,7 @@ import { parseApiSourceUrl, fetchApiSource } from "./apis";
 import { subredditFrom, subredditFeedUrl, subredditPageUrl } from "./reddit";
 import { knownFeedFor } from "./publishers";
 import { frontOutletForHost } from "./outlets";
+import { scholarlyRoute, type ScholarlyRoute } from "./scholarly";
 import { parseBundle, mergeBundled } from "./bundle";
 import { canonicalUrl } from "./url";
 import { sortNewestFirst } from "./sort";
@@ -291,6 +292,27 @@ function pageTitle(html: string | null): string | undefined {
   return raw ? raw.split(/\s+[|–—-]\s+/).pop()?.trim() || raw : undefined;
 }
 
+/** A research route, previewed: a feed, or a source from the API directory, under the route's own name. */
+async function fromScholarly(route: ScholarlyRoute, limit: number, keys?: Record<string, string>): Promise<DiscoverResult> {
+  const api = parseApiSourceUrl(route.feedUrl);
+  const { meta, total, articles } = api
+    ? await fetchApiSource(route.feedUrl, limit, keys).then((r) => ({ ...r, total: r.articles.length }))
+    : await tryFeed(route.feedUrl, limit);
+  return {
+    ...meta,
+    kind: api ? "api" : "feed",
+    scope: route.scope,
+    total,
+    title: route.title,
+    siteUrl: route.siteUrl,
+    description: route.note ?? meta.description,
+    feedUrl: route.feedUrl,
+    favicon: faviconFor(route.faviconHost),
+    articles,
+    ...(route.fromArticle ? { fromArticle: route.fromArticle } : {}),
+  };
+}
+
 export async function discover(
   input: string,
   limit = 12,
@@ -338,6 +360,13 @@ export async function discover(
       articles,
     };
   }
+
+  // Research — an arXiv listing or paper, a bioRxiv collection or preprint,
+  // a DOI, a journal the directory holds. Publishers refuse a server their
+  // pages (lib/scholarly.ts), so this works from what the link says, before
+  // any page is fetched.
+  const scholarly = await scholarlyRoute(raw);
+  if (scholarly) return fromScholarly(scholarly, limit, keys);
 
   // An X account is neither a feed nor a scrapable page: x.com serves
   // logged-out visitors a login wall, so it goes through the API instead.
