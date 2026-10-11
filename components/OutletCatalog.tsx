@@ -33,6 +33,9 @@ const CATEGORY_LABELS: Record<OutletCategory, string> = {
   culture: "Culture",
   sports: "Sport",
   aggregator: "Aggregators",
+  neuroscience: "Neuroscience",
+  philosophy: "Philosophy",
+  research: "Research & preprints",
 };
 
 function faviconFor(host: string) {

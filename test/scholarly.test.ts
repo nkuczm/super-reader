@@ -1,0 +1,211 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  arxivCategoryFrom,
+  arxivIdFrom,
+  directoryForIssn,
+  directoryForUrl,
+  doiFrom,
+  normalIssn,
+  piiFrom,
+  rxivFrom,
+  scholarlyRoute,
+  wileyJournalFrom,
+} from "../lib/scholarly";
+import { abstractFrom, buildApiSourceUrl, fetchApiSource, getApiProvider, openAlexArticle, parseApiSourceUrl } from "../lib/apis";
+import { OUTLETS, frontOutletForHost } from "../lib/outlets";
+
+/*
+ * The links here are the shapes measured on 11 Oct 2026 (docs/COLLECTION.md
+ * §2): the addresses papers actually have at each publisher. None of these
+ * tests reaches the network — the publishers refuse a server anyway, which
+ * is why the link alone has to say where the paper is from.
+ */
+
+test("a DOI is found in every shape publishers put one", () => {
+  const cases: [string, string | null][] = [
+    ["https://doi.org/10.1111/nous.70071", "10.1111/nous.70071"],
+    ["https://dx.doi.org/10.1038/nature14539", "10.1038/nature14539"],
+    ["doi:10.1093/mind/fzag023", "10.1093/mind/fzag023"],
+    ["10.1007/s11098-026-02616-9", "10.1007/s11098-026-02616-9"],
+    ["https://onlinelibrary.wiley.com/doi/10.1111/nous.70071?af=R", "10.1111/nous.70071"],
+    ["https://onlinelibrary.wiley.com/doi/full/10.1111/phpr.70168", "10.1111/phpr.70168"],
+    ["https://www.tandfonline.com/doi/full/10.1080/00048402.2026.2688289?af=R", "10.1080/00048402.2026.2688289"],
+    ["https://www.science.org/doi/abs/10.1126/science.adx9628?af=R", "10.1126/science.adx9628"],
+    ["https://journals.physiology.org/doi/abs/10.1152/jn.00011.2026", "10.1152/jn.00011.2026"],
+    ["https://link.springer.com/article/10.1007/s11098-026-02616-9", "10.1007/s11098-026-02616-9"],
+    ["https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1014858", "10.1371/journal.pcbi.1014858"],
+    ["https://www.nature.com/articles/s41593-026-02472-0", "10.1038/s41593-026-02472-0"],
+    ["https://elifesciences.org/articles/108246", "10.7554/eLife.108246"],
+    ["https://www.nytimes.com/2026/10/09/science/brains.html", null],
+    ["predictive coding", null],
+  ];
+  for (const [input, doi] of cases) assert.equal(doiFrom(input), doi, input);
+});
+
+test("an Elsevier article is known by its PII, from ScienceDirect or Cell Press", () => {
+  assert.equal(piiFrom("https://www.sciencedirect.com/science/article/pii/S0896627326007282?dgcid=rss_sd_all"), "S0896627326007282");
+  assert.equal(piiFrom("https://www.cell.com/neuron/fulltext/S0896-6273(26)00728-2?rss=yes"), "S0896627326007282");
+  assert.equal(piiFrom("https://www.cell.com/neuron/home"), null);
+});
+
+test("arXiv: a paper by its identifier, a category by its listing, feed or name", () => {
+  assert.equal(arxivIdFrom("https://arxiv.org/abs/1706.03762"), "1706.03762");
+  assert.equal(arxivIdFrom("https://arxiv.org/abs/2610.12426v1"), "2610.12426");
+  assert.equal(arxivIdFrom("https://arxiv.org/pdf/2610.12426v2"), "2610.12426");
+  assert.equal(arxivIdFrom("arXiv:2610.12426"), "2610.12426");
+  assert.equal(arxivIdFrom("https://doi.org/10.48550/arXiv.1706.03762"), "1706.03762");
+  assert.equal(arxivIdFrom("https://arxiv.org/list/q-bio.NC/recent"), null);
+  assert.equal(arxivCategoryFrom("https://arxiv.org/list/q-bio.NC/recent"), "q-bio.NC");
+  assert.equal(arxivCategoryFrom("https://rss.arxiv.org/rss/cs.AI"), "cs.AI");
+  assert.equal(arxivCategoryFrom("https://export.arxiv.org/rss/physics.hist-ph"), "physics.hist-ph");
+  assert.equal(arxivCategoryFrom("arxiv cs.ai"), "cs.AI");
+  assert.equal(arxivCategoryFrom("arXiv q-bio.NC"), "q-bio.NC");
+  assert.equal(arxivCategoryFrom("arxiv nonsense"), null);
+});
+
+test("bioRxiv and medRxiv: a collection by its subject, a preprint by its DOI (old prefix and new)", () => {
+  assert.deepEqual(rxivFrom("https://www.biorxiv.org/collection/neuroscience"), { server: "biorxiv", subject: "neuroscience" });
+  assert.deepEqual(rxivFrom("https://www.biorxiv.org/collection/cell-biology"), { server: "biorxiv", subject: "cell_biology" });
+  assert.deepEqual(rxivFrom("https://www.biorxiv.org/content/10.1101/2025.10.29.685457v4"), { server: "biorxiv", doi: "10.1101/2025.10.29.685457" });
+  assert.deepEqual(rxivFrom("https://www.medrxiv.org/content/10.64898/2026.10.05.26364229v1.full"), { server: "medrxiv", doi: "10.64898/2026.10.05.26364229" });
+});
+
+test("a journal's address finds its directory entry, the longest path winning; news is left alone", () => {
+  assert.equal(directoryForUrl("https://www.cell.com/neuron/fulltext/S0896-6273(26)00728-2")?.id, "neuron");
+  assert.equal(directoryForUrl("https://www.cell.com/cell/fulltext/S0092-8674(26)01071-8")?.id, "cell");
+  assert.equal(directoryForUrl("https://www.jneurosci.org/content/46/41/e0619262026")?.id, "jneurosci");
+  assert.equal(directoryForUrl("https://academic.oup.com/mind/article/135/540/1/1234")?.id, "mind");
+  assert.equal(directoryForUrl("https://academic.oup.com/brain")?.id, "brain");
+  assert.equal(directoryForUrl("https://elifesciences.org/subjects/neuroscience")?.id, "elife-neuro");
+  assert.equal(directoryForUrl("https://elifesciences.org/articles/108246")?.id, "elife");
+  assert.equal(directoryForUrl("https://www.nytimes.com/section/world"), null, "a news section keeps its own way of being found");
+  // A bare domain's front outlet is news; the research rung finds journals.
+  assert.equal(frontOutletForHost("jneurosci.org"), null);
+});
+
+test("ISSNs: any spelling, and a journal by any of its numbers", () => {
+  assert.equal(normalIssn("14680068"), "1468-0068");
+  assert.equal(normalIssn("ISSN 0022-362x"), "0022-362X");
+  assert.equal(normalIssn("12345"), null);
+  assert.equal(directoryForIssn(["1468-0068"])?.id, "nous");
+  assert.equal(directoryForIssn(["0029-4624"])?.id, "nous");
+  assert.equal(directoryForIssn(["1476-4687"])?.id, "nature-news");
+  assert.equal(wileyJournalFrom("https://onlinelibrary.wiley.com/journal/14680017"), "1468-0017");
+});
+
+test("every research entry in the directory can be followed: a feed, or an API source spelled as the API spells it", () => {
+  const research = OUTLETS.filter((o) => ["neuroscience", "philosophy", "research"].includes(o.category));
+  assert.ok(research.length >= 50);
+  for (const outlet of research) {
+    assert.ok(!outlet.panel, `${outlet.id} is not a news panel entry`);
+    for (const issn of outlet.issn ?? []) assert.equal(normalIssn(issn), issn, `${outlet.id}: ${issn}`);
+    if (!outlet.feedUrl.startsWith("api:")) {
+      assert.match(outlet.feedUrl, /^https:\/\//, outlet.id);
+      continue;
+    }
+    const parsed = parseApiSourceUrl(outlet.feedUrl);
+    assert.ok(parsed, `${outlet.id}: ${outlet.feedUrl}`);
+    assert.equal(buildApiSourceUrl(parsed!.provider.id, parsed!.params), outlet.feedUrl, `${outlet.id} is spelled as the API spells it`);
+  }
+  const ids = OUTLETS.map((o) => o.id);
+  assert.equal(new Set(ids).size, ids.length, "ids are unique");
+  // No two journals claim the same ISSN.
+  const issns = OUTLETS.flatMap((o) => o.issn ?? []);
+  assert.equal(new Set(issns).size, issns.length);
+});
+
+const lookups = (calls: string[] = []) => ({
+  arxiv: async (id: string) => (calls.push(`arxiv ${id}`), { category: "cs.CL", title: "Attention Is All You Need" }),
+  rxiv: async (server: string, doi: string) => (calls.push(`rxiv ${server} ${doi}`), { subject: "neuroscience", title: "A preprint" }),
+  doi: async (doi: string) => {
+    calls.push(`doi ${doi}`);
+    if (doi === "10.1016/j.neuron.2026.09.018") return { issns: ["0896-6273"], journal: "Neuron", title: "Stepwise engagement" };
+    if (doi === "10.1086/742215") return { issns: ["0014-1704"], journal: "Ethics", title: "Three Balance Models" };
+    if (doi === "10.9999/unknown.1") return { issns: ["1234-5679"], journal: "Journal of Things", title: "A paper" };
+    return null;
+  },
+  pii: async (pii: string) => (calls.push(`pii ${pii}`), { issns: ["1053-8119"], journal: "NeuroImage", title: "An imaging paper" }),
+});
+
+test("a pasted paper leads to its journal's feed — or its category's, or its collection's — and says which paper", async () => {
+  const calls: string[] = [];
+  const paper = await scholarlyRoute("https://arxiv.org/abs/1706.03762v7", lookups(calls));
+  assert.equal(paper?.title, "arXiv · Computation and Language");
+  assert.equal(paper?.feedUrl, buildApiSourceUrl("arxiv", { q: "cat:cs.CL" }));
+  assert.equal(paper?.fromArticle?.title, "Attention Is All You Need");
+
+  const listing = await scholarlyRoute("https://arxiv.org/list/q-bio.NC/recent", lookups(calls));
+  assert.equal(listing?.title, "arXiv · Neurons and Cognition");
+
+  const neuron = await scholarlyRoute("https://doi.org/10.1016/j.neuron.2026.09.018", lookups(calls));
+  assert.equal(neuron?.feedUrl, "https://www.cell.com/neuron/inpress.rss", "a journal in the directory: its own feed");
+  assert.equal(neuron?.fromArticle?.title, "Stepwise engagement");
+
+  const sd = await scholarlyRoute("https://www.sciencedirect.com/science/article/pii/S1053811926006038", lookups(calls));
+  assert.equal(sd?.title, "NeuroImage");
+  assert.match(sd?.feedUrl ?? "", /^api:journal\?issn=1053-8119/);
+
+  const unknown = await scholarlyRoute("https://doi.org/10.9999/unknown.1", lookups(calls));
+  assert.equal(unknown?.feedUrl, buildApiSourceUrl("journal", { issn: "1234-5679", name: "Journal of Things" }), "any other journal: by its ISSN");
+
+  const preprint = await scholarlyRoute("https://www.biorxiv.org/content/10.64898/2026.09.28.755022v1", lookups(calls));
+  assert.equal(preprint?.title, "bioRxiv · Neuroscience");
+  assert.equal(preprint?.feedUrl, "api:rxiv?server=biorxiv&subject=neuroscience");
+
+  const oup = await scholarlyRoute("https://academic.oup.com/mind/article/135/540/1/1234", lookups(calls));
+  assert.equal(oup?.title, "Mind", "a walled journal the directory holds needs no lookup at all");
+
+  calls.length = 0;
+  assert.equal(await scholarlyRoute("https://www.nytimes.com/2026/10/09/science/brains.html", lookups(calls)), null);
+  assert.equal(await scholarlyRoute("predictive coding", lookups(calls)), null);
+  assert.deepEqual(calls, [], "news and words are not looked up anywhere");
+});
+
+test("OpenAlex: an abstract put back in order, the journal after the authors", () => {
+  assert.equal(abstractFrom({ brain: [1], The: [0], predicts: [2] }), "The brain predicts");
+  const article = openAlexArticle({
+    id: "https://openalex.org/W1",
+    display_name: "Estradiol-dependent memory",
+    doi: "https://doi.org/10.1523/jneurosci.0619-26.2026",
+    publication_date: "2026-10-09",
+    authorships: ["A", "B", "C", "D"].map((n) => ({ author: { display_name: n } })),
+    primary_location: { source: { display_name: "Journal of Neuroscience" } },
+    abstract_inverted_index: { Memory: [0], needs: [1], estradiol: [2] },
+  });
+  assert.equal(article?.link, "https://doi.org/10.1523/jneurosci.0619-26.2026");
+  assert.equal(article?.author, "A, B, C et al. · Journal of Neuroscience");
+  assert.equal(article?.publishedAt, "2026-10-09T00:00:00.000Z");
+  assert.equal(article?.summary, "Memory needs estradiol");
+});
+
+const realFetch = globalThis.fetch;
+test.after(() => {
+  globalThis.fetch = realFetch;
+});
+
+test("a journal's papers come from Crossref when OpenAlex is rate-limited, after one retry", async () => {
+  const calls: string[] = [];
+  globalThis.fetch = (async (input: any) => {
+    const url = String(input);
+    calls.push(url.replace(/\?.*/, ""));
+    if (url.includes("openalex")) return new Response(JSON.stringify({ error: "Too many" }), { status: 429, headers: { "retry-after": "0.01" } });
+    return new Response(JSON.stringify({ message: { items: [{ title: ["Three Balance Models"], URL: "https://doi.org/10.1086/742215", DOI: "10.1086/742215", published: { "date-parts": [[2026, 9, 21]] } }] } }), { status: 200 });
+  }) as typeof fetch;
+  const { meta, articles } = await fetchApiSource(buildApiSourceUrl("journal", { issn: "0014-1704", name: "Ethics" }), 20);
+  assert.equal(meta.title, "Ethics");
+  assert.deepEqual(articles.map((a) => a.title), ["Three Balance Models"]);
+  assert.deepEqual(calls, ["https://api.openalex.org/works", "https://api.openalex.org/works", "https://api.crossref.org/journals/0014-1704/works"]);
+});
+
+test("bioRxiv: first versions only, read from the newest end of the range", async () => {
+  const provider = getApiProvider("rxiv")!;
+  const url = provider.request({ server: "biorxiv", subject: "neuroscience" }, { limit: 20, key: null }).url;
+  assert.match(url, /^https:\/\/api\.biorxiv\.org\/details\/biorxiv\/\d{4}-\d{2}-\d{2}\/\d{4}-\d{2}-\d{2}\/0\?category=neuroscience$/);
+  const page = (cursor: number) => ({ messages: [{ cursor, total: 237 }], collection: new Array(30).fill({ version: "1" }) });
+  const first = provider.nextPage!(page(0), url)!;
+  assert.match(first, /\/207\?category=neuroscience$/, "from the first page, straight to the last");
+  assert.match(provider.nextPage!(page(207), first)!, /\/177\?/, "then back towards the first");
+  assert.equal(provider.nextPage!(page(27), url.replace("/0?", "/27?")), null, "not back onto the first page");
+  assert.deepEqual(provider.items!({ collection: [{ version: "1" }, { version: "2" }, { version: "1" }] }).length, 2);
+});

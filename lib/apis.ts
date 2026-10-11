@@ -1,6 +1,7 @@
 import { stripHtml, toIso, faviconFor, fetchText, parseFeed, looksLikeFeed } from "./feed";
 import { sortNewestFirst } from "./sort";
 import type { Article, Attachment, SourceMeta } from "./types";
+import { ARXIV_CATEGORIES as ARXIV_NAMES } from "./arxiv";
 
 /**
  * A directory of data APIs — CourtListener, the Federal Register, arXiv and
@@ -117,7 +118,14 @@ export type ApiProvider = {
    * source shows one page and looks like it has stopped: CourtListener's
    * search returns 20 whatever you ask for.
    */
-  nextPage?: (body: any) => string | null;
+  nextPage?: (body: any, url: string) => string | null;
+  /**
+   * Another way to the same records, used when the first one cannot answer
+   * (rate-limited, down, timed out). A journal's newest papers come from
+   * OpenAlex, and from Crossref when OpenAlex is busy: two services, two
+   * separate limits.
+   */
+  fallback?: Pick<ApiProvider, "request" | "items" | "article">;
   /** The name this source gets, given what the user asked for. */
   title: (params: ApiParams) => string;
   /** How to get an article's text from the API rather than from the page. */
@@ -189,6 +197,100 @@ function fromCompactDate(value: unknown): string | undefined {
 }
 
 const query = (value: string) => encodeURIComponent(value.trim());
+
+/** Today, as the APIs below want a date: "2026-10-11". Papers dated later than this are a cover date, not a publication. */
+const today = () => new Date().toISOString().slice(0, 10);
+
+/** One Crossref work as an Article. */
+function crossrefArticle(item: any): Article | null {
+  const title = pick(item?.title?.[0]);
+  const link = pick(item?.URL);
+  if (!title || !link) return null;
+  const authors = (item.author ?? [])
+    .map((person: any) => pick(person?.family ? `${person.given ?? ""} ${person.family}` : person?.name))
+    .filter(Boolean);
+  return {
+    id: `crossref:${pick(item.DOI) ?? link}`,
+    title,
+    link,
+    author: authors.slice(0, 3).join(", ") || pick(item["container-title"]?.[0]),
+    publishedAt:
+      // The publication date, in any of the forms Crossref records it,
+      // skipping any that has not happened yet. created is a
+      // registration event and the last resort — a 2011 paper deposited
+      // last week would otherwise arrive as last week's news — but it is
+      // a real moment, which a publisher's cover date is not.
+      notFuture(fromDateParts(item.published)) ??
+      notFuture(fromDateParts(item.issued)) ??
+      notFuture(fromDateParts(item["published-print"])) ??
+      notFuture(fromDateParts(item["published-online"])) ??
+      toIso(pick(item.created?.["date-time"])),
+    summary: clean(item.abstract),
+  };
+}
+
+/**
+ * OpenAlex keeps an abstract as an inverted index — each word with the
+ * places it appears — rather than as text, for licensing reasons. Put back
+ * in order, it reads as the abstract did.
+ */
+export function abstractFrom(index: unknown, max = 600): string | undefined {
+  if (!index || typeof index !== "object") return undefined;
+  const words: string[] = [];
+  for (const [word, places] of Object.entries(index as Record<string, unknown>)) {
+    if (!Array.isArray(places)) continue;
+    for (const at of places) if (Number.isInteger(at) && at >= 0 && at < 5000) words[at] = word;
+  }
+  const text = words.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  return text ? clean(text, max) : undefined;
+}
+
+/** One OpenAlex work as an Article: its DOI as the link, the journal after its authors. */
+export function openAlexArticle(item: any): Article | null {
+  const title = clean(pick(item?.display_name, item?.title), 300);
+  const link = pick(item?.doi, item?.primary_location?.landing_page_url, item?.id);
+  if (!title || !link) return null;
+  const people = (Array.isArray(item.authorships) ? item.authorships : [])
+    .map((a: any) => pick(a?.author?.display_name))
+    .filter(Boolean) as string[];
+  const names = people.length > 3 ? `${people.slice(0, 3).join(", ")} et al.` : people.join(", ");
+  const venue = pick(item?.primary_location?.source?.display_name);
+  return {
+    id: `openalex:${pick(item.id) ?? link}`,
+    title,
+    link,
+    author: [names, venue].filter(Boolean).join(" · ") || undefined,
+    publishedAt: notFuture(toIso(pick(item.publication_date) ? `${item.publication_date}T00:00:00Z` : undefined)),
+    summary: abstractFrom(item.abstract_inverted_index),
+  };
+}
+
+/** What a filter value may hold: OpenAlex separates filters with commas and values with pipes. */
+const filterValue = (value: string) => encodeURIComponent(value.replace(/[,|:]/g, " ").replace(/\s+/g, " ").trim());
+
+/** The fields and subfields OpenAlex files works under (ids measured 11 Oct 2026). */
+export const OPENALEX_AREAS: { value: string; label: string; filter: string }[] = [
+  { value: "neuroscience", label: "Neuroscience", filter: "primary_topic.field.id:28" },
+  { value: "psychology", label: "Psychology", filter: "primary_topic.field.id:32" },
+  { value: "philosophy", label: "Philosophy", filter: "primary_topic.subfield.id:1211" },
+  { value: "ai", label: "Artificial intelligence", filter: "primary_topic.subfield.id:1702" },
+];
+
+/** bioRxiv's subject collections, as its API names them. */
+export const BIORXIV_SUBJECTS = [
+  "animal_behavior_and_cognition", "biochemistry", "bioengineering", "bioinformatics", "biophysics", "cancer_biology",
+  "cell_biology", "developmental_biology", "ecology", "evolutionary_biology", "genetics", "genomics", "immunology",
+  "microbiology", "molecular_biology", "neuroscience", "paleontology", "pathology", "pharmacology_and_toxicology",
+  "physiology", "plant_biology", "scientific_communication_and_education", "synthetic_biology", "systems_biology", "zoology",
+];
+export const MEDRXIV_SUBJECTS = [
+  "neurology", "psychiatry_and_clinical_psychology", "epidemiology", "infectious_diseases", "public_and_global_health",
+  "health_policy", "health_informatics", "genetic_and_genomic_medicine", "oncology", "cardiovascular_medicine",
+  "pediatrics", "pharmacology_and_therapeutics", "radiology_and_imaging", "rehabilitation_medicine_and_physical_therapy",
+];
+
+/** How far back a preprint collection is read: long enough to fill a source after a quiet weekend. */
+const RXIV_DAYS = 5;
 
 export const API_PROVIDERS: ApiProvider[] = [
   {
@@ -703,7 +805,10 @@ export const API_PROVIDERS: ApiProvider[] = [
           `&sortBy=submittedDate&sortOrder=descending&max_results=${limit}`,
       };
     },
-    title: ({ q }) => `arXiv · ${q?.trim() ?? "recent"}`,
+    title: ({ q }) => {
+      const cat = q?.trim().match(/^cat:([\w.-]+)$/)?.[1];
+      return `arXiv · ${cat ? ARXIV_NAMES[cat] ?? cat : q?.trim() ?? "recent"}`;
+    },
   },
 
   {
@@ -722,33 +827,158 @@ export const API_PROVIDERS: ApiProvider[] = [
         `&sort=published&order=desc&rows=${limit}`,
     }),
     items: (body) => body?.message?.items ?? [],
-    article: (item) => {
-      const title = pick(item?.title?.[0]);
-      const link = pick(item?.URL);
-      if (!title || !link) return null;
-      const authors = (item.author ?? [])
-        .map((person: any) => pick(person?.family ? `${person.given ?? ""} ${person.family}` : person?.name))
-        .filter(Boolean);
+    article: crossrefArticle,
+    title: ({ q }) => `Crossref · “${q?.trim() ?? ""}”`,
+  },
+
+  {
+    id: "journal",
+    name: "A journal's newest papers",
+    category: "Research",
+    description: "Any journal by its ISSN — for the many whose own site will not serve a feed.",
+    siteUrl: "https://openalex.org",
+    docsUrl: "https://docs.openalex.org/api-entities/works/filter-works",
+    params: [
+      {
+        key: "issn",
+        label: "ISSN",
+        placeholder: "0026-4423",
+        required: true,
+        hint: "On the journal's own site, usually labelled ISSN or eISSN. Either one works.",
+      },
+      { key: "name", label: "Name", placeholder: "Mind" },
+    ],
+    // OpenAlex first: abstracts, authors, and every publisher. Measured on
+    // 11 Oct 2026 for twenty journals whose sites refuse a server, each
+    // with papers from that week.
+    request: ({ issn = "" }, { limit }) => ({
+      url:
+        `https://api.openalex.org/works?filter=primary_location.source.issn:${filterValue(issn)},` +
+        `to_publication_date:${today()},type:article|preprint|review` +
+        `&sort=publication_date:desc&per-page=${Math.min(limit, 50)}`,
+    }),
+    items: (body) => body?.results ?? [],
+    article: openAlexArticle,
+    // Crossref when OpenAlex cannot answer: the same journal by the same ISSN.
+    fallback: {
+      request: ({ issn = "" }, { limit }) => ({
+        url:
+          `https://api.crossref.org/journals/${encodeURIComponent(issn.trim())}/works` +
+          `?sort=published&order=desc&rows=${Math.min(limit, 50)}&filter=until-pub-date:${today()},type:journal-article`,
+      }),
+      items: (body) => body?.message?.items ?? [],
+      article: crossrefArticle,
+    },
+    title: ({ name, issn }) => name?.trim() || `Journal ${issn?.trim() ?? ""}`,
+  },
+
+  {
+    id: "openalex",
+    name: "Papers (OpenAlex)",
+    category: "Research",
+    description:
+      "New papers matching your words, across every journal and preprint server — the open index that stands in for Google Scholar, which has no API.",
+    siteUrl: "https://openalex.org",
+    docsUrl: "https://docs.openalex.org/api-entities/works/search-works",
+    params: [
+      {
+        key: "q",
+        label: "Words",
+        placeholder: "predictive coding",
+        hint: "Found in a paper's title or abstract. Leave empty to follow a whole field.",
+      },
+      {
+        key: "area",
+        label: "Field",
+        options: [{ value: "", label: "Any field" }, ...OPENALEX_AREAS.map(({ value, label }) => ({ value, label }))],
+        default: "",
+      },
+    ],
+    request: ({ q = "", area = "" }, { limit }) => {
+      const field = OPENALEX_AREAS.find((a) => a.value === area);
+      if (!q.trim() && !field) throw new Error("Give OpenAlex some words to look for, or a field to follow.");
+      const filters = [
+        q.trim() ? `title_and_abstract.search:${filterValue(q)}` : null,
+        field?.filter,
+        `to_publication_date:${today()}`,
+        "type:article|preprint|review",
+      ].filter(Boolean);
       return {
-        id: `crossref:${pick(item.DOI) ?? link}`,
-        title,
-        link,
-        author: authors.slice(0, 3).join(", ") || pick(item["container-title"]?.[0]),
-        publishedAt:
-          // The publication date, in any of the forms Crossref records it,
-          // skipping any that has not happened yet. created is a
-          // registration event and the last resort — a 2011 paper deposited
-          // last week would otherwise arrive as last week's news — but it is
-          // a real moment, which a publisher's cover date is not.
-          notFuture(fromDateParts(item.published)) ??
-          notFuture(fromDateParts(item.issued)) ??
-          notFuture(fromDateParts(item["published-print"])) ??
-          notFuture(fromDateParts(item["published-online"])) ??
-          toIso(pick(item.created?.["date-time"])),
-        summary: clean(item.abstract),
+        url: `https://api.openalex.org/works?filter=${filters.join(",")}&sort=publication_date:desc&per-page=${Math.min(limit, 50)}`,
       };
     },
-    title: ({ q }) => `Crossref · “${q?.trim() ?? ""}”`,
+    items: (body) => body?.results ?? [],
+    article: openAlexArticle,
+    title: ({ q, area }) => {
+      const field = OPENALEX_AREAS.find((a) => a.value === area)?.label;
+      const words = q?.trim() ? `“${q.trim()}”` : "";
+      return `Papers · ${[words, field].filter(Boolean).join(" in ") || "newest"}`;
+    },
+  },
+
+  {
+    id: "rxiv",
+    name: "bioRxiv & medRxiv",
+    category: "Research",
+    description: "New preprints in a subject, newest first — first versions only, not revisions.",
+    siteUrl: "https://www.biorxiv.org",
+    docsUrl: "https://api.biorxiv.org",
+    params: [
+      {
+        key: "server",
+        label: "Server",
+        options: [{ value: "biorxiv", label: "bioRxiv (biology)" }, { value: "medrxiv", label: "medRxiv (medicine)" }],
+        default: "biorxiv",
+      },
+      {
+        key: "subject",
+        label: "Subject",
+        options: [...BIORXIV_SUBJECTS, ...MEDRXIV_SUBJECTS].map((value) => ({ value, label: value.replace(/_/g, " ") })),
+        default: "neuroscience",
+        required: true,
+      },
+    ],
+    // The API lists a date range oldest first, thirty at a time (measured:
+    // 237 neuroscience records over five days, 155 of them new papers). The
+    // first page says how many there are; the rest are read from the newest end.
+    request: ({ server = "biorxiv", subject = "neuroscience" }) => {
+      const to = new Date();
+      const from = new Date(to.getTime() - RXIV_DAYS * 86_400_000);
+      const host = server === "medrxiv" ? "medrxiv" : "biorxiv";
+      return {
+        url:
+          `https://api.biorxiv.org/details/${host}/${from.toISOString().slice(0, 10)}/${to.toISOString().slice(0, 10)}/0` +
+          `?category=${encodeURIComponent(subject.trim().toLowerCase())}`,
+      };
+    },
+    nextPage: (body, url) => {
+      const status = body?.messages?.[0];
+      const total = Number(status?.total);
+      const cursor = Number(status?.cursor);
+      const size = Array.isArray(body?.collection) ? body.collection.length : 0;
+      if (!Number.isFinite(total) || !Number.isFinite(cursor) || !size) return null;
+      // From the first page, jump to the last; from there, step back towards the first.
+      const next = cursor === 0 ? Math.max(size, total - size) : cursor - size;
+      if (next <= 0 || next >= total || (cursor !== 0 && next < size)) return null;
+      return url.replace(/\/\d+(\?|$)/, `/${next}$1`);
+    },
+    items: (body) => (Array.isArray(body?.collection) ? body.collection : []).filter((item: any) => String(item?.version) === "1"),
+    article: (item, { server = "biorxiv" }) => {
+      const title = clean(item?.title, 300);
+      const doi = pick(item?.doi);
+      if (!title || !doi) return null;
+      const people = String(item.authors ?? "").split(";").map((a) => a.trim()).filter(Boolean);
+      return {
+        id: `${server}:${doi}`,
+        title,
+        link: `https://www.${server === "medrxiv" ? "medrxiv" : "biorxiv"}.org/content/${doi}v1`,
+        author: people.length > 3 ? `${people.slice(0, 3).join(", ")} et al.` : people.join(", ") || undefined,
+        publishedAt: notFuture(toIso(pick(item.date) ? `${item.date}T00:00:00Z` : undefined)),
+        summary: clean(item.abstract, 600),
+      };
+    },
+    title: ({ server = "biorxiv", subject = "" }) =>
+      `${server === "medrxiv" ? "medRxiv" : "bioRxiv"} · ${subject.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase())}`,
   },
 
   {
@@ -1006,7 +1236,55 @@ export function apiCatalog(): ApiCatalogEntry[] {
   });
 }
 
-async function fetchJson(request: ApiRequest, timeoutMs = 15000) {
+/**
+ * Requests to one service, at most this many at once. A refresh reads every
+ * source in one request, so a reader following a dozen journals would ask
+ * OpenAlex a dozen times in the same instant — and OpenAlex (and Crossref)
+ * answer a burst with 429: measured on 11 Oct 2026, the twelfth of a quick
+ * run of requests was refused, and the same request answered minutes later.
+ */
+const PER_HOST = 2;
+const active = new Map<string, number>();
+const waiting = new Map<string, (() => void)[]>();
+async function turn<T>(host: string, run: () => Promise<T>): Promise<T> {
+  if ((active.get(host) ?? 0) >= PER_HOST) {
+    await new Promise<void>((resolve) => waiting.set(host, [...(waiting.get(host) ?? []), resolve]));
+  }
+  active.set(host, (active.get(host) ?? 0) + 1);
+  try {
+    return await run();
+  } finally {
+    active.set(host, (active.get(host) ?? 1) - 1);
+    const next = waiting.get(host)?.shift();
+    if (next) next();
+  }
+}
+
+async function fetchJson(request: ApiRequest, timeoutMs = 15000): Promise<any> {
+  let host = "";
+  try {
+    host = new URL(request.url).hostname;
+  } catch {
+    /* fetch will say */
+  }
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await turn(host, () => fetchJsonOnce(request, timeoutMs));
+    } catch (error) {
+      // Rate-limited: once more, after the pause the service asked for (or a second).
+      if (!(error instanceof RateLimited) || attempt >= 1) throw error;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(3000, error.retryAfterMs)));
+    }
+  }
+}
+
+class RateLimited extends Error {
+  constructor(readonly retryAfterMs: number) {
+    super("The API rate limit was reached. Try again shortly.");
+  }
+}
+
+async function fetchJsonOnce(request: ApiRequest, timeoutMs: number) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -1019,7 +1297,8 @@ async function fetchJson(request: ApiRequest, timeoutMs = 15000) {
       throw new Error("The API refused the request — check its API key.");
     }
     if (res.status === 429) {
-      throw new Error("The API rate limit was reached. Try again shortly.");
+      const after = Number(res.headers?.get?.("retry-after"));
+      throw new RateLimited(Number.isFinite(after) && after > 0 ? after * 1000 : 1000);
     }
     if (!res.ok) throw new Error(`API error ${res.status} ${res.statusText}`);
     return await res.json();
@@ -1076,23 +1355,34 @@ export async function fetchApiSource(
 
   // Follow the API's own paging until there is enough, rather than showing
   // whatever one page happened to hold.
-  const items: any[] = [];
-  let pageUrl: string | null = request.url;
-  for (let page = 0; pageUrl && page < 4 && items.length < limit; page += 1) {
-    const body = await fetchJson({ ...request, url: pageUrl });
-    items.push(...(provider.items?.(body) ?? []));
-    pageUrl = provider.nextPage?.(body) ?? null;
+  const read = async (way: Pick<ApiProvider, "items" | "article">, first: ApiRequest) => {
+    const items: any[] = [];
+    let pageUrl: string | null = first.url;
+    for (let page = 0; pageUrl && page < 4 && items.length < limit; page += 1) {
+      const body = await fetchJson({ ...first, url: pageUrl });
+      items.push(...(way.items?.(body) ?? []));
+      pageUrl = provider.nextPage?.(body, pageUrl) ?? null;
+    }
+    return items
+      .map((item) => {
+        try {
+          return way.article?.(item, params) ?? null;
+        } catch {
+          // One malformed record should not cost the whole source.
+          return null;
+        }
+      })
+      .filter((article): article is Article => article !== null);
+  };
+  let articles: Article[];
+  try {
+    articles = await read(provider, request);
+  } catch (error) {
+    if (!provider.fallback) throw error;
+    articles = await read(provider.fallback, provider.fallback.request(params, { limit, key }));
   }
-  const articles = items
-    .map((item) => {
-      try {
-        return provider.article?.(item, params) ?? null;
-      } catch {
-        // One malformed record should not cost the whole source.
-        return null;
-      }
-    })
-    .filter((article): article is Article => article !== null);
-
-  return { meta, articles: sortNewestFirst(articles).slice(0, limit) };
+  // One article per link: an API can list the same record twice (a paper and its revision).
+  const seen = new Set<string>();
+  const once = sortNewestFirst(articles).filter((article) => !seen.has(article.link) && Boolean(seen.add(article.link)));
+  return { meta, articles: once.slice(0, limit) };
 }

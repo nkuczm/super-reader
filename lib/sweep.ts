@@ -257,6 +257,13 @@ export async function auditSlice(slice: number): Promise<AuditResult> {
   const checked = await Promise.all(
     mine.map(async (outlet) => {
       try {
+        // A journal followed by ISSN, an arXiv category, a preprint collection: an API, not a feed.
+        if (outlet.feedUrl.startsWith("api:")) {
+          const { fetchApiSource } = await import("./apis");
+          const { articles } = await fetchApiSource(outlet.feedUrl, 20);
+          if (articles.length === 0) throw new Error("No papers came back");
+          return { id: outlet.id, feedUrl: outlet.feedUrl, ok: true, items: articles.length };
+        }
         const { body, finalUrl } = await fetchText(outlet.feedUrl, 12000);
         if (!looksLikeFeed(body)) throw new Error("Not a feed");
         const { articles } = parseFeed(body, finalUrl);

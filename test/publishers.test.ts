@@ -248,7 +248,9 @@ test("a bare domain finds the directory's feed for that newsroom", () => {
 });
 
 test("every directory domain resolves to an entry with a feed", () => {
-  for (const outlet of OUTLETS) {
+  // News outlets. Journals and preprint servers are found by the research
+  // rung instead (lib/scholarly.ts) — and some of them are API sources, not feeds.
+  for (const outlet of OUTLETS.filter((o) => !["neuroscience", "philosophy", "research"].includes(o.category))) {
     const host = new URL(outlet.siteUrl).hostname;
     const found = frontOutletForHost(host);
     assert.ok(found, `${host} resolves`);
