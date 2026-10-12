@@ -20,7 +20,7 @@ import SubjectFind, { type FindTarget } from "./SubjectFind";
 import type { Writing } from "./useAccount";
 import type { Note, NoteEntry } from "@/lib/notes";
 import { omissionsHtml, putFactNotes, researchOf, scriptQuotes, scriptRows, type FactCheckResult, type SourceTarget } from "@/lib/factcheck";
-import { addTranscriptNote, documentOrder, LABEL_COLORS, labelColorOf, safeHref, youtubeThumbnail, type StoryItem } from "@/lib/subjects";
+import { addTranscriptNote, documentOrder, LABEL_COLORS, labelColorOf, youtubeThumbnail, type StoryItem } from "@/lib/subjects";
 import { dragGroup } from "@/lib/drag-group";
 import { NODE_FONT_MAX, NODE_FONT_MIN, nodeFontSize } from "@/lib/node-fit";
 import { titleFromUrl } from "@/lib/manual";
@@ -46,6 +46,7 @@ import {
   contactRoster,
   initialsOf,
   safeImage,
+  webLink,
   tagOrder,
   taggedWith,
   withTags,
@@ -248,6 +249,17 @@ function blocksFor(board: Board | undefined, cards: Card[], ids: string[], posit
     if (a !== undefined && b !== undefined) links.push([a, b]);
   }
   return { v: 1, items: blocks, links, text: text.filter(Boolean).join("\n\n") };
+}
+
+/** The plain text a copy of blocks put on the clipboard beside them. */
+function copiedText(json: string | null): string {
+  try {
+    const text = (JSON.parse(json ?? "null") as CopiedBlocks | null)?.text;
+    // Spacing as the clipboard may have rewritten it (line endings on Windows).
+    return typeof text === "string" ? text.trim().replace(/\s+/g, " ") : "";
+  } catch {
+    return "";
+  }
 }
 
 function readBlocks(json: string | null | undefined): CopiedBlocks | null {
@@ -1160,7 +1172,7 @@ export default function SubjectPage(props: Props) {
     focusBox,
     onOpenArticle: props.onOpenArticle,
     storyFromLink: (url: string, after: string) => {
-      const link = safeHref(url);
+      const link = webLink(url);
       if (!link) return null;
       return { link, title: addStoryFromLink(link, onBoard, undefined, after).title };
     },
@@ -3522,12 +3534,23 @@ function Whiteboard(
         void shrinkImage(picture).then((image) => shared.addBox(at, { image, caption: "" })).catch(() => {});
         return;
       }
-      const json = e.clipboardData?.getData(BLOCKS_TYPE) || (e.clipboardData?.getData("text/plain") ? null : blockClipboard);
-      const blocks = readBlocks(json ?? blockClipboard);
-      if (!blocks) return;
-      e.preventDefault();
       const rect = canvas.current?.getBoundingClientRect();
       const at = pointer.current ?? toBoard((rect?.left ?? 0) + 80, (rect?.top ?? 0) + 80);
+      // Blocks copied here. A browser that drops the clipboard's own type still carries their
+      // text, which is how the copy kept in memory is known to be what is being pasted —
+      // and anything else on the clipboard (a link copied since) is not that copy.
+      const plain = (e.clipboardData?.getData("text/plain") ?? "").trim();
+      const blocks = readBlocks(e.clipboardData?.getData(BLOCKS_TYPE))
+        ?? (!plain || plain.replace(/\s+/g, " ") === copiedText(blockClipboard) ? readBlocks(blockClipboard) : null);
+      if (!blocks) {
+        // A link on its own becomes the story it points to, where the pointer is.
+        const link = webLink(plain);
+        if (!link) return;
+        e.preventDefault();
+        addStoryAt(link, at);
+        return;
+      }
+      e.preventDefault();
       const fresh = new Set<string>();
       const have = new Set(shared.allCards.map((c) => c.id));
       let recorded = false;
@@ -3595,7 +3618,17 @@ function Whiteboard(
    */
   const [linkAsk, setLinkAsk] = useState<{ left: number; top: number; at: { x: number; y: number }; value: string; problem?: string } | null>(null);
   const addStoryAt = (link: string, at: { x: number; y: number }) => {
-    const { id } = addStoryFromLink(link, onBoard, (next) => put(next, { id: posId(id), kind: "pos", target: id, x: at.x, y: at.y, w: CARD_W, at: Date.now() }));
+    // Its id from its address, before the board is touched: the board can be updated
+    // at once, inside the call, and the place given it has to know which card it is.
+    const id = canonicalUrl(link);
+    const held = shared.allCards.find((card) => card.id === id);
+    if (held && tabOf(board, id) !== activeTabOf(board)) {
+      // A subject holds one card per story: one already on another tab goes in here as a
+      // card set into writing, as a paste of it does, rather than being moved off its tab.
+      shared.addBox(at, { html: `<p>${citeCardHtml({ link: held.link, title: held.title })}</p>` });
+      return;
+    }
+    addStoryFromLink(link, onBoard, (next) => put(next, { id: posId(id), kind: "pos", target: id, x: Math.round(at.x), y: Math.round(at.y), w: CARD_W, at: Date.now() }));
   };
   const storyFromClipboard = async (spot: { left: number; top: number; at: { x: number; y: number } }) => {
     let text = "";
@@ -3604,7 +3637,7 @@ function Whiteboard(
     } catch {
       /* the browser would not share the clipboard: ask instead */
     }
-    const link = /^\S+$/.test(text) ? safeHref(text) : null;
+    const link = webLink(text);
     if (link) addStoryAt(link, spot.at);
     else setLinkAsk({ ...spot, value: "" });
   };
@@ -4093,7 +4126,7 @@ function Whiteboard(
           onPointerDown={(e) => e.stopPropagation()}
           onSubmit={(e) => {
             e.preventDefault();
-            const link = safeHref(linkAsk.value.trim());
+            const link = webLink(linkAsk.value);
             if (!link) return setLinkAsk({ ...linkAsk, problem: "That isn't a web link." });
             addStoryAt(link, linkAsk.at);
             setLinkAsk(null);

@@ -1598,6 +1598,23 @@ export function safeHref(raw: string | undefined): string | null {
 }
 
 /**
+ * A story's address as itself — not escaped for an attribute, as `safeHref`'s
+ * is — or null for anything that is not a web page. One typed without its
+ * scheme ("example.com/a-story") is taken as https.
+ */
+export function webLink(raw: string | undefined): string | null {
+  const text = raw?.trim();
+  if (!text || /\s/.test(text)) return null;
+  const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(text) ? text : /^[\w-]+(\.[\w-]+)+(:\d+)?([/?#]|$)/.test(text) ? `https://${text}` : "";
+  try {
+    const url = new URL(withScheme);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * A YouTube video's thumbnail, from the video's id in its link — youtube.com
  * watch, shorts, live and embed links and youtu.be — or null for anything else.
  */

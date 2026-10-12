@@ -172,6 +172,7 @@ import type { CorpusStats } from "./ScoreExplainer";
 import { canonicalUrl } from "@/lib/url";
 import { repairSources } from "@/lib/publishers";
 import { mergeWindow, stamp } from "@/lib/window";
+import { AWAY_MS, arrivals, loadFresh, loadLastActive, noteArrivals, saveFresh, saveLastActive, seenBefore, type Fresh } from "@/lib/fresh";
 import { mergeSaved, differsFrom, slimForSync } from "@/lib/saved";
 import { knownRefusal } from "@/lib/subscriptions";
 import {
@@ -374,6 +375,10 @@ export default function Reader() {
   const [ready, setReady] = useState(false);
   const [articles, setArticles] = useState<Loaded[]>([]);
   const [read, setRead] = useState<Set<string>>(new Set());
+  /** What refreshes have brought since the reader last looked, lit up in the list (lib/fresh.ts). */
+  const [fresh, setFresh] = useState<Fresh>({});
+  /** The list narrowed to just those. */
+  const [newOnly, setNewOnly] = useState(false);
   const [selection, setSelection] = useState<Selection>({ type: "all" });
   /** Where the reader was before opening a page from Settings, for its Back. */
   const beforeSettingsPage = useRef<Selection>({ type: "all" });
@@ -1716,6 +1721,15 @@ export default function Reader() {
         }),
       );
       refreshed.current = true;
+      // What this refresh brought that was not here before, to be lit up
+      // in the list until it has been looked at.
+      const brought = arrivals(unique, held, canonicalUrl);
+      const inList = new Set(ordered.map((article) => canonicalUrl(article.link)));
+      setFresh((current) => {
+        const next = noteArrivals(current, brought, inList);
+        saveFresh(next);
+        return next;
+      });
       // Stories pasted in and filed under a source are not in its feed; put
       // them back, or the refresh would take them away.
       const withPasted = withPastedStories(ordered, manualRef.current, new Set(sources.map((s) => s.id)));
@@ -1754,6 +1768,44 @@ export default function Reader() {
     } finally {
       setRefreshing(false);
     }
+  }, []);
+
+  /**
+   * New stories stay lit for the visit that brought them. Coming back after
+   * being away a while, what the last visit brought has been seen, and only
+   * what is new since then is lit (lib/fresh.ts). Away is measured from when
+   * the app was last in front of the reader, kept up to date while it is.
+   */
+  useEffect(() => {
+    const here = () => document.visibilityState === "visible" && document.hasFocus();
+    const back = () => {
+      if (document.visibilityState !== "visible") return;
+      const last = loadLastActive();
+      if (last !== null && Date.now() - last >= AWAY_MS) {
+        setFresh((current) => {
+          const next = seenBefore(current, last);
+          saveFresh(next);
+          return next;
+        });
+      }
+      saveLastActive();
+    };
+    const away = () => saveLastActive();
+    const onVisibility = () => (document.visibilityState === "visible" ? back() : away());
+    setFresh(loadFresh());
+    back();
+    const beat = window.setInterval(() => here() && saveLastActive(), 60_000);
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", back);
+    window.addEventListener("blur", away);
+    window.addEventListener("pagehide", away);
+    return () => {
+      window.clearInterval(beat);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", back);
+      window.removeEventListener("blur", away);
+      window.removeEventListener("pagehide", away);
+    };
   }, []);
 
   /**
@@ -2820,6 +2872,27 @@ export default function Reader() {
     return articles.filter((a) => inAnySource(a, ids));
   }, [articles, feeds, selection, savedAsArticles, downloadedAsArticles, teamAsArticles, manualAsArticles]);
 
+  /** Which of these just came in and have not been opened. */
+  const freshIds = useMemo(() => {
+    if (Object.keys(fresh).length === 0) return new Set<string>();
+    return new Set(
+      visible
+        .filter((article) => fresh[canonicalUrl(article.link)] !== undefined && !read.has(article.id))
+        .map((article) => article.id),
+    );
+  }, [visible, fresh, read]);
+  /** Narrowed to the new ones only while there are any. */
+  const showingNew = newOnly && freshIds.size > 0;
+  // A different list is a different question.
+  useEffect(() => setNewOnly(false), [selection]);
+  const seeAll = useCallback(() => {
+    setNewOnly(false);
+    setFresh(() => {
+      saveFresh({});
+      return {};
+    });
+  }, []);
+
   /**
    * What is marked in the article being read: its own highlights, and every
    * quote any subject took from it, with what was written under that quote
@@ -3093,7 +3166,8 @@ export default function Reader() {
       settings.hideRead &&
       selection.type !== "saved" &&
       selection.type !== "downloaded";
-    const list = hideRead ? visible.filter((a) => !read.has(a.id)) : visible;
+    const unread = hideRead ? visible.filter((a) => !read.has(a.id)) : visible;
+    const list = showingNew ? unread.filter((a) => freshIds.has(a.id)) : unread;
 
     if (settings.sort !== "top") {
       /*
@@ -3118,7 +3192,7 @@ export default function Reader() {
       const scoreB = ranking.get(b.id)?.score ?? -1;
       return scoreB - scoreA || timeOf(b) - timeOf(a);
     });
-  }, [visible, settings.hideRead, settings.sort, selection.type, read, ranking]);
+  }, [visible, settings.hideRead, settings.sort, selection.type, read, ranking, showingNew, freshIds]);
 
   /**
    * How much of the list is actually rendered.
@@ -4287,6 +4361,24 @@ export default function Reader() {
                 } of text`}
               {selectedSourceCount > 0 &&
                 ` · ${selectedSourceCount} source${selectedSourceCount === 1 ? "" : "s"}`}
+              {/* What just came in, to find it among everything else. */}
+              {freshIds.size > 0 &&
+                (selection.type === "all" || selection.type === "feed" || selection.type === "source") && (
+                  <>
+                    {" · "}
+                    <button
+                      className={`fresh-chip${showingNew ? " on" : ""}`}
+                      aria-pressed={showingNew}
+                      onClick={() => setNewOnly(!showingNew)}
+                      title={showingNew ? "Show every story again" : "Show only the stories that just came in"}
+                    >
+                      {freshIds.size} new
+                    </button>
+                    <button className="fresh-seen" onClick={seeAll} title="Stop highlighting the new stories">
+                      Mark seen
+                    </button>
+                  </>
+                )}
               {settings.sort === "top" &&
                 (rankState === "unavailable"
                   ? " · ranking needs a database on this deployment"
@@ -4491,7 +4583,7 @@ export default function Reader() {
               const source = sourceById.get(article.sourceId);
               return (
                 <article
-                  className={`article ${read.has(article.id) ? "read" : ""}`}
+                  className={`article${read.has(article.id) ? " read" : ""}${freshIds.has(article.id) ? " fresh" : ""}`}
                   key={article.id}
                 >
                   {/* Magazine puts the picture on the left. Articles without
@@ -4524,6 +4616,7 @@ export default function Reader() {
                     ))}
                   <div className="article-body">
                     <div className="article-meta">
+                      {freshIds.has(article.id) && <span className="new-pill">New</span>}
                       {(source || savedMeta(article.link)) && (
                         <SourceIcon
                           src={source?.favicon ?? savedMeta(article.link)?.favicon ?? ""}
