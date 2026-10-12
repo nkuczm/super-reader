@@ -313,6 +313,118 @@ None of this is in the ranking panel, and research categories are kept out of
 `frontOutletForHost`: a bare `jneurosci.org` is found by the research rung,
 and some of these entries are API sources, not feeds.
 
+### Every discipline, and the directory audited (12 Oct 2026)
+
+Asked for: journals in every discipline — economics, psychology, sociology,
+political science, anthropology "and more" — added and checked. Measured
+from a preview deployment with a temporary probe, removed the same day; the
+directory audit now reports each entry's newest date, not only whether it
+answered, so a quiet entry shows up as one.
+
+**Which publishers serve a server their tables of contents:**
+
+| Publisher | Route | Result |
+|---|---|---|
+| Wiley (incl. AGU, ESA, RAI, AnthroSource) | `/feed/<eissn>/most-recent` | answered for all 13 asked |
+| University of Chicago Press | `/action/showFeed?…&jc=<code>` | answered for all 10 |
+| SAGE | `/action/showFeed?…&jc=<code>` | answered; the code is the `/home/<code>` path |
+| Taylor & Francis, APS, ACP, NEJM, the Lancet, JAMA, the BMJ | their own feeds | answered, dated |
+| Nature (`<code>.rss`) | | answered alone every time; **a burst got HTML** |
+| Annual Reviews, AEA, ACS, CACM, Yale LJ, OJS (Cultural Anthropology) | | 403, timeout or 404 |
+| RSC (Chemical Science), NBER | | answer, **every item undated** |
+| JMLR | | every paper dated as its volume — a year old |
+| EarthArXiv `/feed/` | | other journals' papers: not EarthArXiv's |
+
+**OpenAlex costs money now.** Its answers carry `x-ratelimit-limit: 1000`,
+`x-ratelimit-limit-usd: 0.1` and `x-ratelimit-cost-usd: 0.0001`: a thousand
+list requests a day without a key, reset at midnight UTC. Every journal
+followed by ISSN spends one per refresh. So a publisher's own feed is used
+wherever one answered, and ISSN only where none did.
+
+**Crossref allows one request at a time** (`x-concurrency-limit: 1`, five a
+second, on every answer). Three probe batches at two each drew 429 on most
+calls. `lib/apis.ts` now sends Crossref one request at a time.
+
+**A year is not a date.** OpenAlex dated every 2026 paper in the Journal of
+Philosophy, BJPolS, Sociological Science and Representations as 1 January,
+then sorted them — a year's papers in no order, the newest missing — so the
+Journal of Philosophy looked nine months quiet while Crossref showed papers
+registered on 9 October. Crossref's `created` (registration) is exact; a
+journal like that is read from Crossref first (`via=crossref`), newest
+registered first, and a year-only date takes the registration moment when it
+falls in that year. A 2011 paper registered last week keeps 2011.
+
+The same reading put Mind and Cerebral Cortex on Crossref too: OpenAlex's
+newest Mind paper was 30 July, Crossref's published online 23 September;
+Cerebral Cortex 22 September against 12 October. A registration sort brings
+back old back issues as well — New Literary History's newest was from 1994 —
+so Crossref is asked for the last year only. New Literary History itself
+was left out: Crossref has nothing of it from the past year (it publishes
+through Project MUSE) and OpenAlex dates it by the issue, so it would only
+ever look quiet. LawArXiv's newest preprint was May 2025; the OSF server is
+still in the API directory, the directory entry is not.
+
+**Furniture is not a paper.** Philosophy of Science's newest "paper" was
+"Cover and Front matter"; Ergo's were "Title Pending 12682". The research
+APIs drop covers, front and back matter, issue information, mastheads and
+placeholder titles; an answer with nothing left asks the other service, as
+an error does. A publisher's feed is left alone — §3, "a feed item is an
+article by declaration".
+
+**OSF preprints** (PsyArXiv, SocArXiv, EdArXiv, LawArXiv and others) answer
+`api.osf.io/v2/preprints/` with published preprints newest first and their
+authors embedded, about a second a page. First versions only, as for bioRxiv.
+
+**arXiv's archives.** `cat:astro-ph` matches only filings to the pre-2009
+archive itself: the directory's Astrophysics entry's newest paper was from
+2019. `cat:astro-ph.*` is every subcategory, current to the day; the same
+for `cond-mat` and the others that are only ever filed by subcategory.
+
+**The directory's own audit**, all 221 entries, found 32 problems — none of
+which any test could have seen:
+
+| Problem | Entries | Done |
+|---|---|---|
+| frozen since 2023–25, still 200 | CNN (two), VOA, Jerusalem Post | Google News for CNN; JPost's front-page feed; VOA and CNN World dropped |
+| 402 / 403 / 404 on the feed | Telegraph, Times of Israel, Kyiv Independent, Barron's, BleepingComputer, Lawfare, ESPN, Chicago Tribune, SF Chronicle, Denver Post, AJC, Dallas News, Miami Herald, AZ Central | Google News, two days (seven for Lawfare, which files less) |
+| moved | ABA Journal, Canary Media, Boston Globe, Inquirer, CDC | the measured new address |
+| refuses, no route | Engadget (Google lists its section pages), SEC (needs a declared contact) | dropped |
+| research | Astrophysics, Journal of Philosophy, Ergo, Philosophy of Science | above |
+
+A saved source pointing at one of those dead addresses is rewritten to its
+replacement when the device loads its list (`RETIRED_FEEDS`,
+`repairSources`), by exact address only. CNN World is not: no route answers
+for the section alone, and the whole of CNN in its place would be the
+plausible substitute of §6.
+
+**Feeds are fetched two at a time per host** (`lib/feed.ts`), and a feed's
+address answered with a web page is asked once more before anything else is
+done with it (`fetchFeedText`, used by the refresh and the audit alike). A
+reader following six Nature journals sent nature.com six requests at once,
+and some came back as HTML; two at a time was not enough on its own — the
+audit of the finished directory still saw two Nature feeds answered with a
+page — which is why the retry is there.
+
+What that page was, read from a preview: nature.com had sent the feed's
+request through its sign-in host (`idp.nature.com`) to set a cookie and back,
+and a client that keeps no cookies landed on `?error=cookies_not_supported`.
+Discovery then scraped that page into a "feed" of error icons. The retry
+now carries the cookie the site set along its own redirects — the site's own
+cookie, to the site's own hosts, as any feed reader with a cookie jar does;
+nothing here pretends to be a browser — and a feed's address that still
+answers with a page is a failure for the refresh, never a page to scrape.
+nature.com gets one request at a time: two together still drew the
+challenge for one Nature feed in four. Enrichment, which reads each
+article's page for its picture, skips a bot or cookie check
+(`lib/challenge.ts`) — it had given every Nature story the challenge
+page's error icon as its image.
+
+The finished directory — 356 entries, 198 of them research across 22
+disciplines — was audited from the preview the same afternoon: every entry
+answered, every research entry with a dated paper, and the newest within
+days for all but the quarterlies and the academic calendar (Harvard Law
+Review's last issue was June; it resumes in November).
+
 ### What those numbers mean
 
 **No ordering of routes wins everywhere.** Sitemaps-first loses stories at the
@@ -661,6 +773,12 @@ them rather than re-discovering them:
   articles (bot check), jneurosci.org, cell.com, Wiley, Oxford, ScienceDirect,
   PhilPapers and PhilArchive all refuse a server. Their feeds mostly answer;
   where they don't, a journal is followed by ISSN (§2, "Research").
+- **Publishers' tables of contents, by publisher** — measured 12 Oct 2026:
+  Annual Reviews, the AEA, ACS and CACM refuse or time out; Oxford,
+  Cambridge and APA journals have no feed that answered. All of them are
+  followed by ISSN (§2, "Every discipline").
+- **SEC** — 403 to an undeclared client; sec.gov asks for a contact address
+  in the user agent, which this app does not send on anyone's behalf.
 - **Google Scholar** — no API, no feed, and it refuses automated access by
   design. Not integrated; OpenAlex stands in for it.
 

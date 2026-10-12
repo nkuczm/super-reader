@@ -3345,3 +3345,16 @@
   text-decoration: underline; text-underline-offset: 2px;
 }
 .fresh-seen:hover { color: var(--accent); }
+
+/* A whole discipline in one tap, under the discipline that was picked. */
+.discipline-all { align-self: flex-start; margin: 2px 0 2px; }
+/* On a phone the category chips are one line each, scrolled sideways —
+   twenty-two disciplines wrapped to ten rows and pushed the list off screen. */
+@media (max-width: 620px) {
+  .outlet-cats {
+    flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+    -webkit-overflow-scrolling: touch; padding-bottom: 2px;
+  }
+  .outlet-cats::-webkit-scrollbar { display: none; }
+  .outlet-cats .chip { flex: none; }
+}

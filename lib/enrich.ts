@@ -7,6 +7,7 @@ import {
   isTrackingPixel,
   firstImageIn,
 } from "./feed";
+import { isChallengeHtml } from "./challenge";
 import type { Article } from "./types";
 import { titleFromSlug } from "./sitemap";
 
@@ -60,6 +61,8 @@ async function enrichOne(
 ): Promise<Article> {
   try {
     const { body, finalUrl } = await fetchText(article.link, 9000);
+    // A bot or cookie check where the article should be says nothing about it.
+    if (isChallengeHtml(body, finalUrl)) return article;
     // Metadata lives in <head>; ignore the rest of a potentially huge page.
     const head = body.slice(0, 60_000);
 

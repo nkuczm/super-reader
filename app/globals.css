@@ -67,6 +67,20 @@ html {
   text-size-adjust: 100%;
   touch-action: manipulation;
 }
+/*
+ * touch-action does not inherit, and on <html> it reaches only what scrolls
+ * with the page. Inside a panel that scrolls itself — the outlet list, a
+ * dialog — a control was still waiting on a possible double tap, which on an
+ * iPhone could turn one tap on a checkbox into a tick and an untick.
+ */
+button,
+a,
+label,
+input,
+select,
+summary {
+  touch-action: manipulation;
+}
 @media (pointer: coarse) {
   input,
   textarea,

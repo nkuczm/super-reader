@@ -11,7 +11,7 @@
  * slices are due independently, so a failing outlet delays only itself.
  */
 
-import { fetchText, parseFeed, looksLikeFeed } from "./feed";
+import { fetchFeedText, fetchText, parseFeed, looksLikeFeed } from "./feed";
 import { subredditFeedUrl } from "./reddit";
 import { panelOutlets, panelSubreddits } from "./outlets";
 import type { Outlet, SubredditEntry } from "./outlets";
@@ -235,8 +235,44 @@ export async function catchUpSweeps(limit = 2) {
 export type AuditResult = {
   slice: number;
   slices: number;
-  checked: { id: string; feedUrl: string; ok: boolean; items?: number; error?: string }[];
+  checked: {
+    id: string;
+    feedUrl: string;
+    ok: boolean;
+    items?: number;
+    /** The newest dated item: a feed that answers but stopped filing is quiet, not alive. */
+    newest?: string;
+    /** How many items carried no date at all. */
+    undated?: number;
+    /** The newest headline, to see the feed is the publication it claims to be. */
+    sample?: string;
+    error?: string;
+  }[];
 };
+
+/** What an audit keeps of a list: its size, its newest date and a headline to recognise it by. */
+function freshness(articles: { title?: string; publishedAt?: string }[]) {
+  let newest = 0;
+  let sample: string | undefined;
+  let undated = 0;
+  for (const article of articles) {
+    const at = article.publishedAt ? Date.parse(article.publishedAt) : NaN;
+    if (!Number.isFinite(at)) {
+      undated++;
+      continue;
+    }
+    if (at > newest) {
+      newest = at;
+      sample = article.title;
+    }
+  }
+  return {
+    items: articles.length,
+    newest: newest ? new Date(newest).toISOString() : undefined,
+    undated,
+    sample: (sample ?? articles[0]?.title)?.slice(0, 140),
+  };
+}
 
 /** Feeds per audit slice — nothing is written, so these can go wider. */
 const AUDIT_PER_SLICE = 12;
@@ -262,13 +298,14 @@ export async function auditSlice(slice: number): Promise<AuditResult> {
           const { fetchApiSource } = await import("./apis");
           const { articles } = await fetchApiSource(outlet.feedUrl, 20);
           if (articles.length === 0) throw new Error("No papers came back");
-          return { id: outlet.id, feedUrl: outlet.feedUrl, ok: true, items: articles.length };
+          return { id: outlet.id, feedUrl: outlet.feedUrl, ok: true, ...freshness(articles) };
         }
-        const { body, finalUrl } = await fetchText(outlet.feedUrl, 12000);
+        // As the refresh asks for it, a bot check's web page asked for again (lib/feed.ts).
+        const { body, finalUrl } = await fetchFeedText(outlet.feedUrl, 12000);
         if (!looksLikeFeed(body)) throw new Error("Not a feed");
         const { articles } = parseFeed(body, finalUrl);
         if (articles.length === 0) throw new Error("Feed is empty");
-        return { id: outlet.id, feedUrl: outlet.feedUrl, ok: true, items: articles.length };
+        return { id: outlet.id, feedUrl: outlet.feedUrl, ok: true, ...freshness(articles) };
       } catch (error) {
         return {
           id: outlet.id,

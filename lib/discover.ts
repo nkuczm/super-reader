@@ -1,4 +1,4 @@
-import { fetchText, parseFeed, looksLikeFeed, faviconFor } from "./feed";
+import { fetchFeedText, fetchText, parseFeed, looksLikeFeed, faviconFor } from "./feed";
 import { scrapePage } from "./scrape";
 import { articleOnPage, articleSectionPath, isPerStoryFeed, looksLikeArticlePath } from "./article-link";
 import {
@@ -171,7 +171,7 @@ async function tryFeed(url: string, limit: number) {
     const parts = await Promise.all(
       members.map(async (member) => {
         try {
-          const { body, finalUrl } = await fetchText(member);
+          const { body, finalUrl } = await fetchFeedText(member);
           if (!looksLikeFeed(body)) return null;
           return parseFeed(body, finalUrl);
         } catch {
@@ -188,7 +188,8 @@ async function tryFeed(url: string, limit: number) {
     return { meta: alive[0].meta, total: merged.length, articles: merged.slice(0, limit) };
   }
 
-  const { body, finalUrl } = await fetchText(url);
+  // A feed's address answered with a cookie check is asked again with the cookie (lib/feed.ts).
+  const { body, finalUrl } = await fetchFeedText(url);
 
   // Sitemaps are checked first: looksLikeFeed accepts anything that opens
   // with an XML declaration, so a sitemap passes it and then parses as an

@@ -7,13 +7,15 @@ import {
   directoryForUrl,
   doiFrom,
   normalIssn,
+  osfFrom,
   piiFrom,
   rxivFrom,
   scholarlyRoute,
   wileyJournalFrom,
 } from "../lib/scholarly";
-import { abstractFrom, buildApiSourceUrl, fetchApiSource, getApiProvider, openAlexArticle, parseApiSourceUrl } from "../lib/apis";
-import { OUTLETS, frontOutletForHost } from "../lib/outlets";
+import { abstractFrom, buildApiSourceUrl, fetchApiSource, getApiProvider, isFurniture, openAlexArticle, parseApiSourceUrl } from "../lib/apis";
+import { OUTLETS, RESEARCH_CATEGORIES, frontOutletForHost } from "../lib/outlets";
+import { arxivQuery } from "../lib/arxiv";
 
 /*
  * The links here are the shapes measured on 11 Oct 2026 (docs/COLLECTION.md
@@ -95,8 +97,10 @@ test("ISSNs: any spelling, and a journal by any of its numbers", () => {
 });
 
 test("every research entry in the directory can be followed: a feed, or an API source spelled as the API spells it", () => {
-  const research = OUTLETS.filter((o) => ["neuroscience", "philosophy", "research"].includes(o.category));
-  assert.ok(research.length >= 50);
+  const research = OUTLETS.filter((o) => RESEARCH_CATEGORIES.includes(o.category));
+  assert.ok(research.length >= 190);
+  // Every discipline has something in it.
+  for (const category of RESEARCH_CATEGORIES) assert.ok(research.some((o) => o.category === category), category);
   for (const outlet of research) {
     assert.ok(!outlet.panel, `${outlet.id} is not a news panel entry`);
     for (const issn of outlet.issn ?? []) assert.equal(normalIssn(issn), issn, `${outlet.id}: ${issn}`);
@@ -231,4 +235,95 @@ test("an OpenAlex search leaves out Zenodo deposits, which a date sort brings to
   assert.equal(kept.length, 2);
   assert.throws(() => provider.request({ q: "", area: "" }, { limit: 10, key: null }), /words to look for, or a field/);
   assert.match(provider.request({ q: "predictive coding", area: "neuroscience" }, { limit: 10, key: null }).url, /title_and_abstract\.search:predictive%20coding,primary_topic\.field\.id:28,/);
+});
+
+test("a journal OpenAlex dates only by the year is read from Crossref first, newest registered first, dated when it appeared", async () => {
+  const calls: string[] = [];
+  globalThis.fetch = (async (input: any) => {
+    const url = String(input);
+    calls.push(url);
+    return new Response(JSON.stringify({ message: { items: [
+      // Cambridge and the Journal of Philosophy deposit only the year: the registration is the real moment.
+      { title: ["How Knowledge Entails Truth"], URL: "https://doi.org/10.5840/jphil1", DOI: "10.5840/jphil1", published: { "date-parts": [[2026]] }, created: { "date-time": "2026-10-09T13:05:09Z" } },
+      // A month, and a day online: the day.
+      { title: ["Field and Formation"], URL: "https://doi.org/10.1632/x", DOI: "10.1632/x", published: { "date-parts": [[2026, 3]] }, "published-online": { "date-parts": [[2026, 7, 29]] }, created: { "date-time": "2026-07-29T12:22:41Z" } },
+      // An old paper registered late keeps its own year.
+      { title: ["A 2011 paper"], URL: "https://doi.org/10.5840/old", DOI: "10.5840/old", published: { "date-parts": [[2011]] }, created: { "date-time": "2026-10-01T00:00:00Z" } },
+      { title: ["Cover and Front matter"], URL: "https://doi.org/10.5840/cover", DOI: "10.5840/cover", published: { "date-parts": [[2026, 10, 1]] } },
+    ] } }), { status: 200 });
+  }) as typeof fetch;
+  const { articles } = await fetchApiSource("api:journal?issn=0022-362X&name=The+Journal+of+Philosophy&via=crossref", 20);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /^https:\/\/api\.crossref\.org\/journals\/0022-362X\/works\?sort=created&order=desc/);
+  assert.deepEqual(articles.map((a) => [a.title, a.publishedAt?.slice(0, 10)]), [
+    ["How Knowledge Entails Truth", "2026-10-09"],
+    ["Field and Formation", "2026-07-29"],
+    ["A 2011 paper", "2011-01-01"],
+  ]);
+});
+
+test("an empty answer from OpenAlex is a reason to ask Crossref, as an error is", async () => {
+  const calls: string[] = [];
+  globalThis.fetch = (async (input: any) => {
+    const url = String(input);
+    calls.push(url.replace(/\?.*/, ""));
+    if (url.includes("openalex")) return new Response(JSON.stringify({ results: [{ display_name: "Title Pending 12682", doi: "https://doi.org/10.3998/ergo.1", publication_date: "2026-10-06" }] }), { status: 200 });
+    return new Response(JSON.stringify({ message: { items: [{ title: ["A real paper"], URL: "https://doi.org/10.3998/ergo.2", DOI: "10.3998/ergo.2", published: { "date-parts": [[2026, 10, 6]] } }] } }), { status: 200 });
+  }) as typeof fetch;
+  const { articles } = await fetchApiSource(buildApiSourceUrl("journal", { issn: "2330-4014", name: "Ergo" }), 20);
+  assert.deepEqual(articles.map((a) => a.title), ["A real paper"], "a placeholder title is not a paper");
+  assert.deepEqual(calls, ["https://api.openalex.org/works", "https://api.crossref.org/journals/2330-4014/works"]);
+});
+
+test("an issue's furniture and an index's placeholders are not papers", () => {
+  for (const title of ["Title Pending 12682", "PSA volume 93 issue 4 Cover and Front matter", "Issue Information", "Front Matter", "Backmatter of Econometrica Vol. 94 Iss. 5", "Editorial Board", "Masthead"]) {
+    assert.ok(isFurniture(title), title);
+  }
+  for (const title of ["The Matter of Fronts", "Contents of Consciousness", "Issue framing in Congress", "Pending reform"]) {
+    assert.ok(!isFurniture(title), title);
+  }
+});
+
+test("an arXiv archive filed under subcategories is followed as all of them", () => {
+  assert.equal(arxivQuery("astro-ph"), "cat:astro-ph.*", "cat:astro-ph alone answered with 2019");
+  assert.equal(arxivQuery("cond-mat"), "cat:cond-mat.*");
+  assert.equal(arxivQuery("hep-th"), "cat:hep-th", "no subcategories");
+  assert.equal(arxivQuery("cs.AI"), "cat:cs.AI");
+  assert.equal(OUTLETS.find((o) => o.id === "arxiv-astro-ph")?.feedUrl, "api:arxiv?q=cat%3Aastro-ph.*");
+  assert.equal(getApiProvider("arxiv")!.title({ q: "cat:astro-ph.*" }), "arXiv · Astrophysics");
+});
+
+test("PsyArXiv, SocArXiv and the other OSF servers: newest published first, first versions only, with authors", () => {
+  const provider = getApiProvider("osf")!;
+  const url = provider.request({ server: "socarxiv" }, { limit: 20, key: null }).url;
+  assert.match(url, /^https:\/\/api\.osf\.io\/v2\/preprints\/\?filter%5Bprovider%5D=socarxiv&filter%5Bis_published%5D=true&sort=-date_published/);
+  const body = { data: [
+    { id: "2rjm6_v1", attributes: { title: "Evaluating LLMs for Coding Survey Responses", date_published: "2026-10-12T11:29:57.742279", description: "Open-ended questions…", version: 1 },
+      links: { html: "https://osf.io/preprints/socarxiv/2rjm6_v1/" },
+      embeds: { bibliographic_contributors: { data: [
+        { attributes: { unregistered_contributor: null }, embeds: { users: { data: { attributes: { full_name: "Laone Maphane" } } } } },
+        { attributes: { unregistered_contributor: "Gabriele Durrant" }, embeds: {} },
+      ] } } },
+    { id: "old_v3", attributes: { title: "A revision", date_published: "2026-10-12T10:00:00", version: 3 }, links: { html: "https://osf.io/preprints/socarxiv/old_v3/" } },
+  ] };
+  const items = provider.items!(body);
+  assert.equal(items.length, 1, "a third version is a revision, not a new paper");
+  const article = provider.article!(items[0], { server: "socarxiv" })!;
+  assert.equal(article.link, "https://osf.io/preprints/socarxiv/2rjm6_v1/");
+  assert.equal(article.author, "Laone Maphane, Gabriele Durrant");
+  assert.equal(article.publishedAt, "2026-10-12T11:29:57.742Z", "OSF's zoneless times are UTC");
+  assert.equal(provider.title({ server: "psyarxiv" }), "PsyArXiv");
+});
+
+test("a preprint on an OSF server is followed as its server", async () => {
+  assert.equal(osfFrom("https://osf.io/preprints/socarxiv/2rjm6_v1/"), "socarxiv");
+  assert.equal(osfFrom("https://psyarxiv.com/abcd3"), "psyarxiv");
+  assert.equal(osfFrom("https://doi.org/10.31234/osf.io/abcd3"), "psyarxiv");
+  assert.equal(osfFrom("10.31235/osf.io/2rjm6_v1"), "socarxiv");
+  assert.equal(osfFrom("edarxiv"), "edarxiv");
+  assert.equal(osfFrom("https://osf.io/abcd3/"), null, "a project, not a preprint server");
+  assert.equal(osfFrom("https://example.com/psyarxiv"), null);
+  const route = await scholarlyRoute("https://osf.io/preprints/psyarxiv/hr7gc_v1", lookups());
+  assert.equal(route?.feedUrl, "api:osf?server=psyarxiv");
+  assert.equal(route?.title, "PsyArXiv");
 });

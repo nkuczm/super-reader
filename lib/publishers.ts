@@ -15,6 +15,7 @@
 
 import { bundleOf } from "./bundle";
 import { faviconFor } from "./url";
+import { OUTLETS, RETIRED_FEEDS } from "./outlets";
 
 export type KnownFeed = {
   feedUrl: string;
@@ -266,6 +267,25 @@ export function knownFeedFor(input: string): KnownFeed | null {
  * measured working. A source that still loads is never touched.
  */
 export function repairedFeed(feedUrl: string): KnownFeed | null {
+  // A directory entry measured dead, saved before it was replaced.
+  const replacement = RETIRED_FEEDS[feedUrl] ? OUTLETS.find((outlet) => outlet.id === RETIRED_FEEDS[feedUrl]) : undefined;
+  if (replacement && replacement.feedUrl !== feedUrl) {
+    let faviconHost = "";
+    try {
+      faviconHost = new URL(replacement.siteUrl).hostname.replace(/^www\./, "");
+    } catch {
+      /* no icon */
+    }
+    return {
+      feedUrl: replacement.feedUrl,
+      title: replacement.section && replacement.section !== "All" ? `${replacement.name} · ${replacement.section}` : replacement.name,
+      siteUrl: replacement.siteUrl,
+      faviconHost,
+      // Where collection is aimed: never a Google host's sitemap (see AP above).
+      scope: "section",
+    };
+  }
+
   let url: URL;
   try {
     url = new URL(feedUrl);

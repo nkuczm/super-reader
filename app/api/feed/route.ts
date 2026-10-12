@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchText, parseFeed, looksLikeFeed, faviconFor } from "@/lib/feed";
+import { fetchFeedText, isFeedAddress, parseFeed, looksLikeFeed, faviconFor } from "@/lib/feed";
 import { scrapePage } from "@/lib/scrape";
 import { enrichArticles } from "@/lib/enrich";
 import { xHandleFrom, fetchXFeed } from "@/lib/x";
@@ -95,7 +95,14 @@ export async function GET(request: Request) {
   async function readFeed(url: string, cap: number) {
     // A sitemap source may carry the section it is limited to in its
     // fragment (lib/sitemap.ts, `sitemapSource`); the fetch never sees it.
-    const { body, finalUrl } = await fetchText(url.split("#")[0]);
+    // A feed's address answered with a web page is asked once more (lib/feed.ts).
+    const { body, finalUrl } = await fetchFeedText(url.split("#")[0]);
+    // And if it still is a web page, that is a failure, not a page to scrape:
+    // Nature's cookie-check page scraped into a "feed" of error icons. The
+    // held window keeps what the source had, and Source status hears of it.
+    if (isFeedAddress(url.split("#")[0]) && !looksLikeFeed(body) && !looksLikeSitemap(body)) {
+      throw new Error("The feed's address answered with a web page");
+    }
     // A source may be a real feed, a news sitemap, or a page to be scraped;
     // the body tells us. Sitemaps matter here because some publishers — CNN
     // among them — declare no RSS at all, so the sitemap is the only

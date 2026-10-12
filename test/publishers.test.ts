@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { parseBundle } from "../lib/bundle";
 import { knownFeedFor, WSJ_CHOICES, repairSources } from "../lib/publishers";
-import { frontOutletForHost, OUTLETS, SUBREDDITS, PACKS } from "../lib/outlets";
+import { frontOutletForHost, isResearchCategory, OUTLETS, RETIRED_FEEDS, SUBREDDITS, PACKS } from "../lib/outlets";
 
 test("recognises the WSJ however it is asked for", () => {
   for (const input of [
@@ -250,7 +250,7 @@ test("a bare domain finds the directory's feed for that newsroom", () => {
 test("every directory domain resolves to an entry with a feed", () => {
   // News outlets. Journals and preprint servers are found by the research
   // rung instead (lib/scholarly.ts) — and some of them are API sources, not feeds.
-  for (const outlet of OUTLETS.filter((o) => !["neuroscience", "philosophy", "research"].includes(o.category))) {
+  for (const outlet of OUTLETS.filter((o) => !isResearchCategory(o.category))) {
     const host = new URL(outlet.siteUrl).hostname;
     const found = frontOutletForHost(host);
     assert.ok(found, `${host} resolves`);
@@ -295,4 +295,31 @@ test("Pirate Wires is named as the publication it is, not the section asked for"
 test("a lookalike domain is not Pirate Wires", () => {
   assert.equal(knownFeedFor("https://notpiratewires.com/c/technology"), null);
   assert.equal(knownFeedFor("https://piratewires.com.evil.example/p/x"), null);
+});
+
+test("a source saved from a directory entry since retired is rewritten to its replacement, and nothing else is", () => {
+  const ids = new Set(OUTLETS.map((o) => o.id));
+  const listed = new Set(OUTLETS.map((o) => o.feedUrl));
+  for (const [dead, id] of Object.entries(RETIRED_FEEDS)) {
+    assert.ok(ids.has(id), `${dead} is replaced by an entry that exists (${id})`);
+    assert.ok(!listed.has(dead), `${dead} is no longer listed`);
+  }
+  const saved: { feedUrl: string; title: string; scope?: "site" | "section" }[] = [
+    { feedUrl: "http://rss.cnn.com/rss/cnn_topstories.rss", title: "CNN · Top stories" },
+    { feedUrl: "api:arxiv?q=cat%3Aastro-ph", title: "arXiv · Astrophysics" },
+    // No route answers for CNN World alone; the whole paper in its place would be the wrong source.
+    { feedUrl: "http://rss.cnn.com/rss/cnn_world.rss", title: "CNN · World" },
+    { feedUrl: "https://feeds.npr.org/1001/rss.xml", title: "NPR" },
+  ];
+  const repaired = repairSources(saved);
+  assert.match(repaired[0].feedUrl, /^https:\/\/news\.google\.com\/rss\/search\?q=site%3Acnn\.com/);
+  assert.equal(repaired[0].scope, "section", "never pointed at Google's own sitemap");
+  assert.equal(repaired[1].feedUrl, "api:arxiv?q=cat%3Aastro-ph.*");
+  assert.equal(repaired[2], saved[2]);
+  assert.equal(repaired[3], saved[3]);
+});
+
+test("every bundle names entries the directory has", () => {
+  const ids = new Set(OUTLETS.map((o) => o.id));
+  for (const pack of PACKS) for (const id of pack.outlets) assert.ok(ids.has(id), `${pack.id}: ${id}`);
 });

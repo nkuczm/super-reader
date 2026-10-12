@@ -26,7 +26,24 @@ export const ARXIV_CATEGORIES: Record<string, string> = {
   "econ.GN": "General Economics", "econ.TH": "Theoretical Economics", "econ.EM": "Econometrics",
   "q-fin.GN": "General Finance", "eess.SP": "Signal Processing", "eess.AS": "Audio and Speech Processing",
   "eess.IV": "Image and Video Processing", "eess.SY": "Systems and Control",
+  "astro-ph.HE": "High Energy Astrophysical Phenomena", "astro-ph.SR": "Solar and Stellar Astrophysics",
+  "astro-ph.IM": "Instrumentation and Methods for Astrophysics", "math.NT": "Number Theory", "math.CO": "Combinatorics",
+  "math.AG": "Algebraic Geometry", "hep-ph": "High Energy Physics – Phenomenology",
+  "astro-ph.*": "Astrophysics", "cond-mat.*": "Condensed Matter", "math.*": "Mathematics", "physics.*": "Physics",
   cs: "Computer Science", math: "Mathematics", physics: "Physics", "q-bio": "Quantitative Biology",
   "q-fin": "Quantitative Finance", stat: "Statistics", eess: "Electrical Engineering and Systems Science", econ: "Economics",
 };
 
+
+/**
+ * Archives that are only ever filed under their subcategories. arXiv's
+ * search reads `cat:astro-ph` as the pre-2009 archive itself, so following it
+ * that way returned papers from 2019 and nothing since (measured 12 Oct
+ * 2026); `cat:astro-ph.*` is every subcategory, and current.
+ */
+const SUBDIVIDED = new Set(["astro-ph", "cond-mat", "cs", "math", "physics", "q-bio", "q-fin", "stat", "eess", "econ", "nlin"]);
+
+/** The search that follows a category: a whole archive as all of its subcategories. */
+export function arxivQuery(cat: string): string {
+  return SUBDIVIDED.has(cat) ? `cat:${cat}.*` : `cat:${cat}`;
+}

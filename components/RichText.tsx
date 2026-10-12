@@ -776,6 +776,28 @@ export default function RichText({
   const swipe = useRef<{ x: number; y: number } | null>(null);
 
   /**
+   * A checklist line's box, under a press. It is ticked when the same box is
+   * let go of — not on the click that follows, which an iPhone can deliver
+   * after it has already focused the text and brought the keyboard up, and
+   * which was ticking and unticking it in one tap. One tap is one tick: a
+   * second activation of the same box straight after is the same tap.
+   */
+  const tickPress = useRef<{ item: HTMLLIElement; x: number; y: number } | null>(null);
+  const lastTick = useRef<{ item: HTMLLIElement; at: number } | null>(null);
+  const checkboxAt = (target: EventTarget | null, clientX: number) => {
+    const item = (target as HTMLElement | null)?.closest?.<HTMLLIElement>("ul[data-check] > li");
+    return item && clientX < item.getBoundingClientRect().left ? item : null;
+  };
+  const tick = (item: HTMLLIElement) => {
+    const now = Date.now();
+    if (lastTick.current?.item === item && now - lastTick.current.at < 600) return;
+    lastTick.current = { item, at: now };
+    if (item.getAttribute("data-checked") === "true") item.removeAttribute("data-checked");
+    else item.setAttribute("data-checked", "true");
+    changed();
+  };
+
+  /**
    * On a phone, while this box is being written in, the toolbar rides just
    * above the keyboard instead of sitting at the top of a box that may be a
    * long scroll away. The visual viewport says where the keyboard begins;
@@ -1305,6 +1327,13 @@ export default function RichText({
           watchSubjectPick();
           changed();
         }}
+        onPointerUp={(event) => {
+          const press = tickPress.current;
+          tickPress.current = null;
+          if (!press || Math.hypot(event.clientX - press.x, event.clientY - press.y) > 10) return;
+          if (checkboxAt(event.target, event.clientX) === press.item) tick(press.item);
+        }}
+        onPointerCancel={() => (tickPress.current = null)}
         onTouchStart={(event) => {
           const t = event.touches[0];
           swipe.current = event.touches.length === 1 ? { x: t.clientX, y: t.clientY } : null;
@@ -1360,13 +1389,12 @@ export default function RichText({
             placePin(picture);
             return;
           }
-          // A click on a checklist item's box ticks it.
-          const item = (event.target as HTMLElement).closest<HTMLLIElement>("ul[data-check] > li");
-          if (item && event.clientX < item.getBoundingClientRect().left) {
+          // A checklist item's box: ticked on release (above); a click with no press
+          // before it — from the keyboard, or a browser without pointer events — ticks it here.
+          const item = checkboxAt(event.target, event.clientX);
+          if (item) {
             event.preventDefault();
-            if (item.getAttribute("data-checked") === "true") item.removeAttribute("data-checked");
-            else item.setAttribute("data-checked", "true");
-            changed();
+            tick(item);
             return;
           }
           // A subject chip is opened on press (below); its click has nothing left to do.
@@ -1682,7 +1710,14 @@ export default function RichText({
           // Stop board shortcuts (and dragging) firing from inside a field.
           event.stopPropagation();
         }}
-        onPointerDown={(event) => event.stopPropagation()}
+        onPointerDown={(event) => {
+          event.stopPropagation();
+          const item = checkboxAt(event.target, event.clientX);
+          if (!item || event.button !== 0) return;
+          // The box is not a place to type: no caret moved, no keyboard brought up.
+          event.preventDefault();
+          tickPress.current = { item, x: event.clientX, y: event.clientY };
+        }}
       />
     </div>
   );

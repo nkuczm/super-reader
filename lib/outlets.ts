@@ -24,6 +24,8 @@
  * is the "where did it sit on the site" signal.
  */
 
+import { arxivQuery } from "./arxiv";
+
 export type OutletCategory =
   | "general"
   | "business"
@@ -40,9 +42,36 @@ export type OutletCategory =
   | "sports"
   | "aggregator"
   // Research, not news: journals, preprint servers and the people who read them.
-  | "neuroscience"
+  | "economics"
+  | "psychology"
+  | "sociology"
+  | "polisci"
+  | "anthropology"
+  | "history"
   | "philosophy"
+  | "linguistics"
+  | "education"
+  | "legal"
+  | "geography"
+  | "humanities"
+  | "neuroscience"
+  | "biology"
+  | "ecology"
+  | "medicine"
+  | "physics"
+  | "chemistry"
+  | "earth"
+  | "mathematics"
+  | "computing"
   | "research";
+
+/** The disciplines: journals and preprints, found by their own rung (lib/scholarly.ts), never in the ranking panel. */
+export const RESEARCH_CATEGORIES: readonly OutletCategory[] = [
+  "economics", "psychology", "sociology", "polisci", "anthropology", "history", "philosophy", "linguistics",
+  "education", "legal", "geography", "humanities", "neuroscience", "biology", "ecology", "medicine", "physics",
+  "chemistry", "earth", "mathematics", "computing", "research",
+];
+export const isResearchCategory = (category: OutletCategory) => RESEARCH_CATEGORIES.includes(category);
 
 /**
  * Three newsrooms are missing on purpose: Reuters, USA Today and PBS
@@ -78,9 +107,28 @@ export type Outlet = {
 
 /** A journal's newest papers by ISSN, where its own feed does not answer (lib/apis.ts, "journal"). */
 // Spelled exactly as buildApiSourceUrl spells them, since sources are matched by that string.
-const journal = (issn: string, name: string) => `api:journal?${new URLSearchParams({ issn, name })}`;
+// `via: "crossref"` for a journal OpenAlex dates only by the year (lib/apis.ts).
+const journal = (issn: string, name: string, via?: "crossref") =>
+  `api:journal?${new URLSearchParams({ issn, name, ...(via ? { via } : {}) })}`;
 /** An arXiv category, through arXiv's API: its RSS is empty at weekends. */
-const arxiv = (cat: string) => `api:arxiv?${new URLSearchParams({ q: `cat:${cat}` })}`;
+const arxiv = (cat: string) => `api:arxiv?${new URLSearchParams({ q: arxivQuery(cat) })}`;
+/** bioRxiv's or medRxiv's collection in a subject. */
+const rxiv = (server: "biorxiv" | "medrxiv", subject: string) => `api:rxiv?${new URLSearchParams({ server, subject })}`;
+/** One of the Open Science Framework's preprint servers. */
+const osf = (server: string) => `api:osf?${new URLSearchParams({ server })}`;
+/** A publisher's own table-of-contents feed, by the pattern each one uses (all measured 12 Oct 2026). */
+const wiley = (eissn: string) => `https://onlinelibrary.wiley.com/feed/${eissn}/most-recent`;
+const chicago = (code: string) => `https://www.journals.uchicago.edu/action/showFeed?type=etoc&feed=rss&jc=${code}`;
+const sage = (code: string) => `https://journals.sagepub.com/action/showFeed?ui=0&mi=ehikzz&ai=2b4&jc=${code}&type=etoc&feed=rss`;
+const tandf = (code: string) => `https://www.tandfonline.com/feed/rss/${code}`;
+const natureFeed = (code: string) => `https://www.nature.com/${code}.rss`;
+/**
+ * Google News for one publisher, where the publisher's own feeds have died or
+ * refuse a server (lib/publishers.ts, AP). Two days is the density the AP
+ * measurement settled on; headlines and Google's links only.
+ */
+const googleNews = (site: string, days = 2) =>
+  `https://news.google.com/rss/search?q=site%3A${encodeURIComponent(site)}+when%3A${days}d&hl=en-US&gl=US&ceid=US:en`;
 
 /* eslint-disable prettier/prettier */
 export const OUTLETS: Outlet[] = [
@@ -121,8 +169,7 @@ export const OUTLETS: Outlet[] = [
   { id: "aljazeera", name: "Al Jazeera", section: "All news", feedUrl: "https://www.aljazeera.com/xml/rss/all.xml", siteUrl: "https://www.aljazeera.com", category: "world", region: "Global", tier: 1, panel: true, front: true },
   { id: "ft-home", name: "Financial Times", section: "Home", feedUrl: "https://www.ft.com/rss/home", siteUrl: "https://www.ft.com", category: "business", region: "UK", tier: 1, panel: true, front: true },
   { id: "economist", name: "The Economist", section: "Latest", feedUrl: "https://www.economist.com/latest/rss.xml", siteUrl: "https://www.economist.com", category: "general", region: "UK", tier: 1, panel: true },
-  { id: "cnn-top", name: "CNN", section: "Top stories", feedUrl: "http://rss.cnn.com/rss/cnn_topstories.rss", siteUrl: "https://www.cnn.com", category: "general", region: "US", tier: 1, panel: true, front: true },
-  { id: "cnn-world", name: "CNN", section: "World", feedUrl: "http://rss.cnn.com/rss/cnn_world.rss", siteUrl: "https://www.cnn.com/world", category: "world", region: "US", tier: 1, panel: true },
+  { id: "cnn-top", name: "CNN", section: "Top stories", feedUrl: googleNews("cnn.com"), siteUrl: "https://www.cnn.com", category: "general", region: "US", tier: 1, panel: true, front: true },
   { id: "nbc-news", name: "NBC News", section: "Top stories", feedUrl: "https://feeds.nbcnews.com/nbcnews/public/news", siteUrl: "https://www.nbcnews.com", category: "general", region: "US", tier: 1, panel: true, front: true },
   { id: "cbs-news", name: "CBS News", section: "Top stories", feedUrl: "https://www.cbsnews.com/latest/rss/main", siteUrl: "https://www.cbsnews.com", category: "general", region: "US", tier: 1, panel: true, front: true },
   { id: "abc-news", name: "ABC News", section: "Top stories", feedUrl: "https://abcnews.go.com/abcnews/topstories", siteUrl: "https://abcnews.go.com", category: "general", region: "US", tier: 1, panel: true, front: true },
@@ -134,7 +181,6 @@ export const OUTLETS: Outlet[] = [
   { id: "semafor", name: "Semafor", section: "All", feedUrl: "https://www.semafor.com/rss.xml", siteUrl: "https://www.semafor.com", category: "general", region: "US", tier: 2 },
   { id: "newsweek", name: "Newsweek", section: "Latest", feedUrl: "https://www.newsweek.com/rss.xml", siteUrl: "https://www.newsweek.com", category: "general", region: "US", tier: 2, panel: true },
   { id: "time", name: "TIME", section: "Latest", feedUrl: "https://time.com/feed/", siteUrl: "https://time.com", category: "general", region: "US", tier: 2, panel: true },
-  { id: "voa", name: "Voice of America", section: "All", feedUrl: "https://www.voanews.com/api/zq$omekvi_", siteUrl: "https://www.voanews.com", category: "world", region: "US", tier: 3 },
 
   // ---- World and regional --------------------------------------------------
   { id: "dw", name: "Deutsche Welle", section: "All", feedUrl: "https://rss.dw.com/rdf/rss-en-all", siteUrl: "https://www.dw.com/en", category: "world", region: "Europe", tier: 2, panel: true },
@@ -142,7 +188,7 @@ export const OUTLETS: Outlet[] = [
   { id: "euronews", name: "Euronews", section: "All", feedUrl: "https://www.euronews.com/rss", siteUrl: "https://www.euronews.com", category: "world", region: "Europe", tier: 2 },
   { id: "skynews", name: "Sky News", section: "Home", feedUrl: "https://feeds.skynews.com/feeds/rss/home.xml", siteUrl: "https://news.sky.com", category: "general", region: "UK", tier: 2, panel: true, front: true },
   { id: "independent", name: "The Independent", section: "UK news", feedUrl: "https://www.independent.co.uk/news/uk/rss", siteUrl: "https://www.independent.co.uk", category: "general", region: "UK", tier: 2 },
-  { id: "telegraph", name: "The Telegraph", section: "All", feedUrl: "https://www.telegraph.co.uk/rss.xml", siteUrl: "https://www.telegraph.co.uk", category: "general", region: "UK", tier: 2 },
+  { id: "telegraph", name: "The Telegraph", section: "All", feedUrl: googleNews("telegraph.co.uk"), siteUrl: "https://www.telegraph.co.uk", category: "general", region: "UK", tier: 2 },
   { id: "cbc", name: "CBC News", section: "Top stories", feedUrl: "https://www.cbc.ca/webfeed/rss/rss-topstories", siteUrl: "https://www.cbc.ca/news", category: "general", region: "Canada", tier: 2, panel: true, front: true },
   { id: "globeandmail", name: "The Globe and Mail", section: "Canada", feedUrl: "https://www.theglobeandmail.com/arc/outboundfeeds/rss/category/canada/", siteUrl: "https://www.theglobeandmail.com", category: "general", region: "Canada", tier: 2 },
   { id: "abc-au", name: "ABC (Australia)", section: "Top stories", feedUrl: "https://www.abc.net.au/news/feed/51120/rss.xml", siteUrl: "https://www.abc.net.au/news", category: "general", region: "Australia", tier: 2, panel: true, front: true },
@@ -152,9 +198,9 @@ export const OUTLETS: Outlet[] = [
   { id: "toi", name: "Times of India", section: "Top stories", feedUrl: "https://timesofindia.indiatimes.com/rssfeedstopstories.cms", siteUrl: "https://timesofindia.indiatimes.com", category: "general", region: "Asia", tier: 2, panel: true, front: true },
   { id: "thehindu", name: "The Hindu", section: "National", feedUrl: "https://www.thehindu.com/news/national/feeder/default.rss", siteUrl: "https://www.thehindu.com", category: "general", region: "Asia", tier: 2 },
   { id: "straitstimes", name: "The Straits Times", section: "World", feedUrl: "https://www.straitstimes.com/news/world/rss.xml", siteUrl: "https://www.straitstimes.com", category: "world", region: "Asia", tier: 3 },
-  { id: "timesofisrael", name: "The Times of Israel", section: "All", feedUrl: "https://www.timesofisrael.com/feed/", siteUrl: "https://www.timesofisrael.com", category: "world", region: "Middle East", tier: 2 },
-  { id: "jpost", name: "The Jerusalem Post", section: "Headlines", feedUrl: "https://www.jpost.com/rss/rssfeedsheadlines.aspx", siteUrl: "https://www.jpost.com", category: "world", region: "Middle East", tier: 3 },
-  { id: "kyivindependent", name: "The Kyiv Independent", section: "All", feedUrl: "https://kyivindependent.com/feed/", siteUrl: "https://kyivindependent.com", category: "world", region: "Europe", tier: 3 },
+  { id: "timesofisrael", name: "The Times of Israel", section: "All", feedUrl: googleNews("timesofisrael.com"), siteUrl: "https://www.timesofisrael.com", category: "world", region: "Middle East", tier: 2 },
+  { id: "jpost", name: "The Jerusalem Post", section: "Front page", feedUrl: "https://www.jpost.com/rss/rssfeedsfrontpage.aspx", siteUrl: "https://www.jpost.com", category: "world", region: "Middle East", tier: 3 },
+  { id: "kyivindependent", name: "The Kyiv Independent", section: "All", feedUrl: googleNews("kyivindependent.com"), siteUrl: "https://kyivindependent.com", category: "world", region: "Europe", tier: 3 },
   { id: "moscowtimes", name: "The Moscow Times", section: "News", feedUrl: "https://www.themoscowtimes.com/rss/news", siteUrl: "https://www.themoscowtimes.com", category: "world", region: "Europe", tier: 3 },
   { id: "allafrica", name: "AllAfrica", section: "Latest", feedUrl: "https://allafrica.com/tools/headlines/rdf/latest/headlines.rdf", siteUrl: "https://allafrica.com", category: "world", region: "Africa", tier: 3 },
   { id: "batimes", name: "Buenos Aires Times", section: "All", feedUrl: "https://www.batimes.com.ar/feed", siteUrl: "https://www.batimes.com.ar", category: "world", region: "Americas", tier: 3 },
@@ -162,7 +208,7 @@ export const OUTLETS: Outlet[] = [
   // ---- Business and markets ------------------------------------------------
   { id: "cnbc-top", name: "CNBC", section: "Top news", feedUrl: "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114", siteUrl: "https://www.cnbc.com", category: "business", region: "US", tier: 1, panel: true, front: true },
   { id: "marketwatch", name: "MarketWatch", section: "Top stories", feedUrl: "https://feeds.content.dowjones.io/public/rss/mw_topstories", siteUrl: "https://www.marketwatch.com", category: "business", region: "US", tier: 2, panel: true, front: true },
-  { id: "barrons", name: "Barron's", section: "Real time", feedUrl: "https://feeds.content.dowjones.io/public/rss/RSSBarronsRealTime", siteUrl: "https://www.barrons.com", category: "business", region: "US", tier: 2 },
+  { id: "barrons", name: "Barron's", section: "All", feedUrl: googleNews("barrons.com"), siteUrl: "https://www.barrons.com", category: "business", region: "US", tier: 2 },
   { id: "bloomberg-markets", name: "Bloomberg", section: "Markets", feedUrl: "https://feeds.bloomberg.com/markets/news.rss", siteUrl: "https://www.bloomberg.com/markets", category: "business", region: "US", tier: 1, panel: true },
   { id: "bloomberg-tech", name: "Bloomberg", section: "Technology", feedUrl: "https://feeds.bloomberg.com/technology/news.rss", siteUrl: "https://www.bloomberg.com/technology", category: "tech", region: "US", tier: 1 },
   { id: "businessinsider", name: "Business Insider", section: "All", feedUrl: "https://www.businessinsider.com/rss", siteUrl: "https://www.businessinsider.com", category: "business", region: "US", tier: 2, panel: true },
@@ -177,7 +223,6 @@ export const OUTLETS: Outlet[] = [
   { id: "arstechnica", name: "Ars Technica", section: "All", feedUrl: "https://feeds.arstechnica.com/arstechnica/index", siteUrl: "https://arstechnica.com", category: "tech", region: "US", tier: 2, panel: true },
   { id: "techcrunch", name: "TechCrunch", section: "All", feedUrl: "https://techcrunch.com/feed/", siteUrl: "https://techcrunch.com", category: "tech", region: "US", tier: 2, panel: true },
   { id: "wired", name: "WIRED", section: "All", feedUrl: "https://www.wired.com/feed/rss", siteUrl: "https://www.wired.com", category: "tech", region: "US", tier: 2, panel: true },
-  { id: "engadget", name: "Engadget", section: "All", feedUrl: "https://www.engadget.com/rss.xml", siteUrl: "https://www.engadget.com", category: "tech", region: "US", tier: 3 },
   { id: "404media", name: "404 Media", section: "All", feedUrl: "https://www.404media.co/rss/", siteUrl: "https://www.404media.co", category: "tech", region: "US", tier: 3 },
   { id: "theregister", name: "The Register", section: "Headlines", feedUrl: "https://www.theregister.com/headlines.atom", siteUrl: "https://www.theregister.com", category: "tech", region: "UK", tier: 3 },
   { id: "slashdot", name: "Slashdot", section: "Main", feedUrl: "https://rss.slashdot.org/Slashdot/slashdotMain", siteUrl: "https://slashdot.org", category: "tech", region: "US", tier: 3 },
@@ -190,7 +235,7 @@ export const OUTLETS: Outlet[] = [
   { id: "openai-blog", name: "OpenAI", section: "Blog", feedUrl: "https://openai.com/news/rss.xml", siteUrl: "https://openai.com/news", category: "tech", region: "US", tier: 3 },
   { id: "googleblog-ai", name: "Google", section: "The Keyword", feedUrl: "https://blog.google/rss/", siteUrl: "https://blog.google", category: "tech", region: "US", tier: 3 },
   { id: "krebs", name: "Krebs on Security", section: "All", feedUrl: "https://krebsonsecurity.com/feed/", siteUrl: "https://krebsonsecurity.com", category: "tech", region: "US", tier: 3 },
-  { id: "bleepingcomputer", name: "BleepingComputer", section: "All", feedUrl: "https://www.bleepingcomputer.com/feed/", siteUrl: "https://www.bleepingcomputer.com", category: "tech", region: "US", tier: 3 },
+  { id: "bleepingcomputer", name: "BleepingComputer", section: "All", feedUrl: googleNews("bleepingcomputer.com"), siteUrl: "https://www.bleepingcomputer.com", category: "tech", region: "US", tier: 3 },
 
   // ---- Science and health --------------------------------------------------
   { id: "nature-news", name: "Nature", section: "News", feedUrl: "https://www.nature.com/nature.rss", siteUrl: "https://www.nature.com", category: "science", region: "Global", tier: 2, panel: true, issn: ["0028-0836", "1476-4687"] },
@@ -204,16 +249,15 @@ export const OUTLETS: Outlet[] = [
   { id: "spacenews", name: "SpaceNews", section: "All", feedUrl: "https://spacenews.com/feed/", siteUrl: "https://spacenews.com", category: "science", region: "US", tier: 3 },
   { id: "statnews", name: "STAT", section: "All", feedUrl: "https://www.statnews.com/feed/", siteUrl: "https://www.statnews.com", category: "health", region: "US", tier: 3, panel: true },
   { id: "kffhealth", name: "KFF Health News", section: "All", feedUrl: "https://kffhealthnews.org/feed/", siteUrl: "https://kffhealthnews.org", category: "health", region: "US", tier: 3 },
-  { id: "cdc-newsroom", name: "CDC", section: "Newsroom", feedUrl: "https://tools.cdc.gov/api/v2/resources/media/404952.rss", siteUrl: "https://www.cdc.gov/media", category: "health", region: "US", tier: 3 },
+  { id: "cdc-newsroom", name: "CDC", section: "Newsroom", feedUrl: "https://tools.cdc.gov/podcasts/feed.asp?feedid=183", siteUrl: "https://www.cdc.gov/media", category: "health", region: "US", tier: 3 },
 
   // ---- Law, policy and courts ---------------------------------------------
   { id: "scotusblog", name: "SCOTUSblog", section: "All", feedUrl: "https://www.scotusblog.com/feed/", siteUrl: "https://www.scotusblog.com", category: "law", region: "US", tier: 3, panel: true },
-  { id: "lawfare", name: "Lawfare", section: "All", feedUrl: "https://www.lawfaremedia.org/feeds/articles.rss", siteUrl: "https://www.lawfaremedia.org", category: "law", region: "US", tier: 3 },
+  { id: "lawfare", name: "Lawfare", section: "All", feedUrl: googleNews("lawfaremedia.org", 7), siteUrl: "https://www.lawfaremedia.org", category: "law", region: "US", tier: 3 },
   { id: "courthousenews", name: "Courthouse News", section: "All", feedUrl: "https://www.courthousenews.com/feed/", siteUrl: "https://www.courthousenews.com", category: "law", region: "US", tier: 3 },
-  { id: "abajournal", name: "ABA Journal", section: "All", feedUrl: "https://www.abajournal.com/feed", siteUrl: "https://www.abajournal.com", category: "law", region: "US", tier: 3 },
+  { id: "abajournal", name: "ABA Journal", section: "All", feedUrl: "https://www.abajournal.com/rss/feed", siteUrl: "https://www.abajournal.com", category: "law", region: "US", tier: 3 },
   { id: "justice-gov", name: "U.S. Justice Department", section: "Press releases", feedUrl: "https://www.justice.gov/news/rss", siteUrl: "https://www.justice.gov/news", category: "law", region: "US", tier: 3 },
   { id: "federalregister", name: "Federal Register", section: "Documents", feedUrl: "https://www.federalregister.gov/api/v1/articles.rss", siteUrl: "https://www.federalregister.gov", category: "law", region: "US", tier: 3 },
-  { id: "sec-litigation", name: "SEC", section: "Litigation", feedUrl: "https://www.sec.gov/rss/litigation/litreleases.xml", siteUrl: "https://www.sec.gov", category: "law", region: "US", tier: 3 },
 
   // ---- Investigative and nonprofit ----------------------------------------
   { id: "propublica", name: "ProPublica", section: "All", feedUrl: "https://www.propublica.org/feeds/propublica/main", siteUrl: "https://www.propublica.org", category: "investigative", region: "US", tier: 2, panel: true },
@@ -226,7 +270,7 @@ export const OUTLETS: Outlet[] = [
 
   // ---- Climate and energy --------------------------------------------------
   { id: "insideclimate", name: "Inside Climate News", section: "All", feedUrl: "https://insideclimatenews.org/feed/", siteUrl: "https://insideclimatenews.org", category: "climate", region: "US", tier: 3, panel: true },
-  { id: "canarymedia", name: "Canary Media", section: "All", feedUrl: "https://www.canarymedia.com/articles/feed", siteUrl: "https://www.canarymedia.com", category: "climate", region: "US", tier: 3 },
+  { id: "canarymedia", name: "Canary Media", section: "All", feedUrl: "https://www.canarymedia.com/rss", siteUrl: "https://www.canarymedia.com", category: "climate", region: "US", tier: 3 },
   { id: "heatmap", name: "Heatmap News", section: "All", feedUrl: "https://heatmap.news/feeds/feed.rss", siteUrl: "https://heatmap.news", category: "climate", region: "US", tier: 3 },
   { id: "grist", name: "Grist", section: "All", feedUrl: "https://grist.org/feed/", siteUrl: "https://grist.org", category: "climate", region: "US", tier: 3 },
   { id: "carbonbrief", name: "Carbon Brief", section: "All", feedUrl: "https://www.carbonbrief.org/feed/", siteUrl: "https://www.carbonbrief.org", category: "climate", region: "UK", tier: 3 },
@@ -253,23 +297,23 @@ export const OUTLETS: Outlet[] = [
   { id: "deadline", name: "Deadline", section: "All", feedUrl: "https://deadline.com/feed/", siteUrl: "https://deadline.com", category: "culture", region: "US", tier: 3 },
   { id: "pitchfork", name: "Pitchfork", section: "All", feedUrl: "https://pitchfork.com/feed/feed-news/rss", siteUrl: "https://pitchfork.com", category: "culture", region: "US", tier: 3 },
   { id: "rollingstone", name: "Rolling Stone", section: "All", feedUrl: "https://www.rollingstone.com/feed/", siteUrl: "https://www.rollingstone.com", category: "culture", region: "US", tier: 3 },
-  { id: "espn", name: "ESPN", section: "Top news", feedUrl: "https://www.espn.com/espn/rss/news", siteUrl: "https://www.espn.com", category: "sports", region: "US", tier: 2, front: true },
+  { id: "espn", name: "ESPN", section: "Top news", feedUrl: googleNews("espn.com"), siteUrl: "https://www.espn.com", category: "sports", region: "US", tier: 2, front: true },
   { id: "bbc-sport", name: "BBC Sport", section: "All", feedUrl: "https://feeds.bbci.co.uk/sport/rss.xml", siteUrl: "https://www.bbc.com/sport", category: "sports", region: "UK", tier: 2 },
   { id: "skysports", name: "Sky Sports", section: "All", feedUrl: "https://www.skysports.com/rss/12040", siteUrl: "https://www.skysports.com", category: "sports", region: "UK", tier: 3 },
 
   // ---- Major US metros -----------------------------------------------------
-  { id: "sfchronicle", name: "San Francisco Chronicle", section: "All", feedUrl: "https://www.sfchronicle.com/rss/feed/Bay-Area-News-429.php", siteUrl: "https://www.sfchronicle.com", category: "local", region: "US", tier: 3 },
-  { id: "chicagotribune", name: "Chicago Tribune", section: "All", feedUrl: "https://www.chicagotribune.com/feed/", siteUrl: "https://www.chicagotribune.com", category: "local", region: "US", tier: 3 },
-  { id: "bostonglobe", name: "The Boston Globe", section: "All", feedUrl: "https://www.bostonglobe.com/rss/bigstory", siteUrl: "https://www.bostonglobe.com", category: "local", region: "US", tier: 3 },
+  { id: "sfchronicle", name: "San Francisco Chronicle", section: "All", feedUrl: googleNews("sfchronicle.com"), siteUrl: "https://www.sfchronicle.com", category: "local", region: "US", tier: 3 },
+  { id: "chicagotribune", name: "Chicago Tribune", section: "All", feedUrl: googleNews("chicagotribune.com"), siteUrl: "https://www.chicagotribune.com", category: "local", region: "US", tier: 3 },
+  { id: "bostonglobe", name: "The Boston Globe", section: "All", feedUrl: "https://www.bostonglobe.com/arc/outboundfeeds/rss/?outputType=xml", siteUrl: "https://www.bostonglobe.com", category: "local", region: "US", tier: 3 },
   { id: "seattletimes", name: "The Seattle Times", section: "All", feedUrl: "https://www.seattletimes.com/feed/", siteUrl: "https://www.seattletimes.com", category: "local", region: "US", tier: 3 },
-  { id: "miamiherald", name: "Miami Herald", section: "All", feedUrl: "https://www.miamiherald.com/news/local/?widgetName=rssfeed&widgetContentId=712015&getXmlFeed=true", siteUrl: "https://www.miamiherald.com", category: "local", region: "US", tier: 3 },
-  { id: "dallasnews", name: "The Dallas Morning News", section: "All", feedUrl: "https://www.dallasnews.com/arc/outboundfeeds/rss/", siteUrl: "https://www.dallasnews.com", category: "local", region: "US", tier: 3 },
-  { id: "denverpost", name: "The Denver Post", section: "All", feedUrl: "https://www.denverpost.com/feed/", siteUrl: "https://www.denverpost.com", category: "local", region: "US", tier: 3 },
+  { id: "miamiherald", name: "Miami Herald", section: "All", feedUrl: googleNews("miamiherald.com"), siteUrl: "https://www.miamiherald.com", category: "local", region: "US", tier: 3 },
+  { id: "dallasnews", name: "The Dallas Morning News", section: "All", feedUrl: googleNews("dallasnews.com"), siteUrl: "https://www.dallasnews.com", category: "local", region: "US", tier: 3 },
+  { id: "denverpost", name: "The Denver Post", section: "All", feedUrl: googleNews("denverpost.com"), siteUrl: "https://www.denverpost.com", category: "local", region: "US", tier: 3 },
   { id: "startribune", name: "Star Tribune", section: "All", feedUrl: "https://www.startribune.com/local/index.rss2", siteUrl: "https://www.startribune.com", category: "local", region: "US", tier: 3 },
-  { id: "ajc", name: "The Atlanta Journal-Constitution", section: "All", feedUrl: "https://www.ajc.com/arcio/rss/", siteUrl: "https://www.ajc.com", category: "local", region: "US", tier: 3 },
-  { id: "inquirer", name: "The Philadelphia Inquirer", section: "All", feedUrl: "https://www.inquirer.com/arc/outboundfeeds/rss/", siteUrl: "https://www.inquirer.com", category: "local", region: "US", tier: 3 },
+  { id: "ajc", name: "The Atlanta Journal-Constitution", section: "All", feedUrl: googleNews("ajc.com"), siteUrl: "https://www.ajc.com", category: "local", region: "US", tier: 3 },
+  { id: "inquirer", name: "The Philadelphia Inquirer", section: "All", feedUrl: "https://www.inquirer.com/arc/outboundfeeds/rss/?outputType=xml", siteUrl: "https://www.inquirer.com", category: "local", region: "US", tier: 3 },
   { id: "oregonian", name: "The Oregonian", section: "All", feedUrl: "https://www.oregonlive.com/arc/outboundfeeds/rss/", siteUrl: "https://www.oregonlive.com", category: "local", region: "US", tier: 3 },
-  { id: "azcentral", name: "The Arizona Republic", section: "All", feedUrl: "https://rssfeeds.azcentral.com/phoenix/local", siteUrl: "https://www.azcentral.com", category: "local", region: "US", tier: 3 },
+  { id: "azcentral", name: "The Arizona Republic", section: "All", feedUrl: googleNews("azcentral.com"), siteUrl: "https://www.azcentral.com", category: "local", region: "US", tier: 3 },
   { id: "nevadaindependent", name: "The Nevada Independent", section: "All", feedUrl: "https://thenevadaindependent.com/feed", siteUrl: "https://thenevadaindependent.com", category: "local", region: "US", tier: 3 },
 
   // ---- Research: journals, preprints and the people who read them --------
@@ -293,7 +337,7 @@ export const OUTLETS: Outlet[] = [
   { id: "jneurophys", name: "Journal of Neurophysiology", feedUrl: "https://journals.physiology.org/action/showFeed?type=etoc&feed=rss&jc=jn", siteUrl: "https://journals.physiology.org/journal/jn", category: "neuroscience", region: "US", tier: 3, issn: ["0022-3077", "1522-1598"] },
   { id: "neuroimage", name: "NeuroImage", feedUrl: journal("1053-8119", "NeuroImage"), siteUrl: "https://www.sciencedirect.com/journal/neuroimage", category: "neuroscience", region: "Global", tier: 3, issn: ["1053-8119", "1095-9572"] },
   { id: "brain", name: "Brain", feedUrl: journal("0006-8950", "Brain"), siteUrl: "https://academic.oup.com/brain", category: "neuroscience", region: "UK", tier: 3, issn: ["0006-8950", "1460-2156"] },
-  { id: "cercor", name: "Cerebral Cortex", feedUrl: journal("1047-3211", "Cerebral Cortex"), siteUrl: "https://academic.oup.com/cercor", category: "neuroscience", region: "Global", tier: 3, issn: ["1047-3211", "1460-2199"] },
+  { id: "cercor", name: "Cerebral Cortex", feedUrl: journal("1047-3211", "Cerebral Cortex", "crossref"), siteUrl: "https://academic.oup.com/cercor", category: "neuroscience", region: "Global", tier: 3, issn: ["1047-3211", "1460-2199"] },
   { id: "biorxiv-neuro", name: "bioRxiv", section: "Neuroscience", feedUrl: "api:rxiv?server=biorxiv&subject=neuroscience", siteUrl: "https://www.biorxiv.org/collection/neuroscience", category: "neuroscience", region: "Global", tier: 3 },
   { id: "medrxiv-neuro", name: "medRxiv", section: "Neurology", feedUrl: "api:rxiv?server=medrxiv&subject=neurology", siteUrl: "https://www.medrxiv.org/collection/neurology", category: "neuroscience", region: "Global", tier: 3 },
   { id: "arxiv-qbio-nc", name: "arXiv", section: "Neurons and Cognition", feedUrl: arxiv("q-bio.NC"), siteUrl: "https://arxiv.org/list/q-bio.NC/recent", category: "neuroscience", region: "Global", tier: 3 },
@@ -312,33 +356,221 @@ export const OUTLETS: Outlet[] = [
   { id: "mindlang", name: "Mind & Language", feedUrl: "https://onlinelibrary.wiley.com/feed/14680017/most-recent", siteUrl: "https://onlinelibrary.wiley.com/journal/14680017", category: "philosophy", region: "Global", tier: 3, issn: ["0268-1064", "1468-0017"] },
   { id: "philcompass", name: "Philosophy Compass", feedUrl: "https://onlinelibrary.wiley.com/feed/17479991/most-recent", siteUrl: "https://onlinelibrary.wiley.com/journal/17479991", category: "philosophy", region: "Global", tier: 3, issn: ["1747-9991"] },
   { id: "ajp", name: "Australasian Journal of Philosophy", feedUrl: "https://www.tandfonline.com/feed/rss/rajp20", siteUrl: "https://www.tandfonline.com/journals/rajp20", category: "philosophy", region: "Global", tier: 3, issn: ["0004-8402", "1471-6828"] },
-  { id: "mind", name: "Mind", feedUrl: journal("0026-4423", "Mind"), siteUrl: "https://academic.oup.com/mind", category: "philosophy", region: "UK", tier: 3, issn: ["0026-4423", "1460-2113"] },
+  { id: "mind", name: "Mind", feedUrl: journal("0026-4423", "Mind", "crossref"), siteUrl: "https://academic.oup.com/mind", category: "philosophy", region: "UK", tier: 3, issn: ["0026-4423", "1460-2113"] },
   { id: "pq", name: "The Philosophical Quarterly", feedUrl: journal("0031-8094", "The Philosophical Quarterly"), siteUrl: "https://academic.oup.com/pq", category: "philosophy", region: "UK", tier: 3, issn: ["0031-8094", "1467-9213"] },
   { id: "philreview", name: "The Philosophical Review", feedUrl: journal("0031-8108", "The Philosophical Review"), siteUrl: "https://read.dukeupress.edu/the-philosophical-review", category: "philosophy", region: "US", tier: 3, issn: ["0031-8108", "1558-1470"] },
-  { id: "jphil", name: "The Journal of Philosophy", feedUrl: journal("0022-362X", "The Journal of Philosophy"), siteUrl: "https://www.pdcnet.org/jphil", category: "philosophy", region: "US", tier: 3, issn: ["0022-362X", "1939-8549"] },
+  { id: "jphil", name: "The Journal of Philosophy", feedUrl: journal("0022-362X", "The Journal of Philosophy", "crossref"), siteUrl: "https://www.pdcnet.org/jphil", category: "philosophy", region: "US", tier: 3, issn: ["0022-362X", "1939-8549"] },
   { id: "ethics", name: "Ethics", feedUrl: journal("0014-1704", "Ethics"), siteUrl: "https://www.journals.uchicago.edu/journal/et", category: "philosophy", region: "US", tier: 3, issn: ["0014-1704", "1539-297X"] },
   { id: "philstudies", name: "Philosophical Studies", feedUrl: journal("0031-8116", "Philosophical Studies"), siteUrl: "https://link.springer.com/journal/11098", category: "philosophy", region: "Global", tier: 3, issn: ["0031-8116", "1573-0883"] },
   { id: "synthese", name: "Synthese", feedUrl: journal("0039-7857", "Synthese"), siteUrl: "https://link.springer.com/journal/11229", category: "philosophy", region: "Global", tier: 3, issn: ["0039-7857", "1573-0964"] },
   { id: "erkenntnis", name: "Erkenntnis", feedUrl: journal("0165-0106", "Erkenntnis"), siteUrl: "https://link.springer.com/journal/10670", category: "philosophy", region: "Global", tier: 3, issn: ["0165-0106", "1572-8420"] },
-  { id: "ergo", name: "Ergo", feedUrl: journal("2330-4014", "Ergo"), siteUrl: "https://journals.publishing.umich.edu/ergo", category: "philosophy", region: "Global", tier: 3, issn: ["2330-4014"] },
+  { id: "ergo", name: "Ergo", feedUrl: journal("2330-4014", "Ergo", "crossref"), siteUrl: "https://journals.publishing.umich.edu/ergo", category: "philosophy", region: "Global", tier: 3, issn: ["2330-4014"] },
   { id: "philsci", name: "Philosophy of Science", feedUrl: journal("0031-8248", "Philosophy of Science"), siteUrl: "https://www.cambridge.org/core/journals/philosophy-of-science", category: "philosophy", region: "Global", tier: 3, issn: ["0031-8248", "1539-767X"] },
   { id: "bjps", name: "The British Journal for the Philosophy of Science", feedUrl: journal("0007-0882", "The British Journal for the Philosophy of Science"), siteUrl: "https://www.journals.uchicago.edu/journal/bjps", category: "philosophy", region: "UK", tier: 3, issn: ["0007-0882", "1464-3537"] },
   { id: "arxiv-hist-ph", name: "arXiv", section: "History and Philosophy of Physics", feedUrl: arxiv("physics.hist-ph"), siteUrl: "https://arxiv.org/list/physics.hist-ph/recent", category: "philosophy", region: "Global", tier: 3 },
 
   { id: "science-journal", name: "Science", section: "Table of contents", feedUrl: "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=science", siteUrl: "https://www.science.org/journal/science", category: "research", region: "US", tier: 3, issn: ["0036-8075", "1095-9203"] },
   { id: "pnas", name: "PNAS", feedUrl: "https://www.pnas.org/action/showFeed?type=etoc&feed=rss&jc=pnas", siteUrl: "https://www.pnas.org", category: "research", region: "US", tier: 3, issn: ["0027-8424", "1091-6490"] },
-  { id: "cell", name: "Cell", feedUrl: "https://www.cell.com/cell/inpress.rss", siteUrl: "https://www.cell.com/cell", category: "research", region: "US", tier: 3, issn: ["0092-8674", "1097-4172"] },
-  { id: "curbio", name: "Current Biology", feedUrl: "https://www.cell.com/current-biology/inpress.rss", siteUrl: "https://www.cell.com/current-biology", category: "research", region: "US", tier: 3, issn: ["0960-9822", "1879-0445"] },
+  { id: "cell", name: "Cell", feedUrl: "https://www.cell.com/cell/inpress.rss", siteUrl: "https://www.cell.com/cell", category: "biology", region: "US", tier: 3, issn: ["0092-8674", "1097-4172"] },
+  { id: "curbio", name: "Current Biology", feedUrl: "https://www.cell.com/current-biology/inpress.rss", siteUrl: "https://www.cell.com/current-biology", category: "biology", region: "US", tier: 3, issn: ["0960-9822", "1879-0445"] },
   { id: "elife", name: "eLife", feedUrl: "https://elifesciences.org/rss/recent.xml", siteUrl: "https://elifesciences.org", category: "research", region: "Global", tier: 3, issn: ["2050-084X"] },
-  { id: "plos-biology", name: "PLOS Biology", feedUrl: "https://journals.plos.org/plosbiology/feed/atom", siteUrl: "https://journals.plos.org/plosbiology", category: "research", region: "Global", tier: 3, issn: ["1544-9173", "1545-7885"] },
-  { id: "arxiv-cs-ai", name: "arXiv", section: "Artificial Intelligence", feedUrl: arxiv("cs.AI"), siteUrl: "https://arxiv.org/list/cs.AI/recent", category: "research", region: "Global", tier: 3 },
-  { id: "arxiv-cs-lg", name: "arXiv", section: "Machine Learning", feedUrl: arxiv("cs.LG"), siteUrl: "https://arxiv.org/list/cs.LG/recent", category: "research", region: "Global", tier: 3 },
-  { id: "arxiv-cs-cl", name: "arXiv", section: "Computation and Language", feedUrl: arxiv("cs.CL"), siteUrl: "https://arxiv.org/list/cs.CL/recent", category: "research", region: "Global", tier: 3 },
-  { id: "arxiv-stat-ml", name: "arXiv", section: "Machine Learning (Statistics)", feedUrl: arxiv("stat.ML"), siteUrl: "https://arxiv.org/list/stat.ML/recent", category: "research", region: "Global", tier: 3 },
-  { id: "arxiv-cs-cy", name: "arXiv", section: "Computers and Society", feedUrl: arxiv("cs.CY"), siteUrl: "https://arxiv.org/list/cs.CY/recent", category: "research", region: "Global", tier: 3 },
-  { id: "arxiv-quant-ph", name: "arXiv", section: "Quantum Physics", feedUrl: arxiv("quant-ph"), siteUrl: "https://arxiv.org/list/quant-ph/recent", category: "research", region: "Global", tier: 3 },
-  { id: "arxiv-astro-ph", name: "arXiv", section: "Astrophysics", feedUrl: arxiv("astro-ph"), siteUrl: "https://arxiv.org/list/astro-ph/recent", category: "research", region: "Global", tier: 3 },
-  { id: "arxiv-econ-gn", name: "arXiv", section: "General Economics", feedUrl: arxiv("econ.GN"), siteUrl: "https://arxiv.org/list/econ.GN/recent", category: "research", region: "Global", tier: 3 },
+  { id: "plos-biology", name: "PLOS Biology", feedUrl: "https://journals.plos.org/plosbiology/feed/atom", siteUrl: "https://journals.plos.org/plosbiology", category: "biology", region: "Global", tier: 3, issn: ["1544-9173", "1545-7885"] },
+  { id: "arxiv-cs-ai", name: "arXiv", section: "Artificial Intelligence", feedUrl: arxiv("cs.AI"), siteUrl: "https://arxiv.org/list/cs.AI/recent", category: "computing", region: "Global", tier: 3 },
+  { id: "arxiv-cs-lg", name: "arXiv", section: "Machine Learning", feedUrl: arxiv("cs.LG"), siteUrl: "https://arxiv.org/list/cs.LG/recent", category: "computing", region: "Global", tier: 3 },
+  { id: "arxiv-cs-cl", name: "arXiv", section: "Computation and Language", feedUrl: arxiv("cs.CL"), siteUrl: "https://arxiv.org/list/cs.CL/recent", category: "computing", region: "Global", tier: 3 },
+  { id: "arxiv-stat-ml", name: "arXiv", section: "Machine Learning (Statistics)", feedUrl: arxiv("stat.ML"), siteUrl: "https://arxiv.org/list/stat.ML/recent", category: "computing", region: "Global", tier: 3 },
+  { id: "arxiv-cs-cy", name: "arXiv", section: "Computers and Society", feedUrl: arxiv("cs.CY"), siteUrl: "https://arxiv.org/list/cs.CY/recent", category: "computing", region: "Global", tier: 3 },
+  { id: "arxiv-quant-ph", name: "arXiv", section: "Quantum Physics", feedUrl: arxiv("quant-ph"), siteUrl: "https://arxiv.org/list/quant-ph/recent", category: "physics", region: "Global", tier: 3 },
+  { id: "arxiv-astro-ph", name: "arXiv", section: "Astrophysics", feedUrl: arxiv("astro-ph"), siteUrl: "https://arxiv.org/list/astro-ph/recent", category: "physics", region: "Global", tier: 3 },
+  { id: "arxiv-econ-gn", name: "arXiv", section: "General Economics", feedUrl: arxiv("econ.GN"), siteUrl: "https://arxiv.org/list/econ.GN/recent", category: "economics", region: "Global", tier: 3 },
+
+  // ---- Every discipline (12 Oct 2026) -------------------------------------
+  // Measured from a preview deployment before any was added (docs/COLLECTION.md
+  // §2, "Every discipline"). A publisher's own table of contents wherever it
+  // answered — Wiley, Chicago, SAGE, Taylor & Francis, Nature, Cell Press, APS,
+  // NEJM, the Lancet, JAMA, the BMJ — because a feed costs nothing to read and
+  // OpenAlex allows a thousand requests a day. By ISSN only where the
+  // publisher refused (Oxford, Cambridge, APA, Annual Reviews, AEA, ACS) or
+  // served nonsense; through Crossref first where OpenAlex knows only the year.
+
+  // Economics and finance
+  { id: "aer", name: "American Economic Review", feedUrl: journal("0002-8282", "American Economic Review"), siteUrl: "https://www.aeaweb.org/journals/aer", category: "economics", region: "US", tier: 3, issn: ["0002-8282", "1944-7981"] },
+  { id: "qje", name: "The Quarterly Journal of Economics", feedUrl: journal("0033-5533", "The Quarterly Journal of Economics"), siteUrl: "https://academic.oup.com/qje", category: "economics", region: "US", tier: 3, issn: ["0033-5533", "1531-4650"] },
+  { id: "jpe", name: "Journal of Political Economy", feedUrl: chicago("jpe"), siteUrl: "https://www.journals.uchicago.edu/journal/jpe", category: "economics", region: "US", tier: 3, issn: ["0022-3808", "1537-534X"] },
+  { id: "econometrica", name: "Econometrica", feedUrl: wiley("14680262"), siteUrl: "https://onlinelibrary.wiley.com/journal/14680262", category: "economics", region: "Global", tier: 3, issn: ["0012-9682", "1468-0262"] },
+  { id: "restud", name: "The Review of Economic Studies", feedUrl: journal("0034-6527", "The Review of Economic Studies"), siteUrl: "https://academic.oup.com/restud", category: "economics", region: "UK", tier: 3, issn: ["0034-6527", "1467-937X"] },
+  { id: "jep", name: "Journal of Economic Perspectives", feedUrl: journal("0895-3309", "Journal of Economic Perspectives"), siteUrl: "https://www.aeaweb.org/journals/jep", category: "economics", region: "US", tier: 3, issn: ["0895-3309", "1944-7965"] },
+  { id: "jfinance", name: "The Journal of Finance", feedUrl: wiley("15406261"), siteUrl: "https://onlinelibrary.wiley.com/journal/15406261", category: "economics", region: "US", tier: 3, issn: ["0022-1082", "1540-6261"] },
+  { id: "areconomics", name: "Annual Review of Economics", feedUrl: journal("1941-1383", "Annual Review of Economics"), siteUrl: "https://www.annualreviews.org/content/journals/economics", category: "economics", region: "US", tier: 3, issn: ["1941-1383", "1941-1391"] },
+  { id: "nber", name: "NBER", section: "New working papers", feedUrl: "https://www.nber.org/rss/new.xml", siteUrl: "https://www.nber.org/papers", category: "economics", region: "US", tier: 3 },
+  { id: "arxiv-econ-em", name: "arXiv", section: "Econometrics", feedUrl: arxiv("econ.EM"), siteUrl: "https://arxiv.org/list/econ.EM/recent", category: "economics", region: "Global", tier: 3 },
+
+  // Psychology
+  { id: "psychsci", name: "Psychological Science", feedUrl: sage("pss"), siteUrl: "https://journals.sagepub.com/home/pss", category: "psychology", region: "US", tier: 3, issn: ["0956-7976", "1467-9280"] },
+  { id: "psychreview", name: "Psychological Review", feedUrl: journal("0033-295X", "Psychological Review"), siteUrl: "https://psycnet.apa.org/PsycARTICLES/journal/rev", category: "psychology", region: "US", tier: 3, issn: ["0033-295X", "1939-1471"] },
+  { id: "psychbull", name: "Psychological Bulletin", feedUrl: journal("0033-2909", "Psychological Bulletin"), siteUrl: "https://psycnet.apa.org/PsycARTICLES/journal/bul", category: "psychology", region: "US", tier: 3, issn: ["0033-2909", "1939-1455"] },
+  { id: "jpsp", name: "Journal of Personality and Social Psychology", feedUrl: journal("0022-3514", "Journal of Personality and Social Psychology"), siteUrl: "https://psycnet.apa.org/PsycARTICLES/journal/psp", category: "psychology", region: "US", tier: 3, issn: ["0022-3514", "1939-1315"] },
+  { id: "jepgeneral", name: "Journal of Experimental Psychology: General", feedUrl: journal("0096-3445", "Journal of Experimental Psychology: General"), siteUrl: "https://psycnet.apa.org/PsycARTICLES/journal/xge", category: "psychology", region: "US", tier: 3, issn: ["0096-3445", "1939-2222"] },
+  { id: "cognition", name: "Cognition", feedUrl: journal("0010-0277", "Cognition"), siteUrl: "https://www.sciencedirect.com/journal/cognition", category: "psychology", region: "Global", tier: 3, issn: ["0010-0277", "1873-7838"] },
+  { id: "perspectives-psych", name: "Perspectives on Psychological Science", feedUrl: sage("pps"), siteUrl: "https://journals.sagepub.com/home/pps", category: "psychology", region: "US", tier: 3, issn: ["1745-6916", "1745-6924"] },
+  { id: "bbs", name: "Behavioral and Brain Sciences", feedUrl: journal("0140-525X", "Behavioral and Brain Sciences"), siteUrl: "https://www.cambridge.org/core/journals/behavioral-and-brain-sciences", category: "psychology", region: "Global", tier: 3, issn: ["0140-525X", "1469-1825"] },
+  { id: "arpsych", name: "Annual Review of Psychology", feedUrl: journal("0066-4308", "Annual Review of Psychology"), siteUrl: "https://www.annualreviews.org/content/journals/psych", category: "psychology", region: "US", tier: 3, issn: ["0066-4308", "1545-2085"] },
+  { id: "nrpsych", name: "Nature Reviews Psychology", feedUrl: natureFeed("nrpsychol"), siteUrl: "https://www.nature.com/nrpsychol", category: "psychology", region: "Global", tier: 3, issn: ["2731-0574"] },
+  { id: "psyarxiv", name: "PsyArXiv", feedUrl: osf("psyarxiv"), siteUrl: "https://osf.io/preprints/psyarxiv", category: "psychology", region: "Global", tier: 3 },
+  { id: "medrxiv-psych", name: "medRxiv", section: "Psychiatry and clinical psychology", feedUrl: rxiv("medrxiv", "psychiatry_and_clinical_psychology"), siteUrl: "https://www.medrxiv.org/collection/psychiatry-and-clinical-psychology", category: "psychology", region: "Global", tier: 3 },
+
+  // Sociology and demography
+  { id: "asr", name: "American Sociological Review", feedUrl: sage("asr"), siteUrl: "https://journals.sagepub.com/home/asr", category: "sociology", region: "US", tier: 3, issn: ["0003-1224", "1939-8271"] },
+  { id: "ajs", name: "American Journal of Sociology", feedUrl: chicago("ajs"), siteUrl: "https://www.journals.uchicago.edu/journal/ajs", category: "sociology", region: "US", tier: 3, issn: ["0002-9602", "1537-5390"] },
+  { id: "arsoc", name: "Annual Review of Sociology", feedUrl: journal("0360-0572", "Annual Review of Sociology"), siteUrl: "https://www.annualreviews.org/content/journals/soc", category: "sociology", region: "US", tier: 3, issn: ["0360-0572", "1545-2115"] },
+  { id: "socforces", name: "Social Forces", feedUrl: journal("0037-7732", "Social Forces"), siteUrl: "https://academic.oup.com/sf", category: "sociology", region: "US", tier: 3, issn: ["0037-7732", "1534-7605"] },
+  { id: "socscience", name: "Sociological Science", feedUrl: journal("2330-6696", "Sociological Science", "crossref"), siteUrl: "https://sociologicalscience.com", category: "sociology", region: "US", tier: 3, issn: ["2330-6696"] },
+  { id: "esr", name: "European Sociological Review", feedUrl: journal("0266-7215", "European Sociological Review"), siteUrl: "https://academic.oup.com/esr", category: "sociology", region: "Europe", tier: 3, issn: ["0266-7215", "1468-2672"] },
+  { id: "demography", name: "Demography", feedUrl: journal("0070-3370", "Demography"), siteUrl: "https://read.dukeupress.edu/demography", category: "sociology", region: "US", tier: 3, issn: ["0070-3370", "1533-7790"] },
+  { id: "ssresearch", name: "Social Science Research", feedUrl: journal("0049-089X", "Social Science Research"), siteUrl: "https://www.sciencedirect.com/journal/social-science-research", category: "sociology", region: "Global", tier: 3, issn: ["0049-089X", "1096-0317"] },
+  { id: "socarxiv", name: "SocArXiv", feedUrl: osf("socarxiv"), siteUrl: "https://osf.io/preprints/socarxiv", category: "sociology", region: "Global", tier: 3 },
+
+  // Political science
+  { id: "apsr", name: "American Political Science Review", feedUrl: journal("0003-0554", "American Political Science Review"), siteUrl: "https://www.cambridge.org/core/journals/american-political-science-review", category: "polisci", region: "US", tier: 3, issn: ["0003-0554", "1537-5943"] },
+  { id: "ajps", name: "American Journal of Political Science", feedUrl: wiley("15405907"), siteUrl: "https://onlinelibrary.wiley.com/journal/15405907", category: "polisci", region: "US", tier: 3, issn: ["0092-5853", "1540-5907"] },
+  { id: "jop", name: "The Journal of Politics", feedUrl: chicago("jop"), siteUrl: "https://www.journals.uchicago.edu/journal/jop", category: "polisci", region: "US", tier: 3, issn: ["0022-3816", "1468-2508"] },
+  { id: "intorg", name: "International Organization", feedUrl: journal("0020-8183", "International Organization"), siteUrl: "https://www.cambridge.org/core/journals/international-organization", category: "polisci", region: "Global", tier: 3, issn: ["0020-8183", "1531-5088"] },
+  { id: "arpolisci", name: "Annual Review of Political Science", feedUrl: journal("1094-2939", "Annual Review of Political Science"), siteUrl: "https://www.annualreviews.org/content/journals/polisci", category: "polisci", region: "US", tier: 3, issn: ["1094-2939", "1545-1577"] },
+  { id: "cps", name: "Comparative Political Studies", feedUrl: sage("cps"), siteUrl: "https://journals.sagepub.com/home/cps", category: "polisci", region: "Global", tier: 3, issn: ["0010-4140", "1552-3829"] },
+  { id: "polanalysis", name: "Political Analysis", feedUrl: journal("1047-1987", "Political Analysis"), siteUrl: "https://www.cambridge.org/core/journals/political-analysis", category: "polisci", region: "Global", tier: 3, issn: ["1047-1987", "1476-4989"] },
+  { id: "bjpolsci", name: "British Journal of Political Science", feedUrl: journal("0007-1234", "British Journal of Political Science", "crossref"), siteUrl: "https://www.cambridge.org/core/journals/british-journal-of-political-science", category: "polisci", region: "UK", tier: 3, issn: ["0007-1234", "1469-2112"] },
+  { id: "goodauthority", name: "Good Authority", feedUrl: "https://goodauthority.org/feed/", siteUrl: "https://goodauthority.org", category: "polisci", region: "US", tier: 3 },
+
+  // Anthropology
+  { id: "amanth", name: "American Anthropologist", feedUrl: wiley("15481433"), siteUrl: "https://anthrosource.onlinelibrary.wiley.com/journal/15481433", category: "anthropology", region: "US", tier: 3, issn: ["0002-7294", "1548-1433"] },
+  { id: "curranth", name: "Current Anthropology", feedUrl: chicago("ca"), siteUrl: "https://www.journals.uchicago.edu/journal/ca", category: "anthropology", region: "Global", tier: 3, issn: ["0011-3204", "1537-5382"] },
+  { id: "aranth", name: "Annual Review of Anthropology", feedUrl: journal("0084-6570", "Annual Review of Anthropology"), siteUrl: "https://www.annualreviews.org/content/journals/anthro", category: "anthropology", region: "US", tier: 3, issn: ["0084-6570", "1545-4290"] },
+  { id: "jrai", name: "Journal of the Royal Anthropological Institute", feedUrl: wiley("14679655"), siteUrl: "https://rai.onlinelibrary.wiley.com/journal/14679655", category: "anthropology", region: "UK", tier: 3, issn: ["1359-0987", "1467-9655"] },
+  { id: "amethnologist", name: "American Ethnologist", feedUrl: wiley("15481425"), siteUrl: "https://anthrosource.onlinelibrary.wiley.com/journal/15481425", category: "anthropology", region: "US", tier: 3, issn: ["0094-0496", "1548-1425"] },
+  { id: "culanth", name: "Cultural Anthropology", feedUrl: journal("0886-7356", "Cultural Anthropology"), siteUrl: "https://journal.culanth.org", category: "anthropology", region: "US", tier: 3, issn: ["0886-7356", "1548-1360"] },
+  { id: "hau", name: "HAU: Journal of Ethnographic Theory", feedUrl: chicago("hau"), siteUrl: "https://www.journals.uchicago.edu/journal/hau", category: "anthropology", region: "Global", tier: 3, issn: ["2575-1433", "2049-1115"] },
+  { id: "jhumevol", name: "Journal of Human Evolution", feedUrl: journal("0047-2484", "Journal of Human Evolution"), siteUrl: "https://www.sciencedirect.com/journal/journal-of-human-evolution", category: "anthropology", region: "Global", tier: 3, issn: ["0047-2484", "1095-8606"] },
+
+  // History
+  { id: "ahr", name: "The American Historical Review", feedUrl: journal("0002-8762", "The American Historical Review"), siteUrl: "https://academic.oup.com/ahr", category: "history", region: "US", tier: 3, issn: ["0002-8762", "1937-5239"] },
+  { id: "pastpresent", name: "Past & Present", feedUrl: journal("0031-2746", "Past & Present"), siteUrl: "https://academic.oup.com/past", category: "history", region: "UK", tier: 3, issn: ["0031-2746", "1477-464X"] },
+  { id: "jmodhist", name: "The Journal of Modern History", feedUrl: chicago("jmh"), siteUrl: "https://www.journals.uchicago.edu/journal/jmh", category: "history", region: "US", tier: 3, issn: ["0022-2801", "1537-5358"] },
+  { id: "isis", name: "Isis", feedUrl: chicago("isis"), siteUrl: "https://www.journals.uchicago.edu/journal/isis", category: "history", region: "US", tier: 3, issn: ["0021-1753", "1545-6994"] },
+  { id: "hwj", name: "History Workshop Journal", feedUrl: journal("1363-3554", "History Workshop Journal", "crossref"), siteUrl: "https://academic.oup.com/hwj", category: "history", region: "UK", tier: 3, issn: ["1363-3554", "1477-4569"] },
+  { id: "jamhist", name: "Journal of American History", feedUrl: journal("0021-8723", "Journal of American History"), siteUrl: "https://academic.oup.com/jah", category: "history", region: "US", tier: 3, issn: ["0021-8723", "1945-2314"] },
+  { id: "histtheory", name: "History and Theory", feedUrl: wiley("14682303"), siteUrl: "https://onlinelibrary.wiley.com/journal/14682303", category: "history", region: "Global", tier: 3, issn: ["0018-2656", "1468-2303"] },
+  { id: "econhistrev", name: "The Economic History Review", feedUrl: wiley("14680289"), siteUrl: "https://onlinelibrary.wiley.com/journal/14680289", category: "history", region: "UK", tier: 3, issn: ["0013-0117", "1468-0289"] },
+
+  // Linguistics
+  { id: "language-lsa", name: "Language", feedUrl: journal("0097-8507", "Language"), siteUrl: "https://www.linguisticsociety.org/lsa-publications/language", category: "linguistics", region: "US", tier: 3, issn: ["0097-8507", "1535-0665"] },
+  { id: "linginquiry", name: "Linguistic Inquiry", feedUrl: journal("0024-3892", "Linguistic Inquiry"), siteUrl: "https://direct.mit.edu/ling", category: "linguistics", region: "US", tier: 3, issn: ["0024-3892", "1530-9150"] },
+  { id: "jling", name: "Journal of Linguistics", feedUrl: journal("0022-2267", "Journal of Linguistics"), siteUrl: "https://www.cambridge.org/core/journals/journal-of-linguistics", category: "linguistics", region: "UK", tier: 3, issn: ["0022-2267", "1469-7742"] },
+  { id: "nllt", name: "Natural Language & Linguistic Theory", feedUrl: journal("0167-806X", "Natural Language & Linguistic Theory"), siteUrl: "https://link.springer.com/journal/11049", category: "linguistics", region: "Global", tier: 3, issn: ["0167-806X", "1573-0859"] },
+  { id: "glossa", name: "Glossa", feedUrl: journal("2397-1835", "Glossa"), siteUrl: "https://www.glossa-journal.org", category: "linguistics", region: "Global", tier: 3, issn: ["2397-1835"] },
+  { id: "jml", name: "Journal of Memory and Language", feedUrl: journal("0749-596X", "Journal of Memory and Language"), siteUrl: "https://www.sciencedirect.com/journal/journal-of-memory-and-language", category: "linguistics", region: "Global", tier: 3, issn: ["0749-596X", "1096-0821"] },
+  { id: "languagelog", name: "Language Log", feedUrl: "https://languagelog.ldc.upenn.edu/nll/?feed=rss2", siteUrl: "https://languagelog.ldc.upenn.edu/nll/", category: "linguistics", region: "US", tier: 3 },
+
+  // Education
+  { id: "aerj", name: "American Educational Research Journal", feedUrl: sage("aer"), siteUrl: "https://journals.sagepub.com/home/aer", category: "education", region: "US", tier: 3, issn: ["0002-8312", "1935-1011"] },
+  { id: "rer", name: "Review of Educational Research", feedUrl: sage("rer"), siteUrl: "https://journals.sagepub.com/home/rer", category: "education", region: "US", tier: 3, issn: ["0034-6543", "1935-1046"] },
+  { id: "edresearcher", name: "Educational Researcher", feedUrl: sage("edr"), siteUrl: "https://journals.sagepub.com/home/edr", category: "education", region: "US", tier: 3, issn: ["0013-189X", "1935-102X"] },
+  { id: "socofed", name: "Sociology of Education", feedUrl: sage("soe"), siteUrl: "https://journals.sagepub.com/home/soe", category: "education", region: "US", tier: 3, issn: ["0038-0407", "1939-8573"] },
+  { id: "jedpsych", name: "Journal of Educational Psychology", feedUrl: journal("0022-0663", "Journal of Educational Psychology"), siteUrl: "https://psycnet.apa.org/PsycARTICLES/journal/edu", category: "education", region: "US", tier: 3, issn: ["0022-0663", "1939-2176"] },
+  { id: "edarxiv", name: "EdArXiv", feedUrl: osf("edarxiv"), siteUrl: "https://osf.io/preprints/edarxiv", category: "education", region: "Global", tier: 3 },
+
+  // Legal scholarship
+  { id: "harvardlawreview", name: "Harvard Law Review", feedUrl: "https://harvardlawreview.org/feed/", siteUrl: "https://harvardlawreview.org", category: "legal", region: "US", tier: 3, issn: ["0017-811X", "2161-976X"] },
+  { id: "lawsocreview", name: "Law & Society Review", feedUrl: journal("0023-9216", "Law & Society Review"), siteUrl: "https://www.cambridge.org/core/journals/law-and-society-review", category: "legal", region: "US", tier: 3, issn: ["0023-9216", "1540-5893"] },
+  { id: "jlegalstudies", name: "The Journal of Legal Studies", feedUrl: chicago("jls"), siteUrl: "https://www.journals.uchicago.edu/journal/jls", category: "legal", region: "US", tier: 3, issn: ["0047-2530", "1537-5366"] },
+  { id: "jlaweconomics", name: "The Journal of Law and Economics", feedUrl: chicago("jle"), siteUrl: "https://www.journals.uchicago.edu/journal/jle", category: "legal", region: "US", tier: 3, issn: ["0022-2186", "1537-5285"] },
+
+  // Geography and urban studies
+  { id: "annalsaag", name: "Annals of the American Association of Geographers", feedUrl: tandf("raag21"), siteUrl: "https://www.tandfonline.com/journals/raag21", category: "geography", region: "US", tier: 3, issn: ["2469-4452", "2469-4460"] },
+  { id: "phg", name: "Progress in Human Geography", feedUrl: sage("phg"), siteUrl: "https://journals.sagepub.com/home/phg", category: "geography", region: "UK", tier: 3, issn: ["0309-1325", "1477-0288"] },
+  { id: "urbanstudies", name: "Urban Studies", feedUrl: sage("usj"), siteUrl: "https://journals.sagepub.com/home/usj", category: "geography", region: "UK", tier: 3, issn: ["0042-0980", "1360-063X"] },
+  { id: "tibg", name: "Transactions of the Institute of British Geographers", feedUrl: wiley("14755661"), siteUrl: "https://rgs-ibg.onlinelibrary.wiley.com/journal/14755661", category: "geography", region: "UK", tier: 3, issn: ["0020-2754", "1475-5661"] },
+
+  // Literature, arts and classics
+  { id: "pmla", name: "PMLA", feedUrl: journal("0030-8129", "PMLA", "crossref"), siteUrl: "https://www.cambridge.org/core/journals/pmla", category: "humanities", region: "US", tier: 3, issn: ["0030-8129", "1938-1530"] },
+  { id: "critinquiry", name: "Critical Inquiry", feedUrl: chicago("ci"), siteUrl: "https://www.journals.uchicago.edu/journal/ci", category: "humanities", region: "US", tier: 3, issn: ["0093-1896", "1539-7858"] },
+  { id: "artbulletin", name: "The Art Bulletin", feedUrl: tandf("rcab20"), siteUrl: "https://www.tandfonline.com/journals/rcab20", category: "humanities", region: "US", tier: 3, issn: ["0004-3079", "1559-6478"] },
+  { id: "classicalq", name: "The Classical Quarterly", feedUrl: journal("0009-8388", "The Classical Quarterly"), siteUrl: "https://www.cambridge.org/core/journals/classical-quarterly", category: "humanities", region: "UK", tier: 3, issn: ["0009-8388", "1471-6844"] },
+  { id: "representations", name: "Representations", feedUrl: journal("0734-6018", "Representations", "crossref"), siteUrl: "https://online.ucpress.edu/representations", category: "humanities", region: "US", tier: 3, issn: ["0734-6018", "1533-855X"] },
+
+  // Biology and genetics
+  { id: "natgenet", name: "Nature Genetics", feedUrl: natureFeed("ng"), siteUrl: "https://www.nature.com/ng", category: "biology", region: "Global", tier: 3, issn: ["1061-4036", "1546-1718"] },
+  { id: "natcellbio", name: "Nature Cell Biology", feedUrl: natureFeed("ncb"), siteUrl: "https://www.nature.com/ncb", category: "biology", region: "Global", tier: 3, issn: ["1465-7392", "1476-4679"] },
+  { id: "natmicro", name: "Nature Microbiology", feedUrl: natureFeed("nmicrobiol"), siteUrl: "https://www.nature.com/nmicrobiol", category: "biology", region: "Global", tier: 3, issn: ["2058-5276"] },
+  { id: "molcell", name: "Molecular Cell", feedUrl: "https://www.cell.com/molecular-cell/inpress.rss", siteUrl: "https://www.cell.com/molecular-cell", category: "biology", region: "US", tier: 3, issn: ["1097-2765", "1097-4164"] },
+  { id: "ajhg", name: "The American Journal of Human Genetics", feedUrl: "https://www.cell.com/ajhg/inpress.rss", siteUrl: "https://www.cell.com/ajhg", category: "biology", region: "US", tier: 3, issn: ["0002-9297", "1537-6605"] },
+  { id: "genomeres", name: "Genome Research", feedUrl: journal("1088-9051", "Genome Research"), siteUrl: "https://genome.cshlp.org", category: "biology", region: "US", tier: 3, issn: ["1088-9051", "1549-5469"] },
+  { id: "biorxiv-genomics", name: "bioRxiv", section: "Genomics", feedUrl: rxiv("biorxiv", "genomics"), siteUrl: "https://www.biorxiv.org/collection/genomics", category: "biology", region: "Global", tier: 3 },
+  { id: "biorxiv-cellbio", name: "bioRxiv", section: "Cell biology", feedUrl: rxiv("biorxiv", "cell_biology"), siteUrl: "https://www.biorxiv.org/collection/cell-biology", category: "biology", region: "Global", tier: 3 },
+  { id: "biorxiv-micro", name: "bioRxiv", section: "Microbiology", feedUrl: rxiv("biorxiv", "microbiology"), siteUrl: "https://www.biorxiv.org/collection/microbiology", category: "biology", region: "Global", tier: 3 },
+
+  // Ecology and evolution
+  { id: "natecolevol", name: "Nature Ecology & Evolution", feedUrl: natureFeed("natecolevol"), siteUrl: "https://www.nature.com/natecolevol", category: "ecology", region: "Global", tier: 3, issn: ["2397-334X"] },
+  { id: "tree", name: "Trends in Ecology & Evolution", feedUrl: "https://www.cell.com/trends/ecology-evolution/inpress.rss", siteUrl: "https://www.cell.com/trends/ecology-evolution", category: "ecology", region: "Global", tier: 3, issn: ["0169-5347", "1872-8383"] },
+  { id: "ecolett", name: "Ecology Letters", feedUrl: wiley("14610248"), siteUrl: "https://onlinelibrary.wiley.com/journal/14610248", category: "ecology", region: "Global", tier: 3, issn: ["1461-023X", "1461-0248"] },
+  { id: "gcb", name: "Global Change Biology", feedUrl: wiley("13652486"), siteUrl: "https://onlinelibrary.wiley.com/journal/13652486", category: "ecology", region: "Global", tier: 3, issn: ["1354-1013", "1365-2486"] },
+  { id: "ecology-esa", name: "Ecology", feedUrl: wiley("19399170"), siteUrl: "https://esajournals.onlinelibrary.wiley.com/journal/19399170", category: "ecology", region: "US", tier: 3, issn: ["0012-9658", "1939-9170"] },
+  { id: "mbe", name: "Molecular Biology and Evolution", feedUrl: journal("0737-4038", "Molecular Biology and Evolution"), siteUrl: "https://academic.oup.com/mbe", category: "ecology", region: "Global", tier: 3, issn: ["0737-4038", "1537-1719"] },
+  { id: "biorxiv-ecology", name: "bioRxiv", section: "Ecology", feedUrl: rxiv("biorxiv", "ecology"), siteUrl: "https://www.biorxiv.org/collection/ecology", category: "ecology", region: "Global", tier: 3 },
+  { id: "biorxiv-evo", name: "bioRxiv", section: "Evolutionary biology", feedUrl: rxiv("biorxiv", "evolutionary_biology"), siteUrl: "https://www.biorxiv.org/collection/evolutionary-biology", category: "ecology", region: "Global", tier: 3 },
+
+  // Medicine and public health
+  { id: "nejm", name: "The New England Journal of Medicine", feedUrl: "https://www.nejm.org/action/showFeed?jc=nejm&type=etoc&feed=rss", siteUrl: "https://www.nejm.org", category: "medicine", region: "US", tier: 3, issn: ["0028-4793", "1533-4406"] },
+  { id: "lancet", name: "The Lancet", feedUrl: "https://www.thelancet.com/rssfeed/lancet_online.xml", siteUrl: "https://www.thelancet.com/journals/lancet/home", category: "medicine", region: "UK", tier: 3, issn: ["0140-6736", "1474-547X"] },
+  { id: "jama", name: "JAMA", section: "Online first", feedUrl: "https://jamanetwork.com/rss/site_3/onlineFirst_67.xml", siteUrl: "https://jamanetwork.com/journals/jama", category: "medicine", region: "US", tier: 3, issn: ["0098-7484", "1538-3598"] },
+  { id: "bmj", name: "The BMJ", feedUrl: "https://www.bmj.com/rss/recent.xml", siteUrl: "https://www.bmj.com", category: "medicine", region: "UK", tier: 3, issn: ["0959-8138", "1756-1833"] },
+  { id: "natmed", name: "Nature Medicine", feedUrl: natureFeed("nm"), siteUrl: "https://www.nature.com/nm", category: "medicine", region: "Global", tier: 3, issn: ["1078-8956", "1546-170X"] },
+  { id: "plosmed", name: "PLOS Medicine", feedUrl: "https://journals.plos.org/plosmedicine/feed/atom", siteUrl: "https://journals.plos.org/plosmedicine", category: "medicine", region: "Global", tier: 3, issn: ["1549-1277", "1549-1676"] },
+  { id: "annalsim", name: "Annals of Internal Medicine", feedUrl: "https://www.acpjournals.org/action/showFeed?type=etoc&feed=rss&jc=aim", siteUrl: "https://www.acpjournals.org/journal/aim", category: "medicine", region: "US", tier: 3, issn: ["0003-4819", "1539-3704"] },
+  { id: "medrxiv-epi", name: "medRxiv", section: "Epidemiology", feedUrl: rxiv("medrxiv", "epidemiology"), siteUrl: "https://www.medrxiv.org/collection/epidemiology", category: "medicine", region: "Global", tier: 3 },
+  { id: "medrxiv-pubhealth", name: "medRxiv", section: "Public and global health", feedUrl: rxiv("medrxiv", "public_and_global_health"), siteUrl: "https://www.medrxiv.org/collection/public-and-global-health", category: "medicine", region: "Global", tier: 3 },
+
+  // Physics and astronomy
+  { id: "prl", name: "Physical Review Letters", feedUrl: "https://feeds.aps.org/rss/recent/prl.xml", siteUrl: "https://journals.aps.org/prl", category: "physics", region: "US", tier: 3, issn: ["0031-9007", "1079-7114"] },
+  { id: "natphys", name: "Nature Physics", feedUrl: natureFeed("nphys"), siteUrl: "https://www.nature.com/nphys", category: "physics", region: "Global", tier: 3, issn: ["1745-2473", "1745-2481"] },
+  { id: "natastro", name: "Nature Astronomy", feedUrl: natureFeed("natastron"), siteUrl: "https://www.nature.com/natastron", category: "physics", region: "Global", tier: 3, issn: ["2397-3366"] },
+  { id: "aps-physics", name: "Physics", section: "APS's magazine", feedUrl: "https://feeds.aps.org/rss/recent/physics.xml", siteUrl: "https://physics.aps.org", category: "physics", region: "US", tier: 3 },
+  { id: "arxiv-cond-mat", name: "arXiv", section: "Condensed Matter", feedUrl: arxiv("cond-mat"), siteUrl: "https://arxiv.org/list/cond-mat/recent", category: "physics", region: "Global", tier: 3 },
+  { id: "arxiv-hep-th", name: "arXiv", section: "High Energy Physics \u2013 Theory", feedUrl: arxiv("hep-th"), siteUrl: "https://arxiv.org/list/hep-th/recent", category: "physics", region: "Global", tier: 3 },
+  { id: "arxiv-gr-qc", name: "arXiv", section: "General Relativity and Quantum Cosmology", feedUrl: arxiv("gr-qc"), siteUrl: "https://arxiv.org/list/gr-qc/recent", category: "physics", region: "Global", tier: 3 },
+  { id: "arxiv-soc-ph", name: "arXiv", section: "Physics and Society", feedUrl: arxiv("physics.soc-ph"), siteUrl: "https://arxiv.org/list/physics.soc-ph/recent", category: "physics", region: "Global", tier: 3 },
+
+  // Chemistry and materials
+  { id: "jacs", name: "Journal of the American Chemical Society", feedUrl: journal("0002-7863", "Journal of the American Chemical Society"), siteUrl: "https://pubs.acs.org/journal/jacsat", category: "chemistry", region: "US", tier: 3, issn: ["0002-7863", "1520-5126"] },
+  { id: "natchem", name: "Nature Chemistry", feedUrl: natureFeed("nchem"), siteUrl: "https://www.nature.com/nchem", category: "chemistry", region: "Global", tier: 3, issn: ["1755-4330", "1755-4349"] },
+  { id: "natmater", name: "Nature Materials", feedUrl: natureFeed("nmat"), siteUrl: "https://www.nature.com/nmat", category: "chemistry", region: "Global", tier: 3, issn: ["1476-1122", "1476-4660"] },
+  { id: "angewandte", name: "Angewandte Chemie", feedUrl: wiley("15213773"), siteUrl: "https://onlinelibrary.wiley.com/journal/15213773", category: "chemistry", region: "Europe", tier: 3, issn: ["1433-7851", "1521-3773"] },
+
+  // Earth and climate science
+  { id: "natclimate", name: "Nature Climate Change", feedUrl: natureFeed("nclimate"), siteUrl: "https://www.nature.com/nclimate", category: "earth", region: "Global", tier: 3, issn: ["1758-678X", "1758-6798"] },
+  { id: "natgeosci", name: "Nature Geoscience", feedUrl: natureFeed("ngeo"), siteUrl: "https://www.nature.com/ngeo", category: "earth", region: "Global", tier: 3, issn: ["1752-0894", "1752-0908"] },
+  { id: "natsustain", name: "Nature Sustainability", feedUrl: natureFeed("natsustain"), siteUrl: "https://www.nature.com/natsustain", category: "earth", region: "Global", tier: 3, issn: ["2398-9629"] },
+  { id: "grl", name: "Geophysical Research Letters", feedUrl: wiley("19448007"), siteUrl: "https://agupubs.onlinelibrary.wiley.com/journal/19448007", category: "earth", region: "Global", tier: 3, issn: ["0094-8276", "1944-8007"] },
+  { id: "jclimate", name: "Journal of Climate", feedUrl: journal("0894-8755", "Journal of Climate"), siteUrl: "https://journals.ametsoc.org/view/journals/clim/clim-overview.xml", category: "earth", region: "US", tier: 3, issn: ["0894-8755", "1520-0442"] },
+
+  // Mathematics and statistics
+  { id: "annalsmath", name: "Annals of Mathematics", feedUrl: journal("0003-486X", "Annals of Mathematics"), siteUrl: "https://annals.math.princeton.edu", category: "mathematics", region: "US", tier: 3, issn: ["0003-486X", "1939-8980"] },
+  { id: "jams", name: "Journal of the American Mathematical Society", feedUrl: journal("0894-0347", "Journal of the American Mathematical Society"), siteUrl: "https://www.ams.org/journals/jams", category: "mathematics", region: "US", tier: 3, issn: ["0894-0347", "1088-6834"] },
+  { id: "inventiones", name: "Inventiones mathematicae", feedUrl: journal("0020-9910", "Inventiones mathematicae"), siteUrl: "https://link.springer.com/journal/222", category: "mathematics", region: "Global", tier: 3, issn: ["0020-9910", "1432-1297"] },
+  { id: "annalsstats", name: "The Annals of Statistics", feedUrl: journal("0090-5364", "The Annals of Statistics"), siteUrl: "https://imstat.org/journals-and-publications/annals-of-statistics", category: "mathematics", region: "US", tier: 3, issn: ["0090-5364", "2168-8966"] },
+  { id: "jasa", name: "Journal of the American Statistical Association", feedUrl: tandf("uasa20"), siteUrl: "https://www.tandfonline.com/journals/uasa20", category: "mathematics", region: "US", tier: 3, issn: ["0162-1459", "1537-274X"] },
+  { id: "arxiv-math-pr", name: "arXiv", section: "Probability", feedUrl: arxiv("math.PR"), siteUrl: "https://arxiv.org/list/math.PR/recent", category: "mathematics", region: "Global", tier: 3 },
+  { id: "arxiv-math-nt", name: "arXiv", section: "Number Theory", feedUrl: arxiv("math.NT"), siteUrl: "https://arxiv.org/list/math.NT/recent", category: "mathematics", region: "Global", tier: 3 },
+  { id: "arxiv-stat-me", name: "arXiv", section: "Statistical Methodology", feedUrl: arxiv("stat.ME"), siteUrl: "https://arxiv.org/list/stat.ME/recent", category: "mathematics", region: "Global", tier: 3 },
+
+  // Computer science
+  { id: "cacm", name: "Communications of the ACM", feedUrl: journal("0001-0782", "Communications of the ACM"), siteUrl: "https://cacm.acm.org", category: "computing", region: "US", tier: 3, issn: ["0001-0782", "1557-7317"] },
+  { id: "natmachintell", name: "Nature Machine Intelligence", feedUrl: natureFeed("natmachintell"), siteUrl: "https://www.nature.com/natmachintell", category: "computing", region: "Global", tier: 3, issn: ["2522-5839"] },
+  { id: "arxiv-cs-cr", name: "arXiv", section: "Cryptography and Security", feedUrl: arxiv("cs.CR"), siteUrl: "https://arxiv.org/list/cs.CR/recent", category: "computing", region: "Global", tier: 3 },
+  { id: "arxiv-cs-hc", name: "arXiv", section: "Human-Computer Interaction", feedUrl: arxiv("cs.HC"), siteUrl: "https://arxiv.org/list/cs.HC/recent", category: "computing", region: "Global", tier: 3 },
+  { id: "arxiv-cs-ds", name: "arXiv", section: "Data Structures and Algorithms", feedUrl: arxiv("cs.DS"), siteUrl: "https://arxiv.org/list/cs.DS/recent", category: "computing", region: "Global", tier: 3 },
+
+  // General science
+  { id: "sciadv", name: "Science Advances", feedUrl: "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=sciadv", siteUrl: "https://www.science.org/journal/sciadv", category: "research", region: "US", tier: 3, issn: ["2375-2548"] },
 ];
 /* eslint-enable prettier/prettier */
 
@@ -418,6 +650,47 @@ export const SUBREDDITS: SubredditEntry[] = [
   { name: "futurology", label: "r/Futurology", category: "tech", weight: 3 },
 ];
 
+/**
+ * Feeds this directory used to list that were measured dead or frozen on
+ * 12 Oct 2026, each with the entry that replaced it. A source saved from the
+ * old entry is rewritten to the new one when a device loads its list
+ * (lib/publishers.ts, `repairSources`) — by exact address only, so nothing
+ * that still answers is touched. CNN World has no replacement on purpose: no
+ * route answers for the section alone, and the whole of CNN in its place would
+ * be a section silently becoming the paper (docs/COLLECTION.md §3).
+ */
+export const RETIRED_FEEDS: Record<string, string> = {
+  "http://rss.cnn.com/rss/cnn_topstories.rss": "cnn-top",
+  "https://www.telegraph.co.uk/rss.xml": "telegraph",
+  "https://www.timesofisrael.com/feed/": "timesofisrael",
+  "https://www.jpost.com/rss/rssfeedsheadlines.aspx": "jpost",
+  "https://kyivindependent.com/feed/": "kyivindependent",
+  "https://feeds.content.dowjones.io/public/rss/RSSBarronsRealTime": "barrons",
+  "https://www.bleepingcomputer.com/feed/": "bleepingcomputer",
+  "https://tools.cdc.gov/api/v2/resources/media/404952.rss": "cdc-newsroom",
+  "https://www.lawfaremedia.org/feeds/articles.rss": "lawfare",
+  "https://www.abajournal.com/feed": "abajournal",
+  "https://www.canarymedia.com/articles/feed": "canarymedia",
+  "https://www.espn.com/espn/rss/news": "espn",
+  "https://www.sfchronicle.com/rss/feed/Bay-Area-News-429.php": "sfchronicle",
+  "https://www.chicagotribune.com/feed/": "chicagotribune",
+  "https://www.bostonglobe.com/rss/bigstory": "bostonglobe",
+  "https://www.miamiherald.com/news/local/?widgetName=rssfeed&widgetContentId=712015&getXmlFeed=true": "miamiherald",
+  "https://www.dallasnews.com/arc/outboundfeeds/rss/": "dallasnews",
+  "https://www.denverpost.com/feed/": "denverpost",
+  "https://www.ajc.com/arcio/rss/": "ajc",
+  "https://www.inquirer.com/arc/outboundfeeds/rss/": "inquirer",
+  "https://rssfeeds.azcentral.com/phoenix/local": "azcentral",
+  // arXiv read `cat:astro-ph` as the archive's pre-2009 filings: newest paper 2019.
+  "api:arxiv?q=cat%3Aastro-ph": "arxiv-astro-ph",
+  // OpenAlex dates these only by the year, which hid that week's papers.
+  "api:journal?issn=0022-362X&name=The+Journal+of+Philosophy": "jphil",
+  "api:journal?issn=2330-4014&name=Ergo": "ergo",
+  // OpenAlex trailed Crossref by weeks for these two (Mind: 30 Jul against 23 Sep).
+  "api:journal?issn=1047-3211&name=Cerebral+Cortex": "cercor",
+  "api:journal?issn=0026-4423&name=Mind": "mind",
+};
+
 /** Ready-made bundles, so a reader can follow a beat in one tap. */
 export const PACKS: { id: string; name: string; blurb: string; outlets: string[]; subreddits?: string[] }[] = [
   { id: "front-pages", name: "Front pages", blurb: "What the big newsrooms are leading with today.", outlets: ["ap-wire", "nyt-home", "wapo-national", "wsj-world", "bbc-top", "guardian-front", "npr-news", "aljazeera", "cnn-top", "nbc-news"] },
@@ -456,7 +729,7 @@ export function frontOutletForHost(host: string): Outlet | null {
 
   const matches = OUTLETS.filter((outlet) => {
     // Research is found by its own rung (lib/scholarly.ts); some of it is not a feed at all.
-    if (outlet.category === "neuroscience" || outlet.category === "philosophy" || outlet.category === "research") return false;
+    if (isResearchCategory(outlet.category)) return false;
     let outletHost: string;
     try {
       outletHost = new URL(outlet.siteUrl).hostname.replace(/^www\./, "").toLowerCase();
