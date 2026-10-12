@@ -13,6 +13,36 @@ const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
+/**
+ * Requests to one host, at most this many at once. A refresh reads every
+ * source together, and a reader following six Nature journals asked
+ * nature.com for six feeds in the same instant: measured 12 Oct 2026, a
+ * burst like that had some of them answered with an HTML page instead of the
+ * feed, while each answered alone every time. Wiley and SAGE carry dozens of
+ * journals each and are asked the same way.
+ */
+const FEEDS_PER_HOST = 2;
+const hostActive = new Map<string, number>();
+const hostWaiting = new Map<string, (() => void)[]>();
+async function onePerTurn<T>(url: string, run: () => Promise<T>): Promise<T> {
+  let host = "";
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return run();
+  }
+  if ((hostActive.get(host) ?? 0) >= FEEDS_PER_HOST) {
+    await new Promise<void>((resolve) => hostWaiting.set(host, [...(hostWaiting.get(host) ?? []), resolve]));
+  }
+  hostActive.set(host, (hostActive.get(host) ?? 0) + 1);
+  try {
+    return await run();
+  } finally {
+    hostActive.set(host, (hostActive.get(host) ?? 1) - 1);
+    hostWaiting.get(host)?.shift()?.();
+  }
+}
+
 export async function fetchText(
   url: string,
   timeoutMs = 12000,
@@ -23,6 +53,10 @@ export async function fetchText(
    */
   extraHeaders?: Record<string, string>,
 ) {
+  return onePerTurn(url, () => fetchTextNow(url, timeoutMs, extraHeaders));
+}
+
+async function fetchTextNow(url: string, timeoutMs: number, extraHeaders?: Record<string, string>) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

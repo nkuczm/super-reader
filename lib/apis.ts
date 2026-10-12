@@ -126,6 +126,8 @@ export type ApiProvider = {
    * separate limits.
    */
   fallback?: Pick<ApiProvider, "request" | "items" | "article">;
+  /** Ask the fallback first, for these parameters (the journal route's `via=crossref`). */
+  fallbackFirst?: (params: Record<string, string>) => boolean;
   /**
    * Read every page nextPage offers (up to four), however many records the
    * first held: for an API whose first page is its oldest, stopping once
@@ -220,19 +222,34 @@ function crossrefArticle(item: any): Article | null {
     title,
     link,
     author: authors.slice(0, 3).join(", ") || pick(item["container-title"]?.[0]),
-    publishedAt:
-      // The publication date, in any of the forms Crossref records it,
-      // skipping any that has not happened yet. created is a
-      // registration event and the last resort — a 2011 paper deposited
-      // last week would otherwise arrive as last week's news — but it is
-      // a real moment, which a publisher's cover date is not.
-      notFuture(fromDateParts(item.published)) ??
-      notFuture(fromDateParts(item.issued)) ??
-      notFuture(fromDateParts(item["published-print"])) ??
-      notFuture(fromDateParts(item["published-online"])) ??
-      toIso(pick(item.created?.["date-time"])),
+    publishedAt: crossrefDate(item),
     summary: clean(item.abstract),
   };
+}
+
+/**
+ * When a Crossref work appeared. A date to the day wins, in any of the forms
+ * Crossref records one, skipping any that has not happened yet. Many
+ * publishers deposit only a year or a month — Cambridge, the Journal of
+ * Philosophy and Duke among them — which read as 1 January and made a
+ * journal publishing that week look nine months quiet (12 Oct 2026). For
+ * those, the DOI's registration is the real moment, so long as it falls
+ * inside that year or month: a 2011 paper deposited last week must not
+ * arrive as last week's news.
+ */
+function crossrefDate(item: any): string | undefined {
+  const forms = [item.published, item["published-online"], item["published-print"], item.issued];
+  const precise = forms.find((form) => form?.["date-parts"]?.[0]?.length >= 3 && notFuture(fromDateParts(form)));
+  if (precise) return notFuture(fromDateParts(precise));
+  const coarse = forms.map((form) => form?.["date-parts"]?.[0]).find((parts) => Array.isArray(parts) && parts.length > 0) as number[] | undefined;
+  const created = toIso(pick(item.created?.["date-time"]));
+  if (!coarse) return created;
+  const [year, month] = coarse.map(Number);
+  if (created) {
+    const at = new Date(created);
+    if (at.getUTCFullYear() === year && (month === undefined || at.getUTCMonth() + 1 >= month)) return created;
+  }
+  return notFuture(fromDateParts({ "date-parts": [coarse] })) ?? created;
 }
 
 /**
@@ -281,6 +298,17 @@ export const OPENALEX_AREAS: { value: string; label: string; filter: string }[] 
   { value: "philosophy", label: "Philosophy", filter: "primary_topic.subfield.id:1211" },
   { value: "ai", label: "Artificial intelligence", filter: "primary_topic.subfield.id:1702" },
 ];
+
+/** The Open Science Framework's preprint servers people follow, by the id its API uses. */
+export const OSF_SERVERS: Record<string, { label: string }> = {
+  psyarxiv: { label: "PsyArXiv (psychology)" },
+  socarxiv: { label: "SocArXiv (social sciences)" },
+  edarxiv: { label: "EdArXiv (education)" },
+  lawarxiv: { label: "LawArXiv (law)" },
+  mediarxiv: { label: "MediArXiv (media and communication)" },
+  metaarxiv: { label: "MetaArXiv (research on research)" },
+  sportrxiv: { label: "SportRxiv (sport and exercise science)" },
+};
 
 /** bioRxiv's subject collections, as its API names them. */
 export const BIORXIV_SUBJECTS = [
@@ -812,7 +840,7 @@ export const API_PROVIDERS: ApiProvider[] = [
       };
     },
     title: ({ q }) => {
-      const cat = q?.trim().match(/^cat:([\w.-]+)$/)?.[1];
+      const cat = q?.trim().match(/^cat:([\w.*-]+)$/)?.[1];
       return `arXiv · ${cat ? ARXIV_NAMES[cat] ?? cat : q?.trim() ?? "recent"}`;
     },
   },
@@ -856,7 +884,9 @@ export const API_PROVIDERS: ApiProvider[] = [
     ],
     // OpenAlex first: abstracts, authors, and every publisher. Measured on
     // 11 Oct 2026 for twenty journals whose sites refuse a server, each
-    // with papers from that week.
+    // with papers from that week. `via=crossref` reverses the order, for a
+    // journal whose papers OpenAlex dates only by the year — it then sorts
+    // a year's papers in no particular order, and the newest go missing.
     request: ({ issn = "" }, { limit }) => ({
       url:
         `https://api.openalex.org/works?filter=primary_location.source.issn:${filterValue(issn)},` +
@@ -865,16 +895,19 @@ export const API_PROVIDERS: ApiProvider[] = [
     }),
     items: (body) => body?.results ?? [],
     article: openAlexArticle,
-    // Crossref when OpenAlex cannot answer: the same journal by the same ISSN.
+    // Crossref when OpenAlex cannot answer: the same journal by the same ISSN,
+    // newest registered first — a publication date of only a year cannot order
+    // a year's papers, and registration is when a paper appears.
     fallback: {
       request: ({ issn = "" }, { limit }) => ({
         url:
           `https://api.crossref.org/journals/${encodeURIComponent(issn.trim())}/works` +
-          `?sort=published&order=desc&rows=${Math.min(limit, 50)}&filter=until-pub-date:${today()},type:journal-article`,
+          `?sort=created&order=desc&rows=${Math.min(limit, 50)}&filter=until-pub-date:${today()},type:journal-article`,
       }),
       items: (body) => body?.message?.items ?? [],
       article: crossrefArticle,
     },
+    fallbackFirst: ({ via }) => via === "crossref",
     title: ({ name, issn }) => name?.trim() || `Journal ${issn?.trim() ?? ""}`,
   },
 
@@ -989,6 +1022,54 @@ export const API_PROVIDERS: ApiProvider[] = [
     },
     title: ({ server = "biorxiv", subject = "" }) =>
       `${server === "medrxiv" ? "medRxiv" : "bioRxiv"} · ${subject.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase())}`,
+  },
+
+  {
+    id: "osf",
+    name: "PsyArXiv, SocArXiv & other OSF preprints",
+    category: "Research",
+    description: "New preprints on one of the Open Science Framework's servers — psychology, sociology, education, law and more — newest first, first versions only.",
+    siteUrl: "https://osf.io/preprints",
+    docsUrl: "https://developer.osf.io",
+    params: [
+      {
+        key: "server",
+        label: "Server",
+        options: Object.entries(OSF_SERVERS).map(([value, { label }]) => ({ value, label })),
+        default: "psyarxiv",
+        required: true,
+      },
+    ],
+    // Measured 12 Oct 2026: published preprints only, newest first, with their
+    // authors embedded — a second's wait for a page, and each one's own date.
+    request: ({ server = "psyarxiv" }, { limit }) => ({
+      url:
+        `https://api.osf.io/v2/preprints/?filter%5Bprovider%5D=${encodeURIComponent(server.trim().toLowerCase())}` +
+        `&filter%5Bis_published%5D=true&sort=-date_published&page%5Bsize%5D=${Math.min(limit + 10, 50)}` +
+        `&embed=bibliographic_contributors&fields%5Bpreprints%5D=title,date_published,description,bibliographic_contributors,version` +
+        `&fields%5Busers%5D=full_name`,
+    }),
+    // A second version of an old preprint is a revision, not a new paper.
+    items: (body) => (Array.isArray(body?.data) ? body.data : []).filter((item: any) => Number(item?.attributes?.version ?? 1) === 1),
+    article: (item) => {
+      const title = clean(item?.attributes?.title, 300);
+      const link = pick(item?.links?.html);
+      if (!title || !link) return null;
+      const people = (item?.embeds?.bibliographic_contributors?.data ?? [])
+        .map((c: any) => pick(c?.embeds?.users?.data?.attributes?.full_name, c?.attributes?.unregistered_contributor))
+        .filter(Boolean) as string[];
+      const at = pick(item?.attributes?.date_published);
+      return {
+        id: `osf:${pick(item.id) ?? link}`,
+        title,
+        link,
+        author: people.length > 3 ? `${people.slice(0, 3).join(", ")} et al.` : people.join(", ") || undefined,
+        // OSF writes its times without a zone; they are UTC.
+        publishedAt: notFuture(toIso(at ? (/[zZ]|[+-]\d\d:?\d\d$/.test(at) ? at : `${at}Z`) : undefined)),
+        summary: clean(item?.attributes?.description, 600),
+      };
+    },
+    title: ({ server = "psyarxiv" }) => OSF_SERVERS[server.trim().toLowerCase()]?.label.split(" (")[0] ?? `OSF · ${server}`,
   },
 
   {
@@ -1254,10 +1335,15 @@ export function apiCatalog(): ApiCatalogEntry[] {
  * run of requests was refused, and the same request answered minutes later.
  */
 const PER_HOST = 2;
+/**
+ * Crossref's anonymous pool says so in every answer: `x-concurrency-limit: 1`,
+ * five a second (measured 12 Oct 2026). A second request in flight is refused.
+ */
+const HOST_LIMITS: Record<string, number> = { "api.crossref.org": 1 };
 const active = new Map<string, number>();
 const waiting = new Map<string, (() => void)[]>();
 async function turn<T>(host: string, run: () => Promise<T>): Promise<T> {
-  if ((active.get(host) ?? 0) >= PER_HOST) {
+  if ((active.get(host) ?? 0) >= (HOST_LIMITS[host] ?? PER_HOST)) {
     await new Promise<void>((resolve) => waiting.set(host, [...(waiting.get(host) ?? []), resolve]));
   }
   active.set(host, (active.get(host) ?? 0) + 1);
@@ -1315,6 +1401,17 @@ async function fetchJsonOnce(request: ApiRequest, timeoutMs: number) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * The parts of an issue that are not papers — covers, front and back matter,
+ * the masthead — and the placeholder an index lists before a title is known
+ * ("Title Pending 12682", OpenAlex for Ergo and Philosophers' Imprint).
+ * Measured 12 Oct 2026: Philosophy of Science's newest "paper" was its cover.
+ */
+export function isFurniture(title: string): boolean {
+  return /^(title pending\b|issue information\b|masthead$|editorial board$|(table of )?contents$|(front|back) ?matter$|front cover$|back cover$|cover and (front|back) matter$)/i.test(title.trim())
+    || /\bcover and (front|back) matter\b|\b(front|back) ?matter of\b/i.test(title);
 }
 
 /**
@@ -1384,12 +1481,21 @@ export async function fetchApiSource(
       })
       .filter((article): article is Article => article !== null);
   };
-  let articles: Article[];
-  try {
-    articles = await read(provider, request);
-  } catch (error) {
-    if (!provider.fallback) throw error;
-    articles = await read(provider.fallback, provider.fallback.request(params, { limit, key }));
+  const ways: { way: Pick<ApiProvider, "items" | "article">; ask: () => ApiRequest }[] = [
+    { way: provider, ask: () => request },
+    ...(provider.fallback ? [{ way: provider.fallback, ask: () => provider.fallback!.request(params, { limit, key }) }] : []),
+  ];
+  if (provider.fallbackFirst?.(params)) ways.reverse();
+  let articles: Article[] = [];
+  for (const [index, { way, ask }] of ways.entries()) {
+    try {
+      // An issue's furniture and an index's placeholders are not papers.
+      articles = (await read(way, ask())).filter((article) => provider.category !== "Research" || !isFurniture(article.title));
+      // Nothing usable is a reason to ask the other way, as an error is.
+      if (articles.length > 0) break;
+    } catch (error) {
+      if (index === ways.length - 1) throw error;
+    }
   }
   // One article per link: an API can list the same record twice (a paper and its revision).
   const seen = new Set<string>();

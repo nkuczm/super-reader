@@ -19,14 +19,14 @@
  * newest papers come from OpenAlex, by ISSN.
  */
 
-import { buildApiSourceUrl } from "./apis";
-import { ARXIV_CATEGORIES } from "./arxiv";
-import { OUTLETS, type Outlet, type OutletCategory } from "./outlets";
+import { buildApiSourceUrl, OSF_SERVERS } from "./apis";
+import { ARXIV_CATEGORIES, arxivQuery } from "./arxiv";
+import { OUTLETS, RESEARCH_CATEGORIES, isResearchCategory, type Outlet } from "./outlets";
 import type { KnownFeed } from "./publishers";
 
 /** Directory categories that are research rather than news. */
-export const RESEARCH_CATEGORIES: OutletCategory[] = ["neuroscience", "philosophy", "research"];
-export const isResearch = (outlet: Outlet) => RESEARCH_CATEGORIES.includes(outlet.category);
+export { RESEARCH_CATEGORIES };
+export const isResearch = (outlet: Outlet) => isResearchCategory(outlet.category);
 
 /** A route into research: a feed (or API source) to follow, and the paper it was found from. */
 export type ScholarlyRoute = KnownFeed & { fromArticle?: { url: string; title?: string } };
@@ -52,7 +52,7 @@ export function arxivCategory(value: string): string | null {
 export function arxivRoute(cat: string): ScholarlyRoute {
   const name = ARXIV_CATEGORIES[cat];
   return {
-    feedUrl: buildApiSourceUrl("arxiv", { q: `cat:${cat}` }),
+    feedUrl: buildApiSourceUrl("arxiv", { q: arxivQuery(cat) }),
     title: `arXiv · ${name ?? cat}`,
     siteUrl: `https://arxiv.org/list/${cat}/recent`,
     faviconHost: "arxiv.org",
@@ -264,6 +264,46 @@ type Lookups = {
  * listing, a bioRxiv collection, a journal the directory holds) before
  * anything that needs a lookup.
  */
+/** OSF's preprint DOIs, by prefix: a paper's DOI names the server it was posted to (measured: SocArXiv 10.31235). */
+const OSF_DOI: Record<string, string> = { "10.31234": "psyarxiv", "10.31235": "socarxiv" };
+
+/**
+ * Which OSF preprint server a link, a DOI or a bare name points at:
+ * osf.io/preprints/socarxiv/…, psyarxiv.com/…, doi.org/10.31234/osf.io/…,
+ * or just "psyarxiv". A paper is followed as its server, as an arXiv paper is
+ * followed as its category.
+ */
+export function osfFrom(input: string): string | null {
+  const raw = input.trim();
+  const named = raw.toLowerCase().replace(/\s+/g, "");
+  if (OSF_SERVERS[named]) return named;
+  const doi = raw.match(/\b(10\.\d{4,9})\/osf\.io\//i)?.[1];
+  if (doi && OSF_DOI[doi]) return OSF_DOI[doi];
+  let url: URL;
+  try {
+    url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+  } catch {
+    return null;
+  }
+  const host = url.hostname.replace(/^www\./, "").toLowerCase();
+  const onOsf = host === "osf.io" ? url.pathname.match(/^\/preprints\/([a-z]+)/i)?.[1]?.toLowerCase() : undefined;
+  if (onOsf && OSF_SERVERS[onOsf]) return onOsf;
+  const own = host.split(".")[0];
+  return host.split(".").length === 2 && OSF_SERVERS[own] ? own : null;
+}
+
+export function osfRoute(server: string): ScholarlyRoute {
+  const label = OSF_SERVERS[server]?.label ?? server;
+  return {
+    feedUrl: buildApiSourceUrl("osf", { server }),
+    title: label.split(" (")[0],
+    siteUrl: `https://osf.io/preprints/${server}`,
+    faviconHost: "osf.io",
+    scope: "section",
+    note: `New preprints on ${label}, newest first — first versions only, not revisions.`,
+  };
+}
+
 export async function scholarlyRoute(input: string, lookups: Lookups = LIVE): Promise<ScholarlyRoute | null> {
   const raw = input.trim();
   if (!raw) return null;
@@ -285,6 +325,9 @@ export async function scholarlyRoute(input: string, lookups: Lookups = LIVE): Pr
     if (paper) return { ...rxivRoute(rxiv.server, paper.subject), fromArticle: { url: raw, title: paper.title } };
     return null;
   }
+
+  const osf = osfFrom(raw);
+  if (osf) return osfRoute(osf);
 
   const listed = directoryForUrl(raw);
   if (listed) return { ...outletRoute(listed), ...(articleish(raw, listed) ? { fromArticle: { url: raw } } : {}) };

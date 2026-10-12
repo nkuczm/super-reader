@@ -12,6 +12,10 @@ import { augment } from "@/lib/harvest";
 import { looksLikeSitemap, parseSitemap, withinOf, keepWithin } from "@/lib/sitemap";
 import { keepArticles } from "@/lib/authentic";
 
+
+/** An address that names a feed: a `.rss`/`.atom`/`.xml` file, or a /feed or /rss path. */
+const FEEDISH = /(\.(rss|atom|xml)(\?|$)|\/(feed|rss)(\/|\?|$)|[?&]feed=rss)/i;
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 // Feed fetches plus gap-filling for several sources take a moment.
@@ -95,7 +99,14 @@ export async function GET(request: Request) {
   async function readFeed(url: string, cap: number) {
     // A sitemap source may carry the section it is limited to in its
     // fragment (lib/sitemap.ts, `sitemapSource`); the fetch never sees it.
-    const { body, finalUrl } = await fetchText(url.split("#")[0]);
+    let { body, finalUrl } = await fetchText(url.split("#")[0]);
+    // An address that is plainly a feed's, answered with a web page: a
+    // publisher's bot check on a burst of requests, not the page to scrape
+    // (nature.com, 12 Oct 2026). Once more, a moment later.
+    if (FEEDISH.test(url) && !looksLikeFeed(body) && !looksLikeSitemap(body)) {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      ({ body, finalUrl } = await fetchText(url.split("#")[0]));
+    }
     // A source may be a real feed, a news sitemap, or a page to be scraped;
     // the body tells us. Sitemaps matter here because some publishers — CNN
     // among them — declare no RSS at all, so the sitemap is the only

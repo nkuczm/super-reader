@@ -3345,3 +3345,6 @@
   text-decoration: underline; text-underline-offset: 2px;
 }
 .fresh-seen:hover { color: var(--accent); }
+
+/* A whole discipline in one tap, under the discipline that was picked. */
+.discipline-all { align-self: flex-start; margin: 2px 0 2px; }

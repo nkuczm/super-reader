@@ -18,7 +18,8 @@ type Directory = {
   panel: { outlets: number; subreddits: number };
 };
 
-const CATEGORY_LABELS: Record<OutletCategory, string> = {
+/** The news desks, in the order their chips are shown. */
+const NEWS_LABELS: Partial<Record<OutletCategory, string>> = {
   general: "General news",
   world: "World",
   politics: "Politics",
@@ -33,9 +34,32 @@ const CATEGORY_LABELS: Record<OutletCategory, string> = {
   culture: "Culture",
   sports: "Sport",
   aggregator: "Aggregators",
-  neuroscience: "Neuroscience",
+};
+
+/** The disciplines: journals, preprint servers and working papers, social sciences and humanities first. */
+const DISCIPLINE_LABELS: Partial<Record<OutletCategory, string>> = {
+  economics: "Economics & finance",
+  psychology: "Psychology",
+  sociology: "Sociology & demography",
+  polisci: "Political science",
+  anthropology: "Anthropology",
+  history: "History",
   philosophy: "Philosophy",
-  research: "Research & preprints",
+  linguistics: "Linguistics",
+  education: "Education",
+  legal: "Legal scholarship",
+  geography: "Geography & urban studies",
+  humanities: "Literature, arts & classics",
+  neuroscience: "Neuroscience",
+  biology: "Biology & genetics",
+  ecology: "Ecology & evolution",
+  medicine: "Medicine & public health",
+  physics: "Physics & astronomy",
+  chemistry: "Chemistry & materials",
+  earth: "Earth & climate",
+  mathematics: "Mathematics & statistics",
+  computing: "Computer science & AI",
+  research: "General science",
 };
 
 function faviconFor(host: string) {
@@ -164,6 +188,26 @@ export default function OutletCatalog({
     });
   }
 
+  /**
+   * A whole discipline in one tap, from the discipline itself: every journal
+   * and preprint server in it, or none of them again. A bundle chip would
+   * need maintaining by hand for twenty-two disciplines; the list already
+   * says what belongs to each.
+   */
+  const discipline = category in DISCIPLINE_LABELS ? (category as OutletCategory) : null;
+  const inDiscipline = dir && discipline ? dir.outlets.filter((outlet) => outlet.category === discipline) : [];
+  const allInDiscipline = inDiscipline.length > 0 && inDiscipline.every((outlet) => picked[`o:${outlet.id}`]);
+  function toggleDiscipline() {
+    setPicked((current) => {
+      const next = { ...current };
+      for (const outlet of inDiscipline) {
+        if (allInDiscipline) delete next[`o:${outlet.id}`];
+        else next[`o:${outlet.id}`] = outletAsSource(outlet);
+      }
+      return next;
+    });
+  }
+
   const matches = useMemo(() => {
     if (!dir) return { outlets: [] as Outlet[], subreddits: [] as SubredditEntry[] };
     const needle = query.trim().toLowerCase();
@@ -231,18 +275,42 @@ export default function OutletCatalog({
       <p className="field-label">Or pick them one by one</p>
 
       <div className="outlet-cats">
-        {(["all", "reddit", ...Object.keys(CATEGORY_LABELS)] as (OutletCategory | "all" | "reddit")[]).map(
+        {(["all", "reddit", ...Object.keys(NEWS_LABELS)] as (OutletCategory | "all" | "reddit")[]).map(
           (key) => (
             <button
               key={key}
               className={`chip ${category === key ? "on" : ""}`}
               onClick={() => setCategory(key)}
             >
-              {key === "all" ? "Everything" : key === "reddit" ? "Reddit" : CATEGORY_LABELS[key]}
+              {key === "all" ? "Everything" : key === "reddit" ? "Reddit" : NEWS_LABELS[key]}
             </button>
           ),
         )}
       </div>
+
+      <p className="field-label">Journals and papers, by discipline</p>
+      <div className="outlet-cats">
+        {(Object.keys(DISCIPLINE_LABELS) as OutletCategory[]).map((key) => (
+          <button
+            key={key}
+            className={`chip ${category === key ? "on" : ""}`}
+            onClick={() => setCategory(category === key ? "all" : key)}
+          >
+            {DISCIPLINE_LABELS[key]}
+          </button>
+        ))}
+      </div>
+
+      {discipline && inDiscipline.length > 0 && (
+        <button
+          className={`chip pack-chip discipline-all ${allInDiscipline ? "on" : ""}`}
+          aria-pressed={allInDiscipline}
+          onClick={toggleDiscipline}
+        >
+          {allInDiscipline ? Icon.check : Icon.plus} All of {DISCIPLINE_LABELS[discipline]}
+          <em>{inDiscipline.length}</em>
+        </button>
+      )}
 
       <ul className="outlet-list">
         {matches.outlets.map((outlet) => {
