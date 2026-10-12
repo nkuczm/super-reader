@@ -58,18 +58,68 @@ export async function fetchText(
 
 /** An address that names a feed: a `.rss`/`.atom`/`.xml` file, or a /feed or /rss path. */
 const FEEDISH = /(\.(rss|atom|xml)(\?|$)|\/(feed|rss)(\/|\?|$)|[?&]feed=rss)/i;
+export const isFeedAddress = (url: string) => FEEDISH.test(url);
+const isFeedOrSitemap = (body: string) => looksLikeFeed(body) || /<(urlset|sitemapindex)\b/i.test(body.slice(0, 2000));
 
 /**
- * A feed, asked for once more if its address answered with a web page: a
- * publisher's bot check on a burst of requests, not a page to scrape. Measured
- * 12 Oct 2026 — nature.com answered some of four feeds asked for together
- * with HTML, and the same feeds alone every time.
+ * A feed, asked for once more if its address answered with a web page.
+ *
+ * Measured 12 Oct 2026: nature.com sometimes sends a feed's reader through
+ * its sign-in host to set a cookie and back again, and a client that keeps no
+ * cookies lands on `?error=cookies_not_supported` — an HTML page where the
+ * feed should be, for one feed in four of a burst and then for the same feed
+ * on every try. The second ask carries the cookie the site set on the way, as
+ * any feed reader with a cookie jar does: the site's own cookie, to the site's
+ * own hosts, and nothing else.
  */
 export async function fetchFeedText(url: string, timeoutMs = 12000) {
   const first = await fetchText(url, timeoutMs);
-  if (!FEEDISH.test(url) || looksLikeFeed(first.body) || /<(urlset|sitemapindex)\b/i.test(first.body.slice(0, 2000))) return first;
+  if (!FEEDISH.test(url) || isFeedOrSitemap(first.body)) return first;
   await new Promise((resolve) => setTimeout(resolve, 800));
-  return fetchText(url, timeoutMs);
+  return onePerTurn(url, () => fetchKeepingCookies(url, timeoutMs));
+}
+
+/** The last two labels of a host: nature.com for www.nature.com and idp.nature.com. */
+const siteOf = (host: string) => host.split(".").slice(-2).join(".");
+
+async function fetchKeepingCookies(url: string, timeoutMs: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const site = siteOf(new URL(url).hostname);
+  const jar = new Map<string, string>();
+  try {
+    let next = url;
+    for (let hop = 0; hop < 8; hop++) {
+      const own = siteOf(new URL(next).hostname) === site;
+      const res = await fetch(next, {
+        headers: {
+          "user-agent": UA,
+          accept: "application/rss+xml,application/atom+xml,application/xml;q=0.9,*/*;q=0.8",
+          "accept-language": "en-US,en;q=0.9",
+          ...(own && jar.size ? { cookie: [...jar].map(([name, value]) => `${name}=${value}`).join("; ") } : {}),
+        },
+        redirect: "manual",
+        signal: controller.signal,
+      });
+      if (own) {
+        for (const line of res.headers.getSetCookie?.() ?? []) {
+          const pair = line.split(";")[0];
+          const eq = pair.indexOf("=");
+          if (eq > 0) jar.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
+        }
+      }
+      const location = res.headers.get("location");
+      if (res.status >= 300 && res.status < 400 && location) {
+        next = new URL(location, next).toString();
+        continue;
+      }
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      return { body: await res.text(), finalUrl: next };
+    }
+    throw new Error("Too many redirects");
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function fetchTextNow(url: string, timeoutMs: number, extraHeaders?: Record<string, string>) {

@@ -405,6 +405,15 @@ and some came back as HTML; two at a time was not enough on its own — the
 audit of the finished directory still saw two Nature feeds answered with a
 page — which is why the retry is there.
 
+What that page was, read from a preview: nature.com had sent the feed's
+request through its sign-in host (`idp.nature.com`) to set a cookie and back,
+and a client that keeps no cookies landed on `?error=cookies_not_supported`.
+Discovery then scraped that page into a "feed" of error icons. The retry
+now carries the cookie the site set along its own redirects — the site's own
+cookie, to the site's own hosts, as any feed reader with a cookie jar does;
+nothing here pretends to be a browser — and a feed's address that still
+answers with a page is a failure for the refresh, never a page to scrape.
+
 The finished directory — 356 entries, 198 of them research across 22
 disciplines — was audited from the preview the same afternoon: every entry
 answered, every research entry with a dated paper, and the newest within
