@@ -425,6 +425,63 @@ answered, every research entry with a dated paper, and the newest within
 days for all but the quarterlies and the academic calendar (Harvard Law
 Review's last issue was June; it resumes in November).
 
+### A refresh that answered nothing (12 Oct 2026)
+
+A phone refreshed All articles, waited, and got nothing new. The runtime
+logs had four `Task timed out after 60 seconds` on `/api/feed` in an
+hour. The refresh was one request carrying every source the reader
+follows, and a function stopped at its limit answers nothing — the
+two-second sources lost along with the slow ones.
+
+What made it slow was that morning's per-host queue (above, "two at a
+time per host"). It had been put on every page fetch, not just feeds, and
+a refresh also reads up to fifteen article pages a source for their
+pictures. So a reader's Nature journals queued every Nature story page
+behind one another, one at a time, and the Google News sources did the
+same on news.google.com, two at a time. Measured from production and from
+a preview of the fix, the same requests minutes apart:
+
+| Request | Production | Fix |
+|---|---|---|
+| six Nature journals | 22 s | 3 s |
+| thirty sources (Google News, Wiley, Nature, NPR) | **timed out at 60 s** | 2 s, 28 of 30 answered |
+
+And the page reads it was queueing found nothing: ten Wiley journals, 495
+papers, not one picture; ten Google News sources, 889 stories, none.
+Publishers' pages refuse a server (§8), and a Google News link is a token
+only a browser resolves.
+
+What changed, and why each:
+
+- **The per-host queue is for feeds only** (`fetchFeedText`), which is
+  what it was measured for.
+- **Papers and Google News links are not read page by page**
+  (`readsPages`, `lib/enrich.ts`). Their feeds carry the abstract or
+  headline; the pages were all cost.
+- **A request answers by 45 seconds with what it has**
+  (`lib/deadline.ts`). A source still reading is reported as "Took too
+  long to answer", page reads and the sitemap merge give way to the clock,
+  and the rest of the request is not held for them. The held window keeps
+  a slow source's stories, and `mergeWindow` now keeps a held story's
+  picture when a fetched copy lacks one: an empty value never overwrites a
+  real one, as in `combine()`.
+- **The device sends a refresh in groups** (`lib/refresh.ts`): eight
+  sources a request, six requests at a time, one host's sources together
+  and its groups dealt apart. The list fills in as each group answers, and
+  a group that fails costs only its own sources. The counter on the
+  "Checking for new articles" pill is sources answered so far.
+- **Research services are asked every two hours, not every visit**
+  (`isDue`). OpenAlex allows a thousand requests a day without a key and
+  every journal followed by ISSN spends one a refresh; sixty journals on
+  a phone opened twenty times a day would spend it by the afternoon, and
+  every journal would then wait on the one-at-a-time Crossref fallback.
+  A failure is asked again at once. Feeds are free and are always asked.
+
+Still open from the same measurement: Nature Human Behaviour and Nature
+Communications' neuroscience feed answered with a web page every time,
+alone or together, through the cookie retry and through
+`feeds.nature.com`. The other Nature feeds answered.
+
 ### What those numbers mean
 
 **No ordering of routes wins everywhere.** Sitemaps-first loses stories at the
@@ -630,7 +687,14 @@ a failure is cacheable at the edge for five minutes so a burst of retries
 does not become a burst of invocations.
 
 **A reader opening a story is never skipped** — only the background top-up
-consults the back-off. The rule is that the app may stop *guessing* at work,
+consults the back-off.
+
+**The top-up is off by default** (12 Oct 2026), per device and not synced
+(`loadAutoDownload`, `lib/offline.ts`): a desktop is rarely offline, and
+the top-up was most of the bill above. With it off, only Saved stories
+and subjects marked available offline are fetched in the background;
+Download now still fetches everything, and a small run never prunes what
+a full one kept. The rule is that the app may stop *guessing* at work,
 never stop doing what someone asked for.
 
 Re-measure from the logs rather than trusting this table: `get_runtime_logs`

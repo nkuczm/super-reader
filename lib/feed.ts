@@ -14,12 +14,18 @@ const UA =
   "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 /**
- * Requests to one host, at most this many at once. A refresh reads every
- * source together, and a reader following six Nature journals asked
+ * Feeds from one host, at most this many at once. A refresh reads many
+ * sources together, and a reader following six Nature journals asked
  * nature.com for six feeds in the same instant: measured 12 Oct 2026, a
  * burst like that had some of them answered with an HTML page instead of the
  * feed, while each answered alone every time. Wiley and SAGE carry dozens of
  * journals each and are asked the same way.
+ *
+ * Feeds only. For an afternoon this queued every page fetch too, and a
+ * refresh reads up to fifteen article pages a source for their pictures: ten
+ * Google News sources put a hundred and fifty page reads in one queue on
+ * news.google.com, two at a time, and the refresh ran past its sixty seconds
+ * and answered nothing at all (12 Oct 2026).
  */
 const FEEDS_PER_HOST = 2;
 /** nature.com still challenged two at a time — one feed in four of a slice — so it gets one. */
@@ -55,7 +61,7 @@ export async function fetchText(
    */
   extraHeaders?: Record<string, string>,
 ) {
-  return onePerTurn(url, () => fetchTextNow(url, timeoutMs, extraHeaders));
+  return fetchTextNow(url, timeoutMs, extraHeaders);
 }
 
 /** An address that names a feed: a `.rss`/`.atom`/`.xml` file, or a /feed or /rss path. */
@@ -75,7 +81,7 @@ const isFeedOrSitemap = (body: string) => looksLikeFeed(body) || /<(urlset|sitem
  * own hosts, and nothing else.
  */
 export async function fetchFeedText(url: string, timeoutMs = 12000) {
-  const first = await fetchText(url, timeoutMs);
+  const first = await onePerTurn(url, () => fetchTextNow(url, timeoutMs));
   if (!FEEDISH.test(url) || isFeedOrSitemap(first.body)) return first;
   await new Promise((resolve) => setTimeout(resolve, 800));
   return onePerTurn(url, () => fetchKeepingCookies(url, timeoutMs));
@@ -444,7 +450,7 @@ export function parseFeed(
 }
 
 /** A search feed from an aggregator rather than a publisher's own feed. */
-function isAggregatorFeed(feedUrl: string) {
+export function isAggregatorFeed(feedUrl: string) {
   try {
     return new URL(feedUrl).hostname.endsWith("news.google.com");
   } catch {

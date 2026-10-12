@@ -134,6 +134,7 @@ import {
 } from "@/lib/subjects";
 import { attributeStories, inAnySource, inSource } from "@/lib/attribute";
 import { loadHealth, recordRuns, saveHealth, type HealthLog } from "@/lib/health";
+import { groupsOf, inLanes, isDue, IN_FLIGHT } from "@/lib/refresh";
 import { listenForClientErrors } from "@/lib/client-errors";
 import { encodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import {
@@ -157,6 +158,8 @@ import {
   storedArticles,
   storedBytes,
   type StoredArticle,
+  loadAutoDownload,
+  saveAutoDownload,
 } from "@/lib/offline";
 import ArticleReader from "./ArticleReader";
 import SourceIcon from "./SourceIcon";
@@ -386,6 +389,10 @@ export default function Reader() {
   const [refreshing, setRefreshing] = useState(false);
   /** Whether the refresh has gone on long enough to be worth mentioning. */
   const [slowRefresh, setSlowRefresh] = useState(false);
+  /** Sources answered so far in this refresh, of how many were asked. */
+  const [refreshCount, setRefreshCount] = useState({ done: 0, total: 0 });
+  /** Which refresh is current; a group answering for an older one is ignored. */
+  const refreshRun = useRef(0);
   /**
    * Whether a refresh has replaced the list with live results yet. The stored
    * copy is only allowed to fill an empty screen; once the feeds have answered,
@@ -1683,90 +1690,145 @@ export default function Reader() {
 
   /** Fetch every known feed and merge the results newest-first. */
   const refresh = useCallback(async (sources: Source[]) => {
+    const run = ++refreshRun.current;
     if (sources.length === 0) {
       refreshed.current = true;
       setArticles([]);
+      setRefreshing(false);
       return;
     }
     setRefreshing(true);
-    try {
-      const params = new URLSearchParams();
-      for (const source of sources) params.append("url", source.feedUrl);
-      // Sources that follow a whole publisher may also collect from that
-      // publisher's news sitemap. Sections may not: the sitemap covers the
-      // whole newsroom, and merging it in would widen the source.
-      for (const source of sources) {
-        if (source.scope === "site") params.append("whole", source.feedUrl);
-      }
-      const res = await fetch(`/api/feed?${params}`, { headers: keyHeadersFrom(apiKeysRef.current) });
-      const data = await res.json();
+    const following = new Set(sources.map((source) => source.id));
+    /**
+     * Merged into what was already held, not swapped for it. A feed is a
+     * window of the last few dozen things a desk filed; showing only that
+     * window meant everything published between two visits was missed, with
+     * nothing to show it had happened — see lib/window.ts.
+     */
+    const held = (await loadListSnapshot<Loaded>()) ?? [];
+    // Research services are asked every two hours, not every visit (lib/refresh.ts).
+    const lastRuns = loadHealth();
+    const due = sources.filter((source) => isDue(source, lastRuns[source.id]?.runs.at(-1)));
+    const groups = groupsOf(due);
+    setRefreshCount({ done: 0, total: due.length });
 
-      // One article, once. Two of a paper's feeds carry the same story with
-      // different tracking parameters, which is how the list ended up showing
-      // the same WSJ piece twice in a row. Once, but in every source that
-      // delivered it — filed under its publisher's own (lib/attribute.ts).
-      const unique: Loaded[] = attributeStories<Article>(data.results ?? [], sources, canonicalUrl);
+    type Result = { feedUrl: string; ok?: boolean; error?: unknown; articles?: Article[] };
+    const results: Result[] = [];
+    let answered = 0;
 
-      /**
-       * Merged into what was already held, not swapped for it. A feed is a
-       * window of the last few dozen things a desk filed; showing only that
-       * window meant everything published between two visits was missed, with
-       * nothing to show it had happened — see lib/window.ts.
-       */
-      const held = (await loadListSnapshot<Loaded>()) ?? [];
-      const ordered = sortNewestFirst(
-        mergeWindow(stamp(unique), held, {
-          sources: new Set(sources.map((source) => source.id)),
-          canonical: canonicalUrl,
-        }),
-      );
+    /**
+     * The list as it stands with every group that has answered so far. Put
+     * on screen at most once a second: a group answers every second or two,
+     * and redrawing a long list for each one made a phone stutter.
+     */
+    let view = null as { list: Loaded[]; brought: string[]; inList: Set<string> } | null;
+    let paintedAt = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const paint = () => {
+      timer = undefined;
+      paintedAt = Date.now();
+      if (!view || run !== refreshRun.current) return;
+      const { list, brought, inList } = view;
       refreshed.current = true;
       // What this refresh brought that was not here before, to be lit up
       // in the list until it has been looked at.
-      const brought = arrivals(unique, held, canonicalUrl);
-      const inList = new Set(ordered.map((article) => canonicalUrl(article.link)));
       setFresh((current) => {
         const next = noteArrivals(current, brought, inList);
         saveFresh(next);
         return next;
       });
-      // Stories pasted in and filed under a source are not in its feed; put
-      // them back, or the refresh would take them away.
-      const withPasted = withPastedStories(ordered, manualRef.current, new Set(sources.map((s) => s.id)));
-      setArticles(withPasted);
+      setArticles(list);
+    };
+    const show = () => {
+      // One article, once. Two of a paper's feeds carry the same story with
+      // different tracking parameters, which is how the list ended up showing
+      // the same WSJ piece twice in a row. Once, but in every source that
+      // delivered it — filed under its publisher's own (lib/attribute.ts).
+      const unique: Loaded[] = attributeStories<Article>(results, sources, canonicalUrl);
+      const ordered = sortNewestFirst(mergeWindow(stamp(unique), held, { sources: following, canonical: canonicalUrl }));
+      view = {
+        // Stories pasted in and filed under a source are not in its feed; put
+        // them back, or the refresh would take them away.
+        list: withPastedStories(ordered, manualRef.current, following),
+        brought: arrivals(unique, held, canonicalUrl),
+        inList: new Set(ordered.map((article) => canonicalUrl(article.link))),
+      };
+      const since = Date.now() - paintedAt;
+      if (since >= 1000) {
+        clearTimeout(timer);
+        paint();
+      } else {
+        timer ??= setTimeout(paint, 1000 - since);
+      }
+      return ordered;
+    };
 
-      // What each source delivered, for the status page.
-      const heldBySource = new Map<string, number>();
-      for (const article of ordered) {
-        for (const id of [article.sourceId, ...(article.alsoIn ?? [])]) heldBySource.set(id, (heldBySource.get(id) ?? 0) + 1);
-      }
-      const runs: Parameters<typeof recordRuns>[1] = {};
-      const at = Date.now();
-      for (const result of data.results ?? []) for (const sourceId of sources.filter((s) => s.feedUrl === result.feedUrl).map((s) => s.id)) {
-        const list = (result.articles ?? []) as Article[];
-        const newest = list.reduce((best, a) => Math.max(best, timeOf(a) || 0), 0);
-        runs[sourceId] = {
-          at,
-          ok: result.ok !== false,
-          fetched: list.length,
-          held: heldBySource.get(sourceId) ?? 0,
-          newest: newest || undefined,
-          error: result.ok === false ? String(result.error ?? "Fetch failed") : undefined,
-        };
-      }
-      setHealth((current) => {
-        const next = recordRuns(current, runs, new Set(sources.map((source) => source.id)));
-        saveHealth(next);
-        return next;
+    try {
+      // What is held goes up straight away, without sources since removed.
+      show();
+      await inLanes(groups, IN_FLIGHT, async (group) => {
+        const params = new URLSearchParams();
+        for (const source of group) params.append("url", source.feedUrl);
+        // Sources that follow a whole publisher may also collect from that
+        // publisher's news sitemap. Sections may not: the sitemap covers the
+        // whole newsroom, and merging it in would widen the source.
+        for (const source of group) {
+          if (source.scope === "site") params.append("whole", source.feedUrl);
+        }
+        let data: { results?: Result[] };
+        try {
+          const res = await fetch(`/api/feed?${params}`, {
+            headers: keyHeadersFrom(apiKeysRef.current),
+            // The server answers inside its own minute; past that it is not coming.
+            signal: AbortSignal.timeout(75_000),
+          });
+          data = await res.json();
+        } catch {
+          // Offline, or this group's request failed: its sources keep what
+          // they hold (shown above), and the other groups carry on.
+          return;
+        } finally {
+          answered += group.length;
+          if (run === refreshRun.current) setRefreshCount({ done: answered, total: due.length });
+        }
+        if (run !== refreshRun.current) return;
+        const fresh = (data.results ?? []).filter((result) => result?.feedUrl);
+        results.push(...fresh);
+        const ordered = show();
+
+        // What each source delivered, for the status page.
+        const heldBySource = new Map<string, number>();
+        for (const article of ordered) {
+          for (const id of [article.sourceId, ...(article.alsoIn ?? [])]) heldBySource.set(id, (heldBySource.get(id) ?? 0) + 1);
+        }
+        const runs: Parameters<typeof recordRuns>[1] = {};
+        const at = Date.now();
+        for (const result of fresh) for (const source of group.filter((s) => s.feedUrl === result.feedUrl)) {
+          const list = result.articles ?? [];
+          const newest = list.reduce((best, a) => Math.max(best, timeOf(a) || 0), 0);
+          runs[source.id] = {
+            at,
+            ok: result.ok !== false,
+            fetched: list.length,
+            held: heldBySource.get(source.id) ?? 0,
+            newest: newest || undefined,
+            error: result.ok === false ? String(result.error ?? "Fetch failed") : undefined,
+          };
+        }
+        setHealth((current) => {
+          const next = recordRuns(current, runs, following);
+          saveHealth(next);
+          return next;
+        });
       });
+      clearTimeout(timer);
+      paint();
       // Also what the list falls back to with no connection.
-      void saveListSnapshot(withPasted);
+      if (view && run === refreshRun.current) await saveListSnapshot(view.list);
     } catch {
-      // Offline or the feeds are unreachable: show what was last saved.
-      const snapshot = await loadListSnapshot<Loaded>();
-      if (snapshot && snapshot.length > 0) setArticles(snapshot);
+      // The stored list could not be written: what is on screen stands.
     } finally {
-      setRefreshing(false);
+      if (run === refreshRun.current) setRefreshing(false);
     }
   }, []);
 
@@ -2939,8 +3001,22 @@ export default function Reader() {
     [allSources],
   );
 
-  /** Newest N per source — what gets saved for reading offline. */
-  const offlineTargets = useCallback((): OfflineTarget[] => {
+  /**
+   * Whether this device tops itself up with every source's newest stories
+   * (lib/offline.ts). Off until turned on, on each device separately.
+   */
+  const [autoDownload, setAutoDownload] = useState(false);
+  useEffect(() => setAutoDownload(loadAutoDownload()), []);
+  const changeAutoDownload = useCallback((on: boolean) => {
+    setAutoDownload(on);
+    saveAutoDownload(on);
+  }, []);
+
+  /**
+   * What gets saved for reading offline: subjects marked available offline,
+   * Saved stories, and — for `everything` — each source's newest N.
+   */
+  const offlineTargets = useCallback((everything = true): OfflineTarget[] => {
     const perSource = new Map<string, OfflineTarget[]>();
     for (const article of articles) {
       const list = perSource.get(article.sourceId) ?? [];
@@ -2978,7 +3054,7 @@ export default function Reader() {
       }
     }
 
-    return [...subjectStories, ...bookmarks, ...[...perSource.values()].flat()].filter(
+    return [...subjectStories, ...bookmarks, ...(everything ? [...perSource.values()].flat() : [])].filter(
       (target) => {
         try {
           return !knownRefusal(new URL(target.url).hostname);
@@ -2989,9 +3065,15 @@ export default function Reader() {
     );
   }, [articles, sourceById, saved, notes, boards]);
 
-  const runDownload = useCallback(async () => {
+  /**
+   * Download for offline reading: everything when asked to, or only what the
+   * reader chose to keep when this is the background top-up on a device that
+   * has not turned it on. Pruning always measures against everything, so a
+   * small run never deletes the rest.
+   */
+  const runDownload = useCallback(async (everything: boolean) => {
     if (downloading.current) return;
-    const links = offlineTargets();
+    const links = offlineTargets(everything);
     if (links.length === 0) return;
 
     downloading.current = true;
@@ -3017,6 +3099,8 @@ export default function Reader() {
           if (saved) markSaved(saved);
         },
         keyHeadersFrom(apiKeysRef.current),
+        undefined,
+        everything ? links : offlineTargets(true),
       );
       await markSlotDownloaded(currentSlot());
       // The download prunes anything that fell out of the newest set, so the
@@ -3059,9 +3143,9 @@ export default function Reader() {
 
       if (!navigator.onLine || cancelled) return;
 
-      const missing = offlineTargets().filter((t) => !stored.has(t.url)).length;
+      const missing = offlineTargets(autoDownload).filter((t) => !stored.has(t.url)).length;
       if (missing > 0 || (await isDownloadDue())) {
-        if (!cancelled) void runDownload();
+        if (!cancelled) void runDownload(autoDownload);
       } else if (!cancelled) {
         setOffline({ state: "done", at: await lastDownloadedAt() });
       }
@@ -3087,7 +3171,7 @@ export default function Reader() {
       window.removeEventListener("online", check);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [ready, articles.length, runDownload, offlineTargets]);
+  }, [ready, articles.length, runDownload, offlineTargets, autoDownload]);
 
   /**
    * Ask the server how big each story is.
@@ -4338,6 +4422,11 @@ export default function Reader() {
           {slowRefresh && !pullRefresh && shown.length > 0 && (
             <div className="list-updating" aria-hidden>
               <span className="spinner" /> Checking for new articles…
+              {refreshCount.total > 0 && (
+                <span className="list-updating-count">
+                  {refreshCount.done} of {refreshCount.total}
+                </span>
+              )}
             </div>
           )}
           <button
@@ -4905,7 +4994,9 @@ export default function Reader() {
           signedIn={Boolean(auth.account)}
           onPrefsRestored={() => void syncAccountPrefs()}
           onRestoreFeeds={restoreFeeds}
-          onDownload={runDownload}
+          onDownload={() => void runDownload(true)}
+          autoDownload={autoDownload}
+          onAutoDownloadChange={changeAutoDownload}
           noteCount={notes.length}
           teams={teams}
           teamsBusy={teamsBusy}

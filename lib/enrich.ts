@@ -1,5 +1,6 @@
 import {
   fetchText,
+  isAggregatorFeed,
   stripHtml,
   absolute,
   toIso,
@@ -10,6 +11,27 @@ import {
 import { isChallengeHtml } from "./challenge";
 import type { Article } from "./types";
 import { titleFromSlug } from "./sitemap";
+import { OUTLETS, isResearchCategory } from "./outlets";
+
+/**
+ * Sources whose article pages are not read for a picture or a summary.
+ *
+ * A journal's papers: the publishers' pages refuse a server or answer with a
+ * bot check (§8, measured 11 Oct 2026), so fifteen page reads a journal
+ * brought back nothing. Measured again 12 Oct 2026 from production: ten Wiley
+ * journals, 495 papers, not one picture. Their feeds carry the abstract.
+ */
+const PAPER_FEEDS = new Set(OUTLETS.filter((outlet) => isResearchCategory(outlet.category)).map((outlet) => outlet.feedUrl));
+
+/**
+ * Whether to read a source's article pages at all. Not a paper (above), and
+ * not an aggregator's links: Google's link is a token only a browser can
+ * resolve (§2), and ten Google News sources, 889 stories, came back with no
+ * picture between them (12 Oct 2026).
+ */
+export function readsPages(feedUrl: string) {
+  return !PAPER_FEEDS.has(feedUrl) && !isAggregatorFeed(feedUrl);
+}
 
 /**
  * Listing pages rarely carry a summary for every card, so fill the gaps from

@@ -1,21 +1,33 @@
 import { NextResponse } from "next/server";
 import { fetchFeedText, isFeedAddress, parseFeed, looksLikeFeed, faviconFor } from "@/lib/feed";
 import { scrapePage } from "@/lib/scrape";
-import { enrichArticles } from "@/lib/enrich";
+import { enrichArticles, readsPages } from "@/lib/enrich";
 import { xHandleFrom, fetchXFeed } from "@/lib/x";
 import { sortNewestFirst } from "@/lib/sort";
 import { parseApiSourceUrl, fetchApiSource } from "@/lib/apis";
 import { decodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import { parseBundle, mergeBundled, PER_MEMBER } from "@/lib/bundle";
 import { canonicalUrl } from "@/lib/url";
+import type { Article } from "@/lib/types";
+import type { CoverageReport } from "@/lib/coverage";
 import { augment } from "@/lib/harvest";
 import { looksLikeSitemap, parseSitemap, withinOf, keepWithin } from "@/lib/sitemap";
 import { keepArticles } from "@/lib/authentic";
+import { budget, within } from "@/lib/deadline";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 // Feed fetches plus gap-filling for several sources take a moment.
 export const maxDuration = 60;
+
+/**
+ * How long one request spends before it answers with what it has. Well
+ * inside maxDuration: a function stopped at sixty seconds answers nothing,
+ * and on 12 Oct 2026 that was a whole refresh lost, four times in an hour.
+ */
+const BUDGET_MS = 45_000;
+/** Time kept back from the gap-filling steps for the answer itself. */
+const SPARE_MS = 4_000;
 
 /**
  * How many items to take from one source.
@@ -90,6 +102,7 @@ export async function GET(request: Request) {
   if (urls.length === 0) {
     return NextResponse.json({ error: "Missing ?url" }, { status: 400 });
   }
+  const left = budget(BUDGET_MS);
 
   /** One feed, read and parsed. The unit a source is built out of. */
   async function readFeed(url: string, cap: number) {
@@ -122,94 +135,107 @@ export async function GET(request: Request) {
     return { meta, isSitemap, articles: sortNewestFirst(articles).slice(0, cap) };
   }
 
+  /** Fill gaps from the article pages, for as long as there is time to. */
+  const enriched = (feedUrl: string, articles: Article[], options: Parameters<typeof enrichArticles>[1]) =>
+    readsPages(feedUrl)
+      ? within(enrichArticles(articles, options), left() - SPARE_MS, () => articles)
+      : Promise.resolve(articles);
+  /** The news sitemap merged in, if there is time to; the feed's stories otherwise. */
+  const augmented = (articles: Article[], options: Parameters<typeof augment>[1]) =>
+    within<{ articles: Article[]; coverage?: CoverageReport }>(augment(articles, options), left() - SPARE_MS, () => ({ articles }));
+
+  /** One source, read and parsed. */
+  async function readSource(url: string) {
+    const members = parseBundle(url);
+    if (members) {
+      /**
+       * A publisher with no feed of its own whole output — see
+       * lib/bundle.ts. Every section is read, and a section that fails
+       * costs its own stories and no others: half a paper beats an error
+       * where the rest of it would have been.
+       */
+      const parts = await Promise.all(
+        members.map(async (member) => {
+          try {
+            return await readFeed(member, PER_MEMBER);
+          } catch {
+            return null;
+          }
+        }),
+      );
+      const alive = parts.filter((part) => part !== null);
+      if (alive.length === 0) throw new Error("No feed in this source could be read");
+
+      const merged = mergeBundled(
+        [sortNewestFirst(alive.flatMap((part) => part.articles))],
+        canonicalUrl,
+      );
+      const meta = alive[0].meta;
+      const ready = await enriched(url, merged, {
+        siteDescription: meta.description,
+      });
+      // A bundle names a publisher's sections explicitly, so it is
+      // whole-publisher by construction.
+      const full = await augmented(ready, {
+        origin: originOf(meta.siteUrl),
+        limit: MAX_PER_SOURCE,
+      });
+      return {
+        ok: true as const,
+        ...meta,
+        feedUrl: url,
+        favicon: faviconFor(meta.siteUrl),
+        articles: full.articles,
+        coverage: full.coverage,
+      };
+    }
+
+    if (parseApiSourceUrl(url)) {
+      const { meta, articles } = await fetchApiSource(url, MAX_PER_SOURCE, keys);
+      return { ok: true as const, ...meta, feedUrl: url, articles };
+    }
+
+    const handle = xHandleFrom(url);
+    if (handle) {
+      const { meta, articles } = await fetchXFeed(handle);
+      return { ok: true as const, ...meta, feedUrl: url, articles };
+    }
+
+    const { meta, isSitemap, articles: recent } = await readFeed(url, MAX_PER_SOURCE);
+    const ready = await enriched(url, recent, {
+      siteDescription: meta.description,
+      // A plain sitemap's lastmod drifts; the page says when it was published.
+      preferPageDates: isSitemap,
+    });
+    /**
+     * A feed is one route into a publisher, not the whole of what they
+     * filed. Everything their news sitemap carries is merged in here, so
+     * a source collects what was published rather than what its feed
+     * happened to still be holding.
+     */
+    const full = whole.has(url)
+      ? await augmented(ready, { origin: originOf(meta.siteUrl), limit: MAX_PER_SOURCE })
+      : { articles: ready, coverage: undefined };
+    return {
+      ok: true as const,
+      ...meta,
+      feedUrl: url,
+      favicon: faviconFor(meta.siteUrl),
+      articles: full.articles,
+      coverage: full.coverage,
+    };
+  }
+
+  type Result = Awaited<ReturnType<typeof readSource>> | { feedUrl: string; ok: false; error: string; articles: Article[] };
+  const failed = (url: string, error: string): Result => ({ feedUrl: url, ok: false, error, articles: [] });
   const results = await Promise.all(
     urls.map(async (url) => {
       try {
-        const members = parseBundle(url);
-        if (members) {
-          /**
-           * A publisher with no feed of its own whole output — see
-           * lib/bundle.ts. Every section is read, and a section that fails
-           * costs its own stories and no others: half a paper beats an error
-           * where the rest of it would have been.
-           */
-          const parts = await Promise.all(
-            members.map(async (member) => {
-              try {
-                return await readFeed(member, PER_MEMBER);
-              } catch {
-                return null;
-              }
-            }),
-          );
-          const alive = parts.filter((part) => part !== null);
-          if (alive.length === 0) throw new Error("No feed in this source could be read");
-
-          const merged = mergeBundled(
-            [sortNewestFirst(alive.flatMap((part) => part.articles))],
-            canonicalUrl,
-          );
-          const meta = alive[0].meta;
-          const ready = await enrichArticles(merged, {
-            siteDescription: meta.description,
-          });
-          // A bundle names a publisher's sections explicitly, so it is
-          // whole-publisher by construction.
-          const full = await augment(ready, {
-            origin: originOf(meta.siteUrl),
-            limit: MAX_PER_SOURCE,
-          });
-          return {
-            ok: true as const,
-            ...meta,
-            feedUrl: url,
-            favicon: faviconFor(meta.siteUrl),
-            articles: full.articles,
-            coverage: full.coverage,
-          };
-        }
-
-        if (parseApiSourceUrl(url)) {
-          const { meta, articles } = await fetchApiSource(url, MAX_PER_SOURCE, keys);
-          return { ok: true as const, ...meta, feedUrl: url, articles };
-        }
-
-        const handle = xHandleFrom(url);
-        if (handle) {
-          const { meta, articles } = await fetchXFeed(handle);
-          return { ok: true as const, ...meta, feedUrl: url, articles };
-        }
-
-        const { meta, isSitemap, articles: recent } = await readFeed(url, MAX_PER_SOURCE);
-        const ready = await enrichArticles(recent, {
-          siteDescription: meta.description,
-          // A plain sitemap's lastmod drifts; the page says when it was published.
-          preferPageDates: isSitemap,
-        });
-        /**
-         * A feed is one route into a publisher, not the whole of what they
-         * filed. Everything their news sitemap carries is merged in here, so
-         * a source collects what was published rather than what its feed
-         * happened to still be holding.
-         */
-        const full = whole.has(url)
-          ? await augment(ready, { origin: originOf(meta.siteUrl), limit: MAX_PER_SOURCE })
-          : { articles: ready, coverage: undefined };
-        return {
-          ok: true as const,
-          ...meta,
-          feedUrl: url,
-          favicon: faviconFor(meta.siteUrl),
-          articles: full.articles,
-          coverage: full.coverage,
-        };
+        // A source still reading when the time is up is reported as slow;
+        // the rest of the request is not held for it.
+        return await within<Result>(readSource(url), left(), () => failed(url, "Took too long to answer"));
       } catch (error) {
-        return {
-          feedUrl: url,
-          ok: false as const,
-          error: error instanceof Error ? error.message : "Fetch failed",
-          articles: [],
-        };
+        return failed(url, error instanceof Error ? error.message : "Fetch failed");
       }
     }),
   );
