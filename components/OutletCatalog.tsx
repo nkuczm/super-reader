@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Outlet, OutletCategory, SubredditEntry } from "@/lib/outlets";
 import { Icon } from "./icons";
 
@@ -109,7 +109,16 @@ export default function OutletCatalog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [picked]);
 
+  /**
+   * One tap is one change. An iPhone could deliver a tap on a row to the row
+   * and again to its box, which ticked it and unticked it in the same moment;
+   * the same row changing twice that fast is the same tap.
+   */
+  const lastToggle = useRef<{ key: string; at: number } | null>(null);
   function toggle(key: string, source: PickedSource) {
+    const now = Date.now();
+    if (lastToggle.current?.key === key && now - lastToggle.current.at < 450) return;
+    lastToggle.current = { key, at: now };
     setPicked((current) => {
       const next = { ...current };
       if (next[key]) delete next[key];
