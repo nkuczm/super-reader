@@ -135,6 +135,8 @@ import {
 import { attributeStories, inAnySource, inSource } from "@/lib/attribute";
 import { loadHealth, recordRuns, saveHealth, type HealthLog } from "@/lib/health";
 import { groupsOf, inLanes, isDue, IN_FLIGHT } from "@/lib/refresh";
+import { groupStories } from "@/lib/story-groups";
+import { aboutTopic, trendingTopics } from "@/lib/trending";
 import { listenForClientErrors } from "@/lib/client-errors";
 import { encodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import {
@@ -163,6 +165,7 @@ import {
 } from "@/lib/offline";
 import ArticleReader from "./ArticleReader";
 import SourceIcon from "./SourceIcon";
+import StoryRow from "./StoryRow";
 import { Icon } from "./icons";
 import { timeAgo, hostOf } from "./format";
 import type { ReadableArticle } from "@/lib/article";
@@ -2947,6 +2950,18 @@ export default function Reader() {
   const showingNew = newOnly && freshIds.size > 0;
   // A different list is a different question.
   useEffect(() => setNewOnly(false), [selection]);
+
+  /**
+   * What this feed's stories are about right now, shown above Top stories
+   * (lib/trending.ts), and the one the list is narrowed to, if any. Read off
+   * the list in view, so each feed trends with its own subjects.
+   */
+  const trendsHere =
+    settings.sort === "top" && (selection.type === "all" || selection.type === "feed" || selection.type === "source");
+  const trending = useMemo(() => (trendsHere ? trendingTopics(visible) : []), [trendsHere, visible]);
+  const [topicKey, setTopicKey] = useState<string | null>(null);
+  const topic = trending.find((t) => t.key === topicKey) ?? null;
+  useEffect(() => setTopicKey(null), [selection, settings.sort]);
   const seeAll = useCallback(() => {
     setNewOnly(false);
     setFresh(() => {
@@ -3237,7 +3252,7 @@ export default function Reader() {
     };
   }, [articles, ready]);
 
-  const shown = useMemo(() => {
+  const listed = useMemo(() => {
     /*
      * Hide-read triages a feed; it has no business emptying the keep-list.
      * Saved is where an article was deliberately put so it would still be
@@ -3251,7 +3266,8 @@ export default function Reader() {
       selection.type !== "saved" &&
       selection.type !== "downloaded";
     const unread = hideRead ? visible.filter((a) => !read.has(a.id)) : visible;
-    const list = showingNew ? unread.filter((a) => freshIds.has(a.id)) : unread;
+    const fresher = showingNew ? unread.filter((a) => freshIds.has(a.id)) : unread;
+    const list = topic && settings.sort === "top" ? fresher.filter((a) => aboutTopic(a.title, topic.key)) : fresher;
 
     if (settings.sort !== "top") {
       /*
@@ -3276,7 +3292,27 @@ export default function Reader() {
       const scoreB = ranking.get(b.id)?.score ?? -1;
       return scoreB - scoreA || timeOf(b) - timeOf(a);
     });
-  }, [visible, settings.hideRead, settings.sort, selection.type, read, ranking, showingNew, freshIds]);
+  }, [visible, settings.hideRead, settings.sort, selection.type, read, ranking, showingNew, freshIds, topic]);
+
+  /**
+   * Top stories, one row per story: a story's copies from other outlets sit
+   * beside it rather than one under another (lib/story-groups.ts). The
+   * biggest story first; among stories the ranking has no number for, the
+   * one more outlets carry, then the newest. Newest is one story a row.
+   */
+  const storyGroups = useMemo(() => {
+    if (settings.sort !== "top") return listed.map((article) => [article]);
+    const groups = groupStories(listed, {
+      keyOf: (article) => ranking.get(article.id)?.key,
+      prefer: (article) => Boolean(article.image),
+    });
+    const best = (group: Loaded[]) => Math.max(...group.map((a) => ranking.get(a.id)?.score ?? -1));
+    const outlets = (group: Loaded[]) => new Set(group.map((a) => a.sourceId)).size;
+    const newest = (group: Loaded[]) => Math.max(...group.map(timeOf));
+    return groups.sort((a, b) => best(b) - best(a) || outlets(b) - outlets(a) || newest(b) - newest(a));
+  }, [listed, settings.sort, ranking]);
+  /** The list in the order it is shown, a story's row together. */
+  const shown = useMemo(() => storyGroups.flat(), [storyGroups]);
 
   /**
    * How much of the list is actually rendered.
@@ -3295,8 +3331,8 @@ export default function Reader() {
   const [rendered, setRendered] = useState(PAGE);
   const tail = useRef<HTMLDivElement | null>(null);
 
-  const inView = useMemo(() => shown.slice(0, rendered), [shown, rendered]);
-  const more = shown.length > inView.length;
+  const inView = useMemo(() => storyGroups.slice(0, rendered), [storyGroups, rendered]);
+  const more = storyGroups.length > inView.length;
 
   // A different list starts at its own beginning, not part-way down the last
   // one's depth.
@@ -3777,6 +3813,304 @@ export default function Reader() {
 
   /** A subject open and its page on screen: the only place the sidebar tucks away. */
   const focusSubject = sidebarHidden && !!openNote && settings.subjects && !reading && !subjectsLocked;
+
+  /**
+   * The feed's trending topics, above Top stories. A chip narrows the list to
+   * the stories about it, and tapping it again lets go.
+   */
+  const trendingBar = trending.length > 0 && (
+    <div className="trending" role="group" aria-label="Trending in this feed">
+      <span className="trending-label">Trending</span>
+      <div className="trending-chips">
+        {trending.map((t) => (
+          <button
+            key={t.key}
+            className={`trend-chip${topicKey === t.key ? " on" : ""}`}
+            aria-pressed={topicKey === t.key}
+            title={`${t.sources} outlets in the last two days — ${topicKey === t.key ? "show every story again" : "show only these stories"}`}
+            onClick={() => setTopicKey(topicKey === t.key ? null : t.key)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  /** One story in the list: its picture, outlet, headline, summary and actions. */
+  const renderArticle = (article: Loaded) => {
+    const source = sourceById.get(article.sourceId);
+    return (
+      <article
+        className={`article${read.has(article.id) ? " read" : ""}${freshIds.has(article.id) ? " fresh" : ""}`}
+        key={article.id}
+      >
+        {/* Magazine puts the picture on the left. Articles without
+            one keep the same column so headlines stay aligned. */}
+        {settings.view === "magazine" &&
+          (article.image ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              className="hero"
+              src={article.image}
+              alt=""
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              onError={(event) => {
+                const el = event.currentTarget;
+                el.classList.add("hero-failed");
+                el.removeAttribute("src");
+              }}
+            />
+          ) : (
+            <div className="hero hero-blank" aria-hidden="true">
+              {source && (
+                <SourceIcon
+                  src={source.favicon}
+                  title={source.title}
+                  size={22}
+                />
+              )}
+            </div>
+          ))}
+        <div className="article-body">
+          <div className="article-meta">
+            {freshIds.has(article.id) && <span className="new-pill">New</span>}
+            {(source || savedMeta(article.link)) && (
+              <SourceIcon
+                src={source?.favicon ?? savedMeta(article.link)?.favicon ?? ""}
+                title={
+                  source?.title ??
+                  savedMeta(article.link)?.sourceTitle ??
+                  hostOf(article.link)
+                }
+                size={15}
+              />
+            )}
+            {source ? (
+              // The outlet's name opens its own feed.
+              <button
+                className="meta-name meta-source-link"
+                title={`Open ${source.title}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  event.preventDefault();
+                  choose({ type: "source", id: source.id });
+                }}
+              >
+                {source.title}
+              </button>
+            ) : (
+              <span className="meta-name">
+                {savedMeta(article.link)?.sourceTitle ?? hostOf(article.link)}
+              </span>
+            )}
+            {article.author && (
+              <>
+                <span className="dot">·</span>
+                <span className="meta-author">{article.author}</span>
+              </>
+            )}
+            {article.publishedAt && (
+              <>
+                <span className="dot">·</span>
+                <span className="meta-when">
+                  {timeAgo(article.publishedAt)}
+                </span>
+              </>
+            )}
+            {savedOffline.has(article.link) && (
+              <span
+                className="saved-check"
+                title="Saved for reading offline"
+                aria-label="Saved for reading offline"
+                role="img"
+              >
+                {Icon.check}
+              </span>
+            )}
+          </div>
+          <div className="title-row">
+          <a
+            className="article-title"
+            href={article.link}
+            // Warm the article before the click lands.
+            onMouseEnter={() =>
+              !opensOnSite(article.link) &&
+              prefetch(article.link, source?.feedUrl, article.title)
+            }
+            onTouchStart={() =>
+              !opensOnSite(article.link) &&
+              prefetch(article.link, source?.feedUrl, article.title)
+            }
+            onClick={(event) => {
+              // Plain click reads in-app; modified clicks still open
+              // the original in a new tab.
+              if (
+                event.metaKey ||
+                event.ctrlKey ||
+                event.shiftKey ||
+                event.button !== 0
+              ) {
+                return;
+              }
+              event.preventDefault();
+              openArticle(article, source?.feedUrl);
+            }}
+          >
+            {article.title}
+          </a>
+          {(() => {
+            const rank = ranking.get(article.id);
+            // Only a story with wider coverage behind it gets a
+            // circle. Marking most of a feed would say nothing.
+            if (!rank || rank.band === "quiet") return null;
+            const shown =
+              settings.bigStoryMetric === "newsrooms"
+                ? rank.newsrooms
+                : rank.score;
+            return (
+              <button
+                className={`score-dot rank-${rank.band}`}
+                onClick={() => setExplaining(article.id)}
+                aria-label={`${BAND_LABELS[rank.band]}, scoring ${rank.score} out of 100 — how this was worked out`}
+                title={`${BAND_LABELS[rank.band]} · ${rank.reasons.join(" · ")}\nTap for how this number was worked out`}
+              >
+                {shown}
+              </button>
+            );
+          })()}
+          </div>
+          {article.summary && settings.view !== "list" && (
+            <p className="article-summary">{article.summary}</p>
+          )}
+          {article.attachments && article.attachments.length > 0 && (
+            <Attachments
+              attachments={article.attachments}
+              onOpen={(file) =>
+                setReading({
+                  url: file.url,
+                  title: file.title ?? article.title,
+                  feedUrl: source?.feedUrl,
+                })
+              }
+              isSaved={isSaved}
+              keyHeaders={keyHeaders}
+              onToggleSave={(file) => toggleSavedFile(file, article, source)}
+            />
+          )}
+          <div className="article-actions">
+            {article.comments && article.comments !== article.link && (
+              // Following a subreddit for the links but losing the
+              // thread would miss the point of it. On a self post the
+              // thread is the article, so there is nothing to add.
+              <button
+                className="read-btn"
+                // In the reader, not the browser: a Reddit thread is
+                // rendered here now, post and replies together.
+                onClick={() =>
+                  setReading({
+                    url: article.comments!,
+                    title: article.title,
+                    feedUrl: source?.feedUrl,
+                    summary: article.summary,
+                  })
+                }
+              >
+                {Icon.chat} Discussion
+              </button>
+            )}
+            <button
+              className={`read-btn save-btn${
+                isSaved(article.link) ? " on" : ""
+              }`}
+              aria-pressed={isSaved(article.link)}
+              title={
+                isSaved(article.link)
+                  ? "Remove from Saved"
+                  : "Save for later"
+              }
+              onClick={() => toggleSaved(article, source)}
+            >
+              {isSaved(article.link) ? Icon.bookmarkOn : Icon.bookmark}
+              {isSaved(article.link) ? "Saved" : "Save"}
+            </button>
+            {/* Sharing is its own button, never a side effect of
+                saving: what goes to the team is a deliberate act. */}
+            {teams.length > 0 &&
+              (() => {
+                const on = teamsWith(article.link);
+                const menuOpenHere = teamMenu === article.link;
+                return (
+                  <div className="team-share">
+                    <button
+                      className={`read-btn team-btn${on.length > 0 ? " on" : ""}`}
+                      aria-pressed={on.length > 0}
+                      aria-expanded={teams.length > 1 ? menuOpenHere : undefined}
+                      disabled={teamsBusy}
+                      title={
+                        on.length > 0
+                          ? `Shared with ${on.map((t) => t.name).join(", ")}`
+                          : "Save to a team feed"
+                      }
+                      onClick={() => {
+                        // One team is a straight toggle; several
+                        // need to know which one.
+                        if (teams.length === 1) {
+                          void toggleTeam(teams[0].code, article, source);
+                        } else {
+                          setTeamMenu(menuOpenHere ? null : article.link);
+                        }
+                      }}
+                    >
+                      {on.length > 0 ? Icon.peopleOn : Icon.people}
+                      {on.length > 0 ? "Shared" : "Save to Team"}
+                    </button>
+                    {menuOpenHere && teams.length > 1 && (
+                      <div className="team-menu" role="menu">
+                        {teams.map((team) => {
+                          const shared = on.some((t) => t.code === team.code);
+                          return (
+                            <button
+                              key={team.code}
+                              role="menuitemcheckbox"
+                              aria-checked={shared}
+                              disabled={teamsBusy}
+                              onClick={() =>
+                                void toggleTeam(team.code, article, source)
+                              }
+                            >
+                              <span className="team-check">
+                                {shared ? Icon.check : null}
+                              </span>
+                              {team.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+          </div>
+        </div>
+        {article.image && settings.view === "cards" && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            className="thumb"
+            src={article.image}
+            alt=""
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            // Drop the slot entirely if the image 404s.
+            onError={(event) => {
+              event.currentTarget.style.display = "none";
+            }}
+          />
+        )}
+      </article>
+    );
+  };
 
   return (
     <div className={`app${focusSubject ? " sidebar-collapsed" : ""}`}>
@@ -4642,6 +4976,7 @@ export default function Reader() {
           </div>
         ) : shown.length === 0 ? (
           <div className="state">
+            {topic && trendingBar}
             <h2>{pending ? "Loading articles…" : "Nothing here yet."}</h2>
             {!pending &&
               (selection.type === "team" ? (
@@ -4668,277 +5003,21 @@ export default function Reader() {
           </div>
         ) : (
           <div className={`articles view-${settings.view}`}>
-            {inView.map((article) => {
-              const source = sourceById.get(article.sourceId);
+            {trendingBar}
+            {inView.map((group) => {
+              const [lead, ...others] = group;
+              if (others.length === 0) return renderArticle(lead);
               return (
-                <article
-                  className={`article${read.has(article.id) ? " read" : ""}${freshIds.has(article.id) ? " fresh" : ""}`}
-                  key={article.id}
-                >
-                  {/* Magazine puts the picture on the left. Articles without
-                      one keep the same column so headlines stay aligned. */}
-                  {settings.view === "magazine" &&
-                    (article.image ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        className="hero"
-                        src={article.image}
-                        alt=""
-                        loading="lazy"
-                        referrerPolicy="no-referrer"
-                        onError={(event) => {
-                          const el = event.currentTarget;
-                          el.classList.add("hero-failed");
-                          el.removeAttribute("src");
-                        }}
-                      />
-                    ) : (
-                      <div className="hero hero-blank" aria-hidden="true">
-                        {source && (
-                          <SourceIcon
-                            src={source.favicon}
-                            title={source.title}
-                            size={22}
-                          />
-                        )}
-                      </div>
-                    ))}
-                  <div className="article-body">
-                    <div className="article-meta">
-                      {freshIds.has(article.id) && <span className="new-pill">New</span>}
-                      {(source || savedMeta(article.link)) && (
-                        <SourceIcon
-                          src={source?.favicon ?? savedMeta(article.link)?.favicon ?? ""}
-                          title={
-                            source?.title ??
-                            savedMeta(article.link)?.sourceTitle ??
-                            hostOf(article.link)
-                          }
-                          size={15}
-                        />
-                      )}
-                      {source ? (
-                        // The outlet's name opens its own feed.
-                        <button
-                          className="meta-name meta-source-link"
-                          title={`Open ${source.title}`}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            event.preventDefault();
-                            choose({ type: "source", id: source.id });
-                          }}
-                        >
-                          {source.title}
-                        </button>
-                      ) : (
-                        <span className="meta-name">
-                          {savedMeta(article.link)?.sourceTitle ?? hostOf(article.link)}
-                        </span>
-                      )}
-                      {article.author && (
-                        <>
-                          <span className="dot">·</span>
-                          <span className="meta-author">{article.author}</span>
-                        </>
-                      )}
-                      {article.publishedAt && (
-                        <>
-                          <span className="dot">·</span>
-                          <span className="meta-when">
-                            {timeAgo(article.publishedAt)}
-                          </span>
-                        </>
-                      )}
-                      {savedOffline.has(article.link) && (
-                        <span
-                          className="saved-check"
-                          title="Saved for reading offline"
-                          aria-label="Saved for reading offline"
-                          role="img"
-                        >
-                          {Icon.check}
-                        </span>
-                      )}
-                    </div>
-                    <div className="title-row">
-                    <a
-                      className="article-title"
-                      href={article.link}
-                      // Warm the article before the click lands.
-                      onMouseEnter={() =>
-                        !opensOnSite(article.link) &&
-                        prefetch(article.link, source?.feedUrl, article.title)
-                      }
-                      onTouchStart={() =>
-                        !opensOnSite(article.link) &&
-                        prefetch(article.link, source?.feedUrl, article.title)
-                      }
-                      onClick={(event) => {
-                        // Plain click reads in-app; modified clicks still open
-                        // the original in a new tab.
-                        if (
-                          event.metaKey ||
-                          event.ctrlKey ||
-                          event.shiftKey ||
-                          event.button !== 0
-                        ) {
-                          return;
-                        }
-                        event.preventDefault();
-                        openArticle(article, source?.feedUrl);
-                      }}
-                    >
-                      {article.title}
-                    </a>
-                    {(() => {
-                      const rank = ranking.get(article.id);
-                      // Only a story with wider coverage behind it gets a
-                      // circle. Marking most of a feed would say nothing.
-                      if (!rank || rank.band === "quiet") return null;
-                      const shown =
-                        settings.bigStoryMetric === "newsrooms"
-                          ? rank.newsrooms
-                          : rank.score;
-                      return (
-                        <button
-                          className={`score-dot rank-${rank.band}`}
-                          onClick={() => setExplaining(article.id)}
-                          aria-label={`${BAND_LABELS[rank.band]}, scoring ${rank.score} out of 100 — how this was worked out`}
-                          title={`${BAND_LABELS[rank.band]} · ${rank.reasons.join(" · ")}\nTap for how this number was worked out`}
-                        >
-                          {shown}
-                        </button>
-                      );
-                    })()}
-                    </div>
-                    {article.summary && settings.view !== "list" && (
-                      <p className="article-summary">{article.summary}</p>
-                    )}
-                    {article.attachments && article.attachments.length > 0 && (
-                      <Attachments
-                        attachments={article.attachments}
-                        onOpen={(file) =>
-                          setReading({
-                            url: file.url,
-                            title: file.title ?? article.title,
-                            feedUrl: source?.feedUrl,
-                          })
-                        }
-                        isSaved={isSaved}
-                        keyHeaders={keyHeaders}
-                        onToggleSave={(file) => toggleSavedFile(file, article, source)}
-                      />
-                    )}
-                    <div className="article-actions">
-                      {article.comments && article.comments !== article.link && (
-                        // Following a subreddit for the links but losing the
-                        // thread would miss the point of it. On a self post the
-                        // thread is the article, so there is nothing to add.
-                        <button
-                          className="read-btn"
-                          // In the reader, not the browser: a Reddit thread is
-                          // rendered here now, post and replies together.
-                          onClick={() =>
-                            setReading({
-                              url: article.comments!,
-                              title: article.title,
-                              feedUrl: source?.feedUrl,
-                              summary: article.summary,
-                            })
-                          }
-                        >
-                          {Icon.chat} Discussion
-                        </button>
-                      )}
-                      <button
-                        className={`read-btn save-btn${
-                          isSaved(article.link) ? " on" : ""
-                        }`}
-                        aria-pressed={isSaved(article.link)}
-                        title={
-                          isSaved(article.link)
-                            ? "Remove from Saved"
-                            : "Save for later"
-                        }
-                        onClick={() => toggleSaved(article, source)}
-                      >
-                        {isSaved(article.link) ? Icon.bookmarkOn : Icon.bookmark}
-                        {isSaved(article.link) ? "Saved" : "Save"}
-                      </button>
-                      {/* Sharing is its own button, never a side effect of
-                          saving: what goes to the team is a deliberate act. */}
-                      {teams.length > 0 &&
-                        (() => {
-                          const on = teamsWith(article.link);
-                          const menuOpenHere = teamMenu === article.link;
-                          return (
-                            <div className="team-share">
-                              <button
-                                className={`read-btn team-btn${on.length > 0 ? " on" : ""}`}
-                                aria-pressed={on.length > 0}
-                                aria-expanded={teams.length > 1 ? menuOpenHere : undefined}
-                                disabled={teamsBusy}
-                                title={
-                                  on.length > 0
-                                    ? `Shared with ${on.map((t) => t.name).join(", ")}`
-                                    : "Save to a team feed"
-                                }
-                                onClick={() => {
-                                  // One team is a straight toggle; several
-                                  // need to know which one.
-                                  if (teams.length === 1) {
-                                    void toggleTeam(teams[0].code, article, source);
-                                  } else {
-                                    setTeamMenu(menuOpenHere ? null : article.link);
-                                  }
-                                }}
-                              >
-                                {on.length > 0 ? Icon.peopleOn : Icon.people}
-                                {on.length > 0 ? "Shared" : "Save to Team"}
-                              </button>
-                              {menuOpenHere && teams.length > 1 && (
-                                <div className="team-menu" role="menu">
-                                  {teams.map((team) => {
-                                    const shared = on.some((t) => t.code === team.code);
-                                    return (
-                                      <button
-                                        key={team.code}
-                                        role="menuitemcheckbox"
-                                        aria-checked={shared}
-                                        disabled={teamsBusy}
-                                        onClick={() =>
-                                          void toggleTeam(team.code, article, source)
-                                        }
-                                      >
-                                        <span className="team-check">
-                                          {shared ? Icon.check : null}
-                                        </span>
-                                        {team.name}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })()}
-                    </div>
-                  </div>
-                  {article.image && settings.view === "cards" && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      className="thumb"
-                      src={article.image}
-                      alt=""
-                      loading="lazy"
-                      referrerPolicy="no-referrer"
-                      // Drop the slot entirely if the image 404s.
-                      onError={(event) => {
-                        event.currentTarget.style.display = "none";
-                      }}
-                    />
-                  )}
-                </article>
+                <section className="story-group" key={`group:${lead.id}`} aria-label={`${lead.title}, and ${others.length} more on this story`}>
+                  {renderArticle(lead)}
+                  <StoryRow
+                    stories={others}
+                    sourceOf={(story) => sourceById.get(story.sourceId)}
+                    isRead={(story) => read.has(story.id)}
+                    isFresh={(story) => freshIds.has(story.id)}
+                    onOpen={(story) => openArticle(story as Loaded, sourceById.get(story.sourceId)?.feedUrl)}
+                  />
+                </section>
               );
             })}
             {/* Where the next batch comes in. Kept out of the list itself so
