@@ -22,6 +22,8 @@ const UA =
  * journals each and are asked the same way.
  */
 const FEEDS_PER_HOST = 2;
+/** nature.com still challenged two at a time — one feed in four of a slice — so it gets one. */
+const HOST_TURNS: Record<string, number> = { "www.nature.com": 1 };
 const hostActive = new Map<string, number>();
 const hostWaiting = new Map<string, (() => void)[]>();
 async function onePerTurn<T>(url: string, run: () => Promise<T>): Promise<T> {
@@ -31,7 +33,7 @@ async function onePerTurn<T>(url: string, run: () => Promise<T>): Promise<T> {
   } catch {
     return run();
   }
-  if ((hostActive.get(host) ?? 0) >= FEEDS_PER_HOST) {
+  if ((hostActive.get(host) ?? 0) >= (HOST_TURNS[host] ?? FEEDS_PER_HOST)) {
     await new Promise<void>((resolve) => hostWaiting.set(host, [...(hostWaiting.get(host) ?? []), resolve]));
   }
   hostActive.set(host, (hostActive.get(host) ?? 0) + 1);

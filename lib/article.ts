@@ -3,6 +3,9 @@ import { JSDOM, VirtualConsole } from "jsdom";
 import sanitizeHtml from "sanitize-html";
 import { fetchText, stripHtml, absolute, toIso, stripChrome } from "./feed";
 import { isPaywalled } from "./subscriptions";
+import { isChallengePage } from "./challenge";
+
+export { isChallengePage };
 import type { Attachment } from "./types";
 
 export type ReadableArticle = {
@@ -493,23 +496,6 @@ export async function previewFromMetadata(
     wordCount: description ? description.split(/\s+/).length : 0,
     truncated: false,
   };
-}
-
-/**
- * A bot check standing where the page should be — "Client Challenge",
- * "Just a moment…", "Attention Required!". It answers 200, so nothing else
- * notices; read as an article it becomes a story titled "Client Challenge"
- * and is cached for a day. Measured on sfgate.com, 2 Oct 2026.
- */
-const CHALLENGE_TITLE =
-  /^(client challenge|just a moment\.*|attention required!?.*|access denied|are you a robot\??|pardon our interruption|security check(point)?|vercel security checkpoint|please verify you are a human|human verification|one more step)$/i;
-const CHALLENGE_TEXT =
-  /(a required part of this site couldn.t load|verify(ing)? (that )?you are (a )?human|enable javascript and cookies to continue|checking (if the site connection is secure|your browser)|press (&|and) hold)/i;
-
-export function isChallengePage(title: string | undefined, text: string): boolean {
-  if (title && CHALLENGE_TITLE.test(title.trim())) return true;
-  // Only a short page: a real article may quote these words.
-  return text.length < 2500 && CHALLENGE_TEXT.test(text);
 }
 
 export const CHALLENGE_ERROR = "403 bot check: the site showed a browser check instead of the article";

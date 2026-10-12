@@ -70,3 +70,11 @@ test("a cookie goes only to the site that set it", async () => {
   await fetchFeedText("https://www.example.com/feed.xml");
   assert.deepEqual(sent, ["www.example.com:", "www.example.com:", "cdn.example.org:"]);
 });
+
+test("enrichment leaves an article alone when its page is a bot or cookie check", async () => {
+  const { isChallengeHtml } = await import("../lib/challenge");
+  assert.ok(isChallengeHtml("<html><body>x</body></html>", "https://www.nature.com/articles/x?error=cookies_not_supported&code=1"));
+  assert.ok(isChallengeHtml('<html><img src="https://www.nature.com/_fs-ch-1T1wmsGaOgGaSxcX/assets/errorIcon.svg"></html>', "https://www.nature.com/articles/x"));
+  assert.ok(isChallengeHtml("<html><head><title>Just a moment...</title></head><body>Checking your browser</body></html>", "https://example.com/a"));
+  assert.ok(!isChallengeHtml("<html><head><title>A real story</title></head><body><p>" + "Words. ".repeat(500) + "</p></body></html>", "https://example.com/a"));
+});

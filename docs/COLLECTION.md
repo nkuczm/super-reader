@@ -413,6 +413,11 @@ now carries the cookie the site set along its own redirects — the site's own
 cookie, to the site's own hosts, as any feed reader with a cookie jar does;
 nothing here pretends to be a browser — and a feed's address that still
 answers with a page is a failure for the refresh, never a page to scrape.
+nature.com gets one request at a time: two together still drew the
+challenge for one Nature feed in four. Enrichment, which reads each
+article's page for its picture, skips a bot or cookie check
+(`lib/challenge.ts`) — it had given every Nature story the challenge
+page's error icon as its image.
 
 The finished directory — 356 entries, 198 of them research across 22
 disciplines — was audited from the preview the same afternoon: every entry
