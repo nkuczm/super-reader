@@ -304,7 +304,7 @@ test("a source saved from a directory entry since retired is rewritten to its re
     assert.ok(ids.has(id), `${dead} is replaced by an entry that exists (${id})`);
     assert.ok(!listed.has(dead), `${dead} is no longer listed`);
   }
-  const saved = [
+  const saved: { feedUrl: string; title: string; scope?: "site" | "section" }[] = [
     { feedUrl: "http://rss.cnn.com/rss/cnn_topstories.rss", title: "CNN · Top stories" },
     { feedUrl: "api:arxiv?q=cat%3Aastro-ph", title: "arXiv · Astrophysics" },
     // No route answers for CNN World alone; the whole paper in its place would be the wrong source.
