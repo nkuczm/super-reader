@@ -21,7 +21,7 @@
  */
 
 /** Words that carry no signal about which story a headline is about. */
-const STOPWORDS = new Set(
+export const STOPWORDS = new Set(
   ("a an and are as at be been but by can could for from had has have he her his how in into is it its" +
     " may might more most new not of on one or our out over said say says she so than that the their them" +
     " then there these they this those to up us was we were what when where which who why will with would" +
@@ -62,7 +62,7 @@ export function normalizeTitle(title: string) {
  * Only the plural ending comes off — "es" is dropped just where English
  * added it (boxes, churches), never from "missiles" or "rates".
  */
-function stem(word: string) {
+export function stem(word: string) {
   if (word.length > 4 && word.endsWith("ies")) return `${word.slice(0, -3)}y`;
   if (word.length > 4 && /(s|x|z|ch|sh)es$/.test(word)) return word.slice(0, -2);
   if (word.length > 3 && word.endsWith("s") && !/(s|u)s$/.test(word))
