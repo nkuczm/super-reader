@@ -463,6 +463,36 @@ export async function requestPersistence(): Promise<boolean> {
 /** How many of each source's newest stories are kept for offline reading. */
 export const PER_SOURCE = 15;
 
+const AUTO_KEY = "super-reader:auto-download";
+
+/**
+ * Whether this device downloads every source's newest stories by itself,
+ * whenever the app is open. Off unless turned on here: a desktop is rarely
+ * without a connection, and the top-up is up to sixty article fetches a visit
+ * (§5b). With it off, only what the reader asked to keep is downloaded — Saved
+ * stories and subjects marked available offline — and Download now still
+ * fetches everything.
+ *
+ * Kept on the device, not in Settings: settings follow an account between
+ * devices, and a phone turning this on should not turn it on for a desktop.
+ */
+export function loadAutoDownload(): boolean {
+  try {
+    return window.localStorage.getItem(AUTO_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+export function saveAutoDownload(on: boolean) {
+  try {
+    if (on) window.localStorage.setItem(AUTO_KEY, "on");
+    else window.localStorage.removeItem(AUTO_KEY);
+  } catch {
+    /* storage unavailable; the choice lasts this visit */
+  }
+}
+
 /**
  * Most articles one top-up will fetch. The device catches up across visits
  * instead of asking for everything at once — see the note in
@@ -578,6 +608,11 @@ export async function downloadForOffline(
   headers?: HeadersInit,
   /** Most articles to fetch in one run — see the note on `wanted` below. */
   limit = MAX_PER_RUN,
+  /**
+   * Everything the device still wants kept, when that is more than this run
+   * fetches: a run for Saved stories alone must not prune the rest.
+   */
+  keep: OfflineTarget[] = targets,
 ): Promise<{ saved: number; failed: number; skipped: number }> {
   const seen = new Set<string>();
   const deduped = targets.filter((t) => {
@@ -686,15 +721,16 @@ export async function downloadForOffline(
    * tidies up, and the cost of waiting is a little disk.
    */
   if (failed === 0) {
+    const kept = new Set([...deduped, ...keep].map((t) => t.url));
     // What each wanted link is filed under, for the ones this run skipped
     // because they were already there under a different URL.
-    for (const target of deduped) {
-      const filed = await filedUnder(target.url);
+    for (const url of kept) {
+      const filed = await filedUnder(url);
       if (filed) storedKeys.add(filed);
     }
     // Pruning compares against everything this device wants, not just what
     // this run fetched — an article skipped for its back-off is still wanted.
-    await pruneTo(storedKeys, new Set(deduped.map((t) => t.url)));
+    await pruneTo(storedKeys, kept);
   }
   return { saved, failed, skipped };
 }

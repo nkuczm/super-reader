@@ -59,6 +59,11 @@ function ageOf(article: Held, now: number) {
  * The fetched copy wins on ties: it is the publisher's current version of the
  * story, with whatever they have since corrected in it. Order is left to the
  * caller, which sorts the whole list the same way it always did.
+ *
+ * Field by field, though, as in lib/harvest.ts: what the fetched copy lacks
+ * is kept from the held one. A refresh that runs short of time returns its
+ * stories without reading their pages for a picture (lib/deadline.ts), and
+ * the picture an earlier refresh found must not vanish because of it.
  */
 export function mergeWindow<T extends Held>(
   fetched: T[],
@@ -74,10 +79,11 @@ export function mergeWindow<T extends Held>(
     const key = canonical(article.link);
     const existing = byKey.get(key);
     byKey.set(key, {
-      ...article,
+      ...existing,
+      ...filled(article),
       // Keep the day it first appeared here, not the day it was re-read.
       seenAt: existing?.seenAt ?? article.seenAt ?? now,
-    });
+    } as T);
   }
 
   // Bounded per source rather than overall: a desk that files hourly would
@@ -95,6 +101,11 @@ export function mergeWindow<T extends Held>(
     kept.push(article);
   }
   return kept;
+}
+
+/** Only the fields that say something: an empty value never overwrites a real one. */
+function filled<T extends object>(article: T): Partial<T> {
+  return Object.fromEntries(Object.entries(article).filter(([, value]) => value !== undefined && value !== null && value !== "")) as Partial<T>;
 }
 
 /** What a fresh fetch looks like before it has ever been held. */

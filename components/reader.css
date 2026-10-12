@@ -1076,6 +1076,8 @@
 @keyframes pill-in {
   from { opacity: 0; transform: translate(-50%, -8px); }
 }
+/* How many sources have answered: a refresh fills the list in as it goes. */
+.list-updating-count { font-weight: 500; font-variant-numeric: tabular-nums; opacity: 0.8; }
 
 @media (prefers-reduced-motion: reduce) {
   .pull-ring, .pull-arrow { transition: none; }

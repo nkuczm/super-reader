@@ -14,6 +14,7 @@ import DbUsageSection from "./DbUsageSection";
 import PrefsHistory from "./PrefsHistory";
 import { FeedHistory } from "./SyncDialog";
 import type { Settings, TeamFeed, ViewMode } from "@/lib/store";
+import { PER_SOURCE } from "@/lib/offline";
 
 const VIEWS: { id: ViewMode; name: string; blurb: string }[] = [
   {
@@ -84,6 +85,8 @@ export default function SettingsDialog({
   onPrefsRestored,
   onRestoreFeeds,
   onDownload,
+  autoDownload,
+  onAutoDownloadChange,
   noteCount,
   teams,
   teamsBusy,
@@ -118,6 +121,9 @@ export default function SettingsDialog({
     result?: { saved: number; failed: number; skipped?: number };
   };
   onDownload: () => void;
+  /** Whether this device downloads every source's newest stories by itself. */
+  autoDownload: boolean;
+  onAutoDownloadChange: (on: boolean) => void;
   /** How many notes exist, so the switch can say what it is switching off. */
   noteCount: number;
   /** The team feeds this device is connected to. */
@@ -287,6 +293,21 @@ export default function SettingsDialog({
             <label className="check-row">
               <input
                 type="checkbox"
+                checked={autoDownload}
+                onChange={(event) => onAutoDownloadChange(event.target.checked)}
+              />
+              <span>
+                Download new stories automatically on this device
+                <em>
+                  The newest {PER_SOURCE} from every source, whenever the app is open — worth
+                  it on a phone you read without signal. Off, only Saved stories and subjects
+                  marked available offline are downloaded.
+                </em>
+              </span>
+            </label>
+            <label className="check-row">
+              <input
+                type="checkbox"
                 checked={settings.showDownloadBar}
                 onChange={(event) =>
                   onChange({ ...settings, showDownloadBar: event.target.checked })
@@ -294,7 +315,7 @@ export default function SettingsDialog({
               />
               <span>
                 Show a progress bar while downloading
-                <em>The download otherwise runs quietly on every visit.</em>
+                <em>The download otherwise runs quietly.</em>
               </span>
             </label>
             <div className="offline-box">
@@ -332,11 +353,12 @@ export default function SettingsDialog({
                   )}
                   <details className="settings-more">
                     <summary>How offline reading works</summary>
-                    The newest 15 stories from each source, plus everything in
-                    Saved, are kept on this device so you can read them without a
-                    connection. Anything missing is fetched whenever the app is
-                    open, so an interrupted download finishes itself; the full
-                    refresh runs on the first visit after 7am and after 4pm ET.
+                    Saved stories and subjects marked available offline are kept on
+                    this device so you can read them without a connection. With
+                    automatic downloads on, so are the newest {PER_SOURCE} stories from
+                    each source: anything missing is fetched whenever the app is
+                    open, so an interrupted download finishes itself. Download now
+                    fetches all of it once, whichever way the switch is set.
                     Downloaded articles carry a blue check in the list.{" "}
                     {persisted
                       ? "This browser has agreed to keep the cache."
