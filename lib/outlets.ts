@@ -337,7 +337,7 @@ export const OUTLETS: Outlet[] = [
   { id: "jneurophys", name: "Journal of Neurophysiology", feedUrl: "https://journals.physiology.org/action/showFeed?type=etoc&feed=rss&jc=jn", siteUrl: "https://journals.physiology.org/journal/jn", category: "neuroscience", region: "US", tier: 3, issn: ["0022-3077", "1522-1598"] },
   { id: "neuroimage", name: "NeuroImage", feedUrl: journal("1053-8119", "NeuroImage"), siteUrl: "https://www.sciencedirect.com/journal/neuroimage", category: "neuroscience", region: "Global", tier: 3, issn: ["1053-8119", "1095-9572"] },
   { id: "brain", name: "Brain", feedUrl: journal("0006-8950", "Brain"), siteUrl: "https://academic.oup.com/brain", category: "neuroscience", region: "UK", tier: 3, issn: ["0006-8950", "1460-2156"] },
-  { id: "cercor", name: "Cerebral Cortex", feedUrl: journal("1047-3211", "Cerebral Cortex"), siteUrl: "https://academic.oup.com/cercor", category: "neuroscience", region: "Global", tier: 3, issn: ["1047-3211", "1460-2199"] },
+  { id: "cercor", name: "Cerebral Cortex", feedUrl: journal("1047-3211", "Cerebral Cortex", "crossref"), siteUrl: "https://academic.oup.com/cercor", category: "neuroscience", region: "Global", tier: 3, issn: ["1047-3211", "1460-2199"] },
   { id: "biorxiv-neuro", name: "bioRxiv", section: "Neuroscience", feedUrl: "api:rxiv?server=biorxiv&subject=neuroscience", siteUrl: "https://www.biorxiv.org/collection/neuroscience", category: "neuroscience", region: "Global", tier: 3 },
   { id: "medrxiv-neuro", name: "medRxiv", section: "Neurology", feedUrl: "api:rxiv?server=medrxiv&subject=neurology", siteUrl: "https://www.medrxiv.org/collection/neurology", category: "neuroscience", region: "Global", tier: 3 },
   { id: "arxiv-qbio-nc", name: "arXiv", section: "Neurons and Cognition", feedUrl: arxiv("q-bio.NC"), siteUrl: "https://arxiv.org/list/q-bio.NC/recent", category: "neuroscience", region: "Global", tier: 3 },
@@ -356,7 +356,7 @@ export const OUTLETS: Outlet[] = [
   { id: "mindlang", name: "Mind & Language", feedUrl: "https://onlinelibrary.wiley.com/feed/14680017/most-recent", siteUrl: "https://onlinelibrary.wiley.com/journal/14680017", category: "philosophy", region: "Global", tier: 3, issn: ["0268-1064", "1468-0017"] },
   { id: "philcompass", name: "Philosophy Compass", feedUrl: "https://onlinelibrary.wiley.com/feed/17479991/most-recent", siteUrl: "https://onlinelibrary.wiley.com/journal/17479991", category: "philosophy", region: "Global", tier: 3, issn: ["1747-9991"] },
   { id: "ajp", name: "Australasian Journal of Philosophy", feedUrl: "https://www.tandfonline.com/feed/rss/rajp20", siteUrl: "https://www.tandfonline.com/journals/rajp20", category: "philosophy", region: "Global", tier: 3, issn: ["0004-8402", "1471-6828"] },
-  { id: "mind", name: "Mind", feedUrl: journal("0026-4423", "Mind"), siteUrl: "https://academic.oup.com/mind", category: "philosophy", region: "UK", tier: 3, issn: ["0026-4423", "1460-2113"] },
+  { id: "mind", name: "Mind", feedUrl: journal("0026-4423", "Mind", "crossref"), siteUrl: "https://academic.oup.com/mind", category: "philosophy", region: "UK", tier: 3, issn: ["0026-4423", "1460-2113"] },
   { id: "pq", name: "The Philosophical Quarterly", feedUrl: journal("0031-8094", "The Philosophical Quarterly"), siteUrl: "https://academic.oup.com/pq", category: "philosophy", region: "UK", tier: 3, issn: ["0031-8094", "1467-9213"] },
   { id: "philreview", name: "The Philosophical Review", feedUrl: journal("0031-8108", "The Philosophical Review"), siteUrl: "https://read.dukeupress.edu/the-philosophical-review", category: "philosophy", region: "US", tier: 3, issn: ["0031-8108", "1558-1470"] },
   { id: "jphil", name: "The Journal of Philosophy", feedUrl: journal("0022-362X", "The Journal of Philosophy", "crossref"), siteUrl: "https://www.pdcnet.org/jphil", category: "philosophy", region: "US", tier: 3, issn: ["0022-362X", "1939-8549"] },
@@ -483,7 +483,6 @@ export const OUTLETS: Outlet[] = [
   { id: "lawsocreview", name: "Law & Society Review", feedUrl: journal("0023-9216", "Law & Society Review"), siteUrl: "https://www.cambridge.org/core/journals/law-and-society-review", category: "legal", region: "US", tier: 3, issn: ["0023-9216", "1540-5893"] },
   { id: "jlegalstudies", name: "The Journal of Legal Studies", feedUrl: chicago("jls"), siteUrl: "https://www.journals.uchicago.edu/journal/jls", category: "legal", region: "US", tier: 3, issn: ["0047-2530", "1537-5366"] },
   { id: "jlaweconomics", name: "The Journal of Law and Economics", feedUrl: chicago("jle"), siteUrl: "https://www.journals.uchicago.edu/journal/jle", category: "legal", region: "US", tier: 3, issn: ["0022-2186", "1537-5285"] },
-  { id: "lawarxiv", name: "LawArXiv", feedUrl: osf("lawarxiv"), siteUrl: "https://osf.io/preprints/lawarxiv", category: "legal", region: "Global", tier: 3 },
 
   // Geography and urban studies
   { id: "annalsaag", name: "Annals of the American Association of Geographers", feedUrl: tandf("raag21"), siteUrl: "https://www.tandfonline.com/journals/raag21", category: "geography", region: "US", tier: 3, issn: ["2469-4452", "2469-4460"] },
@@ -494,7 +493,6 @@ export const OUTLETS: Outlet[] = [
   // Literature, arts and classics
   { id: "pmla", name: "PMLA", feedUrl: journal("0030-8129", "PMLA", "crossref"), siteUrl: "https://www.cambridge.org/core/journals/pmla", category: "humanities", region: "US", tier: 3, issn: ["0030-8129", "1938-1530"] },
   { id: "critinquiry", name: "Critical Inquiry", feedUrl: chicago("ci"), siteUrl: "https://www.journals.uchicago.edu/journal/ci", category: "humanities", region: "US", tier: 3, issn: ["0093-1896", "1539-7858"] },
-  { id: "nlh", name: "New Literary History", feedUrl: journal("0028-6087", "New Literary History", "crossref"), siteUrl: "https://www.press.jhu.edu/journals/new-literary-history", category: "humanities", region: "US", tier: 3, issn: ["0028-6087", "1080-661X"] },
   { id: "artbulletin", name: "The Art Bulletin", feedUrl: tandf("rcab20"), siteUrl: "https://www.tandfonline.com/journals/rcab20", category: "humanities", region: "US", tier: 3, issn: ["0004-3079", "1559-6478"] },
   { id: "classicalq", name: "The Classical Quarterly", feedUrl: journal("0009-8388", "The Classical Quarterly"), siteUrl: "https://www.cambridge.org/core/journals/classical-quarterly", category: "humanities", region: "UK", tier: 3, issn: ["0009-8388", "1471-6844"] },
   { id: "representations", name: "Representations", feedUrl: journal("0734-6018", "Representations", "crossref"), siteUrl: "https://online.ucpress.edu/representations", category: "humanities", region: "US", tier: 3, issn: ["0734-6018", "1533-855X"] },
@@ -688,6 +686,9 @@ export const RETIRED_FEEDS: Record<string, string> = {
   // OpenAlex dates these only by the year, which hid that week's papers.
   "api:journal?issn=0022-362X&name=The+Journal+of+Philosophy": "jphil",
   "api:journal?issn=2330-4014&name=Ergo": "ergo",
+  // OpenAlex trailed Crossref by weeks for these two (Mind: 30 Jul against 23 Sep).
+  "api:journal?issn=1047-3211&name=Cerebral+Cortex": "cercor",
+  "api:journal?issn=0026-4423&name=Mind": "mind",
 };
 
 /** Ready-made bundles, so a reader can follow a beat in one tap. */

@@ -354,6 +354,16 @@ journal like that is read from Crossref first (`via=crossref`), newest
 registered first, and a year-only date takes the registration moment when it
 falls in that year. A 2011 paper registered last week keeps 2011.
 
+The same reading put Mind and Cerebral Cortex on Crossref too: OpenAlex's
+newest Mind paper was 30 July, Crossref's published online 23 September;
+Cerebral Cortex 22 September against 12 October. A registration sort brings
+back old back issues as well — New Literary History's newest was from 1994 —
+so Crossref is asked for the last year only. New Literary History itself
+was left out: Crossref has nothing of it from the past year (it publishes
+through Project MUSE) and OpenAlex dates it by the issue, so it would only
+ever look quiet. LawArXiv's newest preprint was May 2025; the OSF server is
+still in the API directory, the directory entry is not.
+
 **Furniture is not a paper.** Philosophy of Science's newest "paper" was
 "Cover and Front matter"; Ergo's were "Title Pending 12682". The research
 APIs drop covers, front and back matter, issue information, mastheads and
@@ -389,8 +399,17 @@ plausible substitute of §6.
 
 **Feeds are fetched two at a time per host** (`lib/feed.ts`), and a feed's
 address answered with a web page is asked once more before anything else is
-done with it. A reader following six Nature journals sent nature.com six
-requests at once, and some came back as HTML.
+done with it (`fetchFeedText`, used by the refresh and the audit alike). A
+reader following six Nature journals sent nature.com six requests at once,
+and some came back as HTML; two at a time was not enough on its own — the
+audit of the finished directory still saw two Nature feeds answered with a
+page — which is why the retry is there.
+
+The finished directory — 356 entries, 198 of them research across 22
+disciplines — was audited from the preview the same afternoon: every entry
+answered, every research entry with a dated paper, and the newest within
+days for all but the quarterlies and the academic calendar (Harvard Law
+Review's last issue was June; it resumes in November).
 
 ### What those numbers mean
 

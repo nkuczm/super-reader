@@ -208,6 +208,7 @@ const query = (value: string) => encodeURIComponent(value.trim());
 
 /** Today, as the APIs below want a date: "2026-10-11". Papers dated later than this are a cover date, not a publication. */
 const today = () => new Date().toISOString().slice(0, 10);
+const yearAgo = () => new Date(Date.now() - 365 * 86_400_000).toISOString().slice(0, 10);
 
 /** One Crossref work as an Article. */
 function crossrefArticle(item: any): Article | null {
@@ -902,7 +903,10 @@ export const API_PROVIDERS: ApiProvider[] = [
       request: ({ issn = "" }, { limit }) => ({
         url:
           `https://api.crossref.org/journals/${encodeURIComponent(issn.trim())}/works` +
-          `?sort=created&order=desc&rows=${Math.min(limit, 50)}&filter=until-pub-date:${today()},type:journal-article`,
+          `?sort=created&order=desc&rows=${Math.min(limit, 50)}` +
+          // A year back at most: Crossref registers old back issues as well, and a
+          // registration sort put New Literary History's 1994 papers first.
+          `&filter=from-pub-date:${yearAgo()},until-pub-date:${today()},type:journal-article`,
       }),
       items: (body) => body?.message?.items ?? [],
       article: crossrefArticle,

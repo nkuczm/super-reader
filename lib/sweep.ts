@@ -11,7 +11,7 @@
  * slices are due independently, so a failing outlet delays only itself.
  */
 
-import { fetchText, parseFeed, looksLikeFeed } from "./feed";
+import { fetchFeedText, fetchText, parseFeed, looksLikeFeed } from "./feed";
 import { subredditFeedUrl } from "./reddit";
 import { panelOutlets, panelSubreddits } from "./outlets";
 import type { Outlet, SubredditEntry } from "./outlets";
@@ -300,7 +300,8 @@ export async function auditSlice(slice: number): Promise<AuditResult> {
           if (articles.length === 0) throw new Error("No papers came back");
           return { id: outlet.id, feedUrl: outlet.feedUrl, ok: true, ...freshness(articles) };
         }
-        const { body, finalUrl } = await fetchText(outlet.feedUrl, 12000);
+        // As the refresh asks for it, a bot check's web page asked for again (lib/feed.ts).
+        const { body, finalUrl } = await fetchFeedText(outlet.feedUrl, 12000);
         if (!looksLikeFeed(body)) throw new Error("Not a feed");
         const { articles } = parseFeed(body, finalUrl);
         if (articles.length === 0) throw new Error("Feed is empty");

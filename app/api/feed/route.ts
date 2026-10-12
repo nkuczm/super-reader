@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchText, parseFeed, looksLikeFeed, faviconFor } from "@/lib/feed";
+import { fetchFeedText, parseFeed, looksLikeFeed, faviconFor } from "@/lib/feed";
 import { scrapePage } from "@/lib/scrape";
 import { enrichArticles } from "@/lib/enrich";
 import { xHandleFrom, fetchXFeed } from "@/lib/x";
@@ -11,10 +11,6 @@ import { canonicalUrl } from "@/lib/url";
 import { augment } from "@/lib/harvest";
 import { looksLikeSitemap, parseSitemap, withinOf, keepWithin } from "@/lib/sitemap";
 import { keepArticles } from "@/lib/authentic";
-
-
-/** An address that names a feed: a `.rss`/`.atom`/`.xml` file, or a /feed or /rss path. */
-const FEEDISH = /(\.(rss|atom|xml)(\?|$)|\/(feed|rss)(\/|\?|$)|[?&]feed=rss)/i;
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -99,14 +95,8 @@ export async function GET(request: Request) {
   async function readFeed(url: string, cap: number) {
     // A sitemap source may carry the section it is limited to in its
     // fragment (lib/sitemap.ts, `sitemapSource`); the fetch never sees it.
-    let { body, finalUrl } = await fetchText(url.split("#")[0]);
-    // An address that is plainly a feed's, answered with a web page: a
-    // publisher's bot check on a burst of requests, not the page to scrape
-    // (nature.com, 12 Oct 2026). Once more, a moment later.
-    if (FEEDISH.test(url) && !looksLikeFeed(body) && !looksLikeSitemap(body)) {
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      ({ body, finalUrl } = await fetchText(url.split("#")[0]));
-    }
+    // A feed's address answered with a web page is asked once more (lib/feed.ts).
+    const { body, finalUrl } = await fetchFeedText(url.split("#")[0]);
     // A source may be a real feed, a news sitemap, or a page to be scraped;
     // the body tells us. Sitemaps matter here because some publishers — CNN
     // among them — declare no RSS at all, so the sitemap is the only

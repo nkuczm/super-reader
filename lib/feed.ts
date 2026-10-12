@@ -56,6 +56,22 @@ export async function fetchText(
   return onePerTurn(url, () => fetchTextNow(url, timeoutMs, extraHeaders));
 }
 
+/** An address that names a feed: a `.rss`/`.atom`/`.xml` file, or a /feed or /rss path. */
+const FEEDISH = /(\.(rss|atom|xml)(\?|$)|\/(feed|rss)(\/|\?|$)|[?&]feed=rss)/i;
+
+/**
+ * A feed, asked for once more if its address answered with a web page: a
+ * publisher's bot check on a burst of requests, not a page to scrape. Measured
+ * 12 Oct 2026 — nature.com answered some of four feeds asked for together
+ * with HTML, and the same feeds alone every time.
+ */
+export async function fetchFeedText(url: string, timeoutMs = 12000) {
+  const first = await fetchText(url, timeoutMs);
+  if (!FEEDISH.test(url) || looksLikeFeed(first.body) || /<(urlset|sitemapindex)\b/i.test(first.body.slice(0, 2000))) return first;
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  return fetchText(url, timeoutMs);
+}
+
 async function fetchTextNow(url: string, timeoutMs: number, extraHeaders?: Record<string, string>) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
