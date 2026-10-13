@@ -4577,7 +4577,6 @@ export default function Reader() {
             onCreate={(name) => choose({ type: "note", id: createNote(name) })}
             onRename={(id, name) => commitNotes((current) => renameNote(current, id, name))}
             onDelete={(id) => removeNote(id)}
-            opened={subjectUsed}
             onPin={(id, pinned) => commitBoard(id, (board) => putItem(board, { id: PIN_ID, kind: "pin", pinned, at: Date.now() }))}
             onColor={(id, color) => commitBoard(id, (board) => putItem(board, { id: COLOR_ID, kind: "color", ...(color ? { color } : {}), at: Date.now() }))}
           />

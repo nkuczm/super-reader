@@ -89,6 +89,7 @@ import { PROVIDER_NAME, recordSpend, shareSpend, type AiProvider } from "@/lib/s
 import { loadSyncCode } from "@/lib/store";
 import { lastOpened, markOpened, newSince } from "@/lib/subject-seen";
 import { useHeadroom } from "./useHeadroom";
+import MoreMenu from "./MoreMenu";
 import { arriveOnTab } from "@/lib/tab-place";
 
 type Props = {
@@ -4545,38 +4546,6 @@ function TabBar({
         >
           Contacts{contacts.count > 0 && <span className="count">{contacts.count}</span>}
         </button>
-      )}
-    </div>
-  );
-}
-
-/** The ⋯ menu that holds everything the header does not need to show. */
-function MoreMenu({ children }: { children: (close: () => void) => React.ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    const away = (event: PointerEvent) => {
-      if (!ref.current?.contains(event.target as globalThis.Node)) setOpen(false);
-    };
-    const esc = (event: KeyboardEvent) => event.key === "Escape" && setOpen(false);
-    document.addEventListener("pointerdown", away);
-    document.addEventListener("keydown", esc);
-    return () => {
-      document.removeEventListener("pointerdown", away);
-      document.removeEventListener("keydown", esc);
-    };
-  }, [open]);
-  return (
-    <div className="more-wrap" ref={ref}>
-      <button className="btn ghost small more-btn" aria-label="More" aria-haspopup="menu" aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}>
-        ⋯
-      </button>
-      {open && (
-        <div className="more-menu" role="menu">
-          {children(() => setOpen(false))}
-        </div>
       )}
     </div>
   );

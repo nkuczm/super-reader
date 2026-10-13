@@ -39,6 +39,12 @@ export type ReadableArticle = {
    * it was stored for. Only set when one was used.
    */
   subscription?: { host: string; applied: boolean };
+  /**
+   * The reader put this text in themselves — pasted, or read from a PDF —
+   * because the site would not give us all of it. Their copy is kept on the
+   * device through extraction changes and pruning: nothing can fetch it again.
+   */
+  own?: "pasted" | "pdf";
 };
 
 /**
