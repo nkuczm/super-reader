@@ -88,6 +88,7 @@ import { busiestView, chainedLabelLinks, edgePath, layoutBoard, settle, GAP } fr
 import { PROVIDER_NAME, recordSpend, shareSpend, type AiProvider } from "@/lib/spend";
 import { loadSyncCode } from "@/lib/store";
 import { lastOpened, markOpened, newSince } from "@/lib/subject-seen";
+import { useHeadroom } from "./useHeadroom";
 
 type Props = {
   /** Whether this device's boards have been read from storage yet: nothing is written on a guess of an empty board. */
@@ -1396,9 +1397,22 @@ export default function SubjectPage(props: Props) {
     };
   }, [placeKey, meta.view]);
 
+  /**
+   * The header and the text tools stick together at the top of a document;
+   * scrolling down tucks the header away (the tools stay), scrolling up
+   * brings it back, so leaving a subject never needs a trip to the top. By
+   * offset rather than transform: a transformed parent would carry the
+   * phone's keyboard toolbar, which is fixed inside it, away with it.
+   */
+  const topRef = useRef<HTMLDivElement | null>(null);
+  const headRef = useRef<HTMLDivElement | null>(null);
+  const tucked = useHeadroom(topRef, meta.view !== "board");
+
   return (
     <div className="subject-page" ref={pageRef}>
-      <div className="main-head subject-head">
+      <div ref={topRef} className={`subject-top${tucked ? " tucked" : ""}`}
+        style={tucked ? { top: -(headRef.current?.offsetHeight ?? 0) } : undefined}>
+      <div className="main-head subject-head" ref={headRef}>
         {props.onOpenMenu && (
           <button className="menu-btn" onClick={props.onOpenMenu} aria-label="Open feeds">
             {Icon.menu}
@@ -1547,6 +1561,14 @@ export default function SubjectPage(props: Props) {
           </MoreMenu>
         </div>
       </div>
+      {/* One bar of text tools under the header, as in a Doc, for whichever box is being
+          written in — document or whiteboard — so none of them pops up tools of its own. */}
+      <div className="doc-toolbar subject-format-bar" ref={setFormatHost} role="toolbar" aria-label="Text tools" onMouseDown={(e) => e.preventDefault()}>
+        <div className="doc-toolbar-idle">
+          <ToolbarIdle onHistory={(redo) => void stepHistory(redo)} />
+        </div>
+      </div>
+      </div>
       {typeof exporting === "object" && exporting && (
         <div className="subject-ai-bar">
           {"url" in exporting ? (
@@ -1576,13 +1598,6 @@ export default function SubjectPage(props: Props) {
         />
       )}
       {aiStatus && <div className="subject-ai-bar">{aiStatus}</div>}
-      {/* One bar of text tools under the header, as in a Doc, for whichever box is being
-          written in — document or whiteboard — so none of them pops up tools of its own. */}
-      <div className="doc-toolbar subject-format-bar" ref={setFormatHost} role="toolbar" aria-label="Text tools" onMouseDown={(e) => e.preventDefault()}>
-        <div className="doc-toolbar-idle">
-          <ToolbarIdle onHistory={(redo) => void stepHistory(redo)} />
-        </div>
-      </div>
       <ToolsHostContext.Provider value={formatHost}>
       <div className={`subject-body${contactsShown ? " with-contacts" : ""}`}>
       <div className={`subject-main${railOpen ? " rail-open" : " rail-closed"}${props.hideBoxes ? " quiet-boxes" : ""}`}
