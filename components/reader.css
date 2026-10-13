@@ -1619,10 +1619,6 @@
 .subject-tab-add:hover { color: var(--accent); border-color: var(--accent); }
 .subject-tab-input { padding: 4px 8px; font-size: 13.5px; width: 150px; }
 .subject-tab.confirming { font-size: 12.5px; gap: 8px; padding: 4px 8px; background: var(--bg-sub); white-space: nowrap; }
-.subject-card-tab {
-  border: 1px solid var(--border); background: var(--bg); color: var(--text-dim);
-  border-radius: 6px; font-size: 12px; padding: 2px 4px; max-width: 110px; flex-shrink: 0;
-}
 
 /* ---------- Google sign-in, saving and history ---------- */
 .signin-page { position: relative; min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
@@ -1856,7 +1852,6 @@
   display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 0; width: 30px;
   opacity: 0; transition: opacity 0.15s;
 }
-.quiet-boxes .subject-doc .subject-card-tools .subject-card-tab { display: none; }
 .quiet-boxes .subject-doc .subject-box-head .subject-box-grip { display: none; }
 .quiet-boxes .subject-doc .subject-card:hover .subject-card-tools,
 .quiet-boxes .subject-doc .subject-box:hover .subject-box-head,

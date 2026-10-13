@@ -89,6 +89,7 @@ import { PROVIDER_NAME, recordSpend, shareSpend, type AiProvider } from "@/lib/s
 import { loadSyncCode } from "@/lib/store";
 import { lastOpened, markOpened, newSince } from "@/lib/subject-seen";
 import { useHeadroom } from "./useHeadroom";
+import { arriveOnTab } from "@/lib/tab-place";
 
 type Props = {
   /** Whether this device's boards have been read from storage yet: nothing is written on a guess of an empty board. */
@@ -937,7 +938,6 @@ export default function SubjectPage(props: Props) {
   };
 
   const switchTab = (tab: string) => onBoard((current) => put(current, { ...metaOf(current), activeTab: tab }));
-  const moveCard = (target: string, tab: string) => recorded((current) => placeOn(current, target, tab));
 
   /* -------------------------------------------------------------------- */
   /* The AI run                                                            */
@@ -1175,7 +1175,6 @@ export default function SubjectPage(props: Props) {
     dropImage,
     tabs,
     currentTab,
-    moveCard,
     cards,
     boxes,
     insights,
@@ -1185,6 +1184,12 @@ export default function SubjectPage(props: Props) {
     storyFromLink: (url: string, after: string) => {
       const link = webLink(url);
       if (!link) return null;
+      // Already in the subject: it stays on its tab, and this one gets it as a card in writing (lib/tab-place.ts).
+      const held = allCards.find((card) => card.id === canonicalUrl(link));
+      if (held) {
+        onBoard((current) => arriveOnTab(current, held, true, { after }));
+        return { link, title: held.title };
+      }
       return { link, title: addStoryFromLink(link, onBoard, undefined, after).title };
     },
     removeCard,
@@ -1744,7 +1749,6 @@ type Shared = {
   tags: Tags;
   tabs: Tab[];
   currentTab: string;
-  moveCard: (target: string, tab: string) => void;
   cards: Card[];
   boxes: BoxItem[];
   insights: InsightItem[];
@@ -2026,20 +2030,6 @@ function StoryCard({
         )}
         {/* The card's controls, as one group: in a seamless document they sit in the margin, not on the card. */}
         <span className="subject-card-tools">
-        {shared.tabs.length > 1 && (
-          <select
-            className="subject-card-tab"
-            aria-label="Move to tab"
-            title="Move to another tab"
-            value={shared.currentTab}
-            onPointerDown={(e) => e.stopPropagation()}
-            onChange={(event) => shared.moveCard(card.id, event.target.value)}
-          >
-            {shared.tabs.map((tab) => (
-              <option key={tab.id} value={tab.id}>{tab.name}</option>
-            ))}
-          </select>
-        )}
         {/* In the document a story is removed from the keyboard, and contacts are tagged on the whiteboard. */}
         {/* Tagging a contact and printing are in the card's menu (right-click, or ⋯ on a touch screen). */}
         {dragHandle && (

@@ -111,7 +111,6 @@ import {
 } from "@/lib/manual";
 import {
   addStory,
-  placeNew,
   cardsOf,
   retitleCards,
   metaOf,
@@ -136,6 +135,7 @@ import { attributeStories, inAnySource, inSource } from "@/lib/attribute";
 import { loadHealth, recordRuns, saveHealth, type HealthLog } from "@/lib/health";
 import { groupsOf, inLanes, isDue, IN_FLIGHT } from "@/lib/refresh";
 import { groupStories } from "@/lib/story-groups";
+import { arriveOnTab } from "@/lib/tab-place";
 import { aboutTopic, trendingTopics } from "@/lib/trending";
 import { listenForClientErrors } from "@/lib/client-errors";
 import { encodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
@@ -2194,6 +2194,16 @@ export default function Reader() {
     [],
   );
 
+  /**
+   * Whether a subject already holds a story, read before anything is added:
+   * one it holds stays on its own tab, and the open tab gets a card of it in
+   * writing (lib/tab-place.ts). A card from a quote counts.
+   */
+  const holds = useCallback((noteId: string, link: string) => {
+    const note = notesRef.current.find((n) => n.id === noteId);
+    return note ? cardsOf(note, boardsRef.current[noteId]).some((card) => card.id === canonicalUrl(link)) : false;
+  }, []);
+
   const touchSubject = useCallback((id: string) => {
     setSubjectUsed((current) => {
       const next = { ...current, [id]: Date.now() };
@@ -2263,20 +2273,20 @@ export default function Reader() {
       const source = known?.sourceId
         ? allSources.find((entry) => entry.id === known.sourceId)
         : undefined;
-      commitBoard(noteId, (board) =>
-        // Onto the tab that is open in that subject.
-        placeNew(addStory(board, {
-            link,
-            title: known?.title ?? reading?.title ?? link,
-            source: source?.title,
-            publishedAt: known?.publishedAt,
-            author: known?.author,
-          }), canonicalUrl(link)),
-      );
+      const story = {
+        link,
+        title: known?.title ?? reading?.title ?? link,
+        source: source?.title,
+        publishedAt: known?.publishedAt,
+        author: known?.author,
+      };
+      const wasIn = holds(noteId, link);
+      // Onto the tab that is open in that subject; one it already has stays where it is.
+      commitBoard(noteId, (board) => arriveOnTab(wasIn ? board : addStory(board, story), story, wasIn));
       touchSubject(noteId);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [reading, articles, commitBoard, touchSubject],
+    [reading, articles, commitBoard, touchSubject, holds],
   );
 
   /** The subjects a story is in — quoted there, or added to it whole. */
@@ -2380,6 +2390,7 @@ export default function Reader() {
       if (!noteId) return;
       const target = noteId;
       const story = { link, title: article.title, source: article.siteName, publishedAt: article.publishedAt, author: article.byline };
+      const wasIn = holds(target, link);
       if (item.quote) {
         const quoteId = newId();
         commitNotes((current) =>
@@ -2395,7 +2406,7 @@ export default function Reader() {
             at: Date.now(),
           }),
         );
-        commitBoard(target, (board) => placeNew(board, canonicalUrl(link)));
+        commitBoard(target, (board) => arriveOnTab(board, story, wasIn));
         if (item.note) {
           const note = notesRef.current.find((n) => n.id === target);
           const html = `<ul><li>${item.note.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</li></ul>`;
@@ -2403,7 +2414,7 @@ export default function Reader() {
         }
       } else {
         commitBoard(target, (board) => {
-          let next = placeNew(addStory(board, story), canonicalUrl(link));
+          let next = arriveOnTab(wasIn ? board : addStory(board, story), story, wasIn);
           if (item.note) {
             const id = canonicalUrl(link);
             const text = item.note.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -2415,7 +2426,7 @@ export default function Reader() {
       touchSubject(target);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [createNote, commitNotes, commitBoard, touchSubject, articles],
+    [createNote, commitNotes, commitBoard, touchSubject, articles, holds],
   );
 
   const checkInbox = useCallback(async () => {
@@ -2490,6 +2501,7 @@ export default function Reader() {
         ? allSources.find((entry) => entry.id === known.sourceId)
         : undefined;
       const title = known?.title ?? reading?.title ?? link;
+      const wasIn = holds(noteId, link);
 
       commitNotes((current) =>
         appendQuote(current, noteId, {
@@ -2504,8 +2516,8 @@ export default function Reader() {
           at: Date.now(),
         }),
       );
-      // A new story quoted into a subject lands on the tab open there.
-      commitBoard(noteId, (board) => placeNew(board, canonicalUrl(link)));
+      // A new story quoted into a subject lands on the tab open there; one it already has stays put.
+      commitBoard(noteId, (board) => arriveOnTab(board, { link, title }, wasIn));
 
       if (savedRef.current.some((a) => a.link === link)) return entryId;
       setSaved((current) => {
@@ -2532,7 +2544,7 @@ export default function Reader() {
       touchSubject(noteId);
       return entryId;
     },
-    [reading, articles, allSources, commitNotes, touchSubject],
+    [reading, articles, allSources, commitNotes, touchSubject, holds],
   );
 
   /**
