@@ -297,11 +297,12 @@ export default function SettingsDialog({
                 onChange={(event) => onAutoDownloadChange(event.target.checked)}
               />
               <span>
-                Download new stories automatically on this device
+                Download articles automatically on this device
                 <em>
-                  The newest {PER_SOURCE} from every source, whenever the app is open — worth
-                  it on a phone you read without signal. Off, only Saved stories and subjects
-                  marked available offline are downloaded.
+                  The newest {PER_SOURCE} from every source, Saved stories, and subjects marked
+                  available offline, whenever the app is open — worth it on a phone you read
+                  without signal. Off, nothing downloads by itself: an article is kept only
+                  once you open it, or when you tap Download now.
                 </em>
               </span>
             </label>
@@ -353,13 +354,14 @@ export default function SettingsDialog({
                   )}
                   <details className="settings-more">
                     <summary>How offline reading works</summary>
-                    Saved stories and subjects marked available offline are kept on
-                    this device so you can read them without a connection. With
-                    automatic downloads on, so are the newest {PER_SOURCE} stories from
-                    each source: anything missing is fetched whenever the app is
-                    open, so an interrupted download finishes itself. Download now
-                    fetches all of it once, whichever way the switch is set.
-                    Downloaded articles carry a blue check in the list.{" "}
+                    With automatic downloads on, the newest {PER_SOURCE} stories from
+                    each source, everything in Saved, and every story in a subject
+                    marked available offline are kept on this device so you can read
+                    them without a connection; anything missing is fetched whenever
+                    the app is open, so an interrupted download finishes itself. With
+                    it off, Download now fetches the same set once. Articles you open
+                    are kept either way. Downloaded articles carry a blue check in the
+                    list.{" "}
                     {persisted
                       ? "This browser has agreed to keep the cache."
                       : "This browser may clear the cache when space is short — adding the app to your Home Screen usually prevents that."}

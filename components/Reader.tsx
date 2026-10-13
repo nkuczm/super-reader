@@ -2669,9 +2669,33 @@ export default function Reader() {
     [settings],
   );
 
-  /** Fetch and store an article ahead of the click that opens it. */
+  /**
+   * Whether this device downloads articles by itself (lib/offline.ts): the
+   * background top-up, and fetching a story ahead of the click when the
+   * pointer rests on it. Off until turned on, on each device separately; with
+   * it off, an article is stored only when it is opened or Download now is
+   * pressed.
+   */
+  const [autoDownload, setAutoDownload] = useState(false);
+  const autoDownloadRef = useRef(false);
+  useEffect(() => {
+    autoDownloadRef.current = loadAutoDownload();
+    setAutoDownload(autoDownloadRef.current);
+  }, []);
+  const changeAutoDownload = useCallback((on: boolean) => {
+    autoDownloadRef.current = on;
+    setAutoDownload(on);
+    saveAutoDownload(on);
+  }, []);
+
+  /**
+   * Fetch and store an article ahead of the click that opens it. Only where
+   * this device downloads by itself: on a desktop the pointer passes over
+   * most of the list, and each pass was an article fetched, stored and given
+   * its blue check — downloading by another name.
+   */
   const prefetch = useCallback((url: string, feedUrl?: string, title?: string) => {
-    if (prefetched.current.has(url)) return;
+    if (!autoDownloadRef.current || prefetched.current.has(url)) return;
     prefetched.current.add(url);
     void (async () => {
       if (await readCached(url)) {
@@ -3017,21 +3041,10 @@ export default function Reader() {
   );
 
   /**
-   * Whether this device tops itself up with every source's newest stories
-   * (lib/offline.ts). Off until turned on, on each device separately.
-   */
-  const [autoDownload, setAutoDownload] = useState(false);
-  useEffect(() => setAutoDownload(loadAutoDownload()), []);
-  const changeAutoDownload = useCallback((on: boolean) => {
-    setAutoDownload(on);
-    saveAutoDownload(on);
-  }, []);
-
-  /**
    * What gets saved for reading offline: subjects marked available offline,
-   * Saved stories, and — for `everything` — each source's newest N.
+   * Saved stories, and each source's newest N.
    */
-  const offlineTargets = useCallback((everything = true): OfflineTarget[] => {
+  const offlineTargets = useCallback((): OfflineTarget[] => {
     const perSource = new Map<string, OfflineTarget[]>();
     for (const article of articles) {
       const list = perSource.get(article.sourceId) ?? [];
@@ -3069,7 +3082,7 @@ export default function Reader() {
       }
     }
 
-    return [...subjectStories, ...bookmarks, ...(everything ? [...perSource.values()].flat() : [])].filter(
+    return [...subjectStories, ...bookmarks, ...[...perSource.values()].flat()].filter(
       (target) => {
         try {
           return !knownRefusal(new URL(target.url).hostname);
@@ -3080,15 +3093,9 @@ export default function Reader() {
     );
   }, [articles, sourceById, saved, notes, boards]);
 
-  /**
-   * Download for offline reading: everything when asked to, or only what the
-   * reader chose to keep when this is the background top-up on a device that
-   * has not turned it on. Pruning always measures against everything, so a
-   * small run never deletes the rest.
-   */
-  const runDownload = useCallback(async (everything: boolean) => {
+  const runDownload = useCallback(async () => {
     if (downloading.current) return;
-    const links = offlineTargets(everything);
+    const links = offlineTargets();
     if (links.length === 0) return;
 
     downloading.current = true;
@@ -3114,8 +3121,6 @@ export default function Reader() {
           if (saved) markSaved(saved);
         },
         keyHeadersFrom(apiKeysRef.current),
-        undefined,
-        everything ? links : offlineTargets(true),
       );
       await markSlotDownloaded(currentSlot());
       // The download prunes anything that fell out of the newest set, so the
@@ -3144,7 +3149,10 @@ export default function Reader() {
    * skipped, so topping up is cheap when there is nothing to do.
    */
   useEffect(() => {
-    if (!ready || articles.length === 0) return;
+    // Off on this device: nothing downloads by itself — not the newest
+    // stories, and not Saved or a subject marked available offline either,
+    // since that mark follows the subject to every device.
+    if (!ready || articles.length === 0 || !autoDownload) return;
     let cancelled = false;
 
     const check = async () => {
@@ -3158,9 +3166,9 @@ export default function Reader() {
 
       if (!navigator.onLine || cancelled) return;
 
-      const missing = offlineTargets(autoDownload).filter((t) => !stored.has(t.url)).length;
+      const missing = offlineTargets().filter((t) => !stored.has(t.url)).length;
       if (missing > 0 || (await isDownloadDue())) {
-        if (!cancelled) void runDownload(autoDownload);
+        if (!cancelled) void runDownload();
       } else if (!cancelled) {
         setOffline({ state: "done", at: await lastDownloadedAt() });
       }
@@ -5073,7 +5081,7 @@ export default function Reader() {
           signedIn={Boolean(auth.account)}
           onPrefsRestored={() => void syncAccountPrefs()}
           onRestoreFeeds={restoreFeeds}
-          onDownload={() => void runDownload(true)}
+          onDownload={() => void runDownload()}
           autoDownload={autoDownload}
           onAutoDownloadChange={changeAutoDownload}
           noteCount={notes.length}
