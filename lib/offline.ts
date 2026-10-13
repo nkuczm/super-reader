@@ -66,12 +66,15 @@ function run<T>(
   );
 }
 
+const readable = (copy: CachedArticle) => copy.v === EXTRACT_VERSION || Boolean(copy.own);
+
 export async function readCached(url: string): Promise<CachedArticle | null> {
   try {
     const direct = await run<CachedArticle>(ARTICLES, "readonly", (s) => s.get(url));
     // Showing the wrong article is worse than fetching it again: a copy from
-    // an older extraction is ignored rather than served.
-    if (direct) return direct.v === EXTRACT_VERSION ? direct : null;
+    // an older extraction is ignored rather than served. The reader's own
+    // text was never extracted, so it is never out of date.
+    if (direct) return readable(direct) ? direct : null;
 
     // Filed under the URL the server resolved it to, rather than the link
     // that was asked for — a topic source's links go through a redirector.
@@ -84,7 +87,7 @@ export async function readCached(url: string): Promise<CachedArticle | null> {
     if (!storedAs || storedAs === url) return null;
     const hit = await run<CachedArticle>(ARTICLES, "readonly", (s) => s.get(storedAs));
     if (!hit) return null;
-    return hit.v === EXTRACT_VERSION ? hit : null;
+    return readable(hit) ? hit : null;
   } catch {
     return null;
   }
@@ -103,6 +106,15 @@ export async function writeCached(article: ReadableArticle, requestedUrl?: strin
     await rememberLink(`canonical:${canonicalUrl(requestedUrl ?? article.url)}`, article.url);
   } catch {
     /* storage full or unavailable — reading online still works */
+  }
+}
+
+/** Take a copy off the device: one the reader replaced and then took back. */
+export async function forgetCached(url: string) {
+  try {
+    await run(ARTICLES, "readwrite", (s) => s.delete(url));
+  } catch {
+    /* nothing stored, or storage unavailable */
   }
 }
 
@@ -150,7 +162,7 @@ export async function storedArticles(): Promise<StoredArticle[]> {
     return (rows ?? [])
       // A copy from an older extraction is not readable — readCached refuses
       // it — so listing it would promise something the reader cannot open.
-      .filter((row) => row?.url && row.v === EXTRACT_VERSION)
+      .filter((row) => row?.url && readable(row))
       .map((row) => ({
         url: row.url,
         title: row.title || row.url,
@@ -196,13 +208,23 @@ export async function purgeStaleVersion(): Promise<number> {
   const stored = await meta<number>(VERSION_KEY);
   if (stored === EXTRACT_VERSION) return 0;
 
-  const stale = (await cachedUrls()).length;
+  let stale = 0;
+  // The reader's own text stays, and the links it is found by: there is
+  // nowhere to fetch it from again.
+  const own = new Set<string>();
   try {
-    await run(ARTICLES, "readwrite", (s) => s.clear());
+    const rows = await run<CachedArticle[]>(ARTICLES, "readonly", (s) => s.getAll());
+    for (const row of rows ?? []) {
+      if (row?.own) own.add(row.url);
+      else if (row?.url) {
+        stale += 1;
+        await run(ARTICLES, "readwrite", (s) => s.delete(row.url));
+      }
+    }
   } catch {
     /* nothing stored, or storage unavailable */
   }
-  await setMeta(LINKS, []);
+  await setMeta(LINKS, Object.fromEntries(Object.entries(await linkIndex()).filter(([, filed]) => own.has(filed))));
   await setMeta("slot", null);
   await setMeta(VERSION_KEY, EXTRACT_VERSION);
   return stale;
@@ -211,8 +233,9 @@ export async function purgeStaleVersion(): Promise<number> {
 /** Drop anything no longer in the newest set, so the store cannot grow forever. */
 export async function pruneTo(keep: Set<string>, keepLinks?: Set<string>) {
   try {
+    const own = new Set((await run<CachedArticle[]>(ARTICLES, "readonly", (s) => s.getAll())).filter((row) => row?.own).map((row) => row.url));
     for (const url of await cachedUrls()) {
-      if (!keep.has(url)) {
+      if (!keep.has(url) && !own.has(url)) {
         await run(ARTICLES, "readwrite", (s) => s.delete(url));
       }
     }

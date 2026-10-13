@@ -8,7 +8,7 @@ test("each subject is sized with its board, pictures counted, last edit found", 
   const [a, b] = subjectUsage(notes, boards);
   assert.equal(a.items, 1);
   assert.equal(a.images, "data:image/png;base64,AAAA".length);
-  assert.equal(a.edited, 99, "a deleted item does not count as an edit");
+  assert.equal(a.edited, 500, "taking something out is an edit, as on the Subjects page");
   assert.ok(a.bytes > b.bytes);
   assert.equal(b.name, "Untitled");
 });

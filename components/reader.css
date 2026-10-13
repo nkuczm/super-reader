@@ -2295,6 +2295,18 @@
 
 /* ---------- pasting a walled article's text in by hand ---------- */
 .reader-paste { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.reader-body > .reader-paste { margin: 0 0 24px; }
+/* What the ⋯ menu did to the text, or is doing: with Undo, or a way on when a rescan found nothing more. */
+.reader-replaced {
+  display: flex; align-items: center; gap: 4px 12px; flex-wrap: wrap;
+  margin: -12px 0 22px; padding: 7px 8px 7px 12px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg-sub); color: var(--text-dim); font-size: 13.5px;
+}
+.reader-replaced > span { flex: 1 1 220px; }
+.reader-replaced .link-btn { font-weight: 600; color: var(--accent); text-decoration: none; }
+/* As tall as the buttons beside it. */
+.reader-bar .more-wrap { display: flex; align-self: stretch; }
+.reader-bar .more-btn { padding-top: 0; padding-bottom: 4px; }
 .reader-paste .sub { margin: 0; font-size: 13px; color: var(--text-dim); }
 .reader-paste-box { min-height: 160px; max-height: 50vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--bg); color: var(--text); outline: none; }
 .reader-paste-box:focus { border-color: var(--accent); }
@@ -2869,7 +2881,8 @@
   .print-preview { padding: 12px 6px 18px; }
   .print-hint { padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
 }
-@media (max-width: 380px) {
+/* Up to the widest phones, now the ⋯ menu is in the bar too. */
+@media (max-width: 430px) {
   .reader-bar { gap: 4px; }
   .reader-bar .btn.ghost.small, .reader-bar a.btn { padding: 8px 7px; }
   .reader-bar .menu-btn { width: 38px; }
@@ -3024,7 +3037,7 @@
 
 .subjects-list { margin: 4px 20px 40px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 .subjects-list-head, .subjects-list-row {
-  display: grid; grid-template-columns: 40px minmax(0, 1fr) 96px 112px 112px 92px; align-items: center; column-gap: 8px;
+  display: grid; grid-template-columns: 40px minmax(0, 1fr) 96px 112px 92px; align-items: center; column-gap: 8px;
 }
 .subjects-list-head { padding: 6px 8px; border-bottom: 1px solid var(--border); background: var(--bg-soft, var(--bg-hover)); }
 .subjects-list-head button {
@@ -3059,9 +3072,9 @@
   .subjects-list { margin: 4px 12px 32px; }
   /* Narrow: the date being sorted by stays, the others go. */
   .subjects-list-head, .subjects-list-row { grid-template-columns: 34px minmax(0, 1fr) 88px 86px; }
-  .subjects-list .col-created, .subjects-list .col-opened, .subjects-list .col-edited { display: none; }
-  .subjects-list.by-created .col-created, .subjects-list.by-opened .col-opened, .subjects-list.by-edited .col-edited,
-  .subjects-list.by-name .col-opened { display: block; }
+  .subjects-list .col-created, .subjects-list .col-edited { display: none; }
+  .subjects-list.by-created .col-created, .subjects-list.by-edited .col-edited,
+  .subjects-list.by-name .col-edited { display: block; }
   .subjects-list-row .col-actions .icon-btn { opacity: 1; }
   .subjects-toolbar { padding: 4px 12px 6px; }
 }

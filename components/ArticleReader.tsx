@@ -8,7 +8,7 @@ import { useHeadroom } from "./useHeadroom";
 import type { ReadableArticle } from "@/lib/article";
 import { Icon } from "./icons";
 import { downloadUrlFor } from "@/lib/download";
-import { EXTRACT_VERSION, readCached, writeCached } from "@/lib/offline";
+import { EXTRACT_VERSION, forgetCached, readCached, writeCached } from "@/lib/offline";
 import { loadSyncCode } from "@/lib/store";
 import { sanitizeRichText } from "@/lib/subjects";
 import { cleanPastedHtml } from "@/lib/paste";
@@ -20,6 +20,28 @@ import PrintDialog, { type PrintJob } from "./PrintDialog";
 import { printedOn, printPage, transcriptArticleExcerpt } from "@/lib/print";
 import { findQuoteRange } from "@/lib/highlight";
 import type { Note } from "@/lib/notes";
+import MoreMenu from "./MoreMenu";
+
+/** A PDF this size is a book or a scan, not an article; reading it would stall the page. */
+const MAX_PDF_BYTES = 60 * 1024 * 1024;
+
+/** The copy of a page the reader saved from their own browser with the extension, if there is one. */
+async function savedFromBrowser(url: string): Promise<ReadableArticle | null> {
+  // Signed in, the account's saved pages (the session is the key); otherwise an old code's.
+  const code = isSignedIn() ? null : loadSyncCode();
+  if (!code && !isSignedIn()) return null;
+  try {
+    const res = await fetch(`/api/inbox?${code ? `code=${encodeURIComponent(code)}&` : ""}page=${encodeURIComponent(url)}`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const { article } = (await res.json()) as { article?: ReadableArticle };
+    return article?.html ? article : null;
+  } catch {
+    return null;
+  }
+}
 
 type Props = {
   url: string;
@@ -197,22 +219,162 @@ export default function ArticleReader({
     const html = video && lines.length
       ? sanitizeRichText((article?.html ?? "").replace(/<h2>Transcript[\s\S]*$/, "") + transcriptArticleHtml(video, lines))
       : sanitizeRichText(box.innerHTML);
-    const pasted: ReadableArticle = {
-      ...(article ?? {}),
-      via: "page",
-      url,
-      title: article?.title || fallbackTitle || hostOf(url),
-      siteName: article?.siteName || hostOf(url),
-      html,
-      wordCount: words,
-      truncated: false,
-      transcript: Boolean(video && lines.length) || undefined,
-    };
-    setArticle(pasted);
+    replaceText({ ...ownCopy(html, words, "pasted"), transcript: Boolean(video && lines.length) || undefined }, "Replaced with the text you pasted");
+  };
+
+  /** The text the reader supplied, in the article's place: its headline, outlet and byline kept. */
+  const ownCopy = (html: string, words: number, own: ReadableArticle["own"]): ReadableArticle => ({
+    ...(article ?? {}),
+    via: "page",
+    url,
+    title: article?.title || fallbackTitle || hostOf(url),
+    siteName: article?.siteName || hostOf(url),
+    html,
+    wordCount: words,
+    truncated: false,
+    transcript: undefined,
+    // Whatever the site's own copy said of itself is not true of this one.
+    paywalled: undefined,
+    subscription: undefined,
+    own,
+  });
+
+  /** Set while the text is being replaced, and what to say once it has been. */
+  const [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ text: string; undo?: ReadableArticle; scan?: boolean } | null>(null);
+  /** The reader's place is not looked up again for a copy that only replaced the one being read. */
+  const replacedRef = useRef(false);
+  const pdfInput = useRef<HTMLInputElement | null>(null);
+  /** Set when the reader went to scan the page in with the extension from here. */
+  const scanStarted = useRef(false);
+  /** The article open now: a rescan or a PDF finishing after another was opened belongs to the one it started on. */
+  const urlRef = useRef(url);
+  urlRef.current = url;
+  useEffect(() => {
+    setNotice(null);
+    setBusy(null);
+    setPasting(false);
+    scanStarted.current = false;
+  }, [url]);
+
+  /**
+   * A fuller copy in place of the one showing — rescanned, pasted or read
+   * from a PDF — kept on this device so it opens that way next time. Filed
+   * under the link that was opened, so it is the copy found there. The text
+   * it replaced can be put back.
+   */
+  const replaceText = (next: ReadableArticle, said: string) => {
+    const before = article;
+    const copy = { ...next, url };
+    replacedRef.current = true;
+    setArticle(copy);
+    setFromCache(false);
     setError(null);
     setPasting(false);
-    void writeCached(pasted, url);
+    // A walled preview is not kept: the cache is read before the network,
+    // and it would be served back for ever.
+    if (!copy.paywalled) void writeCached(copy, url);
+    const count = (n: number) => `${n.toLocaleString()} word${n === 1 ? "" : "s"}`;
+    setNotice({
+      text: before?.html ? `${said} — ${count(copy.wordCount)}, was ${count(before.wordCount ?? 0)}.` : `${said} — ${count(copy.wordCount)}.`,
+      undo: before?.html ? before : undefined,
+    });
+    (bodyRef.current?.closest(".main") as HTMLElement | null)?.scrollTo({ top: 0 });
   };
+
+  const undoReplace = (before: ReadableArticle) => {
+    replacedRef.current = true;
+    setArticle(before);
+    setNotice(null);
+    if (before.paywalled) void forgetCached(url);
+    else void writeCached({ ...before, url }, url);
+  };
+
+  /**
+   * Read the page again, past every cache, and keep the copy that has more
+   * of the article: a fresh read that comes back shorter — the site having
+   * a bad minute, or walling us this time — never costs the reader the text
+   * they already have.
+   */
+  const rescan = async () => {
+    setNotice(null);
+    setBusy("Reading the website again…");
+    try {
+      const res = await fetch(
+        `/api/article?url=${encodeURIComponent(url)}&x=${EXTRACT_VERSION}` +
+          (feedUrl ? `&feed=${encodeURIComponent(feedUrl)}` : "") +
+          `&title=${encodeURIComponent(fallbackTitle)}` +
+          // A different address from every earlier read, so neither the
+          // browser nor the CDN answers with the copy they kept.
+          `&fresh=${Date.now()}`,
+        { headers: keyHeaders, signal: AbortSignal.timeout(35000) },
+      );
+      const data = await res.json();
+      if (urlRef.current !== url) return;
+      if (!res.ok) throw new Error(data.error ?? "The site did not answer.");
+      const fresh = data as ReadableArticle;
+      const have = article?.html ? article.wordCount ?? 0 : 0;
+      if (fresh.wordCount > have) {
+        replaceText(fresh, "Rescanned the website");
+      } else {
+        setNotice({
+          text: fresh.wordCount === have
+            ? "The website gave the same text again."
+            : `The website gave less than this copy has (${fresh.wordCount.toLocaleString()} words against ${have.toLocaleString()}), so this copy stays.`,
+          scan: true,
+        });
+      }
+    } catch (err) {
+      if (urlRef.current !== url) return;
+      const timedOut = err instanceof DOMException && (err.name === "TimeoutError" || err.name === "AbortError");
+      setNotice({ text: timedOut ? "The website took too long to answer." : err instanceof Error ? err.message : "The website could not be read.", scan: true });
+    } finally {
+      if (urlRef.current === url) setBusy(null);
+    }
+  };
+
+  /** A PDF of the article, read on this device, as its text. */
+  const fromPdf = async (file: File) => {
+    setNotice(null);
+    if (file.size > MAX_PDF_BYTES) {
+      setNotice({ text: "That PDF is too large to read here." });
+      return;
+    }
+    setBusy(`Reading ${file.name}…`);
+    try {
+      const { pdfArticleHtml, readPdfPages } = await import("@/lib/pdf-article");
+      const pages = await readPdfPages(new Uint8Array(await file.arrayBuffer()));
+      const { html, words } = pdfArticleHtml(pages, { title: article?.title || fallbackTitle });
+      if (urlRef.current !== url) return;
+      if (words < 5) throw new Error("This PDF has no text in it — it is probably a scan, which needs OCR.");
+      replaceText(ownCopy(html, words, "pdf"), `Replaced with the text of ${file.name}`);
+    } catch (err) {
+      if (urlRef.current !== url) return;
+      const message = err instanceof Error ? err.message : "";
+      setNotice({
+        text: /OCR/.test(message) ? message : /password/i.test(message) ? "That PDF is locked with a password." : "That file could not be read as a PDF.",
+      });
+    } finally {
+      if (urlRef.current === url) setBusy(null);
+    }
+  };
+
+  /*
+   * Back from scanning the page in with the extension, started from a
+   * rescan: the copy the reader's own browser saw replaces this one if it
+   * holds more of the article.
+   */
+  useEffect(() => {
+    const back = async () => {
+      if (!scanStarted.current || !article) return;
+      const scanned = await savedFromBrowser(url);
+      if (urlRef.current !== url || !scanned || scanned.wordCount <= (article.wordCount ?? 0)) return;
+      scanStarted.current = false;
+      replaceText(scanned, "Scanned in from your browser");
+    };
+    window.addEventListener("focus", back);
+    return () => window.removeEventListener("focus", back);
+  }, [article, url]);
   const [fromCache, setFromCache] = useState(false);
   /** Set when a fetch is taking long enough that silence looks like a bug. */
   const [slow, setSlow] = useState(false);
@@ -231,6 +393,10 @@ export default function ArticleReader({
    */
   useEffect(() => {
     setResumed(null);
+    if (replacedRef.current) {
+      replacedRef.current = false;
+      return;
+    }
     if (!article || highlight) return;
     const fraction = positionFor(url);
     if (fraction === null) return;
@@ -473,7 +639,8 @@ export default function ArticleReader({
       const cached = await readCached(url);
       // A thin copy — a page's own summary, or a few lines — gives way to the
       // full text the reader saved from their browser, if there is one.
-      const thin = !!cached && (cached.via === "preview" || (cached.wordCount ?? 0) < 150);
+      // The reader's own text is never thin: it is what they chose.
+      const thin = !!cached && !cached.own && (cached.via === "preview" || (cached.wordCount ?? 0) < 150);
       if (cached && !thin && !cancelled) {
         setArticle(cached);
         setFromCache(true);
@@ -483,26 +650,12 @@ export default function ArticleReader({
       // Saved from the browser with the Chrome extension: the copy the
       // reader's own browser was given, kept with their account so any of
       // their devices can show it. It beats fetching the page again.
-      // Signed in, the account's saved pages (the session is the key); otherwise an old code's.
-      const code = isSignedIn() ? null : loadSyncCode();
-      if (code || isSignedIn()) {
-        try {
-          const res = await fetch(`/api/inbox?${code ? `code=${encodeURIComponent(code)}&` : ""}page=${encodeURIComponent(url)}`, {
-            cache: "no-store",
-            signal: AbortSignal.timeout(8000),
-          });
-          if (res.ok) {
-            const { article: saved } = (await res.json()) as { article?: ReadableArticle };
-            if (saved?.html && !cancelled) {
-              setArticle(saved);
-              setFromCache(false);
-              void writeCached(saved, url);
-              return;
-            }
-          }
-        } catch {
-          /* no saved copy reachable; carry on */
-        }
+      const saved = await savedFromBrowser(url);
+      if (saved && !cancelled) {
+        setArticle(saved);
+        setFromCache(false);
+        void writeCached(saved, url);
+        return;
       }
       if (cached && !cancelled) {
         setArticle(cached);
@@ -580,12 +733,20 @@ export default function ArticleReader({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Opened from the menu, the box to paste into comes into view ready for it.
+  useEffect(() => {
+    if (!pasting) return;
+    pasteBox.current?.scrollIntoView({ block: "center" });
+    pasteBox.current?.focus();
+  }, [pasting]);
+
   const isVideo = Boolean(youtubeId(url));
   const pastePanel = pasting ? (
               <div className="reader-paste">
                 <p className="sub">
-                  Open the story on the site, select all of it, copy, and paste it here. It is kept on this device as the
-                  article&apos;s text, so highlights and quotes work as usual.
+                  {article?.html && !(isVideo && !article.transcript)
+                    ? "Paste the whole article here — from the site, an email, anywhere. It replaces the text below and is kept on this device, so highlights and quotes work on it as usual."
+                    : "Open the story on the site, select all of it, copy, and paste it here. It is kept on this device as the article\u2019s text, so highlights and quotes work as usual."}
                 </p>
                 <div
                   ref={pasteBox}
@@ -754,6 +915,23 @@ export default function ArticleReader({
         >
           Open<span className="btn-label"> original</span>
         </a>
+        {(article || error) && (
+          <MoreMenu label="Replace the text">
+            {(close) => (
+              <>
+                <button role="menuitem" disabled={Boolean(busy)} onClick={() => { close(); void rescan(); }}>Rescan the website</button>
+                <button role="menuitem" disabled={Boolean(busy)} onClick={() => { close(); setNotice(null); setPasting(true); }}>Import text…</button>
+                <button role="menuitem" disabled={Boolean(busy)} onClick={() => { close(); pdfInput.current?.click(); }}>Upload a PDF…</button>
+              </>
+            )}
+          </MoreMenu>
+        )}
+        <input ref={pdfInput} type="file" accept="application/pdf,.pdf" hidden
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) void fromPdf(file);
+          }} />
       </div>
 
       <article
@@ -794,10 +972,34 @@ export default function ArticleReader({
             fromCache ? "Saved for offline" : null,
             article?.via === "feed" ? "From the publisher's feed" : null,
             article?.via === "preview" ? "Preview" : null,
+            article?.own === "pdf" ? "Text from your PDF" : article?.own === "pasted" ? "Text you pasted" : null,
           ]
             .filter(Boolean)
             .join("  ·  ")}
         </p>
+
+        {(busy || notice) && (
+          <div className="reader-replaced" role="status">
+            <span>{busy ?? notice?.text}</span>
+            {!busy && notice?.undo && (
+              <button className="link-btn" onClick={() => undoReplace(notice.undo!)}>Undo</button>
+            )}
+            {!busy && notice?.scan && (
+              <a className="link-btn" href={`${url.split("#")[0]}#super-reader-capture`} target="_blank" rel="opener"
+                title="Needs the Super Reader Chrome extension — it reads the page in your browser and brings it back here"
+                onClick={() => { scanStarted.current = true; }}>
+                Scan it in from your browser
+              </a>
+            )}
+            {!busy && (
+              <button className="icon-btn subtle" aria-label="Dismiss" onClick={() => setNotice(null)}>{Icon.close}</button>
+            )}
+          </div>
+        )}
+
+        {/* Opened from the ⋯ menu over an article that did load; where it
+            did not, or a video has no transcript yet, it opens in their panels below. */}
+        {article && !error && !(isVideo && !article.transcript) && pastePanel}
 
         {article?.transcript && (
           <div className="transcript-find reader-find" role="search">
@@ -862,6 +1064,9 @@ export default function ArticleReader({
               </a>
               <button className="btn ghost small" onClick={() => setPasting((v) => !v)}>
                 Paste the text
+              </button>
+              <button className="btn ghost small" onClick={() => pdfInput.current?.click()}>
+                Upload a PDF
               </button>
               <a
                 className="btn ghost small"

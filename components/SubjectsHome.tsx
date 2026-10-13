@@ -6,11 +6,11 @@ import { useEffect, useState } from "react";
 import { Icon } from "./icons";
 import type { Note } from "@/lib/notes";
 import { cardsOf, isPinned, LABEL_COLOR_NAMES, LABEL_COLORS, live, metaOf, subjectColorOf, type Boards } from "@/lib/subjects";
-import { sortSubjects, type SortDir, type SubjectSort } from "@/lib/subject-order";
+import { lastEdited, sortSubjects, type SortDir, type SubjectSort } from "@/lib/subject-order";
 import { timeAgo } from "./format";
 
 const LAYOUT_KEY = "super-reader:subjects-layout:v1";
-const SORT_LABEL: Record<SubjectSort, string> = { opened: "Last opened", edited: "Last edited", created: "Date created", name: "Name" };
+const SORT_LABEL: Record<SubjectSort, string> = { edited: "Last edited", created: "Date created", name: "Name" };
 
 const PIN_ICON = (
   <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round">
@@ -54,8 +54,8 @@ const shortDate = (t: number) =>
 /**
  * Every subject at a glance, the way a documents home page shows files: as
  * tiles with a picture of each board, or as a list with its dates side by
- * side — sorted by when each was last opened, last edited or made, or by
- * name, with pinned subjects always first. Layout and order are this
+ * side — sorted by when each was last edited or made, or by name, with
+ * pinned subjects always first. Layout and order are this
  * device's; pins and colours travel with the subject.
  */
 export default function SubjectsHome({
@@ -67,14 +67,11 @@ export default function SubjectsHome({
   onDelete,
   onOpenMenu,
   accountStrip,
-  opened,
   onPin,
   onColor,
 }: {
   notes: Note[];
   boards: Boards;
-  /** When each subject was last opened or added to, on this device. */
-  opened: Record<string, number>;
   onPin: (id: string, pinned: boolean) => void;
   /** A colour for the subject's tile and name; null for none. */
   onColor: (id: string, color: string | null) => void;
@@ -96,10 +93,12 @@ export default function SubjectsHome({
     setColoring(null);
   };
   const [name, setName] = useState("");
-  const [layout, setLayout] = useState<{ view: "grid" | "list"; by: SubjectSort; dir: SortDir }>({ view: "grid", by: "opened", dir: "desc" });
+  const [layout, setLayout] = useState<{ view: "grid" | "list"; by: SubjectSort; dir: SortDir }>({ view: "grid", by: "edited", dir: "desc" });
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "null");
+      // "Last opened" is gone; a layout saved with it keeps its view and sorts by last edited.
+      if (saved?.by === "opened") saved.by = "edited";
       if (saved && (saved.view === "grid" || saved.view === "list") && saved.by in SORT_LABEL && (saved.dir === "asc" || saved.dir === "desc")) setLayout(saved);
     } catch {
       /* the defaults */
@@ -124,12 +123,7 @@ export default function SubjectsHome({
       const board = boards[note.id];
       const cards = cardsOf(note, board);
       const items = live(board);
-      // What was written, not which view or tab was last switched to, nor a pin.
-      const lastChange = Math.max(
-        note.updatedAt ?? note.at,
-        ...note.entries.map((entry) => entry.at),
-        ...items.filter((item) => item.kind !== "meta" && item.kind !== "pin" && item.kind !== "color").map((item) => item.at),
-      );
+      const lastChange = lastEdited(note, board);
       return {
         note,
         cards,
@@ -142,7 +136,6 @@ export default function SubjectsHome({
         pinned: isPinned(board),
         color: subjectColorOf(board),
         created: note.at,
-        opened: opened[note.id] ?? 0,
         edited: lastChange,
       };
     });
@@ -195,10 +188,10 @@ export default function SubjectsHome({
         <div className={`subjects-list by-${layout.by}`} role="table" aria-label="Subjects">
           <div className="subjects-list-head" role="row">
             <span role="columnheader" className="col-pin" aria-label="Pinned" />
-            {(["name", "created", "opened", "edited"] as const).map((by) => (
+            {(["name", "created", "edited"] as const).map((by) => (
               <button key={by} role="columnheader" aria-sort={layout.by === by ? (layout.dir === "asc" ? "ascending" : "descending") : "none"}
                 className={`col-${by}${layout.by === by ? " on" : ""}`} onClick={() => sortBy(by)}>
-                {by === "name" ? "Name" : by === "created" ? "Created" : by === "opened" ? "Last opened" : "Edited"}
+                {by === "name" ? "Name" : by === "created" ? "Created" : "Last edited"}
                 {layout.by === by && <span aria-hidden="true">{layout.dir === "asc" ? " ↑" : " ↓"}</span>}
               </button>
             ))}
@@ -213,7 +206,7 @@ export default function SubjectsHome({
           ) : (
             <button className="subjects-list-add" onClick={() => setNaming(true)}>{Icon.plus} New subject</button>
           )}
-          {tiles.map(({ note, cards, quotes, pinned, color, created, opened: openedAt, edited }) => (
+          {tiles.map(({ note, cards, quotes, pinned, color, created, edited }) => (
             <div key={note.id} role="row" className={`subjects-list-row${pinned ? " pinned" : ""}${color ? " colored" : ""}`}
               style={color ? ({ "--subject-color": color } as React.CSSProperties) : undefined}>
               <span role="cell" className="col-pin">
@@ -244,9 +237,6 @@ export default function SubjectsHome({
                 )}
               </span>
               <span role="cell" className="col-created" title={new Date(created).toLocaleString()}>{shortDate(created)}</span>
-              <span role="cell" className="col-opened" title={openedAt ? new Date(openedAt).toLocaleString() : "Not opened on this device"}>
-                {openedAt ? timeAgo(new Date(openedAt).toISOString()) : "—"}
-              </span>
               <span role="cell" className="col-edited" title={new Date(edited).toLocaleString()}>{timeAgo(new Date(edited).toISOString())}</span>
               <span role="cell" className="col-actions">
                 {confirming === note.id ? (

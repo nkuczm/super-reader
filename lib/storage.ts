@@ -7,6 +7,7 @@ import type { Note } from "./notes";
 import type { Board } from "./subjects";
 import type { SavedArticle } from "./saved";
 import { canonicalUrl } from "./url";
+import { lastEdited } from "./subject-order";
 
 export const sizeOf = (value: unknown) => new Blob([typeof value === "string" ? value : JSON.stringify(value ?? null)]).size;
 
@@ -17,18 +18,14 @@ export function subjectUsage(notes: Note[], boards: Record<string, Board>): Subj
   return notes.map((note) => {
     const board = boards[note.id] ?? {};
     let images = 0;
-    let edited = note.updatedAt ?? note.at;
     let items = 0;
     for (const item of Object.values(board)) {
       if (!item || (item as { deleted?: boolean }).deleted) continue;
       items++;
-      const at = (item as { at?: number }).at;
-      if (typeof at === "number" && at > edited) edited = at;
       const image = (item as { image?: unknown }).image;
       if (typeof image === "string") images += image.length;
     }
-    for (const entry of note.entries) if (typeof (entry as { at?: number }).at === "number") edited = Math.max(edited, (entry as { at: number }).at);
-    return { id: note.id, name: note.name || "Untitled", bytes: sizeOf(note) + sizeOf(board), images, items, edited };
+    return { id: note.id, name: note.name || "Untitled", bytes: sizeOf(note) + sizeOf(board), images, items, edited: lastEdited(note, board) };
   });
 }
 
