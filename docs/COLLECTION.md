@@ -691,10 +691,14 @@ consults the back-off.
 
 **The top-up is off by default** (12 Oct 2026), per device and not synced
 (`loadAutoDownload`, `lib/offline.ts`): a desktop is rarely offline, and
-the top-up was most of the bill above. With it off, only Saved stories
-and subjects marked available offline are fetched in the background;
-Download now still fetches everything, and a small run never prunes what
-a full one kept. The rule is that the app may stop *guessing* at work,
+the top-up was most of the bill above. Off means nothing is fetched in the
+background at all. It first still fetched Saved stories and subjects marked
+available offline, and a desktop with the switch off kept downloading:
+that mark syncs with the subject, so a subject made available offline on a
+phone downloaded every story it cites on the Mac too, and the hover
+pre-fetch stored every headline the pointer crossed (13 Oct 2026). Both now
+wait for the switch; an opened article is still kept, and Download now
+still fetches everything. The rule is that the app may stop *guessing* at work,
 never stop doing what someone asked for.
 
 Re-measure from the logs rather than trusting this table: `get_runtime_logs`
