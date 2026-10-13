@@ -2,7 +2,7 @@
 
 import { STORAGE_FULL_EVENT } from "@/lib/subjects";
 import { DEFAULT_ANTHROPIC_MODEL, DEFAULT_QUICK_MODEL } from "@/lib/models";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Article, Attachment, DiscoverResult } from "@/lib/types";
 import {
@@ -178,7 +178,6 @@ import type { CorpusStats } from "./ScoreExplainer";
 import { canonicalUrl } from "@/lib/url";
 import { repairSources } from "@/lib/publishers";
 import { mergeWindow, stamp } from "@/lib/window";
-import { AWAY_MS, arrivals, loadFresh, loadLastActive, noteArrivals, saveFresh, saveLastActive, seenBefore, type Fresh } from "@/lib/fresh";
 import { mergeSaved, differsFrom, slimForSync } from "@/lib/saved";
 import { knownRefusal } from "@/lib/subscriptions";
 import {
@@ -381,10 +380,6 @@ export default function Reader() {
   const [ready, setReady] = useState(false);
   const [articles, setArticles] = useState<Loaded[]>([]);
   const [read, setRead] = useState<Set<string>>(new Set());
-  /** What refreshes have brought since the reader last looked, lit up in the list (lib/fresh.ts). */
-  const [fresh, setFresh] = useState<Fresh>({});
-  /** The list narrowed to just those. */
-  const [newOnly, setNewOnly] = useState(false);
   const [selection, setSelection] = useState<Selection>({ type: "all" });
   /** Where the reader was before opening a page from Settings, for its Back. */
   const beforeSettingsPage = useRef<Selection>({ type: "all" });
@@ -1724,23 +1719,15 @@ export default function Reader() {
      * on screen at most once a second: a group answers every second or two,
      * and redrawing a long list for each one made a phone stutter.
      */
-    let view = null as { list: Loaded[]; brought: string[]; inList: Set<string> } | null;
+    let view = null as { list: Loaded[] } | null;
     let paintedAt = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const paint = () => {
       timer = undefined;
       paintedAt = Date.now();
       if (!view || run !== refreshRun.current) return;
-      const { list, brought, inList } = view;
       refreshed.current = true;
-      // What this refresh brought that was not here before, to be lit up
-      // in the list until it has been looked at.
-      setFresh((current) => {
-        const next = noteArrivals(current, brought, inList);
-        saveFresh(next);
-        return next;
-      });
-      setArticles(list);
+      setArticles(view.list);
     };
     const show = () => {
       // One article, once. Two of a paper's feeds carry the same story with
@@ -1749,13 +1736,9 @@ export default function Reader() {
       // delivered it — filed under its publisher's own (lib/attribute.ts).
       const unique: Loaded[] = attributeStories<Article>(results, sources, canonicalUrl);
       const ordered = sortNewestFirst(mergeWindow(stamp(unique), held, { sources: following, canonical: canonicalUrl }));
-      view = {
-        // Stories pasted in and filed under a source are not in its feed; put
-        // them back, or the refresh would take them away.
-        list: withPastedStories(ordered, manualRef.current, following),
-        brought: arrivals(unique, held, canonicalUrl),
-        inList: new Set(ordered.map((article) => canonicalUrl(article.link))),
-      };
+      // Stories pasted in and filed under a source are not in its feed; put
+      // them back, or the refresh would take them away.
+      view = { list: withPastedStories(ordered, manualRef.current, following) };
       const since = Date.now() - paintedAt;
       if (since >= 1000) {
         clearTimeout(timer);
@@ -1833,44 +1816,6 @@ export default function Reader() {
     } finally {
       if (run === refreshRun.current) setRefreshing(false);
     }
-  }, []);
-
-  /**
-   * New stories stay lit for the visit that brought them. Coming back after
-   * being away a while, what the last visit brought has been seen, and only
-   * what is new since then is lit (lib/fresh.ts). Away is measured from when
-   * the app was last in front of the reader, kept up to date while it is.
-   */
-  useEffect(() => {
-    const here = () => document.visibilityState === "visible" && document.hasFocus();
-    const back = () => {
-      if (document.visibilityState !== "visible") return;
-      const last = loadLastActive();
-      if (last !== null && Date.now() - last >= AWAY_MS) {
-        setFresh((current) => {
-          const next = seenBefore(current, last);
-          saveFresh(next);
-          return next;
-        });
-      }
-      saveLastActive();
-    };
-    const away = () => saveLastActive();
-    const onVisibility = () => (document.visibilityState === "visible" ? back() : away());
-    setFresh(loadFresh());
-    back();
-    const beat = window.setInterval(() => here() && saveLastActive(), 60_000);
-    document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("focus", back);
-    window.addEventListener("blur", away);
-    window.addEventListener("pagehide", away);
-    return () => {
-      window.clearInterval(beat);
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("focus", back);
-      window.removeEventListener("blur", away);
-      window.removeEventListener("pagehide", away);
-    };
   }, []);
 
   /**
@@ -2961,20 +2906,6 @@ export default function Reader() {
     return articles.filter((a) => inAnySource(a, ids));
   }, [articles, feeds, selection, savedAsArticles, downloadedAsArticles, teamAsArticles, manualAsArticles]);
 
-  /** Which of these just came in and have not been opened. */
-  const freshIds = useMemo(() => {
-    if (Object.keys(fresh).length === 0) return new Set<string>();
-    return new Set(
-      visible
-        .filter((article) => fresh[canonicalUrl(article.link)] !== undefined && !read.has(article.id))
-        .map((article) => article.id),
-    );
-  }, [visible, fresh, read]);
-  /** Narrowed to the new ones only while there are any. */
-  const showingNew = newOnly && freshIds.size > 0;
-  // A different list is a different question.
-  useEffect(() => setNewOnly(false), [selection]);
-
   /**
    * What this feed's stories are about right now, shown above Top stories
    * (lib/trending.ts), and the one the list is narrowed to, if any. Read off
@@ -2986,13 +2917,6 @@ export default function Reader() {
   const [topicKey, setTopicKey] = useState<string | null>(null);
   const topic = trending.find((t) => t.key === topicKey) ?? null;
   useEffect(() => setTopicKey(null), [selection, settings.sort]);
-  const seeAll = useCallback(() => {
-    setNewOnly(false);
-    setFresh(() => {
-      saveFresh({});
-      return {};
-    });
-  }, []);
 
   /**
    * What is marked in the article being read: its own highlights, and every
@@ -3274,8 +3198,7 @@ export default function Reader() {
       selection.type !== "saved" &&
       selection.type !== "downloaded";
     const unread = hideRead ? visible.filter((a) => !read.has(a.id)) : visible;
-    const fresher = showingNew ? unread.filter((a) => freshIds.has(a.id)) : unread;
-    const list = topic && settings.sort === "top" ? fresher.filter((a) => aboutTopic(a.title, topic.key)) : fresher;
+    const list = topic && settings.sort === "top" ? unread.filter((a) => aboutTopic(a.title, topic.key)) : unread;
 
     if (settings.sort !== "top") {
       /*
@@ -3300,7 +3223,7 @@ export default function Reader() {
       const scoreB = ranking.get(b.id)?.score ?? -1;
       return scoreB - scoreA || timeOf(b) - timeOf(a);
     });
-  }, [visible, settings.hideRead, settings.sort, selection.type, read, ranking, showingNew, freshIds, topic]);
+  }, [visible, settings.hideRead, settings.sort, selection.type, read, ranking, topic]);
 
   /**
    * Top stories, one row per story: a story's copies from other outlets sit
@@ -3348,6 +3271,49 @@ export default function Reader() {
   useEffect(() => {
     setRendered(PAGE);
   }, [listKey]);
+
+  /**
+   * The story being read stays where it is when the list changes under it.
+   *
+   * A refresh now fills the list in group by group, and the ranking reorders
+   * Top stories when it lands, so stories arrived above the one being read
+   * and pushed it down the screen mid-sentence. The story at the top of the
+   * view is noted as the reader scrolls, and after each change the list is
+   * moved by exactly as much as that story was. Only once the reader has
+   * scrolled: at the very top, new stories appearing at the top is the point
+   * of pulling to refresh. Safari has no scroll anchoring of its own, so this
+   * is done by hand everywhere and the browser's is switched off (.main).
+   */
+  const scrollAnchor = useRef<{ list: string; id: string; top: number } | null>(null);
+  const listKeyRef = useRef(listKey);
+  listKeyRef.current = listKey;
+  const anchorFrame = useRef(0);
+  const noteAnchor = useCallback(() => {
+    if (anchorFrame.current) return;
+    anchorFrame.current = requestAnimationFrame(() => {
+      anchorFrame.current = 0;
+      const root = listRef.current;
+      scrollAnchor.current = null;
+      if (!root || root.scrollTop <= 0) return;
+      const top = root.getBoundingClientRect().top;
+      for (const el of root.querySelectorAll<HTMLElement>("[data-anchor]")) {
+        const box = el.getBoundingClientRect();
+        if (box.bottom <= top) continue;
+        scrollAnchor.current = { list: listKeyRef.current, id: el.dataset.anchor!, top: box.top - top };
+        return;
+      }
+    });
+  }, []);
+  useLayoutEffect(() => {
+    const root = listRef.current;
+    const anchor = scrollAnchor.current;
+    // A different list starts at its own top, whatever it shares with the last.
+    if (!root || !anchor || anchor.list !== listKey) return;
+    const el = root.querySelector<HTMLElement>(`[data-anchor="${CSS.escape(anchor.id)}"]`);
+    if (!el) return;
+    const moved = el.getBoundingClientRect().top - root.getBoundingClientRect().top - anchor.top;
+    if (Math.abs(moved) >= 1) root.scrollTop += moved;
+  }, [inView, listKey]);
 
   /**
    * Grow the rendered list as its end comes into view. The sentinel sits a
@@ -3850,7 +3816,8 @@ export default function Reader() {
     const source = sourceById.get(article.sourceId);
     return (
       <article
-        className={`article${read.has(article.id) ? " read" : ""}${freshIds.has(article.id) ? " fresh" : ""}`}
+        data-anchor={article.id}
+        className={`article${read.has(article.id) ? " read" : ""}`}
         key={article.id}
       >
         {/* Magazine puts the picture on the left. Articles without
@@ -3883,7 +3850,6 @@ export default function Reader() {
           ))}
         <div className="article-body">
           <div className="article-meta">
-            {freshIds.has(article.id) && <span className="new-pill">New</span>}
             {(source || savedMeta(article.link)) && (
               <SourceIcon
                 src={source?.favicon ?? savedMeta(article.link)?.favicon ?? ""}
@@ -4530,6 +4496,7 @@ export default function Reader() {
       <main
         className="main"
         ref={listRef}
+        onScroll={noteAnchor}
         onTouchStart={onListTouchStart}
         onTouchMove={onListTouchMove}
         onTouchEnd={onListTouchEnd}
@@ -4792,24 +4759,6 @@ export default function Reader() {
                 } of text`}
               {selectedSourceCount > 0 &&
                 ` · ${selectedSourceCount} source${selectedSourceCount === 1 ? "" : "s"}`}
-              {/* What just came in, to find it among everything else. */}
-              {freshIds.size > 0 &&
-                (selection.type === "all" || selection.type === "feed" || selection.type === "source") && (
-                  <>
-                    {" · "}
-                    <button
-                      className={`fresh-chip${showingNew ? " on" : ""}`}
-                      aria-pressed={showingNew}
-                      onClick={() => setNewOnly(!showingNew)}
-                      title={showingNew ? "Show every story again" : "Show only the stories that just came in"}
-                    >
-                      {freshIds.size} new
-                    </button>
-                    <button className="fresh-seen" onClick={seeAll} title="Stop highlighting the new stories">
-                      Mark seen
-                    </button>
-                  </>
-                )}
               {settings.sort === "top" &&
                 (rankState === "unavailable"
                   ? " · ranking needs a database on this deployment"
@@ -5022,7 +4971,6 @@ export default function Reader() {
                     stories={others}
                     sourceOf={(story) => sourceById.get(story.sourceId)}
                     isRead={(story) => read.has(story.id)}
-                    isFresh={(story) => freshIds.has(story.id)}
                     onOpen={(story) => openArticle(story as Loaded, sourceById.get(story.sourceId)?.feedUrl)}
                   />
                 </section>

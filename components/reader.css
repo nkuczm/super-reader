@@ -83,7 +83,8 @@
  * page, and iOS rubber-bands the whole document — so the app's gesture was
  * being fought for and usually lost.
  */
-.main { overflow-y: auto; overscroll-behavior-y: contain; }
+/* Scroll anchoring is done by hand in Reader (the same on Safari, which has none). */
+.main { overflow-y: auto; overscroll-behavior-y: contain; overflow-anchor: none; }
 .main-head {
   position: sticky; top: 0; z-index: 5; background: var(--bg);
   border-bottom: 1px solid var(--border);
@@ -1308,6 +1309,12 @@
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 .subject-card { padding: 12px 14px 10px; }
+/* A story added since the subject was last open here (lib/subject-seen.ts). */
+.subject-card.new {
+  position: relative; border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft), 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.subject-card-new { position: absolute; top: -9px; left: 12px; }
 .subject-card-head { display: flex; align-items: flex-start; gap: 8px; }
 .subject-card-title {
   flex: 1; border: 0; background: none; padding: 0; text-align: left;
@@ -3312,41 +3319,12 @@
 .doc-toolbar.subject-format-bar { margin: 0; padding: 4px 16px; flex-shrink: 0; }
 
 /* ---------- new stories ---------- */
-/*
- * A story a refresh has just brought, lit until it is opened or the reader
- * has been away and come back (lib/fresh.ts). The row reaches a little into
- * the list's margin so the tint has room around the words.
- */
-.article.fresh {
-  background: var(--accent-soft);
-  box-shadow: inset 3px 0 0 var(--accent);
-  margin: 0 -12px; padding-left: 12px; padding-right: 12px;
-  animation: fresh-in 1.8s ease-out;
-}
-@keyframes fresh-in {
-  from { background: color-mix(in srgb, var(--accent) 22%, var(--accent-soft)); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .article.fresh { animation: none; }
-}
+/* "New" beside a story just added to a subject (lib/subject-seen.ts). */
 .new-pill {
   flex: none; font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em;
   text-transform: uppercase; color: var(--bg); background: var(--accent);
   padding: 1px 6px; border-radius: 999px; line-height: 1.5;
 }
-.fresh-chip {
-  font: inherit; font-size: 12.5px; font-weight: 650; color: var(--accent);
-  background: var(--accent-soft); border: 1px solid transparent;
-  padding: 1px 8px; border-radius: 999px; cursor: pointer;
-}
-.fresh-chip:hover { border-color: var(--accent); }
-.fresh-chip.on { background: var(--accent); color: var(--bg); }
-.fresh-seen {
-  font: inherit; font-size: 12.5px; color: var(--text-dim);
-  background: none; border: 0; padding: 0 0 0 8px; cursor: pointer;
-  text-decoration: underline; text-underline-offset: 2px;
-}
-.fresh-seen:hover { color: var(--accent); }
 
 /* A whole discipline in one tap, under the discipline that was picked. */
 .discipline-all { align-self: flex-start; margin: 2px 0 2px; }
@@ -3391,7 +3369,6 @@
 }
 .story-row-title:hover { color: var(--accent); }
 .story-row li.read .story-row-title { color: var(--text-dim); font-weight: 500; }
-.story-row li.fresh .story-row-title { color: var(--accent); }
 .story-row-more button {
   font: inherit; font-size: 12.5px; font-weight: 600; color: var(--accent);
   background: none; border: 0; padding: 0; cursor: pointer;

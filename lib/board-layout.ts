@@ -181,3 +181,45 @@ export function edgePath(a: Rect, b: Rect, round: { a?: boolean; b?: boolean } =
     },
   };
 }
+
+/**
+ * Where a board opens: on its busiest stretch, so the first thing seen is
+ * the work rather than empty canvas.
+ *
+ * A screen-sized window is put over each block in turn; the one holding the
+ * most blocks wins, the nearest the middle of the whole board on a tie, and
+ * the view is centred on the blocks inside it. A board that fits on the
+ * screen is simply centred. `screen` is the canvas in pixels; the window is
+ * that at `zoom`. Nothing on the board: nothing to centre on.
+ */
+export function busiestView(rects: Rect[], screen: { width: number; height: number }, zoom: number): { x: number; y: number; zoom: number } | null {
+  if (rects.length === 0 || !screen.width || !screen.height) return null;
+  const centres = rects.map((r) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 }));
+  const mid = {
+    x: centres.reduce((sum, c) => sum + c.x, 0) / centres.length,
+    y: centres.reduce((sum, c) => sum + c.y, 0) / centres.length,
+  };
+  const half = { w: screen.width / zoom / 2, h: screen.height / zoom / 2 };
+  const inside = (c: { x: number; y: number }) =>
+    rects.filter((_, j) => Math.abs(centres[j].x - c.x) <= half.w && Math.abs(centres[j].y - c.y) <= half.h);
+  let best: Rect[] = [];
+  let bestFromMid = Infinity;
+  for (const c of centres) {
+    const held = inside(c);
+    const fromMid = Math.hypot(c.x - mid.x, c.y - mid.y);
+    if (held.length > best.length || (held.length === best.length && fromMid < bestFromMid)) {
+      best = held;
+      bestFromMid = fromMid;
+    }
+  }
+  const minX = Math.min(...best.map((r) => r.x));
+  const minY = Math.min(...best.map((r) => r.y));
+  const maxX = Math.max(...best.map((r) => r.x + r.w));
+  const maxY = Math.max(...best.map((r) => r.y + r.h));
+  // Centred where it fits; where it does not, its top-left corner shows, a
+  // margin in, rather than its middle with the start of it off the screen.
+  const margin = 40 / zoom;
+  const along = (lo: number, hi: number, halfSpan: number) => (hi - lo <= 2 * (halfSpan - margin) ? (lo + hi) / 2 : lo - margin + halfSpan);
+  const focus = { x: along(minX, maxX, half.w), y: along(minY, maxY, half.h) };
+  return { zoom, x: screen.width / 2 - focus.x * zoom, y: screen.height / 2 - focus.y * zoom };
+}
