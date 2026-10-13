@@ -11,7 +11,7 @@ import { downloadUrlFor } from "@/lib/download";
 import { EXTRACT_VERSION, forgetCached, readCached, writeCached } from "@/lib/offline";
 import { loadSyncCode } from "@/lib/store";
 import { sanitizeRichText } from "@/lib/subjects";
-import { cleanPastedHtml } from "@/lib/paste";
+import { cleanArticleHtml, takeHeadline } from "@/lib/own-article";
 import { parsePastedTranscript, transcriptArticleHtml, youtubeId } from "@/lib/youtube";
 import { timeAgo, hostOf } from "./format";
 import QuoteToNote from "./QuoteToNote";
@@ -21,6 +21,9 @@ import { printedOn, printPage, transcriptArticleExcerpt } from "@/lib/print";
 import { findQuoteRange } from "@/lib/highlight";
 import type { Note } from "@/lib/notes";
 import MoreMenu from "./MoreMenu";
+
+/** How many words an article's HTML holds. */
+const wordsIn = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&[a-z#0-9]+;/gi, " ").split(/\s+/).filter(Boolean).length;
 
 /** A PDF this size is a book or a scan, not an article; reading it would stall the page. */
 const MAX_PDF_BYTES = 60 * 1024 * 1024;
@@ -216,18 +219,26 @@ export default function ArticleReader({
     // its times become links into the video, its lines paragraphs.
     const video = youtubeId(url);
     const lines = video ? parsePastedTranscript(box.innerText) : [];
-    const html = video && lines.length
-      ? sanitizeRichText((article?.html ?? "").replace(/<h2>Transcript[\s\S]*$/, "") + transcriptArticleHtml(video, lines))
-      : sanitizeRichText(box.innerHTML);
-    replaceText({ ...ownCopy(html, words, "pasted"), transcript: Boolean(video && lines.length) || undefined }, "Replaced with the text you pasted");
+    if (video && lines.length) {
+      const html = sanitizeRichText((article?.html ?? "").replace(/<h2>Transcript[\s\S]*$/, "") + transcriptArticleHtml(video, lines));
+      replaceText({ ...ownCopy(html, words, "pasted"), transcript: true }, "Replaced with the text you pasted");
+      return;
+    }
+    // A headline at the top of what was pasted, or typed above it, becomes the article's.
+    const { html, title } = takeHeadline(cleanArticleHtml(box.innerHTML, url));
+    replaceText(ownCopy(html, wordsIn(html), "pasted", title), "Replaced with the text you pasted");
   };
 
-  /** The text the reader supplied, in the article's place: its headline, outlet and byline kept. */
-  const ownCopy = (html: string, words: number, own: ReadableArticle["own"]): ReadableArticle => ({
+  /**
+   * The text the reader supplied, in the article's place: under its own
+   * headline when it carried one, otherwise the one it had; outlet and
+   * byline kept.
+   */
+  const ownCopy = (html: string, words: number, own: ReadableArticle["own"], title?: string): ReadableArticle => ({
     ...(article ?? {}),
     via: "page",
     url,
-    title: article?.title || fallbackTitle || hostOf(url),
+    title: title || article?.title || fallbackTitle || hostOf(url),
     siteName: article?.siteName || hostOf(url),
     html,
     wordCount: words,
@@ -343,11 +354,13 @@ export default function ArticleReader({
     setBusy(`Reading ${file.name}…`);
     try {
       const { pdfArticleHtml, readPdfPages } = await import("@/lib/pdf-article");
-      const pages = await readPdfPages(new Uint8Array(await file.arrayBuffer()));
-      const { html, words } = pdfArticleHtml(pages, { title: article?.title || fallbackTitle });
+      const pages = await readPdfPages(new Uint8Array(await file.arrayBuffer()), (page, of) => {
+        if (urlRef.current === url && of > 1) setBusy(`Reading ${file.name} — page ${page} of ${of}…`);
+      });
+      const { html, words, title } = pdfArticleHtml(pages, { title: article?.title || fallbackTitle });
       if (urlRef.current !== url) return;
       if (words < 5) throw new Error("This PDF has no text in it — it is probably a scan, which needs OCR.");
-      replaceText(ownCopy(html, words, "pdf"), `Replaced with the text of ${file.name}`);
+      replaceText(ownCopy(html, words, "pdf", title), `Replaced with the text of ${file.name}`);
     } catch (err) {
       if (urlRef.current !== url) return;
       const message = err instanceof Error ? err.message : "";
@@ -755,12 +768,13 @@ export default function ArticleReader({
                   suppressContentEditableWarning
                   data-placeholder="Paste the article here…"
                   onPaste={(event) => {
-                    // Formatting is kept but cleaned; plain text becomes paragraphs.
+                    // Cleaned as an article — headings, links and pictures
+                    // kept, all of it; plain text becomes paragraphs.
                     event.preventDefault();
                     const html = event.clipboardData.getData("text/html");
                     const text = event.clipboardData.getData("text/plain");
                     const clean = html
-                      ? sanitizeRichText(cleanPastedHtml(html))
+                      ? cleanArticleHtml(html, url)
                       : text.split(/\n\s*\n|\n/).map((l) => l.trim()).filter(Boolean)
                           .map((l) => `<p>${l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>`).join("");
                     document.execCommand("insertHTML", false, clean);
