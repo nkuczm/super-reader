@@ -320,6 +320,14 @@
   border-bottom: 1px solid var(--border); margin-bottom: 26px;
 }
 .reader-bar .btn { width: auto; text-decoration: none; }
+/* On a phone the bar tucks away while reading down and is back on any scroll up (useHeadroom). */
+@media (max-width: 860px) {
+  .reader-bar { transition: transform 0.2s ease; }
+  .reader-bar.tucked { transform: translateY(-100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reader-bar, .subject-top { transition: none; }
+}
 .reader-bar .btn.on { color: var(--accent); border-color: var(--accent); }
 /* The trailing links group at the right together: giving every anchor the
    auto margin pushed the second one onto its own line. */
@@ -2166,7 +2174,14 @@
 .transcript-foot .link-btn { cursor: pointer; }
 .transcript-problem { margin: 0; font-size: 12px; color: #dc2626; }
 
-/* The header's menus open over the whiteboard's floating tools. */
+/*
+ * A subject's header and its text tools, stuck together at the top: scrolling
+ * down a document tucks the header up out of sight (an offset, set inline,
+ * of its own height) and leaves the tools; scrolling up brings it back
+ * (components/useHeadroom.ts). Above the whiteboard's floating tools, so the
+ * header's menus open over them.
+ */
+.subject-top { position: sticky; top: 0; z-index: 40; background: var(--bg); transition: top 0.2s ease; }
 .subject-head { position: relative; z-index: 30; }
 .more-add { display: flex; align-items: center; gap: 2px; padding: 2px 4px 6px; margin-bottom: 4px; border-bottom: 1px solid var(--border); }
 .more-add > span { font-size: 12px; color: var(--text-dim); margin-right: auto; padding-left: 6px; }

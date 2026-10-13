@@ -4,6 +4,7 @@ import { isSignedIn } from "@/lib/signed-in";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { forgetPosition, positionFor, rememberPosition } from "@/lib/position";
+import { useHeadroom } from "./useHeadroom";
 import type { ReadableArticle } from "@/lib/article";
 import { Icon } from "./icons";
 import { downloadUrlFor } from "@/lib/download";
@@ -124,6 +125,9 @@ export default function ArticleReader({
 }: Props) {
   const [subjectMenu, setSubjectMenu] = useState(false);
   const [printing, setPrinting] = useState(false);
+  /** The bar tucks away while reading down a phone's screen, and is back on any scroll up. */
+  const barRef = useRef<HTMLDivElement | null>(null);
+  const barTucked = useHeadroom(barRef);
   const onLoadedRef = useRef(onLoaded);
   onLoadedRef.current = onLoaded;
   const [addedTo, setAddedTo] = useState<string | null>(null);
@@ -634,7 +638,7 @@ export default function ArticleReader({
   return (
     <div className="reader">
       {printing && printJob && <PrintDialog job={printJob} onClose={() => setPrinting(false)} />}
-      <div className="reader-bar">
+      <div className={`reader-bar${barTucked ? " tucked" : ""}`} ref={barRef}>
         {onOpenMenu && (
           <button className="menu-btn" onClick={onOpenMenu} aria-label="Open feeds">
             {Icon.menu}
