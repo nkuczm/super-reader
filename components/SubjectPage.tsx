@@ -84,9 +84,10 @@ import {
   tabsOf,
   type Tab,
 } from "@/lib/subjects";
-import { chainedLabelLinks, edgePath, layoutBoard, settle, GAP } from "@/lib/board-layout";
+import { busiestView, chainedLabelLinks, edgePath, layoutBoard, settle, GAP } from "@/lib/board-layout";
 import { PROVIDER_NAME, recordSpend, shareSpend, type AiProvider } from "@/lib/spend";
 import { loadSyncCode } from "@/lib/store";
+import { lastOpened, markOpened, newSince } from "@/lib/subject-seen";
 
 type Props = {
   /** Whether this device's boards have been read from storage yet: nothing is written on a guess of an empty board. */
@@ -603,6 +604,14 @@ export default function SubjectPage(props: Props) {
   const tabs = useMemo(() => tabsOf(board), [board]);
   const currentTab = activeTabOf(board);
   const cards = allCards.filter((card) => tabOf(board, card.id, tabs) === currentTab);
+  /**
+   * Stories added since this subject was last open on this device, lit for
+   * this visit so they can be found among the rest (lib/subject-seen.ts).
+   * Read before this visit marks the subject seen.
+   */
+  const seenAt = useMemo(() => lastOpened(note.id), [note.id]);
+  useEffect(() => markOpened(note.id), [note.id]);
+  const newCards = useMemo(() => newSince(allCards, seenAt), [allCards, seenAt]);
   const tabCardIds = new Set(cards.map((card) => card.id));
   const boxes = items.filter(
     (item): item is BoxItem => item.kind === "box" && !item.embedded && tabOf(board, item.id, tabs) === currentTab,
@@ -1159,6 +1168,7 @@ export default function SubjectPage(props: Props) {
     });
 
   const shared = {
+    newCards,
     resolveEmbed,
     embedBox,
     dropImage,
@@ -1771,6 +1781,8 @@ type Shared = {
   aiModel: string;
   aiQuickModel: string;
   allCards: Card[];
+  /** Stories added since this subject was last open here, lit for this visit. */
+  newCards: ReadonlySet<string>;
   /** Search a transcript by meaning, with the same AI key and model as insights. */
   aiSearch: AiSearch;
 };
@@ -1959,8 +1971,10 @@ function StoryCard({
     setCiteMenu((m) => (m ? { ...m, copied: true } : m));
     setTimeout(() => setCiteMenu(null), 900);
   };
+  const isNew = shared.newCards.has(card.id);
   return (
-    <div className="subject-card">
+    <div className={`subject-card${isNew ? " new" : ""}`}>
+      {isNew && <span className="new-pill subject-card-new">New</span>}
       <div className="subject-card-head" onPointerDown={dragHandle}>
         <button className="subject-card-title"
           // In the document, the title drags out as a citation; on the whiteboard the card itself does.
@@ -2965,10 +2979,15 @@ function Whiteboard(
   // A phone starts zoomed out, so more than one card fits across.
   const startView = () =>
     typeof window !== "undefined" && window.innerWidth < 760 ? { x: 12, y: 12, zoom: 0.55 } : { x: 40, y: 40, zoom: 1 };
+  /** Whether the view is where this tab last left it, rather than a fresh opening. */
+  const viewKept = useRef(false);
   const [view, setView] = useState(() => {
     try {
       const held = JSON.parse(sessionStorage.getItem(shared.placeKey) ?? "{}").board;
-      if (held && [held.x, held.y, held.zoom].every((n) => typeof n === "number" && Number.isFinite(n))) return held as { x: number; y: number; zoom: number };
+      if (held && [held.x, held.y, held.zoom].every((n) => typeof n === "number" && Number.isFinite(n))) {
+        viewKept.current = true;
+        return held as { x: number; y: number; zoom: number };
+      }
     } catch {
       /* start fresh */
     }
@@ -3142,6 +3161,33 @@ function Whiteboard(
     return laid;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [board, shared.cards, shared.boxes, shared.insights, shared.suggestions, drag, sizes, resize]);
+
+  /**
+   * Opening a board looks at its busiest stretch, not at the board's top-left
+   * corner, which could be empty canvas with everything off to one side
+   * (lib/board-layout.ts). A tab coming back to a board keeps where it was,
+   * unless that shows nothing at all. Once, when the board is first laid out.
+   */
+  const rectsNow = () => [...positions.entries()].map(([id, r]) => ({ x: r.x, y: r.y, w: r.w, h: sizes[id]?.h ?? 160 }));
+  const onBusiest = (zoom: number) => {
+    const host = canvas.current?.getBoundingClientRect();
+    return host ? busiestView(rectsNow(), host, zoom) : null;
+  };
+  const opened = useRef(false);
+  useEffect(() => {
+    if (opened.current || positions.size === 0) return;
+    const host = canvas.current?.getBoundingClientRect();
+    if (!host?.width) return;
+    opened.current = true;
+    if (viewKept.current) {
+      const seen = { x: -view.x / view.zoom, y: -view.y / view.zoom, w: host.width / view.zoom, h: host.height / view.zoom };
+      const showsSome = rectsNow().some((r) => r.x < seen.x + seen.w && r.x + r.w > seen.x && r.y < seen.y + seen.h && r.y + r.h > seen.y);
+      if (showsSome) return;
+    }
+    const busiest = onBusiest(view.zoom);
+    if (busiest) setView(busiest);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [positions]);
 
   /**
    * Widen or narrow a card by dragging its right edge. Saved as the card's
@@ -3997,7 +4043,7 @@ function Whiteboard(
         <MoreMenu>
           {(close) => (
             <>
-              <button role="menuitem" onClick={() => { close(); setView(startView()); }}>Reset view</button>
+              <button role="menuitem" onClick={() => { close(); setView(onBusiest(startView().zoom) ?? startView()); }}>Reset view</button>
               <button role="menuitemcheckbox" aria-checked={showAiLinks} title="Show every line from the AI's insights to the stories they draw on"
                 onClick={() => setShowAiLinks((v) => !v)}>
                 AI links{showAiLinks && <span className="more-check">✓</span>}

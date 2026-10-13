@@ -20,13 +20,11 @@ export default function StoryRow({
   stories,
   sourceOf,
   isRead,
-  isFresh,
   onOpen,
 }: {
   stories: Story[];
   sourceOf: (story: Story) => Source | undefined;
   isRead: (story: Story) => boolean;
-  isFresh: (story: Story) => boolean;
   onOpen: (story: Story) => void;
 }) {
   const [all, setAll] = useState(false);
@@ -38,7 +36,7 @@ export default function StoryRow({
         const source = sourceOf(story);
         const name = source?.title ?? hostOf(story.link);
         return (
-          <li key={story.id} className={`${isRead(story) ? "read" : ""}${isFresh(story) ? " fresh" : ""}`}>
+          <li key={story.id} className={isRead(story) ? "read" : undefined}>
             <div className="story-row-meta">
               <SourceIcon src={source?.favicon ?? ""} title={name} size={13} />
               <span className="story-row-name">{name}</span>
@@ -48,7 +46,6 @@ export default function StoryRow({
                   <span className="story-row-when">{timeAgo(story.publishedAt)}</span>
                 </>
               )}
-              {isFresh(story) && <span className="new-pill">New</span>}
             </div>
             <a
               className="story-row-title"
