@@ -1456,7 +1456,11 @@ export default function RichText({
           const cite = event.clipboardData.getData("text/html").includes("data-cite") ? null : citeFor(plain);
           if (cite) {
             if (selected && !selected.isCollapsed) document.execCommand("insertHTML", false, citeTextHtml(cite, selected.toString()));
-            else insertChip(cite);
+            else {
+              insertChip(cite);
+              // And the story comes to this tab, if it is on another one (lib/tab-place.ts).
+              onPasteLink?.(plain);
+            }
             changed();
             return;
           }
