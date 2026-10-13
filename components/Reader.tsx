@@ -2224,8 +2224,9 @@ export default function Reader() {
 
   /**
    * A story card filed under one headline, whose article turns out to have
-   * another once its full text is read — scanned in with the extension, or
-   * fetched — takes the article's own, in every subject that holds it.
+   * another once its full text is read — scanned in with the extension,
+   * fetched, or put in by the reader as text or a PDF that carries its
+   * headline — takes the article's own, in every subject that holds it.
    * Only a full copy counts: a page's preview or a paywall's stub can carry
    * a title that is not the story's.
    */
@@ -2243,6 +2244,17 @@ export default function Reader() {
           source: article.siteName,
         });
         if (after !== before) commitBoard(note.id, () => after ?? {});
+      }
+      // A story pasted in by link, still under the title its address gave —
+      // or under any, once the reader has put in its text themselves.
+      const key = manualKey(requestedUrl);
+      const story = manualRef.current[key];
+      if (story && !story.deleted && story.title !== title &&
+        (article.own || story.title === titleFromUrl(story.link) || story.title === hostOf(story.link))) {
+        const next = { ...manualRef.current, [key]: { ...story, title, at: Date.now() } };
+        manualRef.current = next;
+        setManual(next);
+        saveManual(next);
       }
     },
     [commitBoard],
