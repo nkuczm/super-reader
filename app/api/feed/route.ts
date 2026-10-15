@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchFeedText, isFeedAddress, parseFeed, looksLikeFeed, faviconFor } from "@/lib/feed";
+import { fetchFeedText, fetchText, isFeedAddress, parseFeed, looksLikeFeed, faviconFor } from "@/lib/feed";
 import { scrapePage } from "@/lib/scrape";
 import { enrichArticles, readsPages } from "@/lib/enrich";
 import { xHandleFrom, fetchXFeed } from "@/lib/x";
@@ -10,7 +10,8 @@ import { parseBundle, mergeBundled, PER_MEMBER } from "@/lib/bundle";
 import { canonicalUrl } from "@/lib/url";
 import type { Article } from "@/lib/types";
 import type { CoverageReport } from "@/lib/coverage";
-import { augment } from "@/lib/harvest";
+import { augment, combine } from "@/lib/harvest";
+import { isTechmemeFeed, riverArticles, TECHMEME_RIVER } from "@/lib/techmeme";
 import { looksLikeSitemap, parseSitemap, withinOf, keepWithin } from "@/lib/sitemap";
 import { keepArticles } from "@/lib/authentic";
 import { budget, within } from "@/lib/deadline";
@@ -144,6 +145,17 @@ export async function GET(request: Request) {
   const augmented = (articles: Article[], options: Parameters<typeof augment>[1]) =>
     within<{ articles: Article[]; coverage?: CoverageReport }>(augment(articles, options), left() - SPARE_MS, () => ({ articles }));
 
+  /** A feed's stories and a River's as one list: a story both carry is one story, its fields combined. */
+  const withRiver = (fed: Article[], river: Article[]) => {
+    const merged = new Map<string, Article>();
+    for (const article of [...fed, ...river]) {
+      const key = canonicalUrl(article.link);
+      const held = merged.get(key);
+      merged.set(key, held ? combine(held, article) : article);
+    }
+    return sortNewestFirst([...merged.values()]).slice(0, MAX_PER_SOURCE);
+  };
+
   /** One source, read and parsed. */
   async function readSource(url: string) {
     const members = parseBundle(url);
@@ -201,7 +213,16 @@ export async function GET(request: Request) {
       return { ok: true as const, ...meta, feedUrl: url, articles };
     }
 
-    const { meta, isSitemap, articles: recent } = await readFeed(url, MAX_PER_SOURCE);
+    // Techmeme's River beside its feed (lib/techmeme.ts): five days of
+    // headlines, not the latest fifteen. Read together; a River that fails
+    // or runs out of time costs nothing the feed did not have.
+    const [{ meta, isSitemap, articles: fed }, river] = await Promise.all([
+      readFeed(url, MAX_PER_SOURCE),
+      isTechmemeFeed(url)
+        ? within(fetchText(TECHMEME_RIVER, 12000).then(({ body }) => riverArticles(body)).catch(() => []), left() - SPARE_MS, () => [])
+        : Promise.resolve([] as Article[]),
+    ]);
+    const recent = river.length ? withRiver(fed, river) : fed;
     const ready = await enriched(url, recent, {
       siteDescription: meta.description,
       // A plain sitemap's lastmod drifts; the page says when it was published.

@@ -13,7 +13,7 @@ the number.
 **What this covers:** `lib/discover.ts`, `lib/article-link.ts`, `lib/scholarly.ts`, `lib/harvest.ts`, `lib/sitemap.ts`,
 `lib/structured.ts`, `lib/sitesearch.ts`, `lib/authentic.ts`,
 `lib/relevance.ts`, `lib/coverage.ts`, `lib/bundle.ts`, `lib/window.ts`,
-`lib/publishers.ts`, `lib/scrape.ts`, `lib/feed.ts`, `app/api/feed/route.ts`,
+`lib/publishers.ts`, `lib/scrape.ts`, `lib/feed.ts`, `lib/techmeme.ts`, `app/api/feed/route.ts`,
 `app/api/discover/route.ts`, `scripts/coverage.mjs`.
 
 ---
@@ -481,6 +481,45 @@ Still open from the same measurement: Nature Human Behaviour and Nature
 Communications' neuroscience feed answered with a web page every time,
 alone or together, through the cookie retry and through
 `feeds.nature.com`. The other Nature feeds answered.
+
+### An aggregator's own river (15 Oct 2026)
+
+Techmeme, added as a source, showed fourteen stories, and that was all
+its feed had. Measured from a preview with a temporary probe, removed the
+same day:
+
+| Route | Result |
+|---|---|
+| `techmeme.com/feed.xml` | 15 items, **09:30 to 14:10 that day**: under five hours |
+| `techmeme.com/river` | **214 rows, back five days** (to the 10th), newest first |
+| `techmeme.com/sitemap.xml` | 404 |
+| the refresh, after the change | **214 stories**, the feed's 15 among them, none twice |
+
+Techmeme files about fifty headlines a weekday (45–54 each day that
+week, a handful at the weekend), so the feed's window is a few hours. A reader who looked in twice a day was seeing a fraction of
+what was filed, and the held window (§4.2) can only keep what a refresh
+was shown. The River is Techmeme's own page for exactly this: "Techmeme
+in pure reverse chronological order", one row per headline, each with
+its time, outlet and author.
+
+So a refresh of Techmeme's feed reads the River at the same time
+(`lib/techmeme.ts`) and merges the two. Three things make that safe:
+
+- **Same story, same key.** Each River row carries the permalink id the
+  feed uses as its items' link and guid (`pml="261015p44"` is
+  `/261015/p44#a261015p44`), so the two routes and what a device already
+  holds merge story by story. Titles are written as the feed writes them,
+  "Headline (Author/Outlet)".
+- **Techmeme's clock.** The River gives a time and a day heading, in New
+  York time. It is converted with the zone's own offset, summer time
+  included; the feed's `pubDate` for the same item agreed to the minute.
+- **Nothing to lose.** The River is read alongside the feed, never
+  instead of it, and a River that fails or runs out of time leaves the
+  feed's stories as they were.
+
+Only `techmeme.com/feed.xml` reads it. Mediagazer and memeorandum run
+the same software and very likely the same River, but they are not
+measured, and §1 does not take "very likely" as a measurement.
 
 ### What those numbers mean
 
