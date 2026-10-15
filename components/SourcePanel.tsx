@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { assess, type SourceHealth } from "@/lib/health";
 import type { Source } from "@/lib/store";
+import { homepageOf } from "@/lib/homepage";
 
 const VERDICT_LABEL: Record<string, string> = {
   healthy: "Healthy",
@@ -48,10 +49,16 @@ export default function SourcePanel({
   const uptime = runs ? Math.round(((runs - failures) / runs) * 1000) / 10 : null;
   const recent = [...(health?.runs ?? [])].reverse().slice(0, 12);
   const perDay = days.length ? Math.round(days.reduce((n, d) => n + d.fetched, 0) / days.length) : null;
+  const home = homepageOf(source);
 
   return (
     <div className="source-panel">
       <div className="source-panel-actions">
+        {home && (
+          <a className="btn ghost small" href={home} target="_blank" rel="noreferrer noopener">
+            Visit {new URL(home).hostname.replace(/^www\./, "")} ↗
+          </a>
+        )}
         <button className={`btn ghost small${showStats ? " on" : ""}`} aria-expanded={showStats} onClick={() => setShowStats((s) => !s)}>
           Stats &amp; uptime
         </button>

@@ -86,6 +86,7 @@ import { foldIntoNote } from "@/lib/note-flow";
 import AddSourceDialog from "./AddSourceDialog";
 import SyncDialog from "./SyncDialog";
 import SourcePanel from "./SourcePanel";
+import { homepageOf } from "@/lib/homepage";
 import InlineName from "./InlineName";
 import SettingsDialog from "./SettingsDialog";
 import DownloadBar from "./DownloadBar";
@@ -4776,7 +4777,21 @@ export default function Reader() {
             {Icon.menu}
           </button>
           <div>
-            <h1>{heading}</h1>
+            {(() => {
+              // An outlet's page: its name goes to the outlet's own site.
+              const source = selection.type === "source" ? sourceById.get(selection.id) : undefined;
+              const home = source ? homepageOf(source) : null;
+              return home ? (
+                <h1>
+                  <a className="source-home" href={home} target="_blank" rel="noreferrer noopener" title={`Go to ${hostOf(home)}`}>
+                    {heading}
+                    <span className="source-home-arrow" aria-hidden="true">↗</span>
+                  </a>
+                </h1>
+              ) : (
+                <h1>{heading}</h1>
+              );
+            })()}
             <p className="sub">
               {shown.length} article{shown.length === 1 ? "" : "s"}
               {/* What the download is costing in storage, where that is the
