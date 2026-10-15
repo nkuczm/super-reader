@@ -2546,6 +2546,10 @@ function useDocKeys(
         return done();
       }
       if (event.metaKey || event.ctrlKey) return;
+      // A letter is the editor's alone. Everything below finds the block's
+      // neighbours and the caret's edge, which on every keystroke of a long
+      // document was most of the cost of typing.
+      if (!BLOCK_KEYS.has(event.key)) return;
 
       // Blocks selected whole.
       if (chosen.length && target.matches?.("[data-item]")) {
@@ -4550,6 +4554,9 @@ function TabBar({
     </div>
   );
 }
+
+/** The keys that move between a document's blocks, or remove or select them. */
+const BLOCK_KEYS = new Set(["Escape", "Backspace", "Delete", "Enter", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
 
 /** How many ancestors of an element match a selector, itself excluded. */
 function countAncestors(el: Element, selector: string) {

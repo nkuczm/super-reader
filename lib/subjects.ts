@@ -132,9 +132,22 @@ export function embedSrc(box: BoxItem | undefined): string | undefined {
   return safeImage(box.image);
 }
 
+/**
+ * Pictures already checked. A photo is a megabyte of text, and the check
+ * reads all of it; it ran on every picture each time a subject redrew, which
+ * is every pause in typing. The same picture is the same string, so it is
+ * read once.
+ */
+const checkedImages = new Set<string>();
+
 /** Only an image this app made: a base64 PNG, JPEG or WebP data URL. */
 export function safeImage(src: string | undefined): string | undefined {
-  return src && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(src) ? src : undefined;
+  if (!src) return undefined;
+  if (checkedImages.has(src)) return src;
+  if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(src)) return undefined;
+  if (checkedImages.size > 500) checkedImages.clear();
+  checkedImages.add(src);
+  return src;
 }
 
 /** A stroke as synced data says it is: path commands and numbers only. */
@@ -364,6 +377,26 @@ const DB = "super-reader-boards";
 const STORE = "kv";
 let cache: Boards | null = null;
 
+/*
+ * Each item of each board is a record of its own, keyed by subject and item.
+ * The boards used to be one record, so every save copied every subject —
+ * pictures, drawings and all — on the page's own thread, a cost that grew
+ * with everything the reader had ever written and landed at each pause in
+ * typing. Items are replaced, never changed in place, so what a save has to
+ * write is the items that are not the ones last written: a box's words, not
+ * the whole device's subjects.
+ */
+const ITEM = "item:";
+const itemKey = (noteId: string, itemId: string) => `${ITEM}${noteId}\u0000${itemId}`;
+const itemsOf = (noteId?: string) =>
+  noteId === undefined
+    ? IDBKeyRange.bound(ITEM, `${ITEM}\uffff`)
+    : IDBKeyRange.bound(`${ITEM}${noteId}\u0000`, `${ITEM}${noteId}\u0000\uffff`);
+/** What the store holds, as last read or written: what the next write is compared against. */
+let onDisk: Boards | null = null;
+/** The device's boards being read at start: nothing is written over them until they are in. */
+let loading: Promise<unknown> | null = null;
+
 function idb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB, 1);
@@ -373,20 +406,49 @@ function idb(): Promise<IDBDatabase> {
   });
 }
 
-async function idbGet(): Promise<Boards | null> {
+/** The boards as items, and any still in the old single record (from before, or from an old tab). */
+async function idbGet(): Promise<{ items: Boards | null; whole: Boards | null }> {
   const db = await idb();
   return new Promise((resolve, reject) => {
-    const q = db.transaction(STORE).objectStore(STORE).get(KEY);
-    q.onsuccess = () => resolve((q.result as Boards) ?? null);
-    q.onerror = () => reject(q.error);
+    const tx = db.transaction(STORE);
+    const store = tx.objectStore(STORE);
+    const keys = store.getAllKeys(itemsOf());
+    const values = store.getAll(itemsOf());
+    const whole = store.get(KEY);
+    tx.oncomplete = () => {
+      const boards: Boards = {};
+      (keys.result as string[]).forEach((key, i) => {
+        const rest = key.slice(ITEM.length);
+        const cut = rest.indexOf("\u0000");
+        (boards[rest.slice(0, cut)] ??= {})[rest.slice(cut + 1)] = values.result[i] as BoardItem;
+      });
+      resolve({ items: keys.result.length ? boards : null, whole: (whole.result as Boards) ?? null });
+    };
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
   });
 }
 
-async function idbPut(boards: Boards): Promise<void> {
+/**
+ * Write `next`, given that the store holds `before`: the items that are new
+ * or replaced, and the removal of those gone. With `before` unknown, every
+ * item is written over a cleared store. `dropWhole` takes the old single
+ * record away in the same step, so the boards are never in neither place.
+ */
+async function idbWrite(next: Boards, before: Boards | null, dropWhole = false): Promise<void> {
   const db = await idb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite");
-    tx.objectStore(STORE).put(boards, KEY);
+    const store = tx.objectStore(STORE);
+    if (!before) store.delete(itemsOf());
+    for (const [noteId, board] of Object.entries(next)) {
+      const was = before?.[noteId];
+      if (was === board) continue;
+      for (const [itemId, item] of Object.entries(board)) if (was?.[itemId] !== item) store.put(item, itemKey(noteId, itemId));
+      if (was) for (const itemId of Object.keys(was)) if (!(itemId in board)) store.delete(itemKey(noteId, itemId));
+    }
+    if (before) for (const noteId of Object.keys(before)) if (!(noteId in next)) store.delete(itemsOf(noteId));
+    if (dropWhole) store.delete(KEY);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error);
@@ -409,15 +471,34 @@ export function loadBoards(): Boards {
 }
 
 /** The device's boards from IndexedDB, moving any still in localStorage across first. */
-export async function loadBoardsAsync(): Promise<Boards> {
-  if (typeof window === "undefined") return {};
+export function loadBoardsAsync(): Promise<Boards> {
+  if (typeof window === "undefined") return Promise.resolve({});
+  const load = readBoards();
+  loading = load.finally(() => {
+    loading = null;
+  });
+  return load;
+}
+
+async function readBoards(): Promise<Boards> {
   const local = fromLocal();
   try {
-    const held = (await idbGet()) ?? {};
-    const merged = Object.keys(local).length ? mergeBoards(held, local) : held;
-    if (Object.keys(local).length) {
-      await idbPut(merged);
+    const { items, whole } = await idbGet();
+    // The single record: this device's boards from before items, or what a
+    // tab still running the old app wrote since. Either way it merges in.
+    let held = items ?? {};
+    if (whole) held = items ? mergeBoards(held, whole) : whole;
+    let merged = Object.keys(local).length ? mergeBoards(held, local) : held;
+    if (whole || Object.keys(local).length) {
+      await idbWrite(merged, items, true);
       window.localStorage.removeItem(KEY);
+    }
+    onDisk = merged;
+    // Boards given to save while these were being read — the account's copy,
+    // arriving first — are what this device held as well, not instead.
+    if (pending) {
+      merged = mergeBoards(merged, pending);
+      pending = merged;
     }
     cache = merged;
     return merged;
@@ -440,17 +521,49 @@ export function reportStored(ok: boolean) {
 let pending: Boards | null = null;
 let writing: Promise<void> | null = null;
 
-/** Kept on the device: written to IndexedDB, the latest copy only, one write at a time. */
+/**
+ * Kept on the device: written to IndexedDB, the latest copy only, one write
+ * at a time — once the writing has paused for a moment.
+ *
+ * A write copies every subject's board, pictures and all, and the copy is
+ * made on the page's own thread: in a subject with a few photos, a few
+ * megabytes, tens of milliseconds on a phone. Made at every pause in typing
+ * (a box saves 400ms after the last key), it landed on the next keystroke.
+ * What is held in memory is current at once, and reads see it; the copy on
+ * disk follows a second after the writing stops, at most five seconds after
+ * it started, and straight away when the page is put away or closed.
+ */
+const QUIET_MS = 1_000;
+const MOST_MS = 5_000;
+let waiting: ReturnType<typeof setTimeout> | null = null;
+let since = 0;
+
 export function saveBoards(boards: Boards) {
   cache = boards;
   pending = boards;
-  if (writing) return;
+  const now = Date.now();
+  if (!since) since = now;
+  if (waiting) clearTimeout(waiting);
+  waiting = setTimeout(writeBoards, Math.max(0, Math.min(QUIET_MS, since + MOST_MS - now)));
+}
+
+/** Write what is waiting now. */
+export function writeBoards() {
+  if (waiting) clearTimeout(waiting);
+  waiting = null;
+  since = 0;
+  if (writing || !pending) return;
+  if (loading && !onDisk) {
+    void loading.then(writeBoards, writeBoards);
+    return;
+  }
   writing = (async () => {
     while (pending) {
       const next = pending;
       pending = null;
       try {
-        await idbPut(next);
+        await idbWrite(next, onDisk);
+        onDisk = next;
         reportStored(true);
       } catch {
         try {
@@ -464,6 +577,14 @@ export function saveBoards(boards: Boards) {
     }
   })().finally(() => {
     writing = null;
+  });
+}
+
+if (typeof window !== "undefined") {
+  // Leaving — another app, a closed tab — is when waiting would lose the writing.
+  window.addEventListener("pagehide", writeBoards);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") writeBoards();
   });
 }
 
