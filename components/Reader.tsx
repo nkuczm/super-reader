@@ -177,7 +177,7 @@ import ScoreExplainer from "./ScoreExplainer";
 import type { CorpusStats } from "./ScoreExplainer";
 import { canonicalUrl } from "@/lib/url";
 import { repairSources } from "@/lib/publishers";
-import { mergeWindow, stamp } from "@/lib/window";
+import { KEEP_DAYS, mergeWindow, stamp } from "@/lib/window";
 import { mergeSaved, differsFrom, slimForSync } from "@/lib/saved";
 import { knownRefusal } from "@/lib/subscriptions";
 import {
@@ -3284,7 +3284,14 @@ export default function Reader() {
    * what the counts, the ranking and the offline copy are made from.
    */
   const [rendered, setRendered] = useState(PAGE);
-  const tail = useRef<HTMLDivElement | null>(null);
+  /**
+   * Where the next batch comes in, as state rather than a ref: opening a
+   * story takes the list off the page and Back builds it again, with a new
+   * one of these. A ref changes without anything noticing, so the watch
+   * stayed on the old one — gone from the page — and the list stopped
+   * growing at whatever it had, its spinner turning for good.
+   */
+  const [tail, setTail] = useState<HTMLDivElement | null>(null);
 
   const inView = useMemo(() => storyGroups.slice(0, rendered), [storyGroups, rendered]);
   const more = storyGroups.length > inView.length;
@@ -3345,7 +3352,7 @@ export default function Reader() {
    * arrives at it and the scroll never stops at a seam.
    */
   useEffect(() => {
-    const sentinel = tail.current;
+    const sentinel = tail;
     const root = listRef.current;
     if (!sentinel || !root || !more) return;
     const observer = new IntersectionObserver(
@@ -3358,7 +3365,7 @@ export default function Reader() {
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [more, inView.length]);
+  }, [tail, more, inView.length]);
 
   /** The article whose score page is open, with its ranking. */
   const explainRank = useMemo(() => {
@@ -5001,10 +5008,17 @@ export default function Reader() {
             })}
             {/* Where the next batch comes in. Kept out of the list itself so
                 it cannot be mistaken for an article with nothing in it. */}
-            {more && (
-              <div className="list-tail" ref={tail} aria-hidden>
+            {more ? (
+              <div className="list-tail" ref={setTail} aria-hidden>
                 <span className="spinner" />
               </div>
+            ) : (
+              // The end, said as one: a list that just stops reads as one still loading.
+              <p className="list-end">
+                {["all", "feed", "source"].includes(selection.type)
+                  ? `That\u2019s everything — stories are kept for ${KEEP_DAYS} days.`
+                  : "That\u2019s everything here."}
+              </p>
             )}
           </div>
         )}
