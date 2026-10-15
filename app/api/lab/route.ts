@@ -17,11 +17,12 @@ const TARGETS = [
 export async function GET() {
   const out = await Promise.all(TARGETS.map(async (url) => {
     try {
-      const text = await fetchText(url, 15000);
+      const { body: text, finalUrl } = await fetchText(url, 15000);
       const pubDates = [...text.matchAll(/<pubDate>([^<]+)<\/pubDate>/g)].map((m) => m[1]);
       const items = (text.match(/<item>/g) ?? []).length;
       return {
         url,
+        finalUrl,
         size: text.length,
         items,
         newest: pubDates[0],
