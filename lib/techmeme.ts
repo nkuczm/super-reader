@@ -1,10 +1,10 @@
 /**
- * Techmeme's River: every headline Techmeme posts, newest first, three days
+ * Techmeme's River: every headline Techmeme posts, newest first, five days
  * of it on one page — where its feed holds only the latest fifteen.
  *
  * Measured from a preview deployment, 15 Oct 2026 (docs/COLLECTION.md §2):
  * feed.xml held 15 items spanning 09:30 to 14:10 that day, under five
- * hours; /river held 214, back to the 12th. A reader who looked in twice a
+ * hours; /river held 214, back to the 10th. A reader who looked in twice a
  * day saw a fraction of what Techmeme filed, and a source added that
  * afternoon showed fifteen stories. No sitemap (404); robots.txt allows the
  * River.

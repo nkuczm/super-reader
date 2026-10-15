@@ -491,11 +491,12 @@ same day:
 | Route | Result |
 |---|---|
 | `techmeme.com/feed.xml` | 15 items, **09:30 to 14:10 that day**: under five hours |
-| `techmeme.com/river` | **214 rows, back three days**, newest first |
+| `techmeme.com/river` | **214 rows, back five days** (to the 10th), newest first |
 | `techmeme.com/sitemap.xml` | 404 |
+| the refresh, after the change | **214 stories**, the feed's 15 among them, none twice |
 
-Techmeme files roughly seventy headlines a day, so the feed's window is a
-few hours. A reader who looked in twice a day was seeing a fraction of
+Techmeme files about fifty headlines a weekday (45–54 each day that
+week, a handful at the weekend), so the feed's window is a few hours. A reader who looked in twice a day was seeing a fraction of
 what was filed, and the held window (§4.2) can only keep what a refresh
 was shown. The River is Techmeme's own page for exactly this: "Techmeme
 in pure reverse chronological order", one row per headline, each with

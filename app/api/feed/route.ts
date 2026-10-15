@@ -213,7 +213,7 @@ export async function GET(request: Request) {
       return { ok: true as const, ...meta, feedUrl: url, articles };
     }
 
-    // Techmeme's River beside its feed (lib/techmeme.ts): three days of
+    // Techmeme's River beside its feed (lib/techmeme.ts): five days of
     // headlines, not the latest fifteen. Read together; a River that fails
     // or runs out of time costs nothing the feed did not have.
     const [{ meta, isSitemap, articles: fed }, river] = await Promise.all([
