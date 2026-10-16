@@ -10,7 +10,25 @@
 const JUNK_PARAMS =
   /^(utm_|ito$|mod$|ref$|referrer$|smid$|partner$|cmpid$|cmp$|srnd$|taid$|at_|fbclid$|gclid$|mc_cid$|mc_eid$|sh$|s$|share|guccounter|__twitter|_ga$|igshid$|spm$|xtor)/i;
 
+/**
+ * Links already made canonical. The same few thousand links are asked about
+ * again and again — every group of a refresh merges the whole list, and the
+ * list's views key every story — and parsing each one afresh was most of
+ * what a refresh cost on a phone: seconds of a frozen page while the stories
+ * came in. The answer for a link never changes.
+ */
+const canonical = new Map<string, string>();
+
 export function canonicalUrl(input: string) {
+  const known = canonical.get(input);
+  if (known !== undefined) return known;
+  const made = canonicalOf(input);
+  if (canonical.size >= 50_000) canonical.clear();
+  canonical.set(input, made);
+  return made;
+}
+
+function canonicalOf(input: string) {
   try {
     const url = new URL(input.trim());
     url.hash = "";

@@ -78,25 +78,36 @@ export function mergeWindow<T extends Held>(
     if (!article?.link || !sources.has(article.sourceId)) continue;
     const key = canonical(article.link);
     const existing = byKey.get(key);
-    byKey.set(key, {
-      ...existing,
-      ...filled(article),
-      // Keep the day it first appeared here, not the day it was re-read.
-      seenAt: existing?.seenAt ?? article.seenAt ?? now,
-    } as T);
+    // A story seen once is taken as it is; only one held twice is merged
+    // field by field. Copying every story of a few thousand, on every group
+    // of a refresh, was a good part of what froze a phone while it ran.
+    byKey.set(
+      key,
+      existing
+        ? ({
+            ...existing,
+            ...filled(article),
+            // Keep the day it first appeared here, not the day it was re-read.
+            seenAt: existing.seenAt ?? article.seenAt ?? now,
+          } as T)
+        : article.seenAt
+          ? article
+          : ({ ...article, seenAt: now } as T),
+    );
   }
 
   // Bounded per source rather than overall: a desk that files hourly would
   // otherwise push a weekly column out of a list it should still be in.
   const counts = new Map<string, number>();
   const kept: T[] = [];
-  for (const article of [...byKey.values()].sort(
-    (a, b) => ageOf(a, now) - ageOf(b, now),
-  )) {
+  // Each age worked out once, not in every comparison of the sort.
+  const aged = [...byKey.values()].map((article) => ({ article, age: ageOf(article, now) }));
+  aged.sort((a, b) => a.age - b.age);
+  for (const { article, age } of aged) {
     const count = counts.get(article.sourceId) ?? 0;
     if (count >= perSource) continue;
     // Past the window, only a source's newest few survive.
-    if (count >= newest && ageOf(article, now) > cutoff) continue;
+    if (count >= newest && age > cutoff) continue;
     counts.set(article.sourceId, count + 1);
     kept.push(article);
   }
