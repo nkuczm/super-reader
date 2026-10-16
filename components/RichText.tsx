@@ -565,21 +565,23 @@ export default function RichText({
     target.addEventListener("pointerup", up);
   }
 
+  /* Told when the caret comes into this box or leaves it (onCaret, below). */
+  const showingLink = useRef(false);
+  const showingQuote = useRef(false);
   useEffect(() => {
     const checkLink = () => {
       const node = el.current;
       const anchor = window.getSelection()?.anchorNode;
-      const link =
-        node && anchor && node.contains(anchor)
-          ? (anchor instanceof Element ? anchor : anchor.parentElement)?.closest<HTMLAnchorElement>("a[href]")
-          : null;
+      const inside = Boolean(node && anchor && node.contains(anchor));
+      if (!inside && !showingLink.current) return;
+      const link = inside ? (anchor instanceof Element ? anchor : anchor!.parentElement)?.closest<HTMLAnchorElement>("a[href]") : null;
+      showingLink.current = Boolean(link && node);
       if (!link || !node) return setInLink(null);
       const box = node.parentElement!.getBoundingClientRect();
       const rect = link.getBoundingClientRect();
       setInLink({ href: link.href, top: rect.bottom - box.top + 4, left: Math.max(0, rect.left - box.left) });
     };
-    document.addEventListener("selectionchange", checkLink);
-    return () => document.removeEventListener("selectionchange", checkLink);
+    return el.current ? onCaret(el.current, checkLink) : undefined;
   }, []);
 
   /**
@@ -663,10 +665,10 @@ export default function RichText({
       const node = el.current;
       const selection = window.getSelection();
       const anchor = selection?.anchorNode;
-      const link =
-        node && anchor && node.contains(anchor)
-          ? (anchor instanceof Element ? anchor : anchor.parentElement)?.closest<HTMLElement>("a[data-quote]")
-          : null;
+      const inside = Boolean(node && anchor && node.contains(anchor));
+      if (!inside && !showingQuote.current) return;
+      const link = inside ? (anchor instanceof Element ? anchor : anchor!.parentElement)?.closest<HTMLElement>("a[data-quote]") : null;
+      showingQuote.current = Boolean(link && node);
       if (!link || !node) {
         setInQuote(null);
         return;
@@ -675,8 +677,7 @@ export default function RichText({
       const rect = link.getBoundingClientRect();
       setInQuote({ id: link.dataset.quote!, top: rect.top - box.top, left: Math.max(0, rect.left - box.left) });
     };
-    document.addEventListener("selectionchange", check);
-    return () => document.removeEventListener("selectionchange", check);
+    return el.current ? onCaret(el.current, check) : undefined;
   }, [onOpenQuote]);
 
   useEffect(() => {
@@ -1057,10 +1058,17 @@ export default function RichText({
 
   /** What the caret is in, so the tools can show it: bold, a heading, which kind of list. */
   const [toolState, setToolState] = useState<ToolState>({});
-  const readTools = useRef<() => void>(() => {});
+  const readTools = useRef<(ask?: boolean) => void>(() => {});
   useEffect(() => {
     if (!focused) return;
-    const read = () => {
+    /**
+     * `ask`: ask the browser, which knows about bold switched on with nothing
+     * selected yet (⌘B, or the button, before typing). Otherwise the caret's
+     * own surroundings say it — where typed words go once they are typed — and
+     * asking is what made typing slow: it makes the browser work out the
+     * styles of a page a keystroke has just changed, two or three times a key.
+     */
+    const read = (ask = false) => {
       const sel = window.getSelection();
       const node = sel?.anchorNode;
       const at = node && (node.nodeType === 1 ? (node as Element) : node.parentElement);
@@ -1074,29 +1082,52 @@ export default function RichText({
         const type = inner.getAttribute("type") === "A" ? "A" : inner.getAttribute("type") === "a" ? "a" : "1";
         list = `${type}${inner.getAttribute("data-mark") === "paren" ? ")" : ""}` as ListKind;
       }
-      const lit = at.closest("mark") || [...el.current.querySelectorAll("span[style]")].some((span) => span.contains(at) && isHighlight(span.getAttribute("style") ?? ""));
+      // Up from the caret, not every styled span in the box: this runs as the reader types.
+      let lit = false;
+      let bold = false;
+      let italic = false;
+      for (let up: Element | null = at; up && up !== el.current; up = up.parentElement) {
+        const style = up.getAttribute("style") ?? "";
+        lit ||= up.tagName === "MARK" || (up.tagName === "SPAN" && isHighlight(style));
+        bold ||= /^(B|STRONG)$/.test(up.tagName) || /font-weight:\s*(bold|[6-9]00)/.test(style);
+        italic ||= /^(I|EM)$/.test(up.tagName) || /font-style:\s*italic/.test(style);
+      }
       const next: ToolState = {
         // A heading is drawn bold; Bold shows as on there only for words made bold.
-        b: at.closest("h3") ? Boolean(at.closest("b, strong")) : document.queryCommandState("bold"),
-        i: document.queryCommandState("italic"),
-        hl: Boolean(lit),
+        b: at.closest("h3") ? Boolean(at.closest("b, strong")) : ask ? document.queryCommandState("bold") : bold,
+        i: ask ? document.queryCommandState("italic") : italic,
+        hl: lit,
         h: Boolean(at.closest("h3")),
         list,
       };
       setToolState((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
     };
     readTools.current = read;
-    read();
-    // Bold switched on with nothing selected moves no caret, so no selection change says so:
-    // read again after each key and each click as well.
-    const soon = () => requestAnimationFrame(read);
-    document.addEventListener("selectionchange", read);
-    document.addEventListener("keyup", soon, true);
-    document.addEventListener("mouseup", soon, true);
+    read(true);
+    // Once a frame at most; a caret move and a key let go are usually the same keystroke.
+    let frame = 0;
+    let asking = false;
+    const soon = (ask: boolean) => {
+      asking ||= ask;
+      if (!frame) frame = requestAnimationFrame(() => {
+        frame = 0;
+        const precise = asking;
+        asking = false;
+        read(precise);
+      });
+    };
+    const moved = () => soon(false);
+    // A shortcut (⌘B, ⌘I) can switch a style on with nothing typed yet: ask then.
+    const key = (event: KeyboardEvent) => soon(event.metaKey || event.ctrlKey);
+    const click = () => soon(false);
+    document.addEventListener("selectionchange", moved);
+    document.addEventListener("keyup", key, true);
+    document.addEventListener("mouseup", click, true);
     return () => {
-      document.removeEventListener("selectionchange", read);
-      document.removeEventListener("keyup", soon, true);
-      document.removeEventListener("mouseup", soon, true);
+      cancelAnimationFrame(frame);
+      document.removeEventListener("selectionchange", moved);
+      document.removeEventListener("keyup", key, true);
+      document.removeEventListener("mouseup", click, true);
     };
   }, [focused]);
 
@@ -1126,7 +1157,7 @@ export default function RichText({
       if (!press.defaultPrevented) format(action);
       return;
     }
-    const after = () => requestAnimationFrame(() => readTools.current());
+    const after = () => requestAnimationFrame(() => readTools.current(true));
     if (action === "bold" || action === "italic") return (format(action), after());
     if (action === "highlight") return (toggleHighlight(), after());
     if (action === "heading") return (format("formatBlock", toolState.h ? "p" : "h3"), after());
@@ -1737,6 +1768,39 @@ export default function RichText({
  * the link into the next bullet leaves an empty or duplicate copy, which is
  * unwrapped so each quote is linked once.
  */
+/*
+ * One caret listener for every box on the page. Each box used to listen for
+ * itself, so every keystroke ran a listener per box — two, with quotes — and
+ * a subject of a hundred blocks ran a few hundred a key. The box the caret
+ * is in is found by walking up from the caret, and only it and the box the
+ * caret has just left are told.
+ */
+const caretBoxes = new Map<Node, Set<() => void>>();
+let caretIn: Node | null = null;
+
+function caretMoved() {
+  let box: Node | null = null;
+  for (let n: Node | null = window.getSelection()?.anchorNode ?? null; n && !box; n = n.parentNode) if (caretBoxes.has(n)) box = n;
+  const left = caretIn !== box ? caretIn : null;
+  caretIn = box;
+  for (const told of [box, left]) caretBoxes.get(told!)?.forEach((tell) => tell());
+}
+
+/** Tell `tell` whenever the caret comes into `box`, moves within it, or leaves it. */
+function onCaret(box: HTMLElement, tell: () => void): () => void {
+  if (caretBoxes.size === 0) document.addEventListener("selectionchange", caretMoved);
+  const tells = caretBoxes.get(box) ?? new Set<() => void>();
+  tells.add(tell);
+  caretBoxes.set(box, tells);
+  return () => {
+    tells.delete(tell);
+    if (tells.size) return;
+    caretBoxes.delete(box);
+    if (caretIn === box) caretIn = null;
+    if (caretBoxes.size === 0) document.removeEventListener("selectionchange", caretMoved);
+  };
+}
+
 export function keepQuotesTight(root: HTMLElement) {
   const seen = new Set<string>();
   for (const link of [...root.querySelectorAll<HTMLAnchorElement>("a[data-quote]")]) {

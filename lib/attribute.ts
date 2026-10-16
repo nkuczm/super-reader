@@ -22,12 +22,21 @@
 export type Attributable = { link: string; sourceId: string; alsoIn?: string[] };
 export type SourceRef = { id: string; feedUrl: string; siteUrl?: string };
 
+/** Hosts already read: every group of a refresh files the whole list again. */
+const hosts = new Map<string, string>();
 const hostOf = (url: string | undefined) => {
-  try {
-    return url ? new URL(url).hostname.toLowerCase().replace(/^www\./, "") : "";
-  } catch {
-    return "";
+  if (!url) return "";
+  let host = hosts.get(url);
+  if (host === undefined) {
+    try {
+      host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+    } catch {
+      host = "";
+    }
+    if (hosts.size >= 50_000) hosts.clear();
+    hosts.set(url, host);
   }
+  return host;
 };
 
 /** Whether a source is the publisher of a story: the story's site is the source's, or under it. */

@@ -14,5 +14,9 @@ export function timeOf(article: { publishedAt?: string }) {
 export function sortNewestFirst<T extends { publishedAt?: string }>(
   articles: T[],
 ): T[] {
-  return [...articles].sort((a, b) => timeOf(b) - timeOf(a));
+  // Each date read once, not in every comparison: a sort compares each item
+  // a dozen times over at a few thousand stories.
+  const timed = articles.map((article) => ({ article, at: timeOf(article) }));
+  timed.sort((a, b) => (b.at === a.at ? 0 : b.at - a.at || 0));
+  return timed.map(({ article }) => article);
 }

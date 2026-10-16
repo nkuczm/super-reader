@@ -468,6 +468,20 @@ export default function Reader() {
   const [explaining, setExplaining] = useState<string | null>(null);
   /** The scrolling column: pull-to-refresh and jump-to-top both need it. */
   const listRef = useRef<HTMLElement | null>(null);
+  /** When the reader last scrolled or touched the list: a refresh's update waits for them to stop. */
+  const lastTouched = useRef(0);
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const touched = () => {
+      lastTouched.current = Date.now();
+    };
+    const events = ["scroll", "wheel", "touchstart", "touchmove", "pointerdown"] as const;
+    for (const type of events) list.addEventListener(type, touched, { passive: true });
+    return () => {
+      for (const type of events) list.removeEventListener(type, touched);
+    };
+  }, []);
   /** How far the list has been dragged past its top, in pixels. */
   const [pullDistance, setPullDistance] = useState(0);
   /** Whether the refresh in flight was started by pulling the list. */
@@ -1716,39 +1730,57 @@ export default function Reader() {
     let answered = 0;
 
     /**
-     * The list as it stands with every group that has answered so far. Put
-     * on screen at most once a second: a group answers every second or two,
-     * and redrawing a long list for each one made a phone stutter.
+     * The list as it stands with every group that has answered so far,
+     * worked out only when it is put on screen. A group answering only marks
+     * it out of date: merging the whole list again for every group, and
+     * drawing it each time, froze a phone for seconds while a refresh ran
+     * (measured: seven seconds of a ten-second refresh, the worst stretch over
+     * a second). It goes on screen at most once a second, and not while the
+     * reader is scrolling or touching the list — the new stories land when
+     * they stop, or after four seconds if they never do.
      */
-    let view = null as { list: Loaded[] } | null;
+    let view = null as { list: Loaded[]; ordered: Loaded[] } | null;
+    let stale = true;
+    const current = () => {
+      if (stale || !view) {
+        stale = false;
+        // One article, once. Two of a paper's feeds carry the same story with
+        // different tracking parameters, which is how the list ended up showing
+        // the same WSJ piece twice in a row. Once, but in every source that
+        // delivered it — filed under its publisher's own (lib/attribute.ts).
+        const unique: Loaded[] = attributeStories<Article>(results, sources, canonicalUrl);
+        const ordered = sortNewestFirst(mergeWindow(stamp(unique), held, { sources: following, canonical: canonicalUrl }));
+        // Stories pasted in and filed under a source are not in its feed; put
+        // them back, or the refresh would take them away.
+        view = { list: withPastedStories(ordered, manualRef.current, following), ordered };
+      }
+      return view;
+    };
     let paintedAt = 0;
+    let dueSince = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const paint = () => {
       timer = undefined;
-      paintedAt = Date.now();
-      if (!view || run !== refreshRun.current) return;
-      refreshed.current = true;
-      setArticles(view.list);
-    };
-    const show = () => {
-      // One article, once. Two of a paper's feeds carry the same story with
-      // different tracking parameters, which is how the list ended up showing
-      // the same WSJ piece twice in a row. Once, but in every source that
-      // delivered it — filed under its publisher's own (lib/attribute.ts).
-      const unique: Loaded[] = attributeStories<Article>(results, sources, canonicalUrl);
-      const ordered = sortNewestFirst(mergeWindow(stamp(unique), held, { sources: following, canonical: canonicalUrl }));
-      // Stories pasted in and filed under a source are not in its feed; put
-      // them back, or the refresh would take them away.
-      view = { list: withPastedStories(ordered, manualRef.current, following) };
-      const since = Date.now() - paintedAt;
-      if (since >= 1000) {
-        clearTimeout(timer);
-        paint();
-      } else {
-        timer ??= setTimeout(paint, 1000 - since);
+      if (run !== refreshRun.current) return;
+      const busy = 350 - (Date.now() - lastTouched.current);
+      if (busy > 0 && Date.now() - dueSince < 4000) {
+        timer = setTimeout(paint, busy);
+        return;
       }
-      return ordered;
+      dueSince = 0;
+      paintedAt = Date.now();
+      refreshed.current = true;
+      setArticles(current().list);
+      setRefreshCount({ done: answered, total: due.length });
     };
+    /** Put the list up when it can be; `changed` when stories arrived, not just the counter. */
+    const show = (changed = true) => {
+      if (changed) stale = true;
+      if (!dueSince) dueSince = Date.now();
+      timer ??= setTimeout(paint, Math.max(0, 1000 - (Date.now() - paintedAt)));
+    };
+    /** What each source delivered, for the status page: recorded once the refresh is done. */
+    const runs: Parameters<typeof recordRuns>[1] = {};
 
     try {
       // What is held goes up straight away, without sources since removed.
@@ -1776,19 +1808,13 @@ export default function Reader() {
           return;
         } finally {
           answered += group.length;
-          if (run === refreshRun.current) setRefreshCount({ done: answered, total: due.length });
+          // The counter goes up with the list, in the same redraw.
+          if (run === refreshRun.current) show(false);
         }
         if (run !== refreshRun.current) return;
         const fresh = (data.results ?? []).filter((result) => result?.feedUrl);
         results.push(...fresh);
-        const ordered = show();
-
-        // What each source delivered, for the status page.
-        const heldBySource = new Map<string, number>();
-        for (const article of ordered) {
-          for (const id of [article.sourceId, ...(article.alsoIn ?? [])]) heldBySource.set(id, (heldBySource.get(id) ?? 0) + 1);
-        }
-        const runs: Parameters<typeof recordRuns>[1] = {};
+        show();
         const at = Date.now();
         for (const result of fresh) for (const source of group.filter((s) => s.feedUrl === result.feedUrl)) {
           const list = result.articles ?? [];
@@ -1797,21 +1823,39 @@ export default function Reader() {
             at,
             ok: result.ok !== false,
             fetched: list.length,
-            held: heldBySource.get(source.id) ?? 0,
+            held: 0,
             newest: newest || undefined,
             error: result.ok === false ? String(result.error ?? "Fetch failed") : undefined,
           };
         }
+      });
+      clearTimeout(timer);
+      timer = undefined;
+      // The last of it waits for the reader to stop scrolling too.
+      const waitFrom = Date.now();
+      for (let busy = 350 - (Date.now() - lastTouched.current); busy > 0 && Date.now() - waitFrom < 4000; busy = 350 - (Date.now() - lastTouched.current)) {
+        await new Promise((resolve) => setTimeout(resolve, busy));
+      }
+      if (run !== refreshRun.current) return;
+      const done = current();
+      refreshed.current = true;
+      setArticles(done.list);
+      setRefreshCount({ done: answered, total: due.length });
+      // What each source now holds, for the status page.
+      const heldBySource = new Map<string, number>();
+      for (const article of done.ordered) {
+        for (const id of [article.sourceId, ...(article.alsoIn ?? [])]) heldBySource.set(id, (heldBySource.get(id) ?? 0) + 1);
+      }
+      for (const [id, entry] of Object.entries(runs)) entry.held = heldBySource.get(id) ?? 0;
+      if (Object.keys(runs).length) {
         setHealth((current) => {
           const next = recordRuns(current, runs, following);
           saveHealth(next);
           return next;
         });
-      });
-      clearTimeout(timer);
-      paint();
+      }
       // Also what the list falls back to with no connection.
-      if (view && run === refreshRun.current) await saveListSnapshot(view.list);
+      await saveListSnapshot(done.list);
     } catch {
       // The stored list could not be written: what is on screen stands.
     } finally {
