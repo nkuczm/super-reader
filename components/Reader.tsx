@@ -398,14 +398,41 @@ export default function Reader() {
    * their answer stands even if it is shorter than what was saved.
    */
   const refreshed = useRef(false);
-  const [reading, setReading] = useState<{
+  type Reading = {
     url: string;
     title: string;
     feedUrl?: string;
     summary?: string;
     /** A passage to go to on arrival, when a note's quote sent us here. */
     quote?: string;
-  } | null>(null);
+  };
+  const [reading, setReadingNow] = useState<Reading | null>(null);
+  const readingRef = useRef(reading);
+  readingRef.current = reading;
+  /**
+   * Where the list beneath an article was left: the story at the top of the
+   * screen and how far down it sat, and the scroll as a fallback. The article
+   * is read in the list's own scrolling pane, so without this Back landed
+   * wherever the article had been scrolled to.
+   */
+  const placeBelow = useRef<{ key: string; top: number; anchor?: { id: string; offset: number } } | null>(null);
+  /** Which list is showing (`listKey`, below), for knowing the place is this list's. */
+  const placeKey = useRef("");
+  const setReading = useCallback((next: Reading | null) => {
+    const root = listRef.current;
+    if (next && !readingRef.current && root) {
+      const top = root.getBoundingClientRect().top;
+      let anchor: { id: string; offset: number } | undefined;
+      for (const el of root.querySelectorAll<HTMLElement>("[data-anchor]")) {
+        const box = el.getBoundingClientRect();
+        if (box.bottom <= top) continue;
+        anchor = { id: el.dataset.anchor!, offset: box.top - top };
+        break;
+      }
+      placeBelow.current = { key: placeKey.current, top: root.scrollTop, anchor };
+    }
+    setReadingNow(next);
+  }, []);
   // An open article is a step in the browser's history, so Back — the
   // button, a swipe, a mouse's back key — closes it and returns to the
   // subject or list beneath, where it was left, rather than leaving the app.
@@ -3344,6 +3371,30 @@ export default function Reader() {
   // A different list starts at its own beginning, not part-way down the last
   // one's depth.
   const listKey = `${selection.type}:${"id" in selection ? selection.id : ""}:${settings.sort}:${settings.hideRead}`;
+  placeKey.current = listKey;
+
+  /*
+   * An article opens at its own top (the reader then takes it to where it was
+   * left, if it was), and closing it — Back, a swipe, the browser's back —
+   * returns the list to where it was: the same story at the same height.
+   */
+  const readBefore = useRef(reading);
+  useLayoutEffect(() => {
+    const was = readBefore.current;
+    readBefore.current = reading;
+    const root = listRef.current;
+    if (!root || Boolean(was) === Boolean(reading)) return;
+    if (reading) {
+      root.scrollTop = 0;
+      return;
+    }
+    const place = placeBelow.current;
+    placeBelow.current = null;
+    if (!place || place.key !== listKey) return;
+    const el = place.anchor ? root.querySelector<HTMLElement>(`[data-anchor="${CSS.escape(place.anchor.id)}"]`) : null;
+    if (el && place.anchor) root.scrollTop += el.getBoundingClientRect().top - root.getBoundingClientRect().top - place.anchor.offset;
+    else root.scrollTop = place.top;
+  }, [reading, listKey]);
   useEffect(() => {
     setRendered(PAGE);
   }, [listKey]);
@@ -4866,14 +4917,21 @@ export default function Reader() {
             >
               <button
                 className={settings.sort === "new" ? "on" : ""}
-                onClick={() => updateSettings({ ...settings, sort: "new" })}
+                onClick={() => {
+                  // Either order starts at its own top.
+                  updateSettings({ ...settings, sort: "new" });
+                  scrollToTop();
+                }}
                 title="Newest first"
               >
                 Newest
               </button>
               <button
                 className={settings.sort === "top" ? "on" : ""}
-                onClick={() => updateSettings({ ...settings, sort: "top" })}
+                onClick={() => {
+                  updateSettings({ ...settings, sort: "top" });
+                  scrollToTop();
+                }}
                 title={
                   rankState && rankState !== "unavailable" && rankState !== "warming"
                     ? `Biggest stories first — measured against ${rankState}`
