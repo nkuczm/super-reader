@@ -3079,9 +3079,11 @@
   .subjects-list { margin: 4px 12px 32px; }
   /* Narrow: the date being sorted by stays, the others go. */
   .subjects-list-head, .subjects-list-row { grid-template-columns: 34px minmax(0, 1fr) 88px 86px; }
-  .subjects-list .col-created, .subjects-list .col-edited { display: none; }
-  .subjects-list.by-created .col-created, .subjects-list.by-edited .col-edited,
-  .subjects-list.by-name .col-edited { display: block; }
+  .subjects-list .col-created, .subjects-list .col-recent { display: none; }
+  .subjects-list.by-created .col-created, .subjects-list.by-recent .col-recent,
+  .subjects-list.by-name .col-recent { display: block; }
+  /* "Viewed" or "Edited" is in the cell's tooltip; the column has room for the time. */
+  .subjects-list .recent-what { display: none; }
   .subjects-list-row .col-actions .icon-btn { opacity: 1; }
   .subjects-toolbar { padding: 4px 12px 6px; }
 }

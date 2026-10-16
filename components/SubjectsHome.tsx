@@ -6,11 +6,17 @@ import { useEffect, useState } from "react";
 import { Icon } from "./icons";
 import type { Note } from "@/lib/notes";
 import { cardsOf, isPinned, LABEL_COLOR_NAMES, LABEL_COLORS, live, metaOf, subjectColorOf, type Boards } from "@/lib/subjects";
-import { lastEdited, sortSubjects, type SortDir, type SubjectSort } from "@/lib/subject-order";
+import { lastEdited, recentOf, sortSubjects, type SortDir, type SubjectSort } from "@/lib/subject-order";
+import { SUBJECT_VIEWED_EVENT, viewedTimes } from "@/lib/subject-seen";
 import { timeAgo } from "./format";
 
 const LAYOUT_KEY = "super-reader:subjects-layout:v1";
-const SORT_LABEL: Record<SubjectSort, string> = { edited: "Last edited", created: "Date created", name: "Name" };
+const SORT_LABEL: Record<SubjectSort, string> = { recent: "Recent", created: "Date created", name: "Name" };
+
+/** "Viewed 5m ago" or "Edited 2h ago": whichever put it where it is in Recent. */
+const recencyParts = ({ edited, viewed }: { edited: number; viewed?: number }) =>
+  [viewed && viewed > edited ? "Viewed" : "Edited", timeAgo(new Date(recentOf({ edited, viewed })).toISOString())] as const;
+const recency = (times: { edited: number; viewed?: number }) => recencyParts(times).join(" ");
 
 const PIN_ICON = (
   <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round">
@@ -95,12 +101,12 @@ export default function SubjectsHome({
     setColoring(null);
   };
   const [name, setName] = useState("");
-  const [layout, setLayout] = useState<{ view: "grid" | "list"; by: SubjectSort; dir: SortDir }>({ view: "grid", by: "edited", dir: "desc" });
+  const [layout, setLayout] = useState<{ view: "grid" | "list"; by: SubjectSort; dir: SortDir }>({ view: "grid", by: "recent", dir: "desc" });
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "null");
-      // "Last opened" is gone; a layout saved with it keeps its view and sorts by last edited.
-      if (saved?.by === "opened") saved.by = "edited";
+      // "Last opened" and "Last edited" are one order now, Recent; a layout saved with either keeps its view.
+      if (saved?.by === "opened" || saved?.by === "edited") saved.by = "recent";
       if (saved && (saved.view === "grid" || saved.view === "list") && saved.by in SORT_LABEL && (saved.dir === "asc" || saved.dir === "desc")) setLayout(saved);
     } catch {
       /* the defaults */
@@ -119,6 +125,26 @@ export default function SubjectsHome({
   /** A column heading: sorts by it, and a second click turns the order round. */
   const sortBy = (by: SubjectSort) =>
     choose(layout.by === by ? { dir: layout.dir === "desc" ? "asc" : "desc" } : { by, dir: by === "name" ? "asc" : "desc" });
+
+  /*
+   * When each subject was last looked at on this device, read again whenever
+   * one is marked — here, as the subject just left records its last moment,
+   * or in another tab.
+   */
+  const [viewed, setViewed] = useState<Record<string, number>>({});
+  useEffect(() => {
+    const read = () => setViewed(viewedTimes());
+    read();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === null || event.key === "super-reader:subject-viewed") read();
+    };
+    window.addEventListener(SUBJECT_VIEWED_EVENT, read);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(SUBJECT_VIEWED_EVENT, read);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
 
   const unsorted = notes
     .map((note) => {
@@ -139,6 +165,7 @@ export default function SubjectsHome({
         color: subjectColorOf(board),
         created: note.at,
         edited: lastChange,
+        viewed: viewed[note.id],
       };
     });
   const tiles = sortSubjects(unsorted, layout.by, layout.dir);
@@ -190,10 +217,10 @@ export default function SubjectsHome({
         <div className={`subjects-list by-${layout.by}`} role="table" aria-label="Subjects">
           <div className="subjects-list-head" role="row">
             <span role="columnheader" className="col-pin" aria-label="Pinned" />
-            {(["name", "created", "edited"] as const).map((by) => (
+            {(["name", "created", "recent"] as const).map((by) => (
               <button key={by} role="columnheader" aria-sort={layout.by === by ? (layout.dir === "asc" ? "ascending" : "descending") : "none"}
                 className={`col-${by}${layout.by === by ? " on" : ""}`} onClick={() => sortBy(by)}>
-                {by === "name" ? "Name" : by === "created" ? "Created" : "Last edited"}
+                {by === "name" ? "Name" : by === "created" ? "Created" : "Recent"}
                 {layout.by === by && <span aria-hidden="true">{layout.dir === "asc" ? " ↑" : " ↓"}</span>}
               </button>
             ))}
@@ -208,7 +235,7 @@ export default function SubjectsHome({
           ) : (
             <button className="subjects-list-add" onClick={() => setNaming(true)}>{Icon.plus} New subject</button>
           )}
-          {tiles.map(({ note, cards, quotes, pinned, color, created, edited }) => (
+          {tiles.map(({ note, cards, quotes, pinned, color, created, edited, viewed: seen }) => (
             <div key={note.id} role="row" className={`subjects-list-row${pinned ? " pinned" : ""}${color ? " colored" : ""}`}
               style={color ? ({ "--subject-color": color } as React.CSSProperties) : undefined}>
               <span role="cell" className="col-pin">
@@ -239,7 +266,10 @@ export default function SubjectsHome({
                 )}
               </span>
               <span role="cell" className="col-created" title={new Date(created).toLocaleString()}>{shortDate(created)}</span>
-              <span role="cell" className="col-edited" title={new Date(edited).toLocaleString()}>{timeAgo(new Date(edited).toISOString())}</span>
+              <span role="cell" className="col-recent"
+                title={`Edited ${new Date(edited).toLocaleString()}${seen ? ` · viewed ${new Date(seen).toLocaleString()}` : ""}`}>
+                <span className="recent-what">{recencyParts({ edited, viewed: seen })[0]} </span>{recencyParts({ edited, viewed: seen })[1]}
+              </span>
               <span role="cell" className="col-actions">
                 {confirming === note.id ? (
                   <span className="subjects-list-confirm" role="alertdialog" aria-label={`Delete ${note.name}?`}>
@@ -292,7 +322,7 @@ export default function SubjectsHome({
           )}
         </div>
 
-        {tiles.map(({ note, cards, quotes, insights, suggested, lastChange, pinned, color }) => (
+        {tiles.map(({ note, cards, quotes, insights, suggested, lastChange, viewed: seen, pinned, color }) => (
           <div key={note.id} className={`subject-tile${pinned ? " pinned" : ""}${color ? " colored" : ""}`}
             style={color ? ({ "--subject-color": color } as React.CSSProperties) : undefined}>
             <button className={`icon-btn pin-btn tile-pin${pinned ? " on" : ""}`} aria-pressed={pinned}
@@ -311,7 +341,7 @@ export default function SubjectsHome({
                   {insights > 0 && ` · ${insights} insights`}
                   {suggested > 0 && ` · ${suggested} suggested`}
                 </span>
-                <span className="subject-tile-sub">Edited {timeAgo(new Date(lastChange).toISOString())}</span>
+                <span className="subject-tile-sub">{recency({ edited: lastChange, viewed: seen })}</span>
               </div>
             </button>
             {renaming?.id === note.id ? (

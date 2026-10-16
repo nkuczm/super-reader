@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { lastEdited, sortSubjects, type SubjectRow } from "../lib/subject-order";
+import { lastEdited, recentOf, sortSubjects, type SubjectRow } from "../lib/subject-order";
 import { addStory, put, remove, cardInfoId, type Board } from "../lib/subjects";
 import type { Note } from "../lib/notes";
 
@@ -13,7 +13,7 @@ const rows: SubjectRow[] = [
 const ids = (r: SubjectRow[]) => r.map((x) => x.id).join("");
 
 test("pinned subjects come first, whatever the order", () => {
-  for (const by of ["edited", "created", "name"] as const) {
+  for (const by of ["recent", "created", "name"] as const) {
     for (const dir of ["asc", "desc"] as const) assert.equal(sortSubjects(rows, by, dir)[0].id, "b", `${by} ${dir}`);
   }
 });
@@ -23,11 +23,19 @@ test("by date created, newest or oldest first", () => {
   assert.equal(ids(sortSubjects(rows, "created", "asc")), "bacd");
 });
 
-test("by last edited, both ways round, and by name ignoring case", () => {
-  assert.equal(ids(sortSubjects(rows, "edited", "desc")), "bcad");
-  assert.equal(ids(sortSubjects(rows, "edited", "asc")), "bdac");
+test("by most recent, both ways round, and by name ignoring case", () => {
+  assert.equal(ids(sortSubjects(rows, "recent", "desc")), "bcad");
+  assert.equal(ids(sortSubjects(rows, "recent", "asc")), "bdac");
   assert.equal(ids(sortSubjects(rows, "name", "asc")), "bcad");
   assert.equal(ids(sortSubjects(rows, "name", "desc")), "bdac");
+});
+
+test("recent is the later of the last edit and the last time it was looked at", () => {
+  // Zoning was last written in long ago but looked at just now; Budget was edited before that.
+  const looked = rows.map((row) => (row.id === "d" ? { ...row, viewed: 1_000 } : row.id === "a" ? { ...row, viewed: 50 } : row));
+  assert.equal(ids(sortSubjects(looked, "recent", "desc")), "bdca");
+  assert.equal(recentOf({ edited: 300, viewed: 50 }), 300, "an old look does not pull back a later edit");
+  assert.equal(recentOf({ edited: 300 }), 300, "never looked at here: its last edit");
 });
 
 const note = (at: number): Note => ({ id: "n", name: "Subject", at, entries: [] }) as unknown as Note;

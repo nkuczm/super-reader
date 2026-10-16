@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons";
+import { useSubjectViewing } from "./useSubjectViewing";
 import { isQuote, type Note, type NoteEntry } from "@/lib/notes";
 import { CARET_SPACE, flowOf, foldFlow, readFlow } from "@/lib/note-flow";
 
@@ -34,6 +35,7 @@ export default function NotePage({
   onOpenMenu?: () => void;
 }) {
   const quotes = note.entries.filter(isQuote).length;
+  useSubjectViewing(note.id);
 
   return (
     <div className="note-page">
