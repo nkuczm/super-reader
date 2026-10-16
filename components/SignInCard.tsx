@@ -50,11 +50,14 @@ export default function SignInCard({ onOpenMenu, failed, movedToAccount }: { onO
   );
 }
 
+let clock: Intl.DateTimeFormat | undefined;
+const timeOfDay = (t: number) => (clock ??= new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" })).format(t);
+
 export function describe(status: SaveStatus, savedAt: number | null) {
   if (status === "saving") return "Saving…";
   if (status === "offline") return "Offline — saved on this device";
   if (status === "error") return "Not saved to your account yet — kept on this device, retrying";
-  if (status === "saved" && savedAt) return `Saved ${new Date(savedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  if (status === "saved" && savedAt) return `Saved ${timeOfDay(savedAt)}`;
   if (status === "saved") return "All changes saved";
   return "";
 }
@@ -95,7 +98,7 @@ export function AccountStrip({
       </span>
       <span className="account-status" role="status">
         {describe(status, savedAt)}
-        {backedUpAt ? ` · Backed up to Drive ${new Date(backedUpAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}
+        {backedUpAt ? ` · Backed up to Drive ${timeOfDay(backedUpAt)}` : ""}
       </span>
       {backupProblem && <span className="account-problem">{backupProblem}</span>}
       <button className="link-btn" onClick={onSignOut}>

@@ -915,7 +915,7 @@ whatever cookie it carries — the fallbacks are unchanged, so an outlet that
 refuses behaves exactly as it did before.
 
 **Where a refusal has been measured, say so rather than blaming the cookie.**
-`REFUSES_SERVER_FETCH` in `lib/subscriptions.ts` holds those hosts with the
+`REFUSES_SERVER_FETCH` in `lib/refusals.ts` (re-exported by `lib/subscriptions.ts`) holds those hosts with the
 measurement behind each. Without it, the New York Times reads as an expired
 sign-in, and someone spends an evening re-pasting a cookie that was never the
 problem. Add a host only after measuring it, and record the numbers in §8.

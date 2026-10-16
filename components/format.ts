@@ -1,3 +1,9 @@
+/*
+ * Building a date formatter costs far more than using one, and these run for
+ * every row of a list on every render: each is made once and kept.
+ */
+let oldDate: Intl.DateTimeFormat | undefined;
+
 export function timeAgo(iso?: string) {
   if (!iso) return "";
   const then = Date.parse(iso);
@@ -9,17 +15,21 @@ export function timeAgo(iso?: string) {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.round(hours / 24);
   if (days < 30) return `${days}d ago`;
-  return new Date(then).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  oldDate ??= new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return oldDate.format(then);
 }
 
+const hosts = new Map<string, string>();
+
 export function hostOf(url: string) {
+  let host = hosts.get(url);
+  if (host !== undefined) return host;
   try {
-    return new URL(url).hostname.replace(/^www\./, "");
+    host = new URL(url).hostname.replace(/^www\./, "");
   } catch {
-    return url;
+    host = url;
   }
+  if (hosts.size > 5000) hosts.clear();
+  hosts.set(url, host);
+  return host;
 }

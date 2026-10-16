@@ -48,8 +48,10 @@ function ColorChoices({ name, color, onPick }: { name: string; color: string | u
   );
 }
 
-const shortDate = (t: number) =>
-  new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short", ...(new Date(t).getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}) });
+// Made once each: a formatter per row was most of what drawing the list cost.
+const thisYear = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" });
+const otherYear = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", year: "numeric" });
+const shortDate = (t: number) => (new Date(t).getFullYear() !== new Date().getFullYear() ? otherYear : thisYear).format(t);
 
 /**
  * Every subject at a glance, the way a documents home page shows files: as

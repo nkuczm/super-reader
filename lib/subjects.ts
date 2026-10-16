@@ -1604,12 +1604,15 @@ export function addQuoteNote(
   return put(board, { id: cardNoteId(card.id), kind: "cardnote", card: card.id, html: next, at: now }, now);
 }
 
+let bylineDate: Intl.DateTimeFormat | undefined;
+
 /** "Oct 1, 2026 · Jane Doe · The Outlet" — what is known of a story, in that order. */
 export function bylineOf(card: { publishedAt?: string; author?: string; source?: string; link?: string }): string {
   const parts: string[] = [];
   const when = card.publishedAt ? new Date(card.publishedAt) : null;
   if (when && !Number.isNaN(when.getTime())) {
-    parts.push(when.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }));
+    bylineDate ??= new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
+    parts.push(bylineDate.format(when));
   }
   const author = card.author?.trim();
   // A feed's author is sometimes just the outlet again.

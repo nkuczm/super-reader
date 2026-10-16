@@ -81,21 +81,13 @@ import {
   type Note,
   type NoteRemoval,
 } from "@/lib/notes";
-import NotePage from "./NotePage";
 import { foldIntoNote } from "@/lib/note-flow";
-import AddSourceDialog from "./AddSourceDialog";
-import SyncDialog from "./SyncDialog";
 import SourcePanel from "./SourcePanel";
 import { homepageOf } from "@/lib/homepage";
 import InlineName from "./InlineName";
-import SettingsDialog from "./SettingsDialog";
 import DownloadBar from "./DownloadBar";
 import Attachments from "./Attachments";
 import { useSourceDrag, type DropAt } from "./useSourceDrag";
-import SubjectPage from "./SubjectPage";
-import StatusPage from "./StatusPage";
-import SpendPage from "./SpendPage";
-import SubjectsHome from "./SubjectsHome";
 import {
   linkIn,
   liveManual,
@@ -164,7 +156,8 @@ import {
   loadAutoDownload,
   saveAutoDownload,
 } from "@/lib/offline";
-import ArticleReader from "./ArticleReader";
+import ArticleReader, { preloadArticleExtras } from "./ArticleReader";
+import { lazyPanel } from "./lazyPanel";
 import SourceIcon from "./SourceIcon";
 import StoryRow from "./StoryRow";
 import { Icon } from "./icons";
@@ -174,13 +167,11 @@ import { setSubjectDirectory, SUBJECT_OPEN_EVENT } from "@/lib/subject-links";
 import { sortNewestFirst, timeOf } from "@/lib/sort";
 import type { RankedArticle } from "@/lib/pulse";
 import type { PickedSource } from "./OutletCatalog";
-import ScoreExplainer from "./ScoreExplainer";
 import type { CorpusStats } from "./ScoreExplainer";
 import { canonicalUrl } from "@/lib/url";
-import { repairSources } from "@/lib/publishers";
 import { KEEP_DAYS, mergeWindow, stamp } from "@/lib/window";
 import { mergeSaved, differsFrom, slimForSync } from "@/lib/saved";
-import { knownRefusal } from "@/lib/subscriptions";
+import { knownRefusal } from "@/lib/refusals";
 import {
   loadPositions,
   mergePositions,
@@ -216,6 +207,40 @@ import {
   type Highlights,
 } from "@/lib/highlights";
 import "./reader.css";
+
+/*
+ * Pages and dialogs a visit may never open, each in a file of its own: the
+ * subjects (with their tables, pictures and whiteboard), Settings, adding a
+ * source, the status and spending pages. Loaded with the page, they were a
+ * few hundred kilobytes of script parsed before the first story showed —
+ * and Settings and Add source brought the feed parser and the whole outlet
+ * directory with them. They are fetched once the app is idle (below), so
+ * opening one is still instant.
+ */
+const SubjectPage = lazyPanel(() => import("./SubjectPage"));
+const SubjectsHome = lazyPanel(() => import("./SubjectsHome"));
+const SettingsDialog = lazyPanel(() => import("./SettingsDialog"));
+const AddSourceDialog = lazyPanel(() => import("./AddSourceDialog"));
+const NotePage = lazyPanel(() => import("./NotePage"));
+const SyncDialog = lazyPanel(() => import("./SyncDialog"));
+const StatusPage = lazyPanel(() => import("./StatusPage"));
+const SpendPage = lazyPanel(() => import("./SpendPage"));
+const ScoreExplainer = lazyPanel(() => import("./ScoreExplainer"));
+/** Fetch them all while nothing else is happening, most used first. */
+function preloadPanels() {
+  const loaders = [
+    preloadArticleExtras,
+    ...[SubjectPage, SubjectsHome, SettingsDialog, AddSourceDialog, NotePage, SyncDialog, StatusPage, SpendPage, ScoreExplainer].map((panel) => panel.preload),
+  ];
+  const idle = (next: () => void) =>
+    typeof window.requestIdleCallback === "function" ? window.requestIdleCallback(next, { timeout: 4000 }) : setTimeout(next, 1500);
+  const step = () => {
+    const load = loaders.shift();
+    if (!load) return;
+    void load().catch(() => {}).finally(() => idle(step));
+  };
+  idle(step);
+}
 
 /** A story as held: filed under one source, and also in any other that delivered it (lib/attribute.ts). */
 type Loaded = Article & { sourceId: string; alsoIn?: string[] };
@@ -641,6 +666,10 @@ export default function Reader() {
 
   // Crashes on a phone are otherwise invisible; see lib/client-errors.ts.
   useEffect(() => listenForClientErrors(), []);
+  // The panels in files of their own come in once the list is up and the app is idle.
+  useEffect(() => {
+    if (ready) preloadPanels();
+  }, [ready]);
 
   useEffect(() => {
     /**
@@ -649,10 +678,19 @@ export default function Reader() {
      * see repairSources in lib/publishers.ts. Each device fixes its own copy
      * the next time it opens.
      */
-    setFeeds(
-      loadFeeds().map((feed) => {
-        const sources = repairSources(feed.sources);
-        return sources === feed.sources ? feed : { ...feed, sources };
+    setFeeds(loadFeeds());
+    // The repair carries the whole outlet directory with it, so it comes in
+    // its own file, just after the list is up, rather than with the page.
+    void import("@/lib/publishers").then(({ repairSources }) =>
+      setFeeds((current) => {
+        let changed = false;
+        const next = current.map((feed) => {
+          const sources = repairSources(feed.sources);
+          if (sources === feed.sources) return feed;
+          changed = true;
+          return { ...feed, sources };
+        });
+        return changed ? next : current;
       }),
     );
     setRead(loadRead());
@@ -3039,9 +3077,15 @@ export default function Reader() {
     return marks;
   }, [reading, highlights, notes, boards, settings.subjects]);
 
-  /** What the device knows of a story — for the byline on a subject's card. */
+  /**
+   * What the device knows of a story — for the byline on a subject's card.
+   * Built only while a subject is open: it walks every story held, and the
+   * feed has no use for it.
+   */
+  const subjectOpen = selection.type === "note";
   const articleMetaMap = useMemo(() => {
     const map = new Map<string, { publishedAt?: string; author?: string; source?: string }>();
+    if (!subjectOpen) return map;
     for (const article of [...manualAsArticles, ...downloadedAsArticles, ...savedAsArticles, ...articles]) {
       const key = canonicalUrl(article.link);
       const held = map.get(key) ?? {};
@@ -3052,7 +3096,7 @@ export default function Reader() {
       });
     }
     return map;
-  }, [articles, savedAsArticles, downloadedAsArticles, manualAsArticles]);
+  }, [subjectOpen, articles, savedAsArticles, downloadedAsArticles, manualAsArticles]);
   const articleMeta = useCallback((link: string) => articleMetaMap.get(canonicalUrl(link)), [articleMetaMap]);
 
   const sourceById = useMemo(
@@ -3909,8 +3953,33 @@ export default function Reader() {
       ? (notes.find((note) => note.id === selection.id) ?? null)
       : null;
 
-  const unread = (items: Loaded[]) =>
-    items.filter((a) => !read.has(a.id)).length;
+  /**
+   * Unread counts for All articles and for each folder, in one pass over the
+   * stories. The sidebar used to filter every story once per folder on every
+   * render — a keystroke in a dialog, a scroll that loaded more.
+   */
+  const unreadCounts = useMemo(() => {
+    const foldersOf = new Map<string, string[]>();
+    for (const feed of feeds) {
+      for (const source of feed.sources) {
+        const list = foldersOf.get(source.id);
+        if (!list) foldersOf.set(source.id, [feed.id]);
+        else if (!list.includes(feed.id)) list.push(feed.id);
+      }
+    }
+    const byFolder = new Map<string, number>();
+    let all = 0;
+    for (const article of articles) {
+      if (read.has(article.id)) continue;
+      all++;
+      // A story in two sources of one folder counts once there.
+      const folders = article.alsoIn?.length
+        ? new Set([article.sourceId, ...article.alsoIn].flatMap((id) => foldersOf.get(id) ?? []))
+        : (foldersOf.get(article.sourceId) ?? []);
+      for (const folder of folders) byFolder.set(folder, (byFolder.get(folder) ?? 0) + 1);
+    }
+    return { all, byFolder };
+  }, [articles, feeds, read]);
 
   /** A subject open and its page on screen: the only place the sidebar tucks away. */
   const focusSubject = sidebarHidden && !!openNote && settings.subjects && !reading && !subjectsLocked;
@@ -4241,7 +4310,7 @@ export default function Reader() {
           >
             {Icon.inbox}
             <span className="feed-name">All articles</span>
-            <span className="count">{unread(articles) || ""}</span>
+            <span className="count">{unreadCounts.all || ""}</span>
           </button>
 
           <button
@@ -4322,8 +4391,7 @@ export default function Reader() {
           )}
 
           {feeds.map((feed) => {
-            const ids = new Set(feed.sources.map((s) => s.id));
-            const count = unread(articles.filter((a) => inAnySource(a, ids)));
+            const count = unreadCounts.byFolder.get(feed.id) ?? 0;
             return (
               <div
                 className={`feed-group${

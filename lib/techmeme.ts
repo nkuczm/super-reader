@@ -33,11 +33,14 @@ export function isTechmemeFeed(feedUrl: string): boolean {
 
 const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 
+let newYork: Intl.DateTimeFormat | undefined;
+
 /** How far New York is from UTC at a moment, in ms: Techmeme's clock, summer time and all. */
 function newYorkOffset(utcMs: number): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
+  newYork ??= new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York", hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric",
-  }).formatToParts(new Date(utcMs));
+  });
+  const parts = newYork.formatToParts(new Date(utcMs));
   const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
   return Date.UTC(get("year"), get("month") - 1, get("day"), get("hour") % 24, get("minute")) - utcMs;
 }
