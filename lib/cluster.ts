@@ -139,10 +139,12 @@ export function similarity(
   b: string[],
   idf: Map<string, number>,
 ) {
-  const weightOf = (token: string) => idf.get(token) ?? 1;
-  const [small, large] =
-    a.length <= b.length ? [new Set(a), new Set(b)] : [new Set(b), new Set(a)];
+  return a.length <= b.length ? similarityOfSets(new Set(a), new Set(b), idf) : similarityOfSets(new Set(b), new Set(a), idf);
+}
 
+/** The same, for headlines already held as sets of their words, the shorter first. */
+function similarityOfSets(small: Set<string>, large: Set<string>, idf: Map<string, number>) {
+  const weightOf = (token: string) => idf.get(token) ?? 1;
   let shared = 0;
   let sharedCount = 0;
   let smallOnly = 0;
@@ -209,7 +211,16 @@ const MUTUAL_SHARE = 0.5;
  */
 export function clusterStories<T extends Clusterable>(
   stories: T[],
-  { threshold = 0.46, blockLimit = 40 }: { threshold?: number; blockLimit?: number } = {},
+  {
+    threshold = 0.46,
+    blockLimit = 40,
+    named = true,
+  }: {
+    threshold?: number;
+    blockLimit?: number;
+    /** Whether each cluster needs its `key`. Grouping a list only needs the members. */
+    named?: boolean;
+  } = {},
 ): Cluster<T>[] {
   const tokens = new Map<string, string[]>();
   for (const story of stories) tokens.set(story.id, tokensOf(story.title));
@@ -246,10 +257,24 @@ export function clusterStories<T extends Clusterable>(
   }
 
   const byId = new Map(stories.map((s) => [s.id, s]));
-  const compared = new Set<string>();
+  // Pairs are remembered by position, not by joining two addresses into a
+  // string, and each headline's words are made a set once rather than for
+  // every comparison: over a few thousand headlines those two were most of
+  // what clustering cost.
+  const position = new Map(stories.map((s, i) => [s.id, i]));
+  const width = stories.length;
+  const compared = new Set<number>();
+  const sets = new Map<string, Set<string>>();
+  const setOf = (id: string) => {
+    let set = sets.get(id);
+    if (!set) sets.set(id, (set = new Set(tokens.get(id))));
+    return set;
+  };
 
-  const score = (a: string, b: string) =>
-    similarity(tokens.get(a)!, tokens.get(b)!, idf);
+  const score = (a: string, b: string) => {
+    const [setA, setB] = [setOf(a), setOf(b)];
+    return setA.size <= setB.size ? similarityOfSets(setA, setB, idf) : similarityOfSets(setB, setA, idf);
+  };
 
   // Collect the candidate pairs first, then decide which to believe. Doing
   // it in one pass means the result depends on which pair happened to be
@@ -263,7 +288,8 @@ export function clusterStories<T extends Clusterable>(
     for (let i = 0; i < bucket.length; i++) {
       for (let j = i + 1; j < bucket.length; j++) {
         const [a, b] = [bucket[i], bucket[j]];
-        const pair = a < b ? `${a}|${b}` : `${b}|${a}`;
+        const [pa, pb] = [position.get(a)!, position.get(b)!];
+        const pair = pa < pb ? pa * width + pb : pb * width + pa;
         if (compared.has(pair)) continue;
         compared.add(pair);
         const value = score(a, b);
@@ -347,7 +373,7 @@ export function clusterStories<T extends Clusterable>(
   return [...grouped.entries()].map(([root, members]) => ({
     // The key is derived from content, not from row ids, so a cluster keeps
     // its identity across sweeps as members come and go.
-    key: clusterKeyFor(members, keyTokens, byId.get(root)!),
+    key: named ? clusterKeyFor(members, keyTokens, byId.get(root)!) : "",
     members,
   }));
 }

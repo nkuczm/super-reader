@@ -2,7 +2,7 @@
 
 import { STORAGE_FULL_EVENT } from "@/lib/subjects";
 import { DEFAULT_ANTHROPIC_MODEL, DEFAULT_QUICK_MODEL } from "@/lib/models";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import type { Article, Attachment, DiscoverResult } from "@/lib/types";
 import {
@@ -127,9 +127,9 @@ import {
 import { attributeStories, inAnySource, inSource } from "@/lib/attribute";
 import { loadHealth, recordRuns, saveHealth, type HealthLog } from "@/lib/health";
 import { groupsOf, inLanes, isDue, IN_FLIGHT } from "@/lib/refresh";
-import { groupStories } from "@/lib/story-groups";
+import { groupStories, headlineMatches } from "@/lib/story-groups";
 import { arriveOnTab } from "@/lib/tab-place";
-import { aboutTopic, trendingTopics } from "@/lib/trending";
+import { aboutTopic, trendingTopics, type Topic } from "@/lib/trending";
 import { listenForClientErrors } from "@/lib/client-errors";
 import { encodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import {
@@ -244,6 +244,44 @@ function preloadPanels() {
 
 /** A story as held: filed under one source, and also in any other that delivered it (lib/attribute.ts). */
 type Loaded = Article & { sourceId: string; alsoIn?: string[] };
+
+/**
+ * What Top stories needs from a list that does not depend on its order or
+ * its ranking — which headlines are one story, and what the list is talking
+ * about — kept per list. Working both out over a few thousand stories took
+ * seconds on a phone, at the moment Top stories was tapped, every time; now
+ * it is done once per list, and while Newest is on screen it is done ahead
+ * of time, when the app is idle (`warmTopStories`).
+ */
+const topWork = new WeakMap<Loaded[], { matches?: Map<string, string>; trending?: Topic[] }>();
+const workFor = (list: Loaded[]) => {
+  let work = topWork.get(list);
+  if (!work) topWork.set(list, (work = {}));
+  return work;
+};
+const matchesFor = (list: Loaded[]) => (workFor(list).matches ??= headlineMatches(list));
+const trendingFor = (list: Loaded[]) => (workFor(list).trending ??= trendingTopics(list));
+/**
+ * A list in Top stories order — ranked first, by score, then the rest newest
+ * first — per list and per ranking. Showing only the unread, or one topic,
+ * filters this rather than sorting again: a stable sort keeps the same
+ * relative order either way.
+ */
+const rankedOrders = new WeakMap<Loaded[], WeakMap<Map<string, RankedArticle>, Loaded[]>>();
+const rankedOrderFor = (list: Loaded[], ranking: Map<string, RankedArticle>) => {
+  let byRanking = rankedOrders.get(list);
+  if (!byRanking) rankedOrders.set(list, (byRanking = new WeakMap()));
+  let order = byRanking.get(ranking);
+  if (!order) {
+    // Each story's score and date are read once, not in every comparison.
+    order = list
+      .map((article) => ({ article, score: ranking.get(article.id)?.score ?? -1, at: timeOf(article) }))
+      .sort((a, b) => b.score - a.score || b.at - a.at)
+      .map(({ article }) => article);
+    byRanking.set(ranking, order);
+  }
+  return order;
+};
 
 /**
  * The reader's own API keys travel in a header rather than the URL, so a key
@@ -3047,7 +3085,34 @@ export default function Reader() {
    */
   const trendsHere =
     settings.sort === "top" && (selection.type === "all" || selection.type === "feed" || selection.type === "source");
-  const trending = useMemo(() => (trendsHere ? trendingTopics(visible) : []), [trendsHere, visible]);
+  const trending = useMemo(() => (trendsHere ? trendingFor(visible) : []), [trendsHere, visible]);
+  /*
+   * On Newest, Top stories' groundwork for this list is done in the quiet
+   * moments, so the switch has nothing left to work out. Not while the list
+   * is still changing — a refresh paints it about once a second — and one
+   * piece per idle moment, so a tap never waits behind both.
+   */
+  const topReady =
+    ready && settings.sort !== "top" && (selection.type === "all" || selection.type === "feed" || selection.type === "source");
+  useEffect(() => {
+    if (!topReady || visible.length === 0) return;
+    const steps = [() => trendingFor(visible), () => matchesFor(visible), () => rankedOrderFor(visible, ranking)];
+    let idle: number | undefined;
+    const next = () => {
+      const step = steps.shift();
+      if (!step) return;
+      idle = typeof window.requestIdleCallback === "function"
+        ? window.requestIdleCallback(() => { step(); next(); }, { timeout: 10_000 })
+        : window.setTimeout(() => { step(); next(); }, 200);
+    };
+    const settle = window.setTimeout(next, 2000);
+    return () => {
+      window.clearTimeout(settle);
+      if (idle === undefined) return;
+      if (typeof window.cancelIdleCallback === "function") window.cancelIdleCallback(idle);
+      else window.clearTimeout(idle);
+    };
+  }, [topReady, visible, ranking]);
   const [topicKey, setTopicKey] = useState<string | null>(null);
   const topic = trending.find((t) => t.key === topicKey) ?? null;
   useEffect(() => setTopicKey(null), [selection, settings.sort]);
@@ -3337,32 +3402,30 @@ export default function Reader() {
       settings.hideRead &&
       selection.type !== "saved" &&
       selection.type !== "downloaded";
-    const unread = hideRead ? visible.filter((a) => !read.has(a.id)) : visible;
-    const list = topic && settings.sort === "top" ? unread.filter((a) => aboutTopic(a.title, topic.key)) : unread;
-
-    if (settings.sort !== "top") {
-      /*
-       * "Newest" sorts. It used to assume, handing back whatever order the
-       * list arrived in, which was right only because every list happened to
-       * be built newest-first — until one was not. The offline store is
-       * ordered by when each article was *downloaded*, so On this device came
-       * out in the order the top-up happened to fetch things, which is not a
-       * publication order and is not what the control says.
-       *
-       * Saved keeps its own order: it is newest-*saved* first by design
-       * (lib/saved.ts), because what you just put there is what you are
-       * looking for. Undated articles sort last and, the sort being stable,
-       * hold whatever order they came in.
-       */
-      return selection.type === "saved" ? list : sortNewestFirst(list);
+    if (settings.sort === "top") {
+      // Ranked first, by score; everything else keeps its date order below,
+      // which is what an unranked story deserves — not a guess at a score.
+      const order = rankedOrderFor(visible, ranking);
+      return hideRead || topic
+        ? order.filter((a) => (!hideRead || !read.has(a.id)) && (!topic || aboutTopic(a.title, topic.key)))
+        : order;
     }
-    // Ranked first, by score; everything else keeps its date order below,
-    // which is what an unranked story deserves — not a guess at a score.
-    return [...list].sort((a, b) => {
-      const scoreA = ranking.get(a.id)?.score ?? -1;
-      const scoreB = ranking.get(b.id)?.score ?? -1;
-      return scoreB - scoreA || timeOf(b) - timeOf(a);
-    });
+    const list = hideRead ? visible.filter((a) => !read.has(a.id)) : visible;
+
+    /*
+     * "Newest" sorts. It used to assume, handing back whatever order the
+     * list arrived in, which was right only because every list happened to
+     * be built newest-first — until one was not. The offline store is
+     * ordered by when each article was *downloaded*, so On this device came
+     * out in the order the top-up happened to fetch things, which is not a
+     * publication order and is not what the control says.
+     *
+     * Saved keeps its own order: it is newest-*saved* first by design
+     * (lib/saved.ts), because what you just put there is what you are
+     * looking for. Undated articles sort last and, the sort being stable,
+     * hold whatever order they came in.
+     */
+    return selection.type === "saved" ? list : sortNewestFirst(list);
   }, [visible, settings.hideRead, settings.sort, selection.type, read, ranking, topic]);
 
   /**
@@ -3376,12 +3439,19 @@ export default function Reader() {
     const groups = groupStories(listed, {
       keyOf: (article) => ranking.get(article.id)?.key,
       prefer: (article) => Boolean(article.image),
+      matches: matchesFor(visible),
     });
-    const best = (group: Loaded[]) => Math.max(...group.map((a) => ranking.get(a.id)?.score ?? -1));
-    const outlets = (group: Loaded[]) => new Set(group.map((a) => a.sourceId)).size;
-    const newest = (group: Loaded[]) => Math.max(...group.map(timeOf));
-    return groups.sort((a, b) => best(b) - best(a) || outlets(b) - outlets(a) || newest(b) - newest(a));
-  }, [listed, settings.sort, ranking]);
+    // Each group's order worked out once, not in every comparison of the sort.
+    return groups
+      .map((group) => ({
+        group,
+        best: Math.max(...group.map((a) => ranking.get(a.id)?.score ?? -1)),
+        outlets: group.length === 1 ? 1 : new Set(group.map((a) => a.sourceId)).size,
+        newest: Math.max(...group.map(timeOf)),
+      }))
+      .sort((a, b) => b.best - a.best || b.outlets - a.outlets || b.newest - a.newest)
+      .map(({ group }) => group);
+  }, [listed, visible, settings.sort, ranking]);
   /** The list in the order it is shown, a story's row together. */
   const shown = useMemo(() => storyGroups.flat(), [storyGroups]);
 
@@ -3796,6 +3866,22 @@ export default function Reader() {
   const scrollToTop = useCallback(() => {
     listRef.current?.scrollTo({ top: 0, behavior: "auto" });
   }, []);
+
+  /*
+   * Newest and Top stories as a transition: the switch shows the choice the
+   * moment it is tapped and the page keeps answering while the other order
+   * is drawn, instead of freezing until it is.
+   */
+  const [sortPending, startSort] = useTransition();
+  const [sortShown, showSort] = useOptimistic(settings.sort);
+  const chooseSort = (sort: Settings["sort"]) => {
+    // Either order starts at its own top.
+    scrollToTop();
+    startSort(() => {
+      showSort(sort);
+      updateSettings({ ...settings, sort });
+    });
+  };
 
   // The article open in this tab, so a refresh reopens it. Its arrival
   // highlight is left out: that was for the moment it was first opened.
@@ -4689,7 +4775,8 @@ export default function Reader() {
       )}
 
       <main
-        className="main"
+        className={`main${sortPending ? " sorting" : ""}`}
+        aria-busy={sortPending || undefined}
         ref={listRef}
         onScroll={noteAnchor}
         onTouchStart={onListTouchStart}
@@ -4984,22 +5071,15 @@ export default function Reader() {
               aria-label="Order articles by"
             >
               <button
-                className={settings.sort === "new" ? "on" : ""}
-                onClick={() => {
-                  // Either order starts at its own top.
-                  updateSettings({ ...settings, sort: "new" });
-                  scrollToTop();
-                }}
+                className={sortShown === "new" ? "on" : ""}
+                onClick={() => chooseSort("new")}
                 title="Newest first"
               >
                 Newest
               </button>
               <button
-                className={settings.sort === "top" ? "on" : ""}
-                onClick={() => {
-                  updateSettings({ ...settings, sort: "top" });
-                  scrollToTop();
-                }}
+                className={sortShown === "top" ? "on" : ""}
+                onClick={() => chooseSort("top")}
                 title={
                   rankState && rankState !== "unavailable" && rankState !== "warming"
                     ? `Biggest stories first — measured against ${rankState}`
