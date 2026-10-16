@@ -3434,3 +3434,7 @@
   }
   .trending-chips::-webkit-scrollbar { display: none; }
 }
+
+/* Switching between Newest and Top stories: the list fades a little while
+   the other order is drawn, only if that takes long enough to notice. */
+.main.sorting .articles { opacity: 0.55; transition: opacity 0.15s 0.12s; }

@@ -32,6 +32,27 @@ function timeOf(story: Groupable) {
 }
 
 /**
+ * Which recent headlines tell the same story: each matched story's id, mapped
+ * to the first story of its match. The slow half of grouping, and it depends
+ * only on the stories, not on their order or ranking — so a caller can work
+ * it out once for a list, ahead of time, and hand it to `groupStories`.
+ */
+export function headlineMatches<T extends Groupable>(
+  stories: T[],
+  { now = Date.now(), hours = SAME_STORY_HOURS }: { now?: number; hours?: number } = {},
+): Map<string, string> {
+  const recent = stories.filter((story) => now - timeOf(story) <= hours * 3_600_000);
+  const matches = new Map<string, string>();
+  const clusters = clusterStories(recent.map((story) => ({ id: story.id, title: story.title, outlet: story.sourceId })), { named: false });
+  for (const cluster of clusters) {
+    if (cluster.members.length < 2) continue;
+    const lead = cluster.members[0].id;
+    for (const member of cluster.members) matches.set(member.id, lead);
+  }
+  return matches;
+}
+
+/**
  * The stories in groups, each group in the list's own order and placed where
  * its first member stood — so a list ranked biggest first stays ranked, with
  * each story's copies gathered up beside it.
@@ -47,12 +68,19 @@ export function groupStories<T extends Groupable>(
     prefer,
     now = Date.now(),
     hours = SAME_STORY_HOURS,
+    matches,
   }: {
     /** The ranking's cluster, where it has one. */
     keyOf?: (story: T) => string | undefined;
     prefer?: (story: T) => boolean;
     now?: number;
     hours?: number;
+    /**
+     * `headlineMatches` already worked out, perhaps over a wider list than
+     * this one (the whole feed, where this is its unread part): copies of
+     * a story are grouped here when both are in this list.
+     */
+    matches?: Map<string, string>;
   } = {},
 ): T[][] {
   const parent = new Map<string, string>();
@@ -79,9 +107,10 @@ export function groupStories<T extends Groupable>(
   }
 
   // Headlines that match, among the recent ones.
-  const recent = stories.filter((story) => now - timeOf(story) <= hours * 3_600_000);
-  for (const cluster of clusterStories(recent.map((story) => ({ id: story.id, title: story.title, outlet: story.sourceId })))) {
-    for (const member of cluster.members.slice(1)) join(cluster.members[0].id, member.id);
+  const matched = matches ?? headlineMatches(stories, { now, hours });
+  for (const story of stories) {
+    const lead = matched.get(story.id);
+    if (lead !== undefined) join(lead, story.id);
   }
 
   const groups = new Map<string, T[]>();

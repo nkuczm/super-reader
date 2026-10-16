@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { groupStories } from "../lib/story-groups";
+import { groupStories, headlineMatches } from "../lib/story-groups";
 import { aboutTopic, trendingTopics } from "../lib/trending";
 
 const NOW = Date.parse("2026-10-12T20:00:00Z");
@@ -100,4 +100,27 @@ test("what the whole feed is about is not a topic within it", () => {
   const labels = trendingTopics(list, { now: NOW }).map((topic) => topic.label);
   assert.ok(!labels.includes("AI"), labels.join(", "));
   assert.ok(labels.some((label) => /OpenAI|Microsoft|Partnership/.test(label)), labels.join(", "));
+});
+
+test("matches worked out ahead over the whole feed group the part of it shown", () => {
+  const feed = [
+    story("Iran restarts ballistic missile production, intelligence finds", "reuters"),
+    story("Iran Is Producing Ballistic Missiles Again", "wsj"),
+    story("Apple unveils new iPad Pro with M6 chip", "verge"),
+    story("Iran producing ballistic missiles again, US officials say", "nyt"),
+    story("Local library extends weekend hours", "patch"),
+  ];
+  const matches = headlineMatches(feed, { now: NOW });
+  // The same answer as grouping the list on its own...
+  assert.deepEqual(
+    groupStories(feed, { now: NOW, matches }).map((group) => group.map((s) => s.id)),
+    groupStories(feed, { now: NOW }).map((group) => group.map((s) => s.id)),
+  );
+  // ...and with the Reuters copy read and hidden, the other two still sit together.
+  const unread = feed.filter((s) => s.sourceId !== "reuters");
+  assert.deepEqual(groupStories(unread, { now: NOW, matches }).map((group) => group.map((s) => s.sourceId)), [
+    ["wsj", "nyt"],
+    ["verge"],
+    ["patch"],
+  ]);
 });
