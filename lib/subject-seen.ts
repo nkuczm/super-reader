@@ -55,3 +55,44 @@ export function markOpened(subjectId: string, now = Date.now()) {
 export function newSince<T extends { id: string; at: number }>(cards: T[], seenAt: number): Set<string> {
   return new Set(cards.filter((card) => card.at > seenAt).map((card) => card.id));
 }
+
+/*
+ * When each subject was last looked at on this device: on screen, in the
+ * window being used. Opening a subject counts, and so does coming back to a
+ * tab or window that has it open — but a subject sitting open in a tab in
+ * the background is not being looked at, and does not count while it sits
+ * there. The Subjects page orders by this together with the last edit
+ * (lib/subject-order.ts). Kept per device, like the lighting above: what
+ * was looked at here is a fact about here, and writing it into the subject
+ * would sync a change every minute anyone has one open.
+ */
+const VIEWED_KEY = "super-reader:subject-viewed";
+/** Fired on this page when a subject is marked viewed; other tabs hear the storage event. */
+export const SUBJECT_VIEWED_EVENT = "super-reader:subject-viewed";
+
+/** Subject id → when it was last looked at here. */
+export function viewedTimes(): Record<string, number> {
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(VIEWED_KEY) ?? "null");
+    return raw && typeof raw === "object" ? (raw as Record<string, number>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function markViewed(subjectId: string, now = Date.now()) {
+  const viewed = viewedTimes();
+  if ((viewed[subjectId] ?? 0) >= now) return;
+  viewed[subjectId] = now;
+  try {
+    window.localStorage.setItem(VIEWED_KEY, JSON.stringify(viewed));
+  } catch {
+    /* not remembered: the order falls back on the last edit */
+  }
+  window.dispatchEvent(new Event(SUBJECT_VIEWED_EVENT));
+}
+
+/** Whether the reader can be looking at this page: shown, and the window in use. */
+export function lookingAtPage() {
+  return document.visibilityState === "visible" && document.hasFocus();
+}

@@ -89,6 +89,7 @@ import { PROVIDER_NAME, recordSpend, shareSpend, type AiProvider } from "@/lib/s
 import { loadSyncCode } from "@/lib/store";
 import { lastOpened, markOpened, newSince } from "@/lib/subject-seen";
 import { useHeadroom } from "./useHeadroom";
+import { useSubjectViewing } from "./useSubjectViewing";
 import MoreMenu from "./MoreMenu";
 import { arriveOnTab } from "@/lib/tab-place";
 
@@ -614,6 +615,8 @@ export default function SubjectPage(props: Props) {
    */
   const seenAt = useMemo(() => lastOpened(note.id), [note.id]);
   useEffect(() => markOpened(note.id), [note.id]);
+  // What the Subjects page's Recent order counts as looking at it.
+  useSubjectViewing(note.id);
   const newCards = useMemo(() => newSince(allCards, seenAt), [allCards, seenAt]);
   const tabCardIds = new Set(cards.map((card) => card.id));
   const boxes = items.filter(
