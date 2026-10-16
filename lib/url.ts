@@ -22,13 +22,34 @@ const canonical = new Map<string, string>();
 export function canonicalUrl(input: string) {
   const known = canonical.get(input);
   if (known !== undefined) return known;
-  const made = canonicalOf(input);
+  const made = plainCanonical(input) ?? canonicalOf(input);
   if (canonical.size >= 50_000) canonical.clear();
   canonical.set(input, made);
   return made;
 }
 
-function canonicalOf(input: string) {
+/**
+ * Most links are plain — a lowercase host, a path of ordinary characters, no
+ * query, fragment or port — and for those the parser's answer can be written
+ * directly, which on a phone is the difference between a list that opens at
+ * once and one that waits on a few thousand parses. Anything else, including
+ * an IP address, an internationalised name or a dot segment, is left to the
+ * parser. test/url.test.ts holds the two to the same answer.
+ */
+const PLAIN = /^https?:\/\/((?:[a-z0-9-]+\.)+[a-z]{2,})(\/[A-Za-z0-9\-._~/]*)?$/;
+
+export function plainCanonical(input: string): string | null {
+  const match = PLAIN.exec(input);
+  if (!match || match[1].includes("xn--")) return null;
+  const path = match[2] ?? "/";
+  if (/\/\.\.?(\/|$)/.test(path)) return null;
+  const host = match[1].replace(/^www\./, "");
+  const pathname = path.replace(/\/amp\/?$/i, "/").replace(/\.amp$/i, "");
+  const text = `https://${host}${pathname}`;
+  return text.endsWith("/") && pathname !== "/" ? text.slice(0, -1) : text;
+}
+
+export function canonicalOf(input: string) {
   try {
     const url = new URL(input.trim());
     url.hash = "";

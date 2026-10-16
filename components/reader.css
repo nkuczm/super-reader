@@ -2786,7 +2786,8 @@
 /* A subject's tile: its whole whiteboard, zoomed out. */
 /* A subject's thumbnail: the middle of its board as it looks, a page in miniature. */
 .subject-tile-preview:has(.bt-page) { height: auto; aspect-ratio: 1.45; padding: 0; display: block; mask-image: none; -webkit-mask-image: none; }
-.bt-page { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--bg-sub);
+/* A thumbnail off screen is not laid out or painted until it scrolls near: a long list of subjects opens as fast as a short one. */
+.bt-page { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--bg-sub); content-visibility: auto;
   background-image: radial-gradient(circle, color-mix(in srgb, var(--text-dim) 22%, transparent) 1px, transparent 1.2px); background-size: 9px 9px; }
 .bt-page > .subject-tile-empty { position: absolute; inset: 0; display: grid; place-items: center; }
 .bt-canvas { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: none; user-select: none; }

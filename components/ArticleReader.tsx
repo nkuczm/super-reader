@@ -14,13 +14,21 @@ import { sanitizeRichText } from "@/lib/subjects";
 import { cleanArticleHtml, takeHeadline } from "@/lib/own-article";
 import { parsePastedTranscript, transcriptArticleHtml, youtubeId } from "@/lib/youtube";
 import { timeAgo, hostOf } from "./format";
-import QuoteToNote from "./QuoteToNote";
 import SubjectChoices from "./SubjectChoices";
 import PrintDialog, { type PrintJob } from "./PrintDialog";
 import { printedOn, printPage, transcriptArticleExcerpt } from "@/lib/print";
 import { findQuoteRange } from "@/lib/highlight";
 import type { Note } from "@/lib/notes";
 import MoreMenu from "./MoreMenu";
+import { lazyPanel } from "./lazyPanel";
+
+/*
+ * The quote-to-subject popover brings the rich-text editor with it, which a
+ * story never needs until text is selected: it is fetched as the story
+ * opens (or earlier, when the app is idle) rather than with the page.
+ */
+const QuoteToNote = lazyPanel(() => import("./QuoteToNote"));
+export const preloadArticleExtras = QuoteToNote.preload;
 
 /** How many words an article's HTML holds. */
 const wordsIn = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&[a-z#0-9]+;/gi, " ").split(/\s+/).filter(Boolean).length;

@@ -70,14 +70,25 @@ export function stem(word: string) {
   return word;
 }
 
+/*
+ * The same headlines are tokenised again on every refresh and every ranking,
+ * so each title's tokens are kept. Callers read them and never change them.
+ */
+const tokenCache = new Map<string, string[]>();
+
 export function tokensOf(title: string): string[] {
+  const cached = tokenCache.get(title);
+  if (cached) return cached;
   const seen = new Set<string>();
   for (const word of normalizeTitle(title).split(" ")) {
     if (!word || word.length < 2) continue;
     if (STOPWORDS.has(word)) continue;
     seen.add(stem(word));
   }
-  return [...seen];
+  const tokens = [...seen];
+  if (tokenCache.size >= 20_000) tokenCache.clear();
+  tokenCache.set(title, tokens);
+  return tokens;
 }
 
 export type Clusterable = {

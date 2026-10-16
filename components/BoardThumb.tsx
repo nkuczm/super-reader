@@ -68,8 +68,13 @@ function edgeToward(from: Rect, to: Rect) {
   return { x: cx + dx * t, y: cy + dy * t };
 }
 
-/** What a block shows in the thumbnail: its own content, read-only, nothing interactive. */
-function Block({ node, w }: { node: Node; w: number }) {
+/**
+ * What a block shows in the thumbnail: its own content, read-only, nothing
+ * interactive. Kept from one render to the next: the thumbnail draws twice
+ * as it opens (once more at its measured scale), and cleaning every block's
+ * text again for that was most of what opening the subjects page cost.
+ */
+const Block = memo(function Block({ node, w }: { node: Node; w: number }) {
   if (node.kind === "card") {
     const { card } = node;
     const byline = bylineOf(card);
@@ -142,7 +147,7 @@ function Block({ node, w }: { node: Node; w: number }) {
     );
   }
   return <div className="bt-box bt-text" dangerouslySetInnerHTML={{ __html: sanitizeRichText(box.html).replace(/<img[^>]*>/g, "") }} />;
-}
+});
 
 /**
  * The thumbnail of a subject: the middle of its whiteboard as it looks, at a

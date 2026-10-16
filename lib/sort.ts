@@ -1,10 +1,25 @@
 import type { Article } from "./types";
 
+/*
+ * Each date string read once for the life of the page: the same few thousand
+ * are sorted, windowed and grouped again on every refresh and every view, and
+ * parsing them afresh each time was among the largest costs of opening the
+ * app on a phone.
+ */
+const parsed = new Map<string, number>();
+
 /** Milliseconds for sorting; undated items sort last rather than randomly. */
 export function timeOf(article: { publishedAt?: string }) {
-  if (!article.publishedAt) return Number.NEGATIVE_INFINITY;
-  const parsed = Date.parse(article.publishedAt);
-  return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
+  const iso = article.publishedAt;
+  if (!iso) return Number.NEGATIVE_INFINITY;
+  let at = parsed.get(iso);
+  if (at === undefined) {
+    const ms = Date.parse(iso);
+    at = Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms;
+    if (parsed.size >= 50_000) parsed.clear();
+    parsed.set(iso, at);
+  }
+  return at;
 }
 
 /**

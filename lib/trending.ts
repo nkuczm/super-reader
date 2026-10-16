@@ -61,8 +61,13 @@ function wordsOf(title: string): (Term | null)[] {
   });
 }
 
-/** Every word and two-word phrase a headline can be found under. */
+/* Kept per headline: the chips and the topic filter ask about the same titles on every render. */
+const termCache = new Map<string, Map<string, string>>();
+
+/** Every word and two-word phrase a headline can be found under. Read it; never change it. */
 export function termsOf(title: string): Map<string, string> {
+  const cached = termCache.get(title);
+  if (cached) return cached;
   const terms = new Map<string, string>();
   const words = wordsOf(title);
   words.forEach((word, i) => {
@@ -74,6 +79,8 @@ export function termsOf(title: string): Map<string, string> {
       if (!terms.has(key)) terms.set(key, `${word.surface} ${next.surface}`);
     }
   });
+  if (termCache.size >= 20_000) termCache.clear();
+  termCache.set(title, terms);
   return terms;
 }
 
