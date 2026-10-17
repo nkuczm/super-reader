@@ -123,6 +123,28 @@ export function mergeSaved(
   return { saved, removals: keptRemovals };
 }
 
+/**
+ * When an un-save is dated. Merging decides by time, so an un-save stamped
+ * earlier than the save it undoes loses, and the article comes back. Between
+ * one device's clock and another's it can be: saved on a laptop whose clock
+ * runs a minute fast, removed on the phone half a minute later, and the
+ * phone's "now" is still before the save. An un-save always comes after the
+ * save it removes, so it is dated after it whatever the clock says.
+ */
+export function removalStamp(entry: { savedAt?: unknown } | undefined, now = Date.now()) {
+  return Math.max(now, (Number(entry?.savedAt) || 0) + 1);
+}
+
+/** When a save is dated: after any un-save of the same article this device knows of, for the same reason. */
+export function saveStamp(removals: SavedRemoval[], link: string, now = Date.now()) {
+  const key = keyOf(link);
+  let after = now;
+  for (const removal of removals ?? []) {
+    if (removal?.link && keyOf(removal.link) === key) after = Math.max(after, (Number(removal.at) || 0) + 1);
+  }
+  return after;
+}
+
 /** Whether a merge produced anything the other side did not already have. */
 export function differsFrom(merged: SavedState, theirs: SavedState) {
   const keys = (state: SavedState) =>

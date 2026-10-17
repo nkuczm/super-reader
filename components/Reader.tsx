@@ -170,7 +170,7 @@ import type { PickedSource } from "./OutletCatalog";
 import type { CorpusStats } from "./ScoreExplainer";
 import { canonicalUrl } from "@/lib/url";
 import { KEEP_DAYS, mergeWindow, stamp } from "@/lib/window";
-import { mergeSaved, differsFrom, slimForSync } from "@/lib/saved";
+import { mergeSaved, differsFrom, slimForSync, removalStamp, saveStamp } from "@/lib/saved";
 import { knownRefusal } from "@/lib/refusals";
 import {
   loadPositions,
@@ -1048,10 +1048,10 @@ export default function Reader() {
     const releasable = releasableSaves(bookmarks.saved, merged.notes);
     if (releasable.length > 0) {
       const drop = new Set(releasable);
+      const held = new Map(bookmarks.saved.map((article) => [article.link, article]));
       bookmarks.saved = bookmarks.saved.filter((article) => !drop.has(article.link));
-      const at = Date.now();
       bookmarks.removals = [
-        ...releasable.map((link) => ({ link, at })),
+        ...releasable.map((link) => ({ link, at: removalStamp(held.get(link)) })),
         ...bookmarks.removals.filter((removal) => !drop.has(removal.link)),
       ];
       setSaved(bookmarks.saved);
@@ -2212,9 +2212,11 @@ export default function Reader() {
    * the article — simply puts it back at the next sync.
    */
   const noteRemoval = useCallback((link: string) => {
+    // Dated after the save it undoes, whatever this device's clock says (lib/saved.ts).
+    const at = removalStamp(savedRef.current.find((a) => a.link === link));
     setSavedRemovals((current) => {
       const next = [
-        { link, at: Date.now() },
+        { link, at },
         ...current.filter((removal) => removal.link !== link),
       ];
       saveSavedRemovals(next);
@@ -2238,7 +2240,7 @@ export default function Reader() {
                 ...article,
                 sourceTitle: source?.title,
                 favicon: source?.favicon,
-                savedAt: Date.now(),
+                savedAt: saveStamp(removalsRef.current, article.link),
               },
               ...current,
             ];
@@ -2270,7 +2272,7 @@ export default function Reader() {
                 sourceId: parent.sourceId,
                 sourceTitle: source?.title,
                 favicon: source?.favicon,
-                savedAt: Date.now(),
+                savedAt: saveStamp(removalsRef.current, file.url),
               },
               ...current,
             ];
@@ -2537,7 +2539,7 @@ export default function Reader() {
           summary: article.excerpt,
           author: article.byline,
           sourceTitle: article.siteName,
-          savedAt: Date.now(),
+          savedAt: saveStamp(removalsRef.current, link),
         };
         setSaved((current) => {
           const next = [entry, ...current.filter((a) => canonicalUrl(a.link) !== canonicalUrl(link))];
@@ -2692,7 +2694,7 @@ export default function Reader() {
             sourceId: known?.sourceId,
             sourceTitle: source?.title ?? (known as SavedArticle | undefined)?.sourceTitle,
             favicon: source?.favicon,
-            savedAt: Date.now(),
+            savedAt: saveStamp(removalsRef.current, link),
             viaNote: true,
           },
           ...current,
