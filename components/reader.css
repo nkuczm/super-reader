@@ -3440,3 +3440,30 @@
 /* Switching between Newest and Top stories: the list fades a little while
    the other order is drawn, only if that takes long enough to notice. */
 .main.sorting .articles { opacity: 0.55; transition: opacity 0.15s 0.12s; }
+
+/* ---------- the tab outline in a document: flush, and fixed in place ----------
+   As in a Google Doc: a column against the page's left edge rather than a
+   card floating over it, held just under the text tools (--rail-top, which
+   follows the header as it tucks away) and running to the bottom of the
+   screen (--rail-h) however far the document scrolls. */
+.tab-rail-anchor { top: var(--rail-top, 0px); transition: top 0.2s ease; }
+.tab-rail.open:not(.on-board) {
+  top: 0; left: 0; width: 220px; box-sizing: border-box;
+  height: var(--rail-h, calc(100dvh - 140px)); max-height: none;
+  background: var(--bg); backdrop-filter: none;
+  border: 0; border-right: 1px solid var(--border); border-radius: 0; box-shadow: none;
+  padding: 8px 8px 24px 10px;
+}
+.tab-rail.open:not(.on-board) .tab-rail-head { position: sticky; top: -8px; margin: -8px -8px 4px -10px; padding: 8px 6px 6px 18px; background: var(--bg); z-index: 1; }
+.tab-rail-hide { display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0; border-radius: 6px; }
+.tab-rail-hide:hover { background: var(--bg-hover); }
+@media (min-width: 901px) {
+  .subject-main.rail-open .subject-doc { padding-left: 248px; }
+}
+@media (max-width: 900px) {
+  .tab-rail.open:not(.on-board) { width: min(280px, 86vw); box-shadow: 8px 0 28px rgba(0, 0, 0, 0.18); }
+}
+@media (prefers-reduced-motion: reduce) { .tab-rail-anchor { transition: none; } }
+/* The heading being read: bold, with a bar down its left, as a Doc's outline marks it. */
+.tab-outline-item.active { font-weight: 700; color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); box-shadow: inset 2px 0 0 var(--accent); }
+.tab-outline-item.level-3.active { color: var(--accent); }

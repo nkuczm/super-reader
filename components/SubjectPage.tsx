@@ -181,6 +181,13 @@ let lastTypedAt = 0;
 
 type OutlineEntry = { id: string; n: number; level: number; text: string };
 
+/** Where an outline entry is in the document: its heading, or the label block itself. */
+function outlineTarget(doc: ParentNode, entry: OutlineEntry): HTMLElement | null {
+  const host = doc.querySelector<HTMLElement>(`[data-item="${CSS.escape(entry.id)}"]`);
+  if (!host) return null;
+  return entry.n >= 0 ? host.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6")[entry.n] ?? host : host;
+}
+
 /** A brief glow on what the reader was just taken to. */
 function flashEl(el: HTMLElement) {
   el.classList.remove("outline-flash");
@@ -1354,11 +1361,19 @@ export default function SubjectPage(props: Props) {
       window.dispatchEvent(new CustomEvent("super-reader:goto", { detail: entry }));
       return;
     }
-    const host = document.querySelector<HTMLElement>(`.subject-doc [data-item="${CSS.escape(entry.id)}"]`);
-    if (!host) return;
-    const target = entry.n >= 0 ? host.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6")[entry.n] ?? host : host;
-    target.scrollIntoView({ behavior: "smooth", block: "start" });
-    flashEl(host);
+    const doc = pageRef.current?.querySelector<HTMLElement>(".subject-doc");
+    const target = doc && outlineTarget(doc, entry);
+    const scroller = pageRef.current?.closest<HTMLElement>(".main");
+    if (!target || !scroller) return;
+    // Just below the bars that stay at the top. Scrolling down tucks the
+    // header away, so going down only the text tools are left above it.
+    const top = topRef.current?.offsetHeight ?? 0;
+    const head = headRef.current?.offsetHeight ?? 0;
+    const at = (offset: number) => scroller.scrollTop + target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - offset - 12;
+    const down = at(top) > scroller.scrollTop;
+    scroller.scrollTo({ top: Math.max(0, at(down ? top - head : top)), behavior: "smooth" });
+    setActiveHeading(outline.indexOf(entry));
+    flashEl(target.closest<HTMLElement>("[data-item]") ?? target);
   };
 
   // A refresh comes back to the same place: how far down the document was
@@ -1416,6 +1431,77 @@ export default function SubjectPage(props: Props) {
   const topRef = useRef<HTMLDivElement | null>(null);
   const headRef = useRef<HTMLDivElement | null>(null);
   const tucked = useHeadroom(topRef, meta.view !== "board");
+
+  /**
+   * The tab outline sits flush against the document's left edge, held just
+   * under the text tools however far the document is scrolled, as the
+   * outline does in a Google Doc. It follows the bars' bottom edge as the
+   * header tucks away and comes back, and runs to the bottom of the screen.
+   */
+  const [railBox, setRailBox] = useState({ top: 0, height: 0 });
+  useEffect(() => {
+    const top = topRef.current;
+    const scroller = pageRef.current?.closest<HTMLElement>(".main");
+    if (!top || !scroller) return;
+    const measure = () => {
+      const at = top.offsetHeight - (tucked ? headRef.current?.offsetHeight ?? 0 : 0);
+      const next = { top: at, height: Math.max(120, scroller.clientHeight - at) };
+      setRailBox((was) => (was.top === next.top && was.height === next.height ? was : next));
+    };
+    measure();
+    const watch = new ResizeObserver(measure);
+    watch.observe(top);
+    watch.observe(scroller);
+    return () => watch.disconnect();
+  }, [tucked, meta.view]);
+
+  /**
+   * The heading being read, lit in the outline as the document scrolls: the
+   * last one whose top has passed under the bars. At the very end of the
+   * document, where the last headings can never reach the top, the last one
+   * on screen counts as reached.
+   */
+  const [activeHeading, setActiveHeading] = useState(-1);
+  const outlineRef = useRef(outline);
+  outlineRef.current = outline;
+  const railTopRef = useRef(0);
+  railTopRef.current = railBox.top;
+  const outlineKey = outline.map((entry) => `${entry.id}:${entry.n}`).join("|");
+  useEffect(() => {
+    const scroller = pageRef.current?.closest<HTMLElement>(".main");
+    if (meta.view === "board" || !railOpen || !scroller) {
+      setActiveHeading(-1);
+      return;
+    }
+    let frame = 0;
+    const spy = () => {
+      frame = 0;
+      const doc = pageRef.current?.querySelector<HTMLElement>(".subject-doc");
+      if (!doc) return;
+      const view = scroller.getBoundingClientRect();
+      const line = view.top + railTopRef.current + 32;
+      const tops = outlineRef.current.map((entry) => outlineTarget(doc, entry)?.getBoundingClientRect().top ?? Infinity);
+      let found = -1;
+      tops.forEach((top, i) => {
+        if (top <= line) found = i;
+      });
+      if (scroller.scrollTop > 0 && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) {
+        tops.forEach((top, i) => {
+          if (i > found && top < view.bottom - 40) found = i;
+        });
+      }
+      setActiveHeading(found);
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(spy);
+    };
+    spy();
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      scroller.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(frame);
+    };
+  }, [meta.view, railOpen, outlineKey]);
 
   return (
     <div className="subject-page" ref={pageRef}>
@@ -1610,7 +1696,11 @@ export default function SubjectPage(props: Props) {
       <ToolsHostContext.Provider value={formatHost}>
       <div className={`subject-body${contactsShown ? " with-contacts" : ""}`}>
       <div className={`subject-main${railOpen ? " rail-open" : " rail-closed"}${props.hideBoxes ? " quiet-boxes" : ""}`}
-        style={props.boxWidth ? ({ "--box-w": `${props.boxWidth}px` } as React.CSSProperties) : undefined}>
+        style={{
+          ...(props.boxWidth ? { "--box-w": `${props.boxWidth}px` } : {}),
+          "--rail-top": `${railBox.top}px`,
+          "--rail-h": `${railBox.height}px`,
+        } as React.CSSProperties}>
       {railOpen && (
       // A zero-height sticky anchor: the outline stays in view down a long document.
       <div className={meta.view === "board" ? undefined : "tab-rail-anchor"}>
@@ -1618,8 +1708,10 @@ export default function SubjectPage(props: Props) {
           <>
             <div className="tab-rail-head">
               <span>Tabs</span>
-              <button className="icon-btn subtle" aria-label="Hide tabs" title="Hide tabs" onClick={() => setRail(false)}>
-                ‹
+              <button className="icon-btn subtle tab-rail-hide" aria-label="Hide tabs" title="Hide tabs" onClick={() => setRail(false)}>
+                <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+                  <path d="M12 5l-5 5 5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
               </button>
             </div>
             <TabBar
@@ -1630,6 +1722,7 @@ export default function SubjectPage(props: Props) {
               onRename={(tab, name) => recorded((current) => renameTab(current, tab, name))}
               onDelete={(tab) => recorded((current) => deleteTab(current, tab))}
               outline={outline}
+              activeOutline={activeHeading}
               onGo={goTo}
             />
           </>
@@ -4434,9 +4527,12 @@ function TabBar({
   onDelete,
   contacts,
   outline = [],
+  activeOutline = -1,
   onGo,
 }: {
   outline?: OutlineEntry[];
+  /** The heading being read, lit as the document scrolls. */
+  activeOutline?: number;
   onGo?: (entry: OutlineEntry) => void;
   tabs: Tab[];
   current: string;
@@ -4448,8 +4544,19 @@ function TabBar({
 }) {
   const [editing, setEditing] = useState<{ id: string | null; draft: string } | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
-  /** The open tab's headings, shown by clicking its name. */
-  const [outlineOpen, setOutlineOpen] = useState(false);
+  /** The open tab's headings, shown under its name; clicking the name folds them away. */
+  const [outlineOpen, setOutlineOpen] = useState(true);
+  const outlineList = useRef<HTMLUListElement | null>(null);
+  // The lit heading kept in view in a long outline, by scrolling the rail alone — never the document.
+  useEffect(() => {
+    const item = outlineList.current?.querySelector<HTMLElement>(".tab-outline-item.active");
+    const rail = item?.closest<HTMLElement>(".tab-rail");
+    if (!item || !rail) return;
+    const a = item.getBoundingClientRect();
+    const r = rail.getBoundingClientRect();
+    if (a.top < r.top + 36) rail.scrollTop -= r.top + 36 - a.top;
+    else if (a.bottom > r.bottom - 8) rail.scrollTop += a.bottom - r.bottom + 8;
+  }, [activeOutline]);
 
   const finish = () => {
     if (!editing) return;
@@ -4519,13 +4626,14 @@ function TabBar({
               </button>
             )}
             {onGo && tab.id === current && outlineOpen && (
-              <ul className="tab-outline">
+              <ul className="tab-outline" ref={outlineList}>
                 {outline.length === 0 ? (
                   <li className="tab-outline-empty">No headings yet — add a section label, or an H heading in a text box.</li>
                 ) : (
                   outline.map((entry, i) => (
                     <li key={`${entry.id}-${entry.n}-${i}`}>
-                      <button className={`tab-outline-item level-${entry.level}`} onClick={() => onGo(entry)} title={entry.text}>
+                      <button className={`tab-outline-item level-${entry.level}${i === activeOutline ? " active" : ""}`}
+                        aria-current={i === activeOutline ? "location" : undefined} onClick={() => onGo(entry)} title={entry.text}>
                         {entry.text}
                       </button>
                     </li>
