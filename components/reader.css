@@ -3535,3 +3535,22 @@
 .doc-link-ask .input { flex: 1; min-width: 200px; }
 /* Clicking just under a block starts writing there. */
 .subject-doc { cursor: default; }
+
+/* ---------- colours: highlights and table cells, with favourites ---------- */
+.color-swatches { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; width: 236px; box-sizing: border-box; }
+.color-grid { display: grid; grid-template-columns: repeat(8, 22px); gap: 5px; }
+.color-swatches .color-swatch {
+  width: 22px; height: 22px; min-width: 0; min-height: 0; padding: 0; border-radius: 50%; border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+  display: grid; place-items: center; cursor: pointer; font-size: 12px; color: var(--text-dim); position: relative;
+}
+.color-swatches .color-swatch:hover { transform: scale(1.12); box-shadow: 0 0 0 2px var(--accent); }
+.color-swatches .color-swatch.none, .color-swatches .color-swatch.add { background: var(--bg); }
+.color-swatches .color-swatch.add { font-size: 15px; font-weight: 600; border-style: dashed; overflow: hidden; }
+.color-swatch.add input[type="color"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; border: 0; padding: 0; }
+.color-favs-head { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); margin-top: 4px; }
+.wb-menu .color-swatches { padding: 6px 4px 2px; }
+/* The narrow arrow beside the highlighter that opens its colours. */
+.rich-tools .rt-hl-more button.rt-btn { width: 14px; margin-left: -4px; }
+.rich-tools.docked .rt-hl-more button.rt-btn { width: 18px; }
+/* A highlight in a colour of its own keeps dark words on it in a dark theme. */
+.rich-body mark[data-hl] { color: #1f2937; }

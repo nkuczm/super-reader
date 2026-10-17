@@ -5,6 +5,8 @@ import { createPortal } from "react-dom";
 import CropDialog, { copyPicture, pastedWidth } from "./CropDialog";
 import { isHighlight, safeHref, sanitizeRichText } from "@/lib/subjects";
 import { hostOf, linkInfo, openLink, type LinkInfo } from "@/lib/link-chip";
+import { DEFAULT_HIGHLIGHT, HIGHLIGHT_COLORS, hexColor, lastHighlight, setLastHighlight } from "@/lib/colors";
+import ColorSwatches from "./ColorSwatches";
 import { cleanPastedHtml } from "@/lib/paste";
 import { CITE_OPEN_EVENT, CITE_TYPE, CITES_CHANGED_EVENT, citeCardHtml, citeChipHtml, citeFor, citeTextHtml, refreshCiteChips, type Cite } from "@/lib/cite";
 import { refreshSubjectChips, subjectChipHtml, subjectsMatching, SUBJECT_OPEN_EVENT, SUBJECTS_CHANGED_EVENT, type SubjectRef } from "@/lib/subject-links";
@@ -24,7 +26,7 @@ export const ToolsHostContext = createContext<HTMLElement | null>(null);
 type ListKind = "bullet" | "check" | "1" | "1)" | "a" | "a)" | "A" | "A)";
 /** What the caret is in, for the tools to show as on. */
 type ToolState = { b?: boolean; i?: boolean; hl?: boolean; h?: boolean; list?: ListKind | null };
-type ToolAction = "undo" | "redo" | "bold" | "italic" | "highlight" | "heading" | "list" | "link";
+type ToolAction = "undo" | "redo" | "bold" | "italic" | "highlight" | "hlColor" | "heading" | "list" | "link";
 
 const svg = (children: React.ReactNode) => (
   <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -86,6 +88,7 @@ function ToolButtons({ state = {}, run, history, onHistory, open }: {
       {button("bold", "Bold (⌘B)", <b className="rt-glyph">B</b>, state.b)}
       {button("italic", "Italic (⌘I)", <i className="rt-glyph rt-italic">I</i>, state.i)}
       {button("highlight", "Highlight — again to remove", ICON.highlight, state.hl)}
+      <span className="rt-hl-more">{button("hlColor", "Highlight colour", ICON.chevron, false)}</span>
       <span className="rt-sep" aria-hidden="true" />
       {button("list", "Lists", LIST_ICON[state.list ?? "bullet"], Boolean(state.list), true)}
       {button("heading", "Heading — again for normal text", <b className="rt-glyph">H</b>, state.h)}
@@ -222,6 +225,24 @@ function keepingCaret(run: () => void) {
   const now = window.getSelection()?.anchorNode;
   const target = (now instanceof Element ? now : now?.parentElement)?.closest("li, p, div, h3, blockquote");
   if (target && (target.textContent ?? "").length >= offset) caretAtText(target, offset);
+}
+
+/**
+ * The spans the browser's highlighter just painted in a colour, made the
+ * marks that keep it (lib/subjects.ts, markTag): a span's colour is not
+ * kept, so a favourite saved as one would come back yellow.
+ */
+export function colorMarks(root: HTMLElement, color: string) {
+  const hex = hexColor(color);
+  if (!hex || hex === DEFAULT_HIGHLIGHT) return;
+  for (const span of root.querySelectorAll<HTMLElement>("span[style*='background']")) {
+    if (hexColor(span.style.backgroundColor) !== hex) continue;
+    const mark = document.createElement("mark");
+    mark.dataset.hl = hex;
+    mark.style.backgroundColor = hex;
+    mark.append(...span.childNodes);
+    span.replaceWith(mark);
+  }
 }
 
 /**
@@ -1144,7 +1165,7 @@ export default function RichText({
       toggleNumbered(upper ? "upper" : true, letter![1].toLowerCase().charCodeAt(0) - 96, typed.endsWith(")"), true);
     }
     for (const command of styles) if (!document.queryCommandState(command)) document.execCommand(command);
-    if (lit) document.execCommand("hiliteColor", false, "#fde68a");
+    if (lit) document.execCommand("hiliteColor", false, lastHighlight());
     return true;
   }
 
@@ -1170,15 +1191,48 @@ export default function RichText({
     if (onFormat?.("highlight")) return;
     const root = el.current;
     const sel = window.getSelection();
-    if (!root || !sel || sel.rangeCount === 0) return format("hiliteColor", "#fde68a");
+    if (!root || !sel || sel.rangeCount === 0) return format("hiliteColor", lastHighlight());
     const range = sel.getRangeAt(0);
     const lit = [...root.querySelectorAll<HTMLElement>("mark, span[style*='background']")].filter((node) => {
       if (range.intersectsNode(node)) return true;
       return node.contains(range.startContainer);
     });
-    if (lit.length === 0) return format("hiliteColor", "#fde68a");
+    if (lit.length === 0) {
+      format("hiliteColor", lastHighlight());
+      colorMarks(root, lastHighlight());
+      return;
+    }
     for (const node of lit) node.replaceWith(...node.childNodes);
     root.normalize();
+    changed();
+  }
+
+  /** A highlight in a chosen colour (or none), over whatever highlight was there; the button keeps the colour for next time. */
+  function colorHighlight(color: string | null) {
+    if (onFormat?.(color ? `highlight:${color}` : "highlight:none")) return;
+    const root = el.current;
+    const sel = window.getSelection();
+    if (!root || !sel || sel.rangeCount === 0) return;
+    root.focus();
+    const range = sel.getRangeAt(0);
+    const lit = [...root.querySelectorAll<HTMLElement>("mark, span[style*='background']")].filter((node) => range.intersectsNode(node) || node.contains(range.startContainer));
+    if (range.collapsed && lit.length) {
+      // The caret in a highlight: the whole highlight takes the colour.
+      const whole = document.createRange();
+      whole.setStartBefore(lit[0]);
+      whole.setEndAfter(lit[lit.length - 1]);
+      sel.removeAllRanges();
+      sel.addRange(whole);
+    }
+    for (const node of lit) node.replaceWith(...node.childNodes);
+    root.normalize();
+    if (color) {
+      setLastHighlight(color);
+      if (!sel.isCollapsed) {
+        document.execCommand("hiliteColor", false, color);
+        colorMarks(root, color);
+      }
+    }
     changed();
   }
 
@@ -1318,9 +1372,10 @@ export default function RichText({
   }, [focused]);
 
   /** A tool's own menu — the kinds of list, the kinds of link — under its button. */
-  const [toolMenu, setToolMenu] = useState<{ kind: "list" | "link"; left: number; top: number } | null>(null);
+  const [toolMenu, setToolMenu] = useState<{ kind: "list" | "link" | "hl"; left: number; top: number } | null>(null);
   useEffect(() => {
-    if (!focused) setToolMenu(null);
+    // The colour picker in a menu takes focus while it is open: the menu stays for it.
+    if (!focused && !document.activeElement?.closest?.(".rt-menu")) setToolMenu(null);
   }, [focused]);
   useEffect(() => {
     if (!toolMenu) return;
@@ -1347,8 +1402,8 @@ export default function RichText({
     if (action === "bold" || action === "italic") return (format(action), after());
     if (action === "highlight") return (toggleHighlight(), after());
     if (action === "heading") return (format("formatBlock", toolState.h ? "p" : "h3"), after());
-    const kind = action;
-    setToolMenu((open) => (open?.kind === kind ? null : { kind, left: Math.min(at.left, window.innerWidth - 230), top: at.bottom + 6 }));
+    const kind = action === "hlColor" ? "hl" : action;
+    setToolMenu((open) => (open?.kind === kind ? null : { kind, left: Math.min(at.left, window.innerWidth - 260), top: at.bottom + 6 }));
   };
   /** A kind of list: on, or — chosen again — off. */
   const setList = (kind: ListKind) => {
@@ -1367,7 +1422,11 @@ export default function RichText({
   ];
   const menu = toolMenu && typeof document !== "undefined" && createPortal(
     <div className="rt-menu" role="menu" style={{ left: toolMenu.left, top: toolMenu.top }} onMouseDown={(e) => e.preventDefault()}>
-      {toolMenu.kind === "list" ? (
+      {toolMenu.kind === "hl" ? (
+        <ColorSwatches label="Highlight colour" colors={HIGHLIGHT_COLORS} noneLabel="No highlight"
+          onPick={(color) => { setToolMenu(null); colorHighlight(color); requestAnimationFrame(() => readTools.current(true)); }}
+          onNone={() => { setToolMenu(null); colorHighlight(null); requestAnimationFrame(() => readTools.current(true)); }} />
+      ) : toolMenu.kind === "list" ? (
         <>
           {LISTS.map(([kind, label, keys]) => (
             <button key={kind} type="button" role="menuitemradio" aria-checked={toolState.list === kind}
@@ -1416,7 +1475,7 @@ export default function RichText({
     <div ref={tools} className={`rich-tools${docked ? " docked" : hosted ? " hosted" : side ? " side" : ""}`}
       style={docked ? { top: vvTop } : side ? { left: side.left, top: side.top } : undefined}
       onMouseDown={(event) => event.preventDefault()}>
-      <ToolButtons state={toolState} run={runTool} history={docked || hosted} open={toolMenu?.kind ?? null} />
+      <ToolButtons state={toolState} run={runTool} history={docked || hosted} open={toolMenu ? (toolMenu.kind === "hl" ? "hlColor" : toolMenu.kind) : null} />
       {docked && (
         <button type="button" className="rich-done" title="Done — close the keyboard"
           aria-label="Done — close the keyboard"

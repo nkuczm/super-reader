@@ -1,5 +1,7 @@
 "use client";
 
+import ColorSwatches from "./ColorSwatches";
+import { CELL_PALETTE, lastHighlight } from "@/lib/colors";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { escapeHtml, sanitizeRichText, textOf, type BoxItem } from "@/lib/subjects";
@@ -9,7 +11,7 @@ import {
   shiftMetas, sortRows, toTsv,
   type CellMetas, type Grid,
 } from "@/lib/sheet";
-import RichText from "./RichText";
+import RichText, { colorMarks } from "./RichText";
 import CompareVersions from "./CompareVersions";
 import FlagButton from "./FlagButton";
 import type { FlagInput } from "@/lib/flags";
@@ -821,13 +823,8 @@ function CellMenuExtras({ range, metas, ops, close }: { range: Range; metas: Cel
     <>
       {many && <button role="menuitem" onClick={() => { ops.merge(range); close(); }}>Merge cells</button>}
       {merged && <button role="menuitem" onClick={() => { ops.unmerge(range.r0, range.c0); close(); }}>Unmerge cells</button>}
-      <div className="tbl-swatches" role="group" aria-label="Cell colour">
-        {CELL_COLORS.map((color) => (
-          <button key={color} role="menuitem" className="tbl-swatch" style={{ background: color }} aria-label={`Colour ${color}`}
-            onClick={() => { ops.color(range, color); close(); }} />
-        ))}
-        <button role="menuitem" className="tbl-swatch none" aria-label="No colour" title="No colour" onClick={() => { ops.color(range, null); close(); }}>⌀</button>
-      </div>
+      <ColorSwatches label="Cell colour" colors={CELL_PALETTE}
+        onPick={(color) => { ops.color(range, color); close(); }} onNone={() => { ops.color(range, null); close(); }} />
     </>
   );
 }
@@ -896,7 +893,18 @@ function DocTable({ facts, media, grid, metas, widths, heights, startResize, sta
         sel?.addRange(range);
         if (command === "highlight") {
           if (lit) el.querySelectorAll("mark, span[style*='background']").forEach((n) => n.replaceWith(...n.childNodes));
-          else document.execCommand("hiliteColor", false, "#fde68a");
+          else {
+            document.execCommand("hiliteColor", false, lastHighlight());
+            colorMarks(el, lastHighlight());
+          }
+        } else if (command.startsWith("highlight:")) {
+          // A chosen colour (or none) across every picked cell.
+          el.querySelectorAll("mark, span[style*='background']").forEach((n) => n.replaceWith(...n.childNodes));
+          const color = command.slice("highlight:".length);
+          if (color !== "none" && el.textContent?.trim()) {
+            document.execCommand("hiliteColor", false, color);
+            colorMarks(el, color);
+          }
         } else if (command === "checklist") {
           if (!el.querySelector("ul")) document.execCommand("insertUnorderedList");
           el.querySelector("ul")?.setAttribute("data-check", "");
