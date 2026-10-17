@@ -17,6 +17,7 @@
  * device still holds it and would otherwise put it back.
  */
 
+import { DEFAULT_HIGHLIGHT, hexColor } from "./colors";
 import type { Transcript } from "./transcript";
 import { isQuote, type Note } from "./notes";
 import { canonicalUrl } from "./url";
@@ -1192,6 +1193,18 @@ function parseColor(value: string): [number, number, number, number] | null {
   return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16), 1];
 }
 
+/**
+ * A highlight's tag: plain for the highlight's own yellow (as every
+ * highlight was before there were colours), or carrying its colour — a
+ * checked #rrggbb, never anything else, in both its data and its style.
+ * Only a <mark> the editor marked with a colour keeps one: a coloured span
+ * from a paste is a highlight in the highlight's own yellow, as before.
+ */
+function markTag(color: string | undefined): string {
+  const hex = hexColor(color);
+  return !hex || hex === DEFAULT_HIGHLIGHT ? "<mark>" : `<mark data-hl="${hex}" style="background-color:${hex}">`;
+}
+
 export function sanitizeRichText(html: string): string {
   const out: string[] = [];
   const stack: string[] = [];
@@ -1279,7 +1292,10 @@ export function sanitizeRichText(html: string): string {
       const href = safeHref(match[2].match(/href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i)?.slice(1).find(Boolean));
       if (!href) continue;
       stack.push("a");
-      out.push(`<a href="${href}" target="_blank" rel="noopener noreferrer">`);
+      // Shown as a chip (lib/link-chip.ts), and opened on the site itself rather than in the reader.
+      const chip = /\bdata-link=["']?chip\b/.test(match[2]) ? ` data-link="chip"` : "";
+      const web = /\bdata-web\b/.test(match[2]) ? ` data-web=""` : "";
+      out.push(`<a href="${href}"${chip}${web} target="_blank" rel="noopener noreferrer">`);
       continue;
     }
     if (tag === "br") {
@@ -1315,6 +1331,8 @@ export function sanitizeRichText(html: string): string {
         out.push(`<ol${type ? ` type="${type}"` : ""}${start > 1 ? ` start="${start}"` : ""}${paren ? ` data-mark="paren" data-kind="${type ?? "1"}"` : ""}>`);
       }
       else if (tag === "li" && /\bdata-checked=["']?true/.test(match[2])) out.push(`<li data-checked="true">`);
+      // A highlight in a colour of its own (lib/colors.ts).
+      else if (tag === "mark") out.push(markTag(match[2].match(/data-hl=["']?(#[0-9a-fA-F]{3,6})/)?.[1]));
       else out.push(`<${tag}>`);
     }
   }
@@ -1830,14 +1848,15 @@ export function documentOrder(entries: { id: string; at: number; label?: boolean
     out.push(id);
     // Pasted one after another below the same block, they read in the order they were pasted.
     for (const next of sorted) if (follows.get(next.id) === id) emit(next.id);
+    // A header, then what is filed under it — a header written in after another block too.
+    if (!byId.get(id)?.label) return;
+    const members = sorted.filter((e) => owner.get(e.id) === id);
+    members.sort((a, b) => place(a.id).y - place(b.id).y || place(a.id).x - place(b.id).x || a.at - b.at);
+    for (const m of members) emit(m.id);
   };
   for (const entry of sorted) {
     if (owner.has(entry.id) || follows.has(entry.id)) continue;
     emit(entry.id);
-    if (!entry.label) continue;
-    const members = sorted.filter((e) => owner.get(e.id) === entry.id);
-    members.sort((a, b) => place(a.id).y - place(b.id).y || place(a.id).x - place(b.id).x || a.at - b.at);
-    for (const m of members) emit(m.id);
   }
   return out;
 }

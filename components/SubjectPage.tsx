@@ -1,9 +1,10 @@
 "use client";
 
 import { createPortal } from "react-dom";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons";
 import RichText, { dropCiteAt, dropEmbedAt, forceNextHtml, ToolbarIdle, ToolsHostContext } from "./RichText";
+import { LINK_OPEN_EVENT } from "@/lib/link-chip";
 import { CITE_OPEN_EVENT, CITE_TYPE, citeCardHtml, citeChipHtml, inlineCardLinks, setCiteSources, type Cite } from "@/lib/cite";
 import FlagButton from "./FlagButton";
 import type { FlagInput } from "@/lib/flags";
@@ -92,6 +93,7 @@ import { useHeadroom } from "./useHeadroom";
 import { useSubjectViewing } from "./useSubjectViewing";
 import MoreMenu from "./MoreMenu";
 import { arriveOnTab } from "@/lib/tab-place";
+import { fileUnder, insertAfter, splitAtHeadings } from "@/lib/doc-sections";
 
 type Props = {
   /** Whether this device's boards have been read from storage yet: nothing is written on a guess of an empty board. */
@@ -180,6 +182,13 @@ type BoardOp = {
 let lastTypedAt = 0;
 
 type OutlineEntry = { id: string; n: number; level: number; text: string };
+
+/** Where an outline entry is in the document: its heading, or the label block itself. */
+function outlineTarget(doc: ParentNode, entry: OutlineEntry): HTMLElement | null {
+  const host = doc.querySelector<HTMLElement>(`[data-item="${CSS.escape(entry.id)}"]`);
+  if (!host) return null;
+  return entry.n >= 0 ? host.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6")[entry.n] ?? host : host;
+}
 
 /** A brief glow on what the reader was just taken to. */
 function flashEl(el: HTMLElement) {
@@ -480,8 +489,11 @@ export default function SubjectPage(props: Props) {
   const [imageProblem, setImageProblem] = useState<string | null>(null);
   /** Where a picture chosen from the whiteboard's menu should land. */
   const imageAt = useRef<{ x: number; y: number } | undefined>(undefined);
-  const pickImage = (at?: { x: number; y: number }) => {
+  /** Where a picture being chosen goes in the document: a block put in there (DocumentView), rather than a place on the board. */
+  const imagePlace = useRef<((extra: Partial<BoxItem>) => void) | undefined>(undefined);
+  const pickImage = (at?: { x: number; y: number }, place?: (extra: Partial<BoxItem>) => void) => {
     imageAt.current = at;
+    imagePlace.current = place;
     imageInput.current?.click();
   };
   const addImage = async (file: File | undefined) => {
@@ -489,8 +501,10 @@ export default function SubjectPage(props: Props) {
     try {
       const image = await shrinkImage(file);
       setImageProblem(null);
-      addBox(imageAt.current, { image, caption: "" });
+      if (imagePlace.current) imagePlace.current({ image, caption: "" });
+      else addBox(imageAt.current, { image, caption: "" });
       imageAt.current = undefined;
+      imagePlace.current = undefined;
     } catch (error) {
       setImageProblem(error instanceof Error ? error.message : "Could not add that picture.");
     }
@@ -1160,6 +1174,55 @@ export default function SubjectPage(props: Props) {
       return next;
     });
   };
+  /**
+   * Blocks put into the document right below another, as writing goes into
+   * a Doc: each reads straight after the one before it, and each is filed
+   * under the header above it (lib/doc-sections.ts) — joined to it on the
+   * whiteboard. A header put in takes what reads below it, up to the next
+   * header, as a Doc's heading does. `keep` rewrites the block being split
+   * in the same step; `relabel` turns it into the first header itself. One
+   * step to undo. The new blocks' ids, in order.
+   */
+  const docInsert = (
+    after: string | null,
+    pieces: Partial<BoxItem>[],
+    opts: { section: string | null; following?: string[]; keep?: { id: string; html: string }; relabel?: string; focus?: number },
+  ) => {
+    const ids = pieces.map(() => newItemId("box"));
+    recorded((current) => {
+      const now = Date.now();
+      let next = current ?? {};
+      let section = opts.section;
+      if (opts.keep) {
+        const held = next[opts.keep.id];
+        if (held && held.kind === "box") next = put(next, { ...held, html: sanitizeRichText(opts.keep.html), at: now }, now);
+      }
+      if (opts.relabel && after) {
+        const held = next[after];
+        if (held && held.kind === "box") {
+          next = fileUnder(next, after, null, now);
+          next = put(next, { ...held, label: true, html: opts.relabel, at: now }, now);
+          section = after;
+        }
+      }
+      let prev = after;
+      pieces.forEach((extra, i) => {
+        const id = ids[i];
+        next = placeNew(put(next, { id, kind: "box", html: "", ...extra, ...(prev ? { after: prev } : {}), at: now }, now), id);
+        if (prev) next = insertAfter(next, id, prev, now);
+        if (extra.label) section = id;
+        else next = fileUnder(next, id, section, now);
+        prev = id;
+      });
+      if (section !== opts.section) for (const id of opts.following ?? []) next = fileUnder(next, id, section, now);
+      return next;
+    });
+    const focus = opts.focus ?? ids.length - 1;
+    const target = focus < 0 ? after : ids[focus];
+    if (target) setFocusBox(target);
+    return ids;
+  };
+
   const joinBlocks = (into: string, from: string, html: string) =>
     recorded((current) => {
       const held = current?.[into];
@@ -1218,6 +1281,21 @@ export default function SubjectPage(props: Props) {
     mergeSteps,
     pasteBlocks,
     joinBlocks,
+    docInsert,
+    splitHeadings: (box: BoxItem, html: string, section: string | null, following: string[]) => {
+      const split = splitAtHeadings(html, document);
+      if (!split) return false;
+      const empty = !textOf(split.before).trim() && !/<img\b|data-cite|data-subject/.test(split.before);
+      const [first, ...rest] = split.pieces;
+      const pieces = (empty && first && "heading" in first ? rest : split.pieces).map((piece): Partial<BoxItem> =>
+        "heading" in piece ? { label: true, html: escapeHtml(piece.heading) } : { html: piece.html });
+      // The writing before the first heading stays in this box; a heading at its very top makes the box itself the header.
+      const relabel = empty && first && "heading" in first ? escapeHtml(first.heading) : undefined;
+      // The caret goes to the header just made — the box's own, or the first new one.
+      const firstLabel = pieces.findIndex((piece) => piece.label);
+      docInsert(box.id, pieces, { section, following, keep: relabel ? undefined : { id: box.id, html: split.before }, relabel, focus: relabel ? -1 : firstLabel });
+      return true;
+    },
     // Undoable, as every change to a block is: a transcript's tab closed, a picture replaced, a caption cleared.
     updateBox: (box: BoxItem, change: Partial<BoxItem>) =>
       recorded((current) => {
@@ -1345,7 +1423,18 @@ export default function SubjectPage(props: Props) {
       props.onOpenArticle(card?.link ?? href, card?.title ?? "", "");
     };
     window.addEventListener(CITE_OPEN_EVENT, open);
-    return () => window.removeEventListener(CITE_OPEN_EVENT, open);
+    // A link in the writing opened from its bubble: in the reader, as a story is (lib/link-chip.ts).
+    const openLinked = (event: Event) => {
+      const { href, title } = (event as CustomEvent<{ href: string; title: string }>).detail;
+      event.preventDefault();
+      const card = allCards.find((c) => c.id === canonicalUrl(href));
+      props.onOpenArticle(card?.link ?? href, card?.title ?? title, "");
+    };
+    window.addEventListener(LINK_OPEN_EVENT, openLinked);
+    return () => {
+      window.removeEventListener(CITE_OPEN_EVENT, open);
+      window.removeEventListener(LINK_OPEN_EVENT, openLinked);
+    };
   });
   /** Take the reader to an outline entry: scrolled to in the document, panned to on the whiteboard. */
   const goTo = (entry: OutlineEntry) => {
@@ -1354,11 +1443,19 @@ export default function SubjectPage(props: Props) {
       window.dispatchEvent(new CustomEvent("super-reader:goto", { detail: entry }));
       return;
     }
-    const host = document.querySelector<HTMLElement>(`.subject-doc [data-item="${CSS.escape(entry.id)}"]`);
-    if (!host) return;
-    const target = entry.n >= 0 ? host.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6")[entry.n] ?? host : host;
-    target.scrollIntoView({ behavior: "smooth", block: "start" });
-    flashEl(host);
+    const doc = pageRef.current?.querySelector<HTMLElement>(".subject-doc");
+    const target = doc && outlineTarget(doc, entry);
+    const scroller = pageRef.current?.closest<HTMLElement>(".main");
+    if (!target || !scroller) return;
+    // Just below the bars that stay at the top. Scrolling down tucks the
+    // header away, so going down only the text tools are left above it.
+    const top = topRef.current?.offsetHeight ?? 0;
+    const head = headRef.current?.offsetHeight ?? 0;
+    const at = (offset: number) => scroller.scrollTop + target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - offset - 12;
+    const down = at(top) > scroller.scrollTop;
+    scroller.scrollTo({ top: Math.max(0, at(down ? top - head : top)), behavior: "smooth" });
+    setActiveHeading(outline.indexOf(entry));
+    flashEl(target.closest<HTMLElement>("[data-item]") ?? target);
   };
 
   // A refresh comes back to the same place: how far down the document was
@@ -1416,6 +1513,99 @@ export default function SubjectPage(props: Props) {
   const topRef = useRef<HTMLDivElement | null>(null);
   const headRef = useRef<HTMLDivElement | null>(null);
   const tucked = useHeadroom(topRef, meta.view !== "board");
+
+  /**
+   * The tab outline sits flush against the document's left edge, held just
+   * under the text tools however far the document is scrolled, as the
+   * outline does in a Google Doc. It follows the bars' bottom edge as the
+   * header tucks away and comes back, and runs to the bottom of the screen.
+   */
+  const [railBox, setRailBox] = useState({ top: 0, height: 0 });
+  useEffect(() => {
+    const top = topRef.current;
+    const scroller = pageRef.current?.closest<HTMLElement>(".main");
+    if (!top || !scroller) return;
+    const measure = () => {
+      const at = top.offsetHeight - (tucked ? headRef.current?.offsetHeight ?? 0 : 0);
+      const next = { top: at, height: Math.max(120, scroller.clientHeight - at) };
+      setRailBox((was) => (was.top === next.top && was.height === next.height ? was : next));
+    };
+    measure();
+    const watch = new ResizeObserver(measure);
+    watch.observe(top);
+    watch.observe(scroller);
+    return () => watch.disconnect();
+  }, [tucked, meta.view]);
+
+  /**
+   * How wide a block in the document may grow past the page's own width: a
+   * table wider than the page widens its card to the right, into the room
+   * beside the document, up to the screen's edge (and never past 1200px).
+   */
+  useEffect(() => {
+    const page = pageRef.current;
+    const scroller = page?.closest<HTMLElement>(".main");
+    const doc = page?.querySelector<HTMLElement>(".subject-doc");
+    if (!page || !scroller || !doc || meta.view === "board") return;
+    const measure = () => {
+      const left = doc.getBoundingClientRect().left + (parseFloat(getComputedStyle(doc).paddingLeft) || 0);
+      const room = Math.round(scroller.getBoundingClientRect().left + scroller.clientWidth - left - 24);
+      page.style.setProperty("--doc-room", `${Math.max(280, room)}px`);
+    };
+    measure();
+    const watch = new ResizeObserver(measure);
+    watch.observe(scroller);
+    watch.observe(doc);
+    return () => watch.disconnect();
+  }, [meta.view, railOpen]);
+
+  /**
+   * The heading being read, lit in the outline as the document scrolls: the
+   * last one whose top has passed under the bars. At the very end of the
+   * document, where the last headings can never reach the top, the last one
+   * on screen counts as reached.
+   */
+  const [activeHeading, setActiveHeading] = useState(-1);
+  const outlineRef = useRef(outline);
+  outlineRef.current = outline;
+  const railTopRef = useRef(0);
+  railTopRef.current = railBox.top;
+  const outlineKey = outline.map((entry) => `${entry.id}:${entry.n}`).join("|");
+  useEffect(() => {
+    const scroller = pageRef.current?.closest<HTMLElement>(".main");
+    if (meta.view === "board" || !railOpen || !scroller) {
+      setActiveHeading(-1);
+      return;
+    }
+    let frame = 0;
+    const spy = () => {
+      frame = 0;
+      const doc = pageRef.current?.querySelector<HTMLElement>(".subject-doc");
+      if (!doc) return;
+      const view = scroller.getBoundingClientRect();
+      const line = view.top + railTopRef.current + 32;
+      const tops = outlineRef.current.map((entry) => outlineTarget(doc, entry)?.getBoundingClientRect().top ?? Infinity);
+      let found = -1;
+      tops.forEach((top, i) => {
+        if (top <= line) found = i;
+      });
+      if (scroller.scrollTop > 0 && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) {
+        tops.forEach((top, i) => {
+          if (i > found && top < view.bottom - 40) found = i;
+        });
+      }
+      setActiveHeading(found);
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(spy);
+    };
+    spy();
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      scroller.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(frame);
+    };
+  }, [meta.view, railOpen, outlineKey]);
 
   return (
     <div className="subject-page" ref={pageRef}>
@@ -1610,7 +1800,11 @@ export default function SubjectPage(props: Props) {
       <ToolsHostContext.Provider value={formatHost}>
       <div className={`subject-body${contactsShown ? " with-contacts" : ""}`}>
       <div className={`subject-main${railOpen ? " rail-open" : " rail-closed"}${props.hideBoxes ? " quiet-boxes" : ""}`}
-        style={props.boxWidth ? ({ "--box-w": `${props.boxWidth}px` } as React.CSSProperties) : undefined}>
+        style={{
+          ...(props.boxWidth ? { "--box-w": `${props.boxWidth}px` } : {}),
+          "--rail-top": `${railBox.top}px`,
+          "--rail-h": `${railBox.height}px`,
+        } as React.CSSProperties}>
       {railOpen && (
       // A zero-height sticky anchor: the outline stays in view down a long document.
       <div className={meta.view === "board" ? undefined : "tab-rail-anchor"}>
@@ -1618,8 +1812,10 @@ export default function SubjectPage(props: Props) {
           <>
             <div className="tab-rail-head">
               <span>Tabs</span>
-              <button className="icon-btn subtle" aria-label="Hide tabs" title="Hide tabs" onClick={() => setRail(false)}>
-                ‹
+              <button className="icon-btn subtle tab-rail-hide" aria-label="Hide tabs" title="Hide tabs" onClick={() => setRail(false)}>
+                <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+                  <path d="M12 5l-5 5 5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
               </button>
             </div>
             <TabBar
@@ -1630,6 +1826,7 @@ export default function SubjectPage(props: Props) {
               onRename={(tab, name) => recorded((current) => renameTab(current, tab, name))}
               onDelete={(tab) => recorded((current) => deleteTab(current, tab))}
               outline={outline}
+              activeOutline={activeHeading}
               onGo={goTo}
             />
           </>
@@ -1774,6 +1971,14 @@ type Shared = {
   pasteBlocks: (blocks: CopiedBlocks, after: string | null) => void;
   /** One text block joined onto the end of another: one step, undone as one. */
   joinBlocks: (into: string, from: string, html: string) => void;
+  /** Blocks put into the document below another, filed under the header above them (see docInsert). */
+  docInsert: (
+    after: string | null,
+    pieces: Partial<BoxItem>[],
+    opts: { section: string | null; following?: string[]; keep?: { id: string; html: string }; relabel?: string; focus?: number },
+  ) => string[];
+  /** A text box written with headings in it, cut into header cards and the writing under each. False when it has none. */
+  splitHeadings: (box: BoxItem, html: string, section: string | null, following: string[]) => boolean;
   removeQuotes: (ids: string[]) => void;
   setCardNote: (card: Card, html: string) => void;
   decide: (suggestion: SuggestItem, state: "accepted" | "dismissed") => void;
@@ -2436,6 +2641,25 @@ function caretTo(target: HTMLElement, end: boolean) {
   target.scrollIntoView({ block: "nearest" });
 }
 
+/** The header a block of the document reads under: the nearest label block at or above it. */
+function sectionAbove(block: HTMLElement | null): string | null {
+  for (let at: Element | null = block; at; at = at.previousElementSibling) {
+    if (at instanceof HTMLElement && at.dataset.item && isLabelBlock(at)) return at.dataset.item;
+  }
+  return null;
+}
+
+/** The blocks reading after one, up to the next header: what a header put in below it takes. */
+function blocksBelow(block: HTMLElement | null): string[] {
+  const out: string[] = [];
+  for (let at = block?.nextElementSibling ?? null; at; at = at.nextElementSibling) {
+    if (!(at instanceof HTMLElement) || !at.dataset.item) continue;
+    if (isLabelBlock(at)) break;
+    out.push(at.dataset.item);
+  }
+  return out;
+}
+
 /**
  * The document written as one document. Blocks are still the whiteboard's
  * blocks underneath — text boxes, stories, tables — but the keyboard crosses
@@ -2505,7 +2729,7 @@ function useDocKeys(
     /** Write on right after a block: a new text box that reads below it. */
     const writeAfter = (block: HTMLElement) => {
       clear();
-      latest.current.shared.addBox(undefined, { after: block.dataset.item });
+      latest.current.shared.docInsert(block.dataset.item!, [{}], { section: sectionAbove(block) });
     };
     /** Join one text block onto the end of another: the writing moves up, the emptied block goes. */
     const join = (into: HTMLElement, from: HTMLElement) => {
@@ -2782,13 +3006,14 @@ function useDocKeys(
 function DocumentView(
   shared: Shared & {
     addBox: (at?: { x: number; y: number }, extra?: Partial<BoxItem>) => void;
-    pickImage: (at?: { x: number; y: number }) => void;
+    pickImage: (at?: { x: number; y: number }, place?: (extra: Partial<BoxItem>) => void) => void;
     board: Board | undefined;
   },
 ) {
   const { inside, apart } = splitInsights(shared.insights);
   // Right-click (or double-click) the page's empty space for something new.
   const [menu, setMenu] = useState<{ left: number; top: number } | null>(null);
+  const [docEl, setDocEl] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!menu) return;
     const close = () => setMenu(null);
@@ -2802,10 +3027,145 @@ function DocumentView(
       window.removeEventListener("scroll", close, true);
     };
   }, [menu]);
+  /** The block a menu opened at puts new things after: the last one above where it was opened. */
+  const [menuAfter, setMenuAfter] = useState<HTMLElement | null>(null);
+  const blockAbove = (y: number) =>
+    [...(docEl?.querySelectorAll<HTMLElement>(":scope > [data-item]") ?? [])].filter((b) => b.getBoundingClientRect().top < y).at(-1) ?? null;
   const open = (event: React.MouseEvent) => {
     if (event.target !== event.currentTarget) return;
     event.preventDefault();
-    setMenu({ left: Math.min(event.clientX, window.innerWidth - 200), top: Math.min(event.clientY, window.innerHeight - 200) });
+    setMenuAfter(blockAbove(event.clientY));
+    setMenu({ left: Math.min(event.clientX, window.innerWidth - 220), top: Math.min(event.clientY, window.innerHeight - 320) });
+  };
+  /** The block being written in (or last written in): where the Insert menu puts things. */
+  const lastBlock = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!docEl) return;
+    const into = (event: FocusEvent) => {
+      const block = (event.target as HTMLElement | null)?.closest?.<HTMLElement>("[data-item]");
+      if (block && block.parentElement === docEl) lastBlock.current = block;
+    };
+    docEl.addEventListener("focusin", into);
+    return () => docEl.removeEventListener("focusin", into);
+  }, [docEl]);
+  /**
+   * Something new put into the document after a block (or at the end), and
+   * filed under the header it lands below. A header takes the blocks below
+   * it, up to the next header.
+   */
+  const insertAfterBlock = (block: HTMLElement | null, extra: Partial<BoxItem>) => {
+    const last = block ?? [...(docEl?.querySelectorAll<HTMLElement>(":scope > [data-item]") ?? [])].at(-1) ?? null;
+    shared.docInsert(last?.dataset.item ?? null, [extra], { section: sectionAbove(last), following: extra.label ? blocksBelow(last) : [] });
+  };
+  /**
+   * A divider line, put in from the Insert menu: the text box the caret is
+   * in is cut in two there, and what follows the caret starts a card of its
+   * own under the same header — joined to it on the whiteboard. Anywhere
+   * else, a new text box below the block.
+   */
+  const divide = (block: HTMLElement | null) => {
+    const body = block?.querySelector<HTMLElement>(".subject-box.text-box .rich-body");
+    const selection = window.getSelection();
+    if (!block || !body || !selection?.rangeCount || !body.contains(selection.anchorNode)) return insertAfterBlock(block, {});
+    const rest = document.createRange();
+    rest.setStart(selection.anchorNode!, selection.anchorOffset);
+    rest.setEnd(body, body.childNodes.length);
+    const holder = document.createElement("div");
+    holder.appendChild(rest.extractContents());
+    // A paragraph the caret was in the middle of leaves an empty shell at the cut: tidied away.
+    holder.querySelectorAll("p:empty, div:empty, li:empty").forEach((el) => el.remove());
+    body.querySelectorAll(":scope > p:empty, :scope > div:empty").forEach((el) => el.remove());
+    forceNextHtml();
+    shared.docInsert(block.dataset.item!, [{ html: holder.innerHTML }], { section: sectionAbove(block), keep: { id: block.dataset.item!, html: body.innerHTML } });
+  };
+  /** Story from link: from the clipboard if it holds one, otherwise asked for in the menu. */
+  const [askLink, setAskLink] = useState<{ after: HTMLElement | null; value: string; problem?: string } | null>(null);
+  const storyFrom = async (after: HTMLElement | null) => {
+    let text = "";
+    try {
+      text = (await navigator.clipboard.readText()).trim();
+    } catch {
+      /* the browser would not share the clipboard: ask instead */
+    }
+    const link = webLink(text);
+    if (link) addStoryBelow(link, after);
+    else setAskLink({ after, value: "" });
+  };
+  const addStoryBelow = (link: string, after: HTMLElement | null) => {
+    const last = after ?? [...(docEl?.querySelectorAll<HTMLElement>(":scope > [data-item]") ?? [])].at(-1) ?? null;
+    if (last) shared.storyFromLink(link, last.dataset.item!);
+    else shared.storyFromLink(link, "");
+  };
+  /** Everything that can be put into the document, for the double-click menu and the Insert menu alike. */
+  const choices = (block: HTMLElement | null, close: () => void): { icon: string; label: string; title?: string; run: () => void }[] => [
+    { icon: "—", label: "Divider line", title: "Starts a new card under the same header, from the caret", run: () => divide(block) },
+    { icon: "H", label: "Header", title: "A header card: what is written below it is joined to it", run: () => insertAfterBlock(block, { label: true, html: "" }) },
+    { icon: "¶", label: "Text box", run: () => insertAfterBlock(block, {}) },
+    { icon: "🔗", label: "Story from link", run: () => void storyFrom(block) },
+    { icon: "✎", label: "Drawing", run: () => insertAfterBlock(block, { drawing: [], height: DRAWING_HEIGHT }) },
+    { icon: "▣", label: "Image…", run: () => shared.pickImage(undefined, (extra) => insertAfterBlock(block, extra)) },
+    { icon: "▦", label: "Table", run: () => insertAfterBlock(block, { table: NEW_TABLE(), tableMode: "doc" }) },
+    { icon: "❝", label: "Transcript", run: () => insertAfterBlock(block, { transcript: { title: "", turns: [] } }) },
+  ].map((choice) => ({ ...choice, run: () => { close(); choice.run(); } }));
+  /** The Insert menu in the text tools, while the document is open. */
+  const toolsHost = useContext(ToolsHostContext);
+  /** Where the Insert menu opens: under its button, fixed to the screen (the tools bar clips what overflows it). */
+  const [inserting, setInserting] = useState<{ left: number; top: number } | null>(null);
+  useEffect(() => {
+    if (!inserting) return;
+    const close = (event: Event) => {
+      if (!(event.target as Element | null)?.closest?.(".doc-insert, .doc-insert-menu")) setInserting(null);
+    };
+    const esc = (event: KeyboardEvent) => event.key === "Escape" && setInserting(null);
+    window.addEventListener("pointerdown", close, true);
+    window.addEventListener("keydown", esc);
+    return () => {
+      window.removeEventListener("pointerdown", close, true);
+      window.removeEventListener("keydown", esc);
+    };
+  }, [inserting]);
+  /**
+   * A click just below a block — on its bottom edge, or in the space under
+   * it — starts writing there: a new text box below it, under the same
+   * header, as a divider line would make. An empty text box already there
+   * is written in instead.
+   */
+  const clickBelow = (event: React.MouseEvent) => {
+    if (event.target !== event.currentTarget || event.button !== 0 || event.detail > 1) return;
+    const block = blockAbove(event.clientY);
+    if (!block || event.clientY - block.getBoundingClientRect().bottom > 40) return;
+    const next = block.nextElementSibling as HTMLElement | null;
+    const nextBody = next?.dataset.item ? next.querySelector<HTMLElement>(".subject-box.text-box .rich-body") : null;
+    event.preventDefault();
+    if (nextBody && isEmptyText(nextBody)) return caretTo(nextBody, false);
+    insertAfterBlock(block, {});
+  };
+  // The latest board, for an editor saving on its way out after its box became a header.
+  const boardRef = useRef(shared.board);
+  boardRef.current = shared.board;
+  /**
+   * Writing in the document, with a heading made in a text box: the box is
+   * cut there, the heading becomes a header card, and what is written under
+   * it is joined to it (lib/doc-sections.ts).
+   */
+  const docShared: typeof shared = {
+    ...shared,
+    setBox: (box, html) => {
+      const held = boardRef.current?.[box.id];
+      if (held && held.kind === "box" && held.label) return;
+      if (/<h3\b/i.test(html) && docEl) {
+        const block = [...docEl.querySelectorAll<HTMLElement>(":scope > [data-item]")].find((b) => b.dataset.item === box.id) ?? null;
+        const split = splitAtHeadings(html, document);
+        if (block && split) {
+          const body = block.querySelector<HTMLElement>(".rich-body");
+          // The editor shows what stays in it at once, so leaving it does not save the heading back.
+          if (body) body.innerHTML = split.before;
+          forceNextHtml();
+          if (shared.splitHeadings(held && held.kind === "box" ? held : box, html, sectionAbove(block), blocksBelow(block))) return;
+        }
+      }
+      shared.setBox(box, html);
+    },
   };
   // A picture pasted while nothing is being typed in joins the page as its own box.
   useEffect(() => {
@@ -2821,26 +3181,24 @@ function DocumentView(
     return () => document.removeEventListener("paste", paste);
   });
   const holdRef = useRef<{ x: number; y: number; timer: ReturnType<typeof setTimeout> } | null>(null);
-  const pick = (run: () => void) => () => {
-    run();
-    setMenu(null);
-  };
   // The document written from the keyboard; a story, table or picture selected whole.
-  const [docEl, setDocEl] = useState<HTMLDivElement | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
   useDocKeys(docEl, shared, picked, setPicked);
   // A story set into the writing as a card reads there, not again as a block of its own.
   const inlined = new Set(shared.boxes.flatMap((box) => (box.html ? inlineCardLinks(box.html) : [])));
   const entries = [
     ...shared.cards.filter((card) => !inlined.has(card.id)).map((card) => ({ id: card.id, at: card.at, after: card.after, key: card.id, node: <StoryCard card={card} own={inside.get(card.id) ?? []} shared={shared} /> })),
-    ...shared.boxes.map((box) => ({ id: box.id, at: madeAt(box), label: box.label, after: box.after, key: box.id, node: <TextBox box={box} shared={shared} /> })),
+    ...shared.boxes.map((box) => ({ id: box.id, at: madeAt(box), label: box.label, after: box.after, key: box.id, node: <TextBox box={box} shared={docShared} /> })),
   ];
   // Sections read as they do on the whiteboard: each header, then what is linked to it.
   const byId = new Map(entries.map((e) => [e.id, e]));
   const stack = documentOrder(entries, shared.board).map((id) => byId.get(id)!);
+  // Two text cards one after the other under the same header: a divider line between them.
+  const textIds = new Set(shared.boxes.filter((b) => !b.label && !b.drawing && !b.table && !b.transcript && b.image === undefined && b.caption === undefined).map((b) => b.id));
+  const divided = new Set(stack.filter((entry, i) => i > 0 && textIds.has(entry.id) && textIds.has(stack[i - 1].id)).map((entry) => entry.id));
 
   return (
-    <div className="subject-doc" ref={setDocEl} onContextMenu={open} onDoubleClick={open}
+    <div className="subject-doc" ref={setDocEl} onContextMenu={open} onDoubleClick={open} onMouseDown={clickBelow}
       // A picture dragged in from the desktop or a screenshot's preview: added right below the
       // block it is let go on, or at the end. (Over writing, the writing takes it in instead.)
       onDragOver={(event) => {
@@ -2888,28 +3246,61 @@ function DocumentView(
       onTouchEnd={() => { if (holdRef.current) clearTimeout(holdRef.current.timer); holdRef.current = null; }}>
       {menu && (
         <div className="wb-menu doc-menu" role="menu" style={{ left: menu.left, top: menu.top }} onPointerDown={(e) => e.stopPropagation()}>
-          <button role="menuitem" onClick={pick(() => shared.addBox())}><span className="wb-menu-icon">¶</span> Text box</button>
-          <button role="menuitem" onClick={pick(() => shared.addBox(undefined, { drawing: [], height: DRAWING_HEIGHT }))}>
-            <span className="wb-menu-icon">✎</span> Drawing
-          </button>
-          <button role="menuitem" onClick={pick(() => shared.pickImage())}><span className="wb-menu-icon">▣</span> Image…</button>
-          <button role="menuitem" onClick={pick(() => shared.addBox(undefined, { table: NEW_TABLE(), tableMode: "doc" }))}>
-            <span className="wb-menu-icon">▦</span> Table
-          </button>
-          <button role="menuitem" onClick={pick(() => shared.addBox(undefined, { transcript: { title: "", turns: [] } }))}>
-            <span className="wb-menu-icon">❝</span> Transcript
-          </button>
+          {choices(menuAfter, () => setMenu(null)).filter((c) => c.label !== "Divider line").map((c) => (
+            <button key={c.label} role="menuitem" title={c.title} onClick={c.run}><span className="wb-menu-icon">{c.icon}</span> {c.label}</button>
+          ))}
         </div>
       )}
+      {askLink && (
+        <form className="doc-link-ask" onPointerDown={(e) => e.stopPropagation()}
+          onSubmit={(e) => {
+            e.preventDefault();
+            const link = webLink(askLink.value);
+            if (!link) return setAskLink({ ...askLink, problem: "That isn't a web link." });
+            addStoryBelow(link, askLink.after);
+            setAskLink(null);
+          }}>
+          <input className="input" autoFocus inputMode="url" placeholder="Paste a story's link" value={askLink.value}
+            onChange={(e) => setAskLink({ ...askLink, value: e.target.value, problem: undefined })}
+            onKeyDown={(e) => e.key === "Escape" && setAskLink(null)} />
+          <button className="btn small">Add story</button>
+          <button type="button" className="link-btn" onClick={() => setAskLink(null)}>Cancel</button>
+          {askLink.problem && <span className="hint">{askLink.problem}</span>}
+        </form>
+      )}
+      {toolsHost && createPortal(
+        <div className="doc-insert" onMouseDown={(e) => e.preventDefault()}>
+          <button type="button" className={`doc-insert-btn${inserting ? " on" : ""}`} aria-haspopup="menu" aria-expanded={Boolean(inserting)}
+            title="Insert a divider line, a header, a story, a table…"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              setInserting((o) => (o ? null : { left: Math.min(r.left, window.innerWidth - 220), top: r.bottom + 4 }));
+            }}>
+            <span aria-hidden="true">＋</span> Insert
+          </button>
+        </div>,
+        toolsHost,
+      )}
+      {inserting && createPortal(
+        <div className="wb-menu doc-insert-menu" role="menu" style={{ left: inserting.left, top: inserting.top }} onMouseDown={(e) => e.preventDefault()}>
+          {choices(lastBlock.current?.isConnected ? lastBlock.current : null, () => setInserting(null)).map((c) => (
+            <button key={c.label} role="menuitem" title={c.title} onClick={c.run}><span className="wb-menu-icon">{c.icon}</span> {c.label}</button>
+          ))}
+        </div>,
+        document.body,
+      )}
       {stack.length === 0 && (
-        <p className="hint">
-          Nothing here yet. Highlight a passage in an article and add it to this subject, use <strong>Subject</strong> in
-          an article&apos;s toolbar to add the whole story, or start with a text box.
-        </p>
+        // An empty document is written in straight away, as a new Doc is.
+        <div className="doc-start" role="textbox" tabIndex={0} aria-label="Start writing"
+          onMouseDown={(e) => { e.preventDefault(); shared.docInsert(null, [{}], { section: null }); }}
+          onKeyDown={(e) => { if (e.key.length === 1 || e.key === "Enter") { e.preventDefault(); shared.docInsert(null, [{}], { section: null }); } }}>
+          Start typing…
+          <span className="hint">Or add a story from an article with <strong>Subject</strong> in its toolbar.</span>
+        </div>
       )}
       {stack.map((entry) => (
         <div key={entry.key} data-item={entry.key} tabIndex={-1}
-          className={[shared.tags.lit ? (shared.tags.lit.has(entry.id) ? "tag-lit" : "tag-dim") : "", picked.includes(entry.key) ? "doc-picked" : ""].filter(Boolean).join(" ") || undefined}>
+          className={[shared.tags.lit ? (shared.tags.lit.has(entry.id) ? "tag-lit" : "tag-dim") : "", picked.includes(entry.key) ? "doc-picked" : "", divided.has(entry.id) ? "doc-divided" : ""].filter(Boolean).join(" ") || undefined}>
           {entry.node}
           {picked[picked.length - 1] === entry.key && (
             <div className="doc-picked-hint" aria-live="polite">
@@ -2954,7 +3345,7 @@ function Whiteboard(
     board: Board | undefined;
     onBoard: Props["onBoard"];
     addBox: (at?: { x: number; y: number }, extra?: Partial<BoxItem>) => void;
-    pickImage: (at?: { x: number; y: number }) => void;
+    pickImage: (at?: { x: number; y: number }, place?: (extra: Partial<BoxItem>) => void) => void;
   },
 ) {
   /** The right-click menu on empty board: where it opened, on screen and on the board. */
@@ -3137,6 +3528,8 @@ function Whiteboard(
    * measured height — lib/board-layout.ts — so cards never cover each other,
    * however much they have grown since they were put down.
    */
+  /** Where a card being dragged would land if let go now: its place in the layout that made room for it. */
+  const landing = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
   const positions = useMemo(() => {
     const placed = new Map<string, { x: number; y: number; w: number }>();
     for (const item of live(board)) {
@@ -3144,12 +3537,46 @@ function Whiteboard(
     }
     const counters = { card: 0, box: 0, insight: 0, suggest: 0 };
     const cardsBottom = Math.ceil(shared.cards.length / 2) * 200;
+    /*
+     * A block written in the document and never placed on the board goes
+     * where it reads: straight below the block it was written after, or
+     * below its header — and whatever is below that makes room for it
+     * (layoutBoard settles later cards down), rather than it landing at the
+     * bottom of a column far from its section.
+     */
+    const boxById = new Map(shared.boxes.map((b) => [b.id, b]));
+    const headerOf = new Map<string, string>();
+    for (const item of live(board)) {
+      if (item.kind !== "link") continue;
+      const l = item as LinkItem;
+      if (boxById.get(l.from)?.label && !boxById.get(l.to)?.label) headerOf.set(l.to, l.from);
+      else if (boxById.get(l.to)?.label && !boxById.get(l.from)?.label) headerOf.set(l.from, l.to);
+    }
+    const anchored = new Map<string, { x: number; y: number } | null>();
+    const anchorSpot = (id: string, depth = 0): { x: number; y: number } | null => {
+      if (placed.has(id)) return placed.get(id)!;
+      if (anchored.has(id)) return anchored.get(id)!;
+      anchored.set(id, null);
+      const box = boxById.get(id);
+      const anchor = box?.after && boxById.has(box.after) ? box.after : headerOf.get(id);
+      const at = anchor && depth < 200 ? anchorSpot(anchor, depth + 1) : null;
+      // Just after its anchor in reading order: the layout settles it under the anchor.
+      const spot = at ? { x: at.x, y: at.y + 0.5 } : null;
+      anchored.set(id, spot);
+      return spot;
+    };
+    // While a single card is dragged it counts where it is, so what it is over makes room for it (a preview of the drop).
+    const single = drag && drag.group.size === 0 ? drag : null;
+    const joinRect = single?.join ? placed.get(single.join) : undefined;
     const laid = layoutBoard(
       nodes
-        .filter((node) => node.id !== drag?.id && !drag?.group.has(node.id))
+        .filter((node) => (single ? true : node.id !== drag?.id) && !drag?.group.has(node.id))
         .map((node) => {
           const h = sizes[node.id]?.h ?? 160;
-          const saved = placed.get(node.id);
+          if (single && node.id === single.id) {
+            return { id: node.id, placed: true, x: joinRect ? joinRect.x : single.x, y: single.y, w: placed.get(node.id)?.w ?? CARD_W, h };
+          }
+          const saved: { x: number; y: number; w?: number } | undefined = placed.get(node.id) ?? (node.kind === "box" ? anchorSpot(node.id) ?? undefined : undefined);
           // A table's card is as wide as the table it holds.
           const table = node.kind === "box" ? shared.boxes.find((b) => b.id === node.id && b.table) : undefined;
           if (table) {
@@ -3165,6 +3592,7 @@ function Whiteboard(
           return { id: node.id, placed: false, x, y, w: width, h };
         }),
     );
+    landing.current = single ? laid.get(single.id) ?? null : null;
     if (drag) {
       laid.set(drag.id, { x: drag.x, y: drag.y, w: placed.get(drag.id)?.w ?? CARD_W, h: sizes[drag.id]?.h ?? 160 });
       for (const [other, from] of drag.group) {
@@ -3174,6 +3602,8 @@ function Whiteboard(
     return laid;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [board, shared.cards, shared.boxes, shared.insights, shared.suggestions, drag, sizes, resize]);
+  const positionsRef = useRef(positions);
+  positionsRef.current = positions;
 
   /**
    * Opening a board looks at its busiest stretch, not at the board's top-left
@@ -3461,31 +3891,31 @@ function Whiteboard(
         ]);
         return;
       }
+      /*
+       * Let go over other cards, it lands where it was let go, and what it
+       * was over moves aside to make room — down, and only as far as it
+       * needs, along with whatever that in turn runs into. Its exact spot is
+       * the one the drag was previewing (landing): over the lower half of a
+       * card, it goes in below that card rather than on top of it. Those
+       * that moved keep their new places, and one ⌘Z puts all of it back.
+       */
       const target = moved && e ? joinTarget(id, { ...last, w: origin.w }, { x: e.clientX, y: e.clientY }) : null;
-      if (target) {
-        const label = positions.get(target)!;
-        const linked = new Set(
-          live(board)
-            .filter((i): i is LinkItem => i.kind === "link")
-            .flatMap((l) => (l.from === target ? [l.to] : l.to === target ? [l.from] : [])),
-        );
-        let y = label.y + (sizes[target]?.h ?? 56) + 14;
-        for (const [other, rect] of [...positions.entries()].sort((a, b) => a[1].y - b[1].y)) {
-          if (other === id || !linked.has(other) || labelIds.has(other)) continue;
-          if (Math.abs(rect.x - label.x) < 40) y = Math.max(y, rect.y + (sizes[other]?.h ?? 160) + 14);
+      const land = landing.current;
+      if (moved && land && (target || last.x !== start.x || last.y !== start.y)) {
+        const now = positionsRef.current;
+        const shifted: Spot[] = [];
+        for (const [other, rect] of now) {
+          if (other === id) continue;
+          const was = positions.get(other);
+          if (was && (Math.abs(was.y - rect.y) > 0.5 || Math.abs(was.x - rect.x) > 0.5)) shifted.push({ id: other, x: rect.x, y: rect.y, w: rect.w });
         }
-        const [from, to] = [target, id].sort();
-        place([{ id, x: label.x, y, w: origin.w }]);
-        shared.recorded((current) => put(current, { id: `link:${from}|${to}`, kind: "link", from, to, at: Date.now() }));
-        // Lined up and linked in one gesture: one ⌘Z takes both back.
-        shared.mergeSteps(2);
-        return;
-      }
-      if (moved && (last.x !== start.x || last.y !== start.y)) {
-        // Dropped on top of something: it lands just below instead.
-        const others = [...positions.entries()].filter(([other]) => other !== id).map(([, rect]) => rect);
-        const landed = settle({ x: last.x, y: last.y, w: origin.w, h: sizes[id]?.h ?? 160 }, others);
-        place([{ id, x: landed.x, y: landed.y, w: origin.w }]);
+        place([{ id, x: land.x, y: land.y, w: origin.w }, ...shifted]);
+        if (target) {
+          // Dropped into a section: joined to its header too — lined up and linked in one gesture, one ⌘Z for both.
+          const [from, to] = [target, id].sort();
+          shared.recorded((current) => put(current, { id: `link:${from}|${to}`, kind: "link", from, to, at: Date.now() }));
+          shared.mergeSteps(2);
+        }
       }
     };
     window.addEventListener("pointermove", move);
@@ -4288,6 +4718,11 @@ function Whiteboard(
               line(link.id, link.from, link.to, "wb-line", () => shared.recorded((current) => remove(current, link.id))),
             )}
           </svg>
+          {drag && drag.group.size === 0 && landing.current && (Math.abs(landing.current.x - drag.x) > 4 || Math.abs(landing.current.y - drag.y) > 4) && (
+            // Where the card will land, when that is not where it is held.
+            <div className="wb-landing" aria-hidden="true"
+              style={{ left: landing.current.x, top: landing.current.y, width: landing.current.w, height: sizes[drag.id]?.h ?? 160 }} />
+          )}
           {marquee && (
             <div
               className="wb-marquee"
@@ -4434,9 +4869,12 @@ function TabBar({
   onDelete,
   contacts,
   outline = [],
+  activeOutline = -1,
   onGo,
 }: {
   outline?: OutlineEntry[];
+  /** The heading being read, lit as the document scrolls. */
+  activeOutline?: number;
   onGo?: (entry: OutlineEntry) => void;
   tabs: Tab[];
   current: string;
@@ -4448,8 +4886,19 @@ function TabBar({
 }) {
   const [editing, setEditing] = useState<{ id: string | null; draft: string } | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
-  /** The open tab's headings, shown by clicking its name. */
-  const [outlineOpen, setOutlineOpen] = useState(false);
+  /** The open tab's headings, shown under its name; clicking the name folds them away. */
+  const [outlineOpen, setOutlineOpen] = useState(true);
+  const outlineList = useRef<HTMLUListElement | null>(null);
+  // The lit heading kept in view in a long outline, by scrolling the rail alone — never the document.
+  useEffect(() => {
+    const item = outlineList.current?.querySelector<HTMLElement>(".tab-outline-item.active");
+    const rail = item?.closest<HTMLElement>(".tab-rail");
+    if (!item || !rail) return;
+    const a = item.getBoundingClientRect();
+    const r = rail.getBoundingClientRect();
+    if (a.top < r.top + 36) rail.scrollTop -= r.top + 36 - a.top;
+    else if (a.bottom > r.bottom - 8) rail.scrollTop += a.bottom - r.bottom + 8;
+  }, [activeOutline]);
 
   const finish = () => {
     if (!editing) return;
@@ -4519,13 +4968,14 @@ function TabBar({
               </button>
             )}
             {onGo && tab.id === current && outlineOpen && (
-              <ul className="tab-outline">
+              <ul className="tab-outline" ref={outlineList}>
                 {outline.length === 0 ? (
                   <li className="tab-outline-empty">No headings yet — add a section label, or an H heading in a text box.</li>
                 ) : (
                   outline.map((entry, i) => (
                     <li key={`${entry.id}-${entry.n}-${i}`}>
-                      <button className={`tab-outline-item level-${entry.level}`} onClick={() => onGo(entry)} title={entry.text}>
+                      <button className={`tab-outline-item level-${entry.level}${i === activeOutline ? " active" : ""}`}
+                        aria-current={i === activeOutline ? "location" : undefined} onClick={() => onGo(entry)} title={entry.text}>
                         {entry.text}
                       </button>
                     </li>

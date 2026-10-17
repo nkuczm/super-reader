@@ -3,7 +3,10 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import CropDialog, { copyPicture, pastedWidth } from "./CropDialog";
-import { isHighlight, sanitizeRichText } from "@/lib/subjects";
+import { isHighlight, safeHref, sanitizeRichText } from "@/lib/subjects";
+import { hostOf, linkInfo, openLink, type LinkInfo } from "@/lib/link-chip";
+import { DEFAULT_HIGHLIGHT, HIGHLIGHT_COLORS, hexColor, lastHighlight, setLastHighlight } from "@/lib/colors";
+import ColorSwatches from "./ColorSwatches";
 import { cleanPastedHtml } from "@/lib/paste";
 import { CITE_OPEN_EVENT, CITE_TYPE, CITES_CHANGED_EVENT, citeCardHtml, citeChipHtml, citeFor, citeTextHtml, refreshCiteChips, type Cite } from "@/lib/cite";
 import { refreshSubjectChips, subjectChipHtml, subjectsMatching, SUBJECT_OPEN_EVENT, SUBJECTS_CHANGED_EVENT, type SubjectRef } from "@/lib/subject-links";
@@ -23,7 +26,7 @@ export const ToolsHostContext = createContext<HTMLElement | null>(null);
 type ListKind = "bullet" | "check" | "1" | "1)" | "a" | "a)" | "A" | "A)";
 /** What the caret is in, for the tools to show as on. */
 type ToolState = { b?: boolean; i?: boolean; hl?: boolean; h?: boolean; list?: ListKind | null };
-type ToolAction = "undo" | "redo" | "bold" | "italic" | "highlight" | "heading" | "list" | "link";
+type ToolAction = "undo" | "redo" | "bold" | "italic" | "highlight" | "hlColor" | "heading" | "list" | "link";
 
 const svg = (children: React.ReactNode) => (
   <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -85,6 +88,7 @@ function ToolButtons({ state = {}, run, history, onHistory, open }: {
       {button("bold", "Bold (⌘B)", <b className="rt-glyph">B</b>, state.b)}
       {button("italic", "Italic (⌘I)", <i className="rt-glyph rt-italic">I</i>, state.i)}
       {button("highlight", "Highlight — again to remove", ICON.highlight, state.hl)}
+      <span className="rt-hl-more">{button("hlColor", "Highlight colour", ICON.chevron, false)}</span>
       <span className="rt-sep" aria-hidden="true" />
       {button("list", "Lists", LIST_ICON[state.list ?? "bullet"], Boolean(state.list), true)}
       {button("heading", "Heading — again for normal text", <b className="rt-glyph">H</b>, state.h)}
@@ -221,6 +225,172 @@ function keepingCaret(run: () => void) {
   const now = window.getSelection()?.anchorNode;
   const target = (now instanceof Element ? now : now?.parentElement)?.closest("li, p, div, h3, blockquote");
   if (target && (target.textContent ?? "").length >= offset) caretAtText(target, offset);
+}
+
+/**
+ * The spans the browser's highlighter just painted in a colour, made the
+ * marks that keep it (lib/subjects.ts, markTag): a span's colour is not
+ * kept, so a favourite saved as one would come back yellow.
+ */
+export function colorMarks(root: HTMLElement, color: string) {
+  const hex = hexColor(color);
+  if (!hex || hex === DEFAULT_HIGHLIGHT) return;
+  for (const span of root.querySelectorAll<HTMLElement>("span[style*='background']")) {
+    if (hexColor(span.style.backgroundColor) !== hex) continue;
+    const mark = document.createElement("mark");
+    mark.dataset.hl = hex;
+    mark.style.backgroundColor = hex;
+    mark.append(...span.childNodes);
+    span.replaceWith(mark);
+  }
+}
+
+/**
+ * What a link in writing can be, offered when the caret is in it — as a
+ * Google Doc's link bubble does. The preview (the page's headline and site)
+ * opens it: in the reader, or on the site when it is marked to open there.
+ * Below, what it shows as: the link's own words, a chip (the headline as one
+ * piece of linked text, still editable in place), or a story card — a story
+ * of the subject, set into the writing as a card.
+ */
+function LinkBubble({ link, top, left, onStoryCard, onChanged, keys, onKeysDone }: {
+  link: HTMLAnchorElement;
+  /** Taking the arrows and Enter: the link was just clicked. */
+  keys: boolean;
+  onKeysDone: () => void;
+  top: number;
+  left: number;
+  onStoryCard?: (url: string) => Cite | null;
+  onChanged: () => void;
+}) {
+  const href = link.href;
+  const cited = link.dataset.cite;
+  const [info, setInfo] = useState<LinkInfo | null>(null);
+  const [, redraw] = useState(0);
+  useEffect(() => {
+    let live = true;
+    void linkInfo(href).then((got) => live && setInfo(got));
+    return () => {
+      live = false;
+    };
+  }, [href]);
+  const chip = link.dataset.link === "chip";
+  const web = link.hasAttribute("data-web");
+  const words = (link.textContent ?? "").trim();
+  const title = info?.title || (cited ? link.title || words : "") || (words && words !== href ? words : "") || hostOf(href);
+  const keep = (event: React.MouseEvent) => event.preventDefault();
+  const asChip = () => {
+    link.dataset.link = "chip";
+    // Its words become the headline, unless the writer chose their own.
+    const plainAddress = !words || words === href || words === href.replace(/\/$/, "") || /^https?:\/\//i.test(words);
+    if (plainAddress) {
+      link.textContent = info?.title || hostOf(href);
+      // Read meanwhile: the headline arrives a moment later, if the words are still the placeholder.
+      if (!info?.title) {
+        const placeholder = link.textContent;
+        void linkInfo(href).then((got) => {
+          if (got.title && link.isConnected && link.textContent === placeholder) {
+            link.textContent = got.title;
+            onChanged();
+          }
+        });
+      }
+    }
+    onChanged();
+    redraw((n) => n + 1);
+  };
+  const asText = () => {
+    delete link.dataset.link;
+    onChanged();
+    redraw((n) => n + 1);
+  };
+  const asCard = () => {
+    const cite = onStoryCard?.(href);
+    if (!cite) return;
+    const holder = document.createElement("span");
+    holder.innerHTML = citeCardHtml({ ...cite, title: info?.title || cite.title });
+    const card = holder.firstChild!;
+    link.replaceWith(card);
+    const selection = window.getSelection();
+    const after = document.createRange();
+    after.setStartAfter(card);
+    after.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(after);
+    onChanged();
+  };
+  const toggleWeb = () => {
+    if (web) link.removeAttribute("data-web");
+    else link.setAttribute("data-web", "");
+    onChanged();
+    redraw((n) => n + 1);
+  };
+  // The choices in the order the arrows go through them.
+  const choices: { id: string; run: () => void }[] = [
+    { id: "open", run: () => openLink(href, title, web) },
+    ...(!cited ? [
+      { id: "link", run: asText },
+      { id: "chip", run: asChip },
+      ...(onStoryCard ? [{ id: "card", run: asCard }] : []),
+      { id: "web", run: toggleWeb },
+    ] : []),
+  ];
+  const [active, setActive] = useState(-1);
+  const latest = useRef({ choices, active });
+  latest.current = { choices, active };
+  useEffect(() => {
+    if (!keys) {
+      setActive(-1);
+      return;
+    }
+    // Ahead of the document's own keys (which move between blocks on the arrows): the window, capturing.
+    const key = (event: KeyboardEvent) => {
+      const { choices: list, active: at } = latest.current;
+      const step = event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : event.key === "ArrowUp" || event.key === "ArrowLeft" ? -1 : 0;
+      if (step && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        setActive(at < 0 ? (step > 0 ? 0 : list.length - 1) : (at + step + list.length) % list.length);
+        return;
+      }
+      if (event.key === "Enter" && at >= 0) {
+        event.preventDefault();
+        event.stopPropagation();
+        list[at]?.run();
+        return;
+      }
+      if (event.key === "Escape" && at >= 0) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      // Anything else is writing again.
+      onKeysDone();
+    };
+    window.addEventListener("keydown", key, true);
+    return () => window.removeEventListener("keydown", key, true);
+  }, [keys, onKeysDone]);
+  const lit = (id: string) => (choices[active]?.id === id ? " kbd" : "");
+  return (
+    <div className="link-bubble" style={{ top, left }} onMouseDown={keep} role="dialog" aria-label="Link">
+      <button type="button" className={`link-bubble-preview${lit("open")}`} title={web ? "Open on the site" : "Open in the reader"}
+        onClick={() => openLink(href, title, web)}>
+        <span className="link-bubble-title">{title}</span>
+        <span className="link-bubble-site">{info?.site || hostOf(href)} · {web ? "opens the site ↗" : "opens in the reader"}</span>
+      </button>
+      {!cited && (
+        <div className="link-bubble-as" role="group" aria-label="Show as">
+          <button type="button" className={`${!chip ? "on" : ""}${lit("link")}`} aria-pressed={!chip} onClick={asText}>Link</button>
+          <button type="button" className={`${chip ? "on" : ""}${lit("chip")}`} aria-pressed={chip} onClick={asChip}>Chip</button>
+          {onStoryCard && <button type="button" className={lit("card")} onClick={asCard}>Story card</button>}
+        </div>
+      )}
+      {!cited && (
+        <label className={`link-bubble-web${lit("web")}`}>
+          <input type="checkbox" checked={web} onChange={toggleWeb} /> Open the site, not a story
+        </label>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -419,7 +589,12 @@ export default function RichText({
   /** The quote the caret is in, and where to show its chip. */
   const [inQuote, setInQuote] = useState<{ id: string; top: number; left: number } | null>(null);
   /** The caret is in a link of the writer's own: where to offer opening it. */
-  const [inLink, setInLink] = useState<{ href: string; top: number; left: number } | null>(null);
+  const [inLink, setInLink] = useState<{ el: HTMLAnchorElement; href: string; top: number; left: number } | null>(null);
+  /** The link bubble answers the arrows and Enter: set when a link is clicked, until something else is typed. */
+  const [bubbleKeys, setBubbleKeys] = useState(false);
+  useEffect(() => {
+    if (!inLink) setBubbleKeys(false);
+  }, [inLink]);
   /** Making a link: the text it goes on, and the address being typed. */
   const [linking, setLinking] = useState<{ range: Range; value: string } | null>(null);
   /**
@@ -574,12 +749,12 @@ export default function RichText({
       const anchor = window.getSelection()?.anchorNode;
       const inside = Boolean(node && anchor && node.contains(anchor));
       if (!inside && !showingLink.current) return;
-      const link = inside ? (anchor instanceof Element ? anchor : anchor!.parentElement)?.closest<HTMLAnchorElement>("a[href]") : null;
+      const link = inside ? (anchor instanceof Element ? anchor : anchor!.parentElement)?.closest<HTMLAnchorElement>("a[href]:not([data-quote]):not([data-subject])") : null;
       showingLink.current = Boolean(link && node);
       if (!link || !node) return setInLink(null);
       const box = node.parentElement!.getBoundingClientRect();
       const rect = link.getBoundingClientRect();
-      setInLink({ href: link.href, top: rect.bottom - box.top + 4, left: Math.max(0, rect.left - box.left) });
+      setInLink({ el: link, href: link.href, top: rect.bottom - box.top + 6, left: Math.max(0, rect.left - box.left) });
     };
     return el.current ? onCaret(el.current, checkLink) : undefined;
   }, []);
@@ -990,7 +1165,7 @@ export default function RichText({
       toggleNumbered(upper ? "upper" : true, letter![1].toLowerCase().charCodeAt(0) - 96, typed.endsWith(")"), true);
     }
     for (const command of styles) if (!document.queryCommandState(command)) document.execCommand(command);
-    if (lit) document.execCommand("hiliteColor", false, "#fde68a");
+    if (lit) document.execCommand("hiliteColor", false, lastHighlight());
     return true;
   }
 
@@ -1016,16 +1191,81 @@ export default function RichText({
     if (onFormat?.("highlight")) return;
     const root = el.current;
     const sel = window.getSelection();
-    if (!root || !sel || sel.rangeCount === 0) return format("hiliteColor", "#fde68a");
+    if (!root || !sel || sel.rangeCount === 0) return format("hiliteColor", lastHighlight());
     const range = sel.getRangeAt(0);
     const lit = [...root.querySelectorAll<HTMLElement>("mark, span[style*='background']")].filter((node) => {
       if (range.intersectsNode(node)) return true;
       return node.contains(range.startContainer);
     });
-    if (lit.length === 0) return format("hiliteColor", "#fde68a");
+    if (lit.length === 0) {
+      format("hiliteColor", lastHighlight());
+      colorMarks(root, lastHighlight());
+      return;
+    }
     for (const node of lit) node.replaceWith(...node.childNodes);
     root.normalize();
     changed();
+  }
+
+  /** A highlight in a chosen colour (or none), over whatever highlight was there; the button keeps the colour for next time. */
+  function colorHighlight(color: string | null) {
+    if (onFormat?.(color ? `highlight:${color}` : "highlight:none")) return;
+    const root = el.current;
+    const sel = window.getSelection();
+    if (!root || !sel || sel.rangeCount === 0) return;
+    root.focus();
+    const range = sel.getRangeAt(0);
+    const lit = [...root.querySelectorAll<HTMLElement>("mark, span[style*='background']")].filter((node) => range.intersectsNode(node) || node.contains(range.startContainer));
+    if (range.collapsed && lit.length) {
+      // The caret in a highlight: the whole highlight takes the colour.
+      const whole = document.createRange();
+      whole.setStartBefore(lit[0]);
+      whole.setEndAfter(lit[lit.length - 1]);
+      sel.removeAllRanges();
+      sel.addRange(whole);
+    }
+    for (const node of lit) node.replaceWith(...node.childNodes);
+    root.normalize();
+    if (color) {
+      setLastHighlight(color);
+      if (!sel.isCollapsed) {
+        document.execCommand("hiliteColor", false, color);
+        colorMarks(root, color);
+      }
+    }
+    changed();
+  }
+
+  /**
+   * The web address just before the space the caret follows, made a link —
+   * as a Doc does. Its trailing punctuation stays outside it: "see
+   * example.com/a." links the address, not the full stop.
+   */
+  function autoLink() {
+    const sel = window.getSelection();
+    const node = sel?.anchorNode;
+    if (!sel?.isCollapsed || !node || node.nodeType !== Node.TEXT_NODE || node.parentElement?.closest("a")) return;
+    const text = node.textContent ?? "";
+    const end = sel.anchorOffset - 1;
+    const found = /(?:https?:\/\/|www\.)[^\s\u00a0<>"]+$/i.exec(text.slice(0, end));
+    if (!found) return;
+    const address = found[0].replace(/[.,;:!?'")\]]+$/, "");
+    const href = /^www\./i.test(address) ? `https://${address}` : address;
+    if (!safeHref(href) || !/\.[a-z]{2,}/i.test(address)) return;
+    const range = document.createRange();
+    range.setStart(node, found.index);
+    range.setEnd(node, found.index + address.length);
+    const a = document.createElement("a");
+    a.href = href;
+    range.surroundContents(a);
+    // The caret back after the space, outside the link.
+    const after = a.nextSibling;
+    const caret = document.createRange();
+    if (after && after.nodeType === Node.TEXT_NODE) caret.setStart(after, Math.min(after.textContent!.length, end - found.index - address.length + 1));
+    else caret.setStartAfter(a);
+    caret.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(caret);
   }
 
   /** "-->" becomes →, "<--" becomes ←, and ← followed by ">" becomes ↔, as they are typed. */
@@ -1132,9 +1372,10 @@ export default function RichText({
   }, [focused]);
 
   /** A tool's own menu — the kinds of list, the kinds of link — under its button. */
-  const [toolMenu, setToolMenu] = useState<{ kind: "list" | "link"; left: number; top: number } | null>(null);
+  const [toolMenu, setToolMenu] = useState<{ kind: "list" | "link" | "hl"; left: number; top: number } | null>(null);
   useEffect(() => {
-    if (!focused) setToolMenu(null);
+    // The colour picker in a menu takes focus while it is open: the menu stays for it.
+    if (!focused && !document.activeElement?.closest?.(".rt-menu")) setToolMenu(null);
   }, [focused]);
   useEffect(() => {
     if (!toolMenu) return;
@@ -1161,8 +1402,8 @@ export default function RichText({
     if (action === "bold" || action === "italic") return (format(action), after());
     if (action === "highlight") return (toggleHighlight(), after());
     if (action === "heading") return (format("formatBlock", toolState.h ? "p" : "h3"), after());
-    const kind = action;
-    setToolMenu((open) => (open?.kind === kind ? null : { kind, left: Math.min(at.left, window.innerWidth - 230), top: at.bottom + 6 }));
+    const kind = action === "hlColor" ? "hl" : action;
+    setToolMenu((open) => (open?.kind === kind ? null : { kind, left: Math.min(at.left, window.innerWidth - 260), top: at.bottom + 6 }));
   };
   /** A kind of list: on, or — chosen again — off. */
   const setList = (kind: ListKind) => {
@@ -1181,7 +1422,11 @@ export default function RichText({
   ];
   const menu = toolMenu && typeof document !== "undefined" && createPortal(
     <div className="rt-menu" role="menu" style={{ left: toolMenu.left, top: toolMenu.top }} onMouseDown={(e) => e.preventDefault()}>
-      {toolMenu.kind === "list" ? (
+      {toolMenu.kind === "hl" ? (
+        <ColorSwatches label="Highlight colour" colors={HIGHLIGHT_COLORS} noneLabel="No highlight"
+          onPick={(color) => { setToolMenu(null); colorHighlight(color); requestAnimationFrame(() => readTools.current(true)); }}
+          onNone={() => { setToolMenu(null); colorHighlight(null); requestAnimationFrame(() => readTools.current(true)); }} />
+      ) : toolMenu.kind === "list" ? (
         <>
           {LISTS.map(([kind, label, keys]) => (
             <button key={kind} type="button" role="menuitemradio" aria-checked={toolState.list === kind}
@@ -1230,7 +1475,7 @@ export default function RichText({
     <div ref={tools} className={`rich-tools${docked ? " docked" : hosted ? " hosted" : side ? " side" : ""}`}
       style={docked ? { top: vvTop } : side ? { left: side.left, top: side.top } : undefined}
       onMouseDown={(event) => event.preventDefault()}>
-      <ToolButtons state={toolState} run={runTool} history={docked || hosted} open={toolMenu?.kind ?? null} />
+      <ToolButtons state={toolState} run={runTool} history={docked || hosted} open={toolMenu ? (toolMenu.kind === "hl" ? "hlColor" : toolMenu.kind) : null} />
       {docked && (
         <button type="button" className="rich-done" title="Done — close the keyboard"
           aria-label="Done — close the keyboard"
@@ -1342,10 +1587,20 @@ export default function RichText({
         );
       })()}
       {inLink && !linking && (
-        <a className="quote-chip link-chip" style={{ top: inLink.top, left: inLink.left }} href={inLink.href}
-          target="_blank" rel="noopener noreferrer" onMouseDown={(event) => event.preventDefault()}>
-          ↗ Open link
-        </a>
+        <LinkBubble
+          key={inLink.href}
+          link={inLink.el}
+          keys={bubbleKeys}
+          onKeysDone={() => setBubbleKeys(false)}
+          top={inLink.top}
+          left={inLink.left}
+          onStoryCard={onPasteLink}
+          onChanged={() => {
+            changed();
+            // The link may have become something else (a story card): look again where the caret is.
+            setInLink((now) => (now && now.el.isConnected ? { ...now } : null));
+          }}
+        />
       )}
       <div
         ref={el}
@@ -1354,7 +1609,11 @@ export default function RichText({
         suppressContentEditableWarning
         data-placeholder={placeholder}
         onInput={(event) => {
-          if ((event.nativeEvent as InputEvent).inputType === "insertText") typeArrow();
+          if ((event.nativeEvent as InputEvent).inputType === "insertText") {
+            typeArrow();
+            // An address typed or pasted as plain text becomes a link once a space follows it.
+            if (/^[ \u00a0]$/.test((event.nativeEvent as InputEvent).data ?? "")) autoLink();
+          }
           watchSubjectPick();
           changed();
         }}
@@ -1433,6 +1692,8 @@ export default function RichText({
             event.preventDefault();
             return;
           }
+          // A link clicked: its bubble takes the arrows and Enter (LinkBubble), until something else is typed.
+          if (!(event.metaKey || event.ctrlKey) && (event.target as HTMLElement).closest?.("a[href]:not([data-quote]):not([data-subject]):not([data-cite=chip]):not([data-cite=card])")) setBubbleKeys(true);
           if (followCite(event.target, event)) return;
           const web = (event.target as HTMLElement).closest<HTMLAnchorElement>("a[href]");
           if (web && (event.metaKey || event.ctrlKey)) {
@@ -1483,15 +1744,10 @@ export default function RichText({
           // An address pasted over selected words links them, as in a Doc.
           const plain = event.clipboardData.getData("text/plain").trim();
           const selected = window.getSelection();
-          // The address of a story in the subject becomes its citation.
+          // The address of a story in the subject, pasted over words, links them to it.
           const cite = event.clipboardData.getData("text/html").includes("data-cite") ? null : citeFor(plain);
-          if (cite) {
-            if (selected && !selected.isCollapsed) document.execCommand("insertHTML", false, citeTextHtml(cite, selected.toString()));
-            else {
-              insertChip(cite);
-              // And the story comes to this tab, if it is on another one (lib/tab-place.ts).
-              onPasteLink?.(plain);
-            }
+          if (cite && selected && !selected.isCollapsed) {
+            document.execCommand("insertHTML", false, citeTextHtml(cite, selected.toString()));
             changed();
             return;
           }
@@ -1500,14 +1756,15 @@ export default function RichText({
             changed();
             return;
           }
-          // A link pasted on its own becomes a story in the subject, cited here as a chip.
-          if (onPasteLink && /^https?:\/\/\S+$/i.test(plain)) {
-            const story = onPasteLink(plain);
-            if (story) {
-              insertChip(story);
-              changed();
-              return;
-            }
+          // A link pasted on its own goes in as itself, linked, as in a Doc. Clicked,
+          // it offers to become a chip or a story card (the link bubble, below).
+          if (/^https?:\/\/\S+$/i.test(plain) && safeHref(plain)) {
+            const a = document.createElement("a");
+            a.href = plain;
+            a.textContent = plain;
+            document.execCommand("insertHTML", false, a.outerHTML);
+            changed();
+            return;
           }
           const html = event.clipboardData.getData("text/html");
           if (html) {
