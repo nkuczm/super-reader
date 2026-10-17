@@ -232,8 +232,11 @@ function keepingCaret(run: () => void) {
  * piece of linked text, still editable in place), or a story card — a story
  * of the subject, set into the writing as a card.
  */
-function LinkBubble({ link, top, left, onStoryCard, onChanged }: {
+function LinkBubble({ link, top, left, onStoryCard, onChanged, keys, onKeysDone }: {
   link: HTMLAnchorElement;
+  /** Taking the arrows and Enter: the link was just clicked. */
+  keys: boolean;
+  onKeysDone: () => void;
   top: number;
   left: number;
   onStoryCard?: (url: string) => Cite | null;
@@ -301,22 +304,67 @@ function LinkBubble({ link, top, left, onStoryCard, onChanged }: {
     onChanged();
     redraw((n) => n + 1);
   };
+  // The choices in the order the arrows go through them.
+  const choices: { id: string; run: () => void }[] = [
+    { id: "open", run: () => openLink(href, title, web) },
+    ...(!cited ? [
+      { id: "link", run: asText },
+      { id: "chip", run: asChip },
+      ...(onStoryCard ? [{ id: "card", run: asCard }] : []),
+      { id: "web", run: toggleWeb },
+    ] : []),
+  ];
+  const [active, setActive] = useState(-1);
+  const latest = useRef({ choices, active });
+  latest.current = { choices, active };
+  useEffect(() => {
+    if (!keys) {
+      setActive(-1);
+      return;
+    }
+    // Ahead of the document's own keys (which move between blocks on the arrows): the window, capturing.
+    const key = (event: KeyboardEvent) => {
+      const { choices: list, active: at } = latest.current;
+      const step = event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : event.key === "ArrowUp" || event.key === "ArrowLeft" ? -1 : 0;
+      if (step && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        setActive(at < 0 ? (step > 0 ? 0 : list.length - 1) : (at + step + list.length) % list.length);
+        return;
+      }
+      if (event.key === "Enter" && at >= 0) {
+        event.preventDefault();
+        event.stopPropagation();
+        list[at]?.run();
+        return;
+      }
+      if (event.key === "Escape" && at >= 0) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      // Anything else is writing again.
+      onKeysDone();
+    };
+    window.addEventListener("keydown", key, true);
+    return () => window.removeEventListener("keydown", key, true);
+  }, [keys, onKeysDone]);
+  const lit = (id: string) => (choices[active]?.id === id ? " kbd" : "");
   return (
     <div className="link-bubble" style={{ top, left }} onMouseDown={keep} role="dialog" aria-label="Link">
-      <button type="button" className="link-bubble-preview" title={web ? "Open on the site" : "Open in the reader"}
+      <button type="button" className={`link-bubble-preview${lit("open")}`} title={web ? "Open on the site" : "Open in the reader"}
         onClick={() => openLink(href, title, web)}>
         <span className="link-bubble-title">{title}</span>
         <span className="link-bubble-site">{info?.site || hostOf(href)} · {web ? "opens the site ↗" : "opens in the reader"}</span>
       </button>
       {!cited && (
         <div className="link-bubble-as" role="group" aria-label="Show as">
-          <button type="button" className={!chip ? "on" : ""} aria-pressed={!chip} onClick={asText}>Link</button>
-          <button type="button" className={chip ? "on" : ""} aria-pressed={chip} onClick={asChip}>Chip</button>
-          {onStoryCard && <button type="button" onClick={asCard}>Story card</button>}
+          <button type="button" className={`${!chip ? "on" : ""}${lit("link")}`} aria-pressed={!chip} onClick={asText}>Link</button>
+          <button type="button" className={`${chip ? "on" : ""}${lit("chip")}`} aria-pressed={chip} onClick={asChip}>Chip</button>
+          {onStoryCard && <button type="button" className={lit("card")} onClick={asCard}>Story card</button>}
         </div>
       )}
       {!cited && (
-        <label className="link-bubble-web">
+        <label className={`link-bubble-web${lit("web")}`}>
           <input type="checkbox" checked={web} onChange={toggleWeb} /> Open the site, not a story
         </label>
       )}
@@ -521,6 +569,11 @@ export default function RichText({
   const [inQuote, setInQuote] = useState<{ id: string; top: number; left: number } | null>(null);
   /** The caret is in a link of the writer's own: where to offer opening it. */
   const [inLink, setInLink] = useState<{ el: HTMLAnchorElement; href: string; top: number; left: number } | null>(null);
+  /** The link bubble answers the arrows and Enter: set when a link is clicked, until something else is typed. */
+  const [bubbleKeys, setBubbleKeys] = useState(false);
+  useEffect(() => {
+    if (!inLink) setBubbleKeys(false);
+  }, [inLink]);
   /** Making a link: the text it goes on, and the address being typed. */
   const [linking, setLinking] = useState<{ range: Range; value: string } | null>(null);
   /**
@@ -1129,6 +1182,38 @@ export default function RichText({
     changed();
   }
 
+  /**
+   * The web address just before the space the caret follows, made a link —
+   * as a Doc does. Its trailing punctuation stays outside it: "see
+   * example.com/a." links the address, not the full stop.
+   */
+  function autoLink() {
+    const sel = window.getSelection();
+    const node = sel?.anchorNode;
+    if (!sel?.isCollapsed || !node || node.nodeType !== Node.TEXT_NODE || node.parentElement?.closest("a")) return;
+    const text = node.textContent ?? "";
+    const end = sel.anchorOffset - 1;
+    const found = /(?:https?:\/\/|www\.)[^\s\u00a0<>"]+$/i.exec(text.slice(0, end));
+    if (!found) return;
+    const address = found[0].replace(/[.,;:!?'")\]]+$/, "");
+    const href = /^www\./i.test(address) ? `https://${address}` : address;
+    if (!safeHref(href) || !/\.[a-z]{2,}/i.test(address)) return;
+    const range = document.createRange();
+    range.setStart(node, found.index);
+    range.setEnd(node, found.index + address.length);
+    const a = document.createElement("a");
+    a.href = href;
+    range.surroundContents(a);
+    // The caret back after the space, outside the link.
+    const after = a.nextSibling;
+    const caret = document.createRange();
+    if (after && after.nodeType === Node.TEXT_NODE) caret.setStart(after, Math.min(after.textContent!.length, end - found.index - address.length + 1));
+    else caret.setStartAfter(a);
+    caret.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(caret);
+  }
+
   /** "-->" becomes →, "<--" becomes ←, and ← followed by ">" becomes ↔, as they are typed. */
   function typeArrow() {
     const sel = window.getSelection();
@@ -1446,6 +1531,8 @@ export default function RichText({
         <LinkBubble
           key={inLink.href}
           link={inLink.el}
+          keys={bubbleKeys}
+          onKeysDone={() => setBubbleKeys(false)}
           top={inLink.top}
           left={inLink.left}
           onStoryCard={onPasteLink}
@@ -1463,7 +1550,11 @@ export default function RichText({
         suppressContentEditableWarning
         data-placeholder={placeholder}
         onInput={(event) => {
-          if ((event.nativeEvent as InputEvent).inputType === "insertText") typeArrow();
+          if ((event.nativeEvent as InputEvent).inputType === "insertText") {
+            typeArrow();
+            // An address typed or pasted as plain text becomes a link once a space follows it.
+            if (/^[ \u00a0]$/.test((event.nativeEvent as InputEvent).data ?? "")) autoLink();
+          }
           watchSubjectPick();
           changed();
         }}
@@ -1542,6 +1633,8 @@ export default function RichText({
             event.preventDefault();
             return;
           }
+          // A link clicked: its bubble takes the arrows and Enter (LinkBubble), until something else is typed.
+          if (!(event.metaKey || event.ctrlKey) && (event.target as HTMLElement).closest?.("a[href]:not([data-quote]):not([data-subject]):not([data-cite=chip]):not([data-cite=card])")) setBubbleKeys(true);
           if (followCite(event.target, event)) return;
           const web = (event.target as HTMLElement).closest<HTMLAnchorElement>("a[href]");
           if (web && (event.metaKey || event.ctrlKey)) {
@@ -1610,7 +1703,7 @@ export default function RichText({
             const a = document.createElement("a");
             a.href = plain;
             a.textContent = plain;
-            document.execCommand("insertHTML", false, `${a.outerHTML}\u00a0`);
+            document.execCommand("insertHTML", false, a.outerHTML);
             changed();
             return;
           }

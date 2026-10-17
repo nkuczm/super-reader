@@ -3508,3 +3508,6 @@
 .link-bubble-as button:hover { border-color: var(--accent); }
 .link-bubble-as button.on { background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .link-bubble-web { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); padding: 0 2px 2px; cursor: pointer; }
+/* The choice the arrows are on. */
+.link-bubble .kbd { outline: 2px solid var(--accent); outline-offset: 1px; }
+.link-bubble-web.kbd { border-radius: 6px; }
