@@ -409,12 +409,14 @@ function LinkBubble({ link, top, left, onStoryCard, onChanged, keys, onKeysDone 
         </div>
       )}
       {!cited && (
-        <label className={`link-bubble-web${lit("web")}`}>
-          <input type="checkbox" checked={web} onChange={toggleWeb} /> Open the site, not a story
-        </label>
-      )}
-      {!cited && (
-        <button type="button" className={`link-bubble-unlink${lit("unlink")}`} onClick={unlink}>Unlink</button>
+        <div className="link-bubble-actions">
+          {/* Without the reader's story the link goes straight to the site; the same button brings it back. */}
+          <button type="button" className={`link-bubble-action${lit("web")}`} aria-pressed={web} onClick={toggleWeb}
+            title={web ? "Open this link as a story in the reader again" : "Open this link on the site instead of in the reader"}>
+            {web ? "Restore reader story" : "Remove reader story"}
+          </button>
+          <button type="button" className={`link-bubble-action${lit("unlink")}`} onClick={unlink}>Unlink</button>
+        </div>
       )}
     </div>
   );
