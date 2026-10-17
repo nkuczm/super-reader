@@ -6,7 +6,10 @@ import {
   slimForSync,
   REMOVAL_TTL_MS,
   MAX_SAVED,
+  removalStamp,
+  saveStamp,
 } from "../lib/saved";
+import { itemsOf } from "../lib/library";
 import { MAX_PAYLOAD_BYTES } from "../lib/sync";
 import { partStamp } from "../lib/sync-doc";
 import type { SavedArticle, SavedState } from "../lib/saved";
@@ -194,4 +197,38 @@ test("each replaced part goes by its own stamp, an old document by its one stamp
   assert.equal(partStamp({ updatedAt: ago(3), stamps: { feeds: ago(9) } }, "feeds"), ago(9));
   assert.equal(partStamp({ updatedAt: ago(3), stamps: { feeds: ago(9) } }, "read"), ago(3), "a part without a stamp falls back");
   assert.equal(partStamp({}, "vault"), 0, "a document with no stamp at all cannot outrank a device that has one");
+});
+
+test("an un-save sticks when the device removing it has a slower clock than the one that saved it", () => {
+  // Saved on a laptop whose clock runs a minute fast; un-saved on the phone
+  // thirty seconds later, when the phone's "now" is still before the save.
+  const link = "https://a.example/clock";
+  const laptop = state([saved(link, NOW + 60_000)]);
+  const phoneNow = NOW + 30_000;
+
+  // Dated by the phone's clock alone, the un-save loses and the article comes back.
+  const naive = mergeSaved(state([], [{ link, at: phoneNow }]), laptop, NOW + 120_000);
+  assert.deepEqual(naive.saved.map((a) => a.link), [link], "the failure: the un-save is undone");
+
+  // Dated after the save it removes, it holds on both devices and in the library.
+  const at = removalStamp(laptop.saved[0], phoneNow);
+  const phone = state([], [{ link, at }]);
+  assert.deepEqual(mergeSaved(phone, laptop, NOW + 120_000).saved, []);
+  assert.deepEqual(mergeSaved(laptop, phone, NOW + 120_000).saved, []);
+  const items = itemsOf({ saved: laptop.saved, savedRemovals: phone.removals, manual: {}, highlights: {} });
+  assert.equal(items.length, 1);
+  assert.equal(items[0].data.deleted, true, "the library keeps the un-save, not the save");
+
+  // And saving it again on the laptop, whose clock is now behind that stamp, brings it back.
+  const again = saveStamp(phone.removals, "https://a.example/clock?utm_source=x", NOW + 40_000);
+  const merged = mergeSaved(state([saved(link, again)], phone.removals), phone, NOW + 120_000);
+  assert.deepEqual(merged.saved.map((a) => a.link), [link]);
+  assert.deepEqual(merged.removals, []);
+});
+
+test("dating saves and un-saves leaves an ordinary clock alone", () => {
+  assert.equal(removalStamp(saved("https://a.example/1", ago(2)), NOW), NOW);
+  assert.equal(removalStamp(undefined, NOW), NOW);
+  assert.equal(saveStamp([{ link: "https://a.example/1", at: ago(1) }], "https://a.example/1", NOW), NOW);
+  assert.equal(saveStamp([], "https://a.example/1", NOW), NOW);
 });
