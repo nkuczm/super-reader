@@ -3589,3 +3589,31 @@
 }
 .color-none:hover { color: var(--text); background: var(--bg-hover); }
 .rt-menu .color-swatches button.color-none { display: inline-flex; width: auto; white-space: nowrap; gap: 4px; }
+
+/* ---------- moving a section: a grip beside each header, and where it would land ---------- */
+.subject-doc { position: relative; }
+.doc-grip {
+  position: absolute; left: -26px; top: 50%; transform: translateY(-50%); z-index: 2;
+  width: 22px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px;
+  background: none; color: var(--text-dim); font-size: 13px; letter-spacing: -2px; cursor: grab; touch-action: none;
+  opacity: 0; transition: opacity 0.12s ease;
+}
+.subject-doc > [data-item]:hover > .doc-grip, .subject-doc > [data-item]:focus-within > .doc-grip, .doc-grip:focus-visible { opacity: 1; }
+.doc-grip:hover { background: var(--bg-hover); color: var(--text); }
+@media (hover: none) { .subject-doc > [data-item] > .doc-grip { opacity: 0.5; } }
+@media (max-width: 700px) { .doc-grip { left: -20px; width: 18px; } }
+.subject-doc > .doc-moving { opacity: 0.4; }
+.doc-drop-line {
+  position: absolute; height: 0; z-index: 5; pointer-events: none;
+  border-top: 2.5px solid var(--accent); border-radius: 2px;
+}
+.doc-drop-line::before {
+  content: ""; position: absolute; left: -5px; top: -6.5px; width: 8px; height: 8px; border-radius: 50%;
+  border: 2px solid var(--accent); background: var(--bg);
+}
+body.doc-dragging, body.doc-dragging * { cursor: grabbing !important; user-select: none; }
+body.doc-dragging .subject-doc > [data-item]:not(.doc-moving) > .doc-grip { opacity: 0; }
+/* A header dragged in the outline. */
+.tab-outline { position: relative; }
+.tab-outline-item.moving { opacity: 0.45; }
+.tab-outline-drop { position: absolute; left: 6px; right: 0; height: 0; border-top: 2.5px solid var(--accent); border-radius: 2px; pointer-events: none; }

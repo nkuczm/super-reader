@@ -1867,9 +1867,24 @@ export function documentOrder(entries: { id: string; at: number; label?: boolean
       if (!held.label || (held.sub && !label.sub)) owner.set(other, label.id);
     }
   }
+  // A header put in above the first block takes that block as its own writing: it leads it
+  // already, and reading before what it owns would leave neither placed (the whole section gone).
+  for (const [id, target] of precedes) {
+    const seen = new Set<string>();
+    for (let at: string | undefined = target; at && !seen.has(at); at = owner.get(at)) {
+      seen.add(at);
+      if (at === id) {
+        precedes.delete(id);
+        break;
+      }
+    }
+  }
   const place = (id: string) => pos.get(id) ?? { x: Infinity, y: Infinity };
   const out: string[] = [];
+  const done = new Set<string>();
   const emit = (id: string) => {
+    if (done.has(id)) return;
+    done.add(id);
     for (const prev of sorted) if (precedes.get(prev.id) === id) emit(prev.id);
     out.push(id);
     // Pasted one after another below the same block, they read in the order they were pasted.
@@ -1885,6 +1900,8 @@ export function documentOrder(entries: { id: string; at: number; label?: boolean
   const roots = sorted.filter((entry) => !owner.has(entry.id) && !follows.has(entry.id) && !precedes.has(entry.id));
   roots.sort((a, b) => Number(!a.before) - Number(!b.before));
   for (const entry of roots) emit(entry.id);
+  // Whatever the blocks say about each other, none of them is left out of the document.
+  for (const entry of sorted) emit(entry.id);
   return out;
 }
 

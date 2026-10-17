@@ -13,7 +13,7 @@
  * writing below it in turn: header → subheader → writing, two levels deep.
  */
 
-import { live, put, remove, type Board, type BoxItem, type LinkItem } from "./subjects";
+import { live, put, remove, type Board, type BoardItem, type BoxItem, type LinkItem, type StoryItem } from "./subjects";
 
 const isLabel = (board: Board | undefined, id: string) => {
   const item = board?.[id];
@@ -86,6 +86,130 @@ export function insertAfter(board: Board | undefined, id: string, after: string,
   for (const item of live(next)) {
     if (item.kind !== "box" || item.id === id || (item as BoxItem).after !== after) continue;
     next = put(next, { ...(item as BoxItem), after: id, at: now }, now);
+  }
+  return next;
+}
+
+/** The board item that holds a block's place: a box itself, or a story card's story. */
+const holderOf = (board: Board, id: string) => {
+  const own = board[id];
+  if (own && !own.deleted && own.kind === "box") return own as BoxItem;
+  const story = board[`story:${id}`];
+  return story && !story.deleted && story.kind === "story" ? (story as StoryItem) : null;
+};
+
+/**
+ * The document in the order given, written back as the blocks' own places:
+ * each reads right after the block before it, the first after nothing.
+ * Only blocks whose place changes are written. A story's card keeps when
+ * it first arrived (its order in the feed) as its place is written.
+ */
+export function rechain(board: Board | undefined, order: string[], now = Date.now()): Board {
+  let next = board ?? {};
+  order.forEach((id, i) => {
+    const held = holderOf(next, id);
+    if (!held) return;
+    const want = i > 0 ? order[i - 1] : undefined;
+    if (held.after === want && !(held as BoxItem).before) return;
+    const rest: Record<string, unknown> = { ...held };
+    delete rest.after;
+    delete rest.before;
+    const since = held.kind === "story" ? { since: held.since ?? held.at } : {};
+    next = put(next, { ...rest, ...since, ...(want ? { after: want } : {}), at: now } as BoardItem, now);
+  });
+  return next;
+}
+
+/**
+ * Blocks taken out of the document: whatever read right after one of them
+ * now reads after what that block read after (or takes its place at the
+ * top), so the writing below a deleted block stays where it was rather
+ * than falling back to when it was written.
+ */
+export function closeGap(board: Board | undefined, gone: Set<string>, now = Date.now()): Board {
+  const start = board ?? {};
+  let next = start;
+  const anchor = (id: string) => {
+    const seen = new Set<string>();
+    let at: string | undefined = id;
+    while (at && gone.has(at) && !seen.has(at)) {
+      seen.add(at);
+      at = holderOf(start, at)?.after;
+    }
+    return { after: at && !gone.has(at) ? at : undefined, last: [...seen].at(-1)! };
+  };
+  for (const item of live(start)) {
+    if (item.kind !== "box" && item.kind !== "story") continue;
+    if (gone.has(item.id) || gone.has(item.id.replace(/^story:/, ""))) continue;
+    const held = item as BoxItem | StoryItem;
+    if (!held.after || !gone.has(held.after)) continue;
+    const { after, last } = anchor(held.after);
+    const before = after ? undefined : (holderOf(start, last) as BoxItem | null)?.before;
+    const rest: Record<string, unknown> = { ...held };
+    delete rest.after;
+    const since = held.kind === "story" ? { since: held.since ?? held.at } : {};
+    next = put(next, { ...rest, ...since, ...(after ? { after } : {}), ...(before && !gone.has(before) && held.kind === "box" ? { before } : {}), at: now } as BoardItem, now);
+  }
+  return next;
+}
+
+/** What a header carries when it moves: its writing, and for a top-level header its subheaders with theirs. */
+export function sectionRun(board: Board | undefined, order: string[], id: string): string[] {
+  const start = order.indexOf(id);
+  if (start < 0 || !isLabel(board, id)) return [];
+  const sub = isSub(board, id);
+  const run = [id];
+  for (const at of order.slice(start + 1)) {
+    if (isLabel(board, at) && (sub || !isSub(board, at))) break;
+    run.push(at);
+  }
+  return run;
+}
+
+/**
+ * Where a header can be moved to, as the block it would then read right
+ * before (null: the end of the document). A header goes between sections:
+ * before another header, at the end, or at the very top. A subheader goes
+ * where a subsection can end — before another subheader or header, or at
+ * the end — as long as a header reads above that spot.
+ */
+export function moveTargets(board: Board | undefined, order: string[], id: string): (string | null)[] {
+  const run = new Set(sectionRun(board, order, id));
+  if (!run.size) return [];
+  const rest = order.filter((at) => !run.has(at));
+  if (!isSub(board, id)) return [...rest.filter((at, i) => i === 0 || isHeader(board, at)), null];
+  const out: (string | null)[] = [];
+  let header = false;
+  for (const at of rest) {
+    if (header && isLabel(board, at)) out.push(at);
+    if (isHeader(board, at)) header = true;
+  }
+  return header ? [...out, null] : out;
+}
+
+/**
+ * A header moved in the document with everything that reads under it, to
+ * read right before `to` (null: at the end). `order` is the document as it
+ * reads now. A subheader is filed under the header it lands below; a header
+ * put in at the very top takes the writing there that read under no header.
+ * Null when the move changes nothing.
+ */
+export function moveSection(board: Board | undefined, order: string[], id: string, to: string | null, now = Date.now()): Board | null {
+  const run = sectionRun(board, order, id);
+  if (!run.length || (to !== null && run.includes(to))) return null;
+  const rest = order.filter((at) => !run.includes(at));
+  const at = to === null ? rest.length : rest.indexOf(to);
+  if (at < 0) return null;
+  const moved = [...rest.slice(0, at), ...run, ...rest.slice(at)];
+  if (moved.every((x, i) => x === order[i])) return null;
+  let next = rechain(board, moved, now);
+  if (isSub(next, id)) {
+    const above = moved.slice(0, moved.indexOf(id)).reverse().find((x) => isHeader(next, x)) ?? null;
+    return fileUnder(next, id, above, now);
+  }
+  for (const x of moved.slice(moved.indexOf(id) + run.length)) {
+    if (isHeader(next, x)) break;
+    if (isSub(next, x) || !sectionOf(next, x)) next = fileUnder(next, x, id, now);
   }
   return next;
 }
