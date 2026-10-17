@@ -1,7 +1,7 @@
 "use client";
 
 import ColorSwatches from "./ColorSwatches";
-import { CELL_PALETTE, lastHighlight } from "@/lib/colors";
+import { lastHighlight } from "@/lib/colors";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { escapeHtml, sanitizeRichText, textOf, type BoxItem } from "@/lib/subjects";
@@ -823,7 +823,7 @@ function CellMenuExtras({ range, metas, ops, close }: { range: Range; metas: Cel
     <>
       {many && <button role="menuitem" onClick={() => { ops.merge(range); close(); }}>Merge cells</button>}
       {merged && <button role="menuitem" onClick={() => { ops.unmerge(range.r0, range.c0); close(); }}>Unmerge cells</button>}
-      <ColorSwatches label="Cell colour" colors={CELL_PALETTE}
+      <ColorSwatches label="Cell colour" use="cell"
         onPick={(color) => { ops.color(range, color); close(); }} onNone={() => { ops.color(range, null); close(); }} />
     </>
   );

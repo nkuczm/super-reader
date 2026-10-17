@@ -2,13 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { documentOrder, live, put, type Board, type BoxItem } from "../lib/subjects";
-import { fileUnder, insertAfter, sectionOf, splitAtHeadings } from "../lib/doc-sections";
+import { fileUnder, headerOf, insertAfter, sectionOf, splitAtHeadings } from "../lib/doc-sections";
 
 const { document } = new JSDOM("<!doctype html><body></body>").window;
 
 const box = (id: string, at: number, extra: Partial<BoxItem> = {}): BoxItem => ({ id, kind: "box", html: "", at, ...extra });
 const order = (board: Board) =>
-  documentOrder(live(board).filter((i): i is BoxItem => i.kind === "box").map((b) => ({ id: b.id, at: b.at, label: b.label, after: b.after })), board);
+  documentOrder(live(board).filter((i): i is BoxItem => i.kind === "box").map((b) => ({ id: b.id, at: b.at, label: b.label, sub: b.sub, after: b.after, before: b.before })), board);
 
 test("filing a block under a header draws one line to it and takes away lines to other headers", () => {
   let board: Board = {};
@@ -46,4 +46,40 @@ test("a text box's writing cut at its headings", () => {
   const split = splitAtHeadings("<p>Intro</p><h3>First</h3><p>One</p><p>Two</p><h3>Second</h3>", document);
   assert.deepEqual(split, { before: "<p>Intro</p>", pieces: [{ heading: "First" }, { html: "<p>One</p><p>Two</p>" }, { heading: "Second" }] });
   assert.equal(splitAtHeadings("<p>No headings</p>", document), null);
+});
+
+test("a subheader is filed under a header, its writing under it, and reads nested in the document", () => {
+  let board: Board = {};
+  for (const b of [box("H", 1, { label: true }), box("S", 2, { label: true, sub: true }), box("x", 3), box("y", 4), box("H2", 5, { label: true })]) board = put(board, b);
+  board = fileUnder(board, "S", "H", 10);
+  board = fileUnder(board, "x", "H", 11);
+  board = fileUnder(board, "y", "S", 12);
+  assert.equal(sectionOf(board, "y"), "S");
+  assert.equal(headerOf(board, "y"), "H");
+  assert.equal(headerOf(board, "S"), "H");
+  // Writing straight under the header first, then the subheader with its own.
+  assert.deepEqual(order(board), ["H", "x", "S", "y", "H2"]);
+  // A subheader filed under its own writing's section resolves to the header; moved, it keeps its writing.
+  board = fileUnder(board, "S", "H2", 13);
+  assert.equal(headerOf(board, "S"), "H2");
+  assert.equal(sectionOf(board, "y"), "S");
+  assert.deepEqual(order(board), ["H", "x", "H2", "S", "y"]);
+  // A header is never filed under anything.
+  board = fileUnder(board, "H", "H2", 14);
+  assert.equal(headerOf(board, "H"), "H");
+});
+
+test("an <h4> splits off as a subheading", () => {
+  const split = splitAtHeadings("<p>Intro</p><h3>Top</h3><p>a</p><h4>Inner</h4><p>b</p>", document)!;
+  assert.deepEqual(split.pieces, [{ heading: "Top" }, { html: "<p>a</p>" }, { heading: "Inner", sub: true }, { html: "<p>b</p>" }]);
+});
+
+test("a block put in above the first reads at the top, and what is written after it follows it", () => {
+  let board: Board = {};
+  for (const b of [box("H", 1, { label: true }), box("x", 2), box("top", 3, { before: "H" }), box("top2", 4, { after: "top" }), box("higher", 5, { before: "top" })]) board = put(board, b);
+  board = fileUnder(board, "x", "H", 10);
+  assert.deepEqual(order(board), ["higher", "top", "top2", "H", "x"]);
+  // The block it read above gone: it still reads first.
+  board = { ...board, H: { ...board.H, deleted: true } as BoxItem };
+  assert.deepEqual(order(board).slice(0, 3), ["higher", "top", "top2"]);
 });

@@ -8,10 +8,13 @@
  * a big hub dragged takes its satellites; a satellite dragged moves alone;
  * two nodes of a size each move by themselves.
  *
+ * A header carries its subheaders and what hangs from each of them; a
+ * subheader dragged carries its own writing, never the header above it.
+ *
  * Pure: the board passes in its links and how to tell what each block is.
  */
 
-export type BlockKind = "node" | "label" | "block";
+export type BlockKind = "node" | "label" | "sub" | "block";
 
 export function dragGroup(
   start: Iterable<string>,
@@ -36,6 +39,12 @@ export function dragGroup(
     for (const other of neighbours.get(id) ?? []) {
       if (group.has(other)) continue;
       const otherKind = kindOf(other);
+      if (kind === "sub" && otherKind === "label") continue;
+      if (kind === "label" && otherKind === "sub") {
+        group.add(other);
+        queue.push(other);
+        continue;
+      }
       if (kind === "node" && otherKind === "node") {
         // Only a smaller node hangs from this one — and brings what hangs from it.
         if (sizeOf(other) < sizeOf(id)) {

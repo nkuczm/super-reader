@@ -93,7 +93,8 @@ import { useHeadroom } from "./useHeadroom";
 import { useSubjectViewing } from "./useSubjectViewing";
 import MoreMenu from "./MoreMenu";
 import { arriveOnTab } from "@/lib/tab-place";
-import { fileUnder, insertAfter, splitAtHeadings } from "@/lib/doc-sections";
+import { fileUnder, headerOf, insertAfter, splitAtHeadings } from "@/lib/doc-sections";
+import { hint, markUsed } from "@/lib/first-use";
 
 type Props = {
   /** Whether this device's boards have been read from storage yet: nothing is written on a guess of an empty board. */
@@ -844,7 +845,9 @@ export default function SubjectPage(props: Props) {
         id: box.id,
         at: madeAt(box),
         after: box.after,
+        before: box.before,
         label: box.label,
+        sub: box.sub,
         html: box.label ? boxHtml(box, board, out) : `<section class="print-block print-${boxKind(box)}">${boxHtml(box, board, out)}</section>`,
       })),
     ];
@@ -1186,7 +1189,7 @@ export default function SubjectPage(props: Props) {
   const docInsert = (
     after: string | null,
     pieces: Partial<BoxItem>[],
-    opts: { section: string | null; following?: string[]; keep?: { id: string; html: string }; relabel?: string; focus?: number },
+    opts: { section: string | null; following?: string[]; keep?: { id: string; html: string }; relabel?: string; relabelSub?: boolean; before?: string; focus?: number },
   ) => {
     const ids = pieces.map(() => newItemId("box"));
     recorded((current) => {
@@ -1201,20 +1204,32 @@ export default function SubjectPage(props: Props) {
         const held = next[after];
         if (held && held.kind === "box") {
           next = fileUnder(next, after, null, now);
-          next = put(next, { ...held, label: true, html: opts.relabel, at: now }, now);
+          next = put(next, { ...held, label: true, ...(opts.relabelSub ? { sub: true } : {}), html: opts.relabel, at: now }, now);
+          if (opts.relabelSub) next = fileUnder(next, after, section, now);
           section = after;
         }
       }
       let prev = after;
       pieces.forEach((extra, i) => {
         const id = ids[i];
-        next = placeNew(put(next, { id, kind: "box", html: "", ...extra, ...(prev ? { after: prev } : {}), at: now }, now), id);
+        const top = i === 0 && !prev && opts.before ? { before: opts.before } : {};
+        next = placeNew(put(next, { id, kind: "box", html: "", ...extra, ...(prev ? { after: prev } : {}), ...top, at: now }, now), id);
         if (prev) next = insertAfter(next, id, prev, now);
+        // A subheader goes under the header it is written below; a header under nothing.
+        if (extra.label && extra.sub) next = fileUnder(next, id, section, now);
         if (extra.label) section = id;
         else next = fileUnder(next, id, section, now);
         prev = id;
       });
-      if (section !== opts.section) for (const id of opts.following ?? []) next = fileUnder(next, id, section, now);
+      // What read below takes the new header: its writing, and — for a top-level header — the subheaders after it.
+      const newSub = Boolean(section && (next[section] as BoxItem | undefined)?.sub);
+      if (section !== opts.section) {
+        for (const id of opts.following ?? []) {
+          const held = next[id];
+          const label = Boolean(held && held.kind === "box" && (held as BoxItem).label);
+          if (!label || !newSub) next = fileUnder(next, id, section, now);
+        }
+      }
       return next;
     });
     const focus = opts.focus ?? ids.length - 1;
@@ -1288,14 +1303,40 @@ export default function SubjectPage(props: Props) {
       const empty = !textOf(split.before).trim() && !/<img\b|data-cite|data-subject/.test(split.before);
       const [first, ...rest] = split.pieces;
       const pieces = (empty && first && "heading" in first ? rest : split.pieces).map((piece): Partial<BoxItem> =>
-        "heading" in piece ? { label: true, html: escapeHtml(piece.heading) } : { html: piece.html });
+        "heading" in piece ? { label: true, ...(piece.sub ? { sub: true } : {}), html: escapeHtml(piece.heading) } : { html: piece.html });
       // The writing before the first heading stays in this box; a heading at its very top makes the box itself the header.
       const relabel = empty && first && "heading" in first ? escapeHtml(first.heading) : undefined;
       // The caret goes to the header just made — the box's own, or the first new one.
       const firstLabel = pieces.findIndex((piece) => piece.label);
-      docInsert(box.id, pieces, { section, following, keep: relabel ? undefined : { id: box.id, html: split.before }, relabel, focus: relabel ? -1 : firstLabel });
+      const relabelSub = Boolean(relabel && first && "heading" in first && first.sub);
+      docInsert(box.id, pieces, { section, following, keep: relabel ? undefined : { id: box.id, html: split.before }, relabel, relabelSub, focus: relabel ? -1 : firstLabel });
       return true;
     },
+    setSubheader: (box: BoxItem, sub: boolean, parent?: string | null) =>
+      recorded((current) => {
+        const held = current?.[box.id];
+        if (!held || held.kind !== "box") return current ?? {};
+        const now = Date.now();
+        let next = put(current, { ...held, sub: true, at: now }, now);
+        if (parent !== undefined) {
+          parent = headerOf(next, parent);
+          // Its own subheaders move up to the header it now sits under; as a header it sits under none.
+          if (sub) {
+            for (const item of live(next)) {
+              if (item.kind !== "link") continue;
+              const other = (item as LinkItem).from === box.id ? (item as LinkItem).to : (item as LinkItem).to === box.id ? (item as LinkItem).from : null;
+              const o = other ? next[other] : undefined;
+              if (other && o?.kind === "box" && (o as BoxItem).label && (o as BoxItem).sub) next = fileUnder(next, other, parent, now);
+            }
+          }
+          next = fileUnder(next, box.id, sub ? parent : null, now);
+        }
+        if (!sub) {
+          const { sub: _gone, ...rest } = next[box.id] as BoxItem;
+          next = put(next, { ...rest, at: now }, now);
+        }
+        return next;
+      }),
     // Undoable, as every change to a block is: a transcript's tab closed, a picture replaced, a caption cleared.
     updateBox: (box: BoxItem, change: Partial<BoxItem>) =>
       recorded((current) => {
@@ -1406,10 +1447,18 @@ export default function SubjectPage(props: Props) {
    * The open tab's outline: its section labels and the headings written in
    * its text boxes, in the order the document shows them.
    */
+  // In the order the document reads, built from the same blocks it shows (a story set into writing is not one).
+  const inlinedCards = new Set(boxes.flatMap((box) => (box.html ? inlineCardLinks(box.html) : [])));
+  const readOrder = new Map(
+    documentOrder([
+      ...cards.filter((card) => !inlinedCards.has(card.id)).map((card) => ({ id: card.id, at: card.at, after: card.after })),
+      ...boxes.map((box) => ({ id: box.id, at: madeAt(box), label: box.label, sub: box.sub, after: box.after, before: box.before })),
+    ], board).map((id, i) => [id, i]),
+  );
   const outline = [...boxes]
-    .sort((a, b) => a.at - b.at)
+    .sort((a, b) => (readOrder.get(a.id) ?? 0) - (readOrder.get(b.id) ?? 0))
     .flatMap((box): OutlineEntry[] => {
-      if (box.label) return textOf(box.html).trim() ? [{ id: box.id, n: -1, level: 1, text: textOf(box.html).trim() }] : [];
+      if (box.label) return textOf(box.html).trim() ? [{ id: box.id, n: -1, level: box.sub ? 2 : 1, text: textOf(box.html).trim() }] : [];
       return [...(box.html || "").matchAll(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi)]
         .map((m, n) => ({ id: box.id, n, level: Math.min(3, Number(m[1])), text: textOf(m[2]).trim() }))
         .filter((h) => h.text);
@@ -1585,13 +1634,14 @@ export default function SubjectPage(props: Props) {
       const view = scroller.getBoundingClientRect();
       const line = view.top + railTopRef.current + 32;
       const tops = outlineRef.current.map((entry) => outlineTarget(doc, entry)?.getBoundingClientRect().top ?? Infinity);
+      // The lowest heading on the page that has reached the line — by where it is, not where it is listed.
       let found = -1;
       tops.forEach((top, i) => {
-        if (top <= line) found = i;
+        if (top <= line && (found < 0 || top >= tops[found])) found = i;
       });
       if (scroller.scrollTop > 0 && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) {
         tops.forEach((top, i) => {
-          if (i > found && top < view.bottom - 40) found = i;
+          if (top < view.bottom - 40 && (found < 0 || top > tops[found])) found = i;
         });
       }
       setActiveHeading(found);
@@ -1975,10 +2025,12 @@ type Shared = {
   docInsert: (
     after: string | null,
     pieces: Partial<BoxItem>[],
-    opts: { section: string | null; following?: string[]; keep?: { id: string; html: string }; relabel?: string; focus?: number },
+    opts: { section: string | null; following?: string[]; keep?: { id: string; html: string }; relabel?: string; relabelSub?: boolean; before?: string; focus?: number },
   ) => string[];
   /** A text box written with headings in it, cut into header cards and the writing under each. False when it has none. */
   splitHeadings: (box: BoxItem, html: string, section: string | null, following: string[]) => boolean;
+  /** A header made a subheader or back; in the document, filed under the header of the section above it (`parent`), or under none. */
+  setSubheader: (box: BoxItem, sub: boolean, parent?: string | null) => void;
   removeQuotes: (ids: string[]) => void;
   setCardNote: (card: Card, html: string) => void;
   decide: (suggestion: SuggestItem, state: "accepted" | "dismissed") => void;
@@ -2270,12 +2322,13 @@ function StoryCard({
           onEmbed={shared.embedBox}
           onDropImage={shared.dropImage}
           quoteSource={cite}
-          placeholder="Add notes…"
+          placeholder={hint("card-note", "Add notes…")}
           onOpenQuote={(id) => {
             const quote = card.quotes.find((q) => q.id === id);
             shared.onOpenArticle(card.link, card.title, quote?.text ?? "");
           }}
           onChange={(html) => {
+            markUsed("card-note");
             // A quote's bullet deleted from the text is the quote deleted.
             const kept = quoteIdsIn(html);
             const gone = card.quotes.filter((quote) => !kept.has(quote.id)).map((quote) => quote.id);
@@ -2338,7 +2391,7 @@ function NodeLabel({ box, shared }: { box: BoxItem; shared: Shared }) {
       ref={field}
       className="section-label node-label"
       defaultValue={textOf(box.html)}
-      placeholder="Node"
+      placeholder={hint("node", "Node")}
       rows={1}
       autoFocus={shared.focusBox === box.id}
       aria-label="Node label"
@@ -2346,6 +2399,7 @@ function NodeLabel({ box, shared }: { box: BoxItem; shared: Shared }) {
       onInput={fit}
       onBlur={(e) => {
         const text = e.currentTarget.value.replace(/\s+/g, " ").trim().slice(0, 120);
+        if (text) markUsed("node");
         if (text !== textOf(box.html)) shared.setBox(box, escapeHtml(text));
         e.currentTarget.scrollTop = 0;
       }}
@@ -2363,9 +2417,9 @@ function NodeLabel({ box, shared }: { box: BoxItem; shared: Shared }) {
 /** A picture's caption: a text box under it, with everything a text box can do. */
 function PictureCaption({ box, shared }: { box: BoxItem; shared: Shared }) {
   return (
-    <RichText html={captionHtmlOf(box)} placeholder="Add a caption…"
+    <RichText html={captionHtmlOf(box)} placeholder={hint("caption", "Add a caption…")}
       resolveEmbed={shared.resolveEmbed} onEmbed={shared.embedBox} onDropImage={shared.dropImage} onReplaceEmbed={shared.replaceEmbed}
-      onPasteLink={(url) => shared.storyFromLink(url, box.id)} onChange={(html) => shared.setCaption(box, html)} />
+      onPasteLink={(url) => shared.storyFromLink(url, box.id)} onChange={(html) => { markUsed("caption"); shared.setCaption(box, html); }} />
   );
 }
 
@@ -2429,6 +2483,21 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
                       aria-label={`Colour ${c}`} onClick={() => shared.updateBox(box, { labelColor: c })} />
                   ))}
                 </span>
+                {box.labelShape !== "node" && (
+                  <span className="seg label-style-seg">
+                    {([false, true] as const).map((sub) => (
+                      <button key={String(sub)} className={Boolean(box.sub) === sub ? "on" : ""}
+                        onClick={(e) => {
+                          if (Boolean(box.sub) === sub) return;
+                          // In the document, a subheader goes under the header written above it.
+                          const block = inDoc ? e.currentTarget.closest<HTMLElement>(".subject-doc > [data-item]") : null;
+                          shared.setSubheader(box, sub, block ? sectionAbove(block.previousElementSibling as HTMLElement | null) : undefined);
+                        }}>
+                        {sub ? "Subheader" : "Header"}
+                      </button>
+                    ))}
+                  </span>
+                )}
                 {/* A node is a whiteboard shape: offered there, and read as a heading in the document. */}
                 {dragHandle && (
                   <span className="seg label-style-seg">
@@ -2471,15 +2540,16 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
         </div>
       ) : box.label ? (
         <input
-          className={`section-label${box.labelStyle === "fill" ? " fill" : ""}`}
+          className={`section-label${box.sub ? " sub-label" : ""}${box.labelStyle === "fill" ? " fill" : ""}`}
           style={{ "--label-color": labelColorOf(box) } as React.CSSProperties}
           defaultValue={textOf(box.html)}
-          placeholder="Section"
+          placeholder={hint("section", box.sub ? "Subsection" : "Section")}
           autoFocus={shared.focusBox === box.id}
           aria-label="Section label"
           onPointerDown={(e) => e.stopPropagation()}
           onBlur={(e) => {
             const text = e.currentTarget.value.trim().slice(0, 120);
+            if (text) markUsed("section");
             if (text !== textOf(box.html)) shared.setBox(box, escapeHtml(text));
           }}
           onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
@@ -2495,9 +2565,9 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
       ) : box.image !== undefined || box.caption !== undefined ? (
         <ImageView box={box} onRemove={() => shared.removeBox(box)} caption={<PictureCaption box={box} shared={shared} />} />
       ) : (
-        <RichText html={box.html} placeholder="Write anything…" autoFocus={shared.focusBox === box.id}
+        <RichText html={box.html} placeholder={hint("text", "Write anything…")} autoFocus={shared.focusBox === box.id}
           resolveEmbed={shared.resolveEmbed} onEmbed={shared.embedBox} onDropImage={shared.dropImage} onReplaceEmbed={shared.replaceEmbed}
-          onPasteLink={(url) => shared.storyFromLink(url, box.id)} onChange={(html) => shared.setBox(box, html)} />
+          onPasteLink={(url) => shared.storyFromLink(url, box.id)} onChange={(html) => { markUsed("text"); shared.setBox(box, html); }} />
       )}
       {!inDoc && <TagBadges id={box.id} tags={shared.tags} />}
     </div>
@@ -2594,6 +2664,7 @@ function editorOf(block: Element): HTMLElement | null {
 }
 const isText = (block: Element) => Boolean(block.querySelector(".subject-box.text-box"));
 const isLabelBlock = (block: Element) => Boolean(block.querySelector("input.section-label"));
+const isSubBlock = (block: Element) => Boolean(block.querySelector("input.section-label.sub-label"));
 
 /** Text from the start (or to the end) of an editor, to the caret: nothing but the caret's own empty line means it is at that edge. */
 function atEdge(body: HTMLElement, end: boolean): boolean {
@@ -2649,13 +2720,21 @@ function sectionAbove(block: HTMLElement | null): string | null {
   return null;
 }
 
-/** The blocks reading after one, up to the next header: what a header put in below it takes. */
+/**
+ * The blocks reading after one, up to the next header: what a header put in
+ * below it takes. Past the first subheader only subheaders are listed, up to
+ * the next top-level header — a header put in takes those, a subheader none.
+ */
 function blocksBelow(block: HTMLElement | null): string[] {
   const out: string[] = [];
+  let writing = true;
   for (let at = block?.nextElementSibling ?? null; at; at = at.nextElementSibling) {
     if (!(at instanceof HTMLElement) || !at.dataset.item) continue;
-    if (isLabelBlock(at)) break;
-    out.push(at.dataset.item);
+    if (isLabelBlock(at)) {
+      if (!isSubBlock(at)) break;
+      writing = false;
+      out.push(at.dataset.item);
+    } else if (writing) out.push(at.dataset.item);
   }
   return out;
 }
@@ -2730,6 +2809,11 @@ function useDocKeys(
     const writeAfter = (block: HTMLElement) => {
       clear();
       latest.current.shared.docInsert(block.dataset.item!, [{}], { section: sectionAbove(block) });
+    };
+    /** Write above the first block: a new text box that reads before it, at the top of the document. */
+    const writeAbove = (block: HTMLElement) => {
+      clear();
+      latest.current.shared.docInsert(null, [{}], { section: null, before: block.dataset.item! });
     };
     /** Join one text block onto the end of another: the writing moves up, the emptied block goes. */
     const join = (into: HTMLElement, from: HTMLElement) => {
@@ -2811,7 +2895,10 @@ function useDocKeys(
         }
         if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
           clear();
-          enter(neighbour(first, -1), true);
+          const above = neighbour(first, -1);
+          // Above the first block: somewhere to write there too.
+          if (above) enter(above, true);
+          else writeAbove(first);
           return done();
         }
         if (event.key === "ArrowDown" || event.key === "ArrowRight") {
@@ -2886,8 +2973,11 @@ function useDocKeys(
       }
       const upward = event.key === "ArrowUp" || (event.key === "ArrowLeft" && start);
       const downward = event.key === "ArrowDown" || (event.key === "ArrowRight" && end);
-      if (upward && (label || event.key === "ArrowLeft" || onEdgeLine(body!, false)) && before) {
-        enter(before, true);
+      if (upward && (label || event.key === "ArrowLeft" || onEdgeLine(body!, false))) {
+        if (before) enter(before, true);
+        // Above a header or a story at the very top: somewhere to write above it.
+        else if (!isText(block)) writeAbove(block);
+        else return;
         return done();
       }
       if (downward && (label || event.key === "ArrowRight" || onEdgeLine(body!, true))) {
@@ -3028,13 +3118,14 @@ function DocumentView(
     };
   }, [menu]);
   /** The block a menu opened at puts new things after: the last one above where it was opened. */
-  const [menuAfter, setMenuAfter] = useState<HTMLElement | null>(null);
+  const [menuAfter, setMenuAfter] = useState<HTMLElement | null | "top">(null);
   const blockAbove = (y: number) =>
     [...(docEl?.querySelectorAll<HTMLElement>(":scope > [data-item]") ?? [])].filter((b) => b.getBoundingClientRect().top < y).at(-1) ?? null;
   const open = (event: React.MouseEvent) => {
     if (event.target !== event.currentTarget) return;
     event.preventDefault();
-    setMenuAfter(blockAbove(event.clientY));
+    // Above the first block, what is chosen goes in at the top.
+    setMenuAfter(blockAbove(event.clientY) ?? (docEl?.querySelector(":scope > [data-item]") ? "top" : null));
     setMenu({ left: Math.min(event.clientX, window.innerWidth - 220), top: Math.min(event.clientY, window.innerHeight - 320) });
   };
   /** The block being written in (or last written in): where the Insert menu puts things. */
@@ -3053,9 +3144,21 @@ function DocumentView(
    * filed under the header it lands below. A header takes the blocks below
    * it, up to the next header.
    */
-  const insertAfterBlock = (block: HTMLElement | null, extra: Partial<BoxItem>) => {
+  const insertAfterBlock = (block: HTMLElement | null | "top", extra: Partial<BoxItem>) => {
+    if (block === "top") return insertAtTop(extra);
     const last = block ?? [...(docEl?.querySelectorAll<HTMLElement>(":scope > [data-item]") ?? [])].at(-1) ?? null;
     shared.docInsert(last?.dataset.item ?? null, [extra], { section: sectionAbove(last), following: extra.label ? blocksBelow(last) : [] });
+  };
+  /**
+   * A block put in above everything, from a click above the first block: it
+   * reads before that block. A header put in there takes the writing below
+   * it, up to the next header, as anywhere else.
+   */
+  const insertAtTop = (extra: Partial<BoxItem>) => {
+    const first = docEl?.querySelector<HTMLElement>(":scope > [data-item]") ?? null;
+    if (!first?.dataset.item) return shared.docInsert(null, [extra], { section: null });
+    const following = extra.label && !isLabelBlock(first) ? [first.dataset.item, ...blocksBelow(first)] : [];
+    shared.docInsert(null, [extra], { section: null, before: first.dataset.item, following });
   };
   /**
    * A divider line, put in from the Insert menu: the text box the caret is
@@ -3066,7 +3169,7 @@ function DocumentView(
   const divide = (block: HTMLElement | null) => {
     const body = block?.querySelector<HTMLElement>(".subject-box.text-box .rich-body");
     const selection = window.getSelection();
-    if (!block || !body || !selection?.rangeCount || !body.contains(selection.anchorNode)) return insertAfterBlock(block, {});
+    if (!block || !body || !selection?.rangeCount || !body.contains(selection.anchorNode)) return insertAfterBlock(block, { divider: true });
     const rest = document.createRange();
     rest.setStart(selection.anchorNode!, selection.anchorOffset);
     rest.setEnd(body, body.childNodes.length);
@@ -3076,7 +3179,7 @@ function DocumentView(
     holder.querySelectorAll("p:empty, div:empty, li:empty").forEach((el) => el.remove());
     body.querySelectorAll(":scope > p:empty, :scope > div:empty").forEach((el) => el.remove());
     forceNextHtml();
-    shared.docInsert(block.dataset.item!, [{ html: holder.innerHTML }], { section: sectionAbove(block), keep: { id: block.dataset.item!, html: body.innerHTML } });
+    shared.docInsert(block.dataset.item!, [{ html: holder.innerHTML, divider: true }], { section: sectionAbove(block), keep: { id: block.dataset.item!, html: body.innerHTML } });
   };
   /** Story from link: from the clipboard if it holds one, otherwise asked for in the menu. */
   const [askLink, setAskLink] = useState<{ after: HTMLElement | null; value: string; problem?: string } | null>(null);
@@ -3097,11 +3200,13 @@ function DocumentView(
     else shared.storyFromLink(link, "");
   };
   /** Everything that can be put into the document, for the double-click menu and the Insert menu alike. */
-  const choices = (block: HTMLElement | null, close: () => void): { icon: string; label: string; title?: string; run: () => void }[] => [
-    { icon: "—", label: "Divider line", title: "Starts a new card under the same header, from the caret", run: () => divide(block) },
+  const choices = (block: HTMLElement | null | "top", close: () => void): { icon: string; label: string; title?: string; run: () => void }[] => [
+    { icon: "—", label: "Divider line", title: "Starts a new card under the same header, from the caret", run: () => divide(block === "top" ? null : block) },
     { icon: "H", label: "Header", title: "A header card: what is written below it is joined to it", run: () => insertAfterBlock(block, { label: true, html: "" }) },
+    { icon: "h", label: "Subheader", title: "A subheader under the header above: what is written below it is joined to it", run: () => insertAfterBlock(block, { label: true, sub: true, html: "" }) },
     { icon: "¶", label: "Text box", run: () => insertAfterBlock(block, {}) },
-    { icon: "🔗", label: "Story from link", run: () => void storyFrom(block) },
+    // A story reads after a block, so it is not offered above the first one.
+    ...(block === "top" ? [] : [{ icon: "🔗", label: "Story from link", run: () => void storyFrom(block) }]),
     { icon: "✎", label: "Drawing", run: () => insertAfterBlock(block, { drawing: [], height: DRAWING_HEIGHT }) },
     { icon: "▣", label: "Image…", run: () => shared.pickImage(undefined, (extra) => insertAfterBlock(block, extra)) },
     { icon: "▦", label: "Table", run: () => insertAfterBlock(block, { table: NEW_TABLE(), tableMode: "doc" }) },
@@ -3133,6 +3238,14 @@ function DocumentView(
   const clickBelow = (event: React.MouseEvent) => {
     if (event.target !== event.currentTarget || event.button !== 0 || event.detail > 1) return;
     const block = blockAbove(event.clientY);
+    // Above the first block: a new text box at the top, or the caret into the empty one already there.
+    const first = docEl?.querySelector<HTMLElement>(":scope > [data-item]");
+    if (!block && first) {
+      event.preventDefault();
+      const firstBody = first.querySelector<HTMLElement>(".subject-box.text-box .rich-body");
+      if (firstBody && isEmptyText(firstBody)) return caretTo(firstBody, false);
+      return insertAtTop({});
+    }
     if (!block || event.clientY - block.getBoundingClientRect().bottom > 40) return;
     const next = block.nextElementSibling as HTMLElement | null;
     const nextBody = next?.dataset.item ? next.querySelector<HTMLElement>(".subject-box.text-box .rich-body") : null;
@@ -3152,8 +3265,9 @@ function DocumentView(
     ...shared,
     setBox: (box, html) => {
       const held = boardRef.current?.[box.id];
-      if (held && held.kind === "box" && held.label) return;
-      if (/<h3\b/i.test(html) && docEl) {
+      // An editor saving into a block that has meanwhile become a header; a header renamed still saves.
+      if (held && held.kind === "box" && held.label && !box.label) return;
+      if (/<h[34]\b/i.test(html) && docEl) {
         const block = [...docEl.querySelectorAll<HTMLElement>(":scope > [data-item]")].find((b) => b.dataset.item === box.id) ?? null;
         const split = splitAtHeadings(html, document);
         if (block && split) {
@@ -3188,14 +3302,14 @@ function DocumentView(
   const inlined = new Set(shared.boxes.flatMap((box) => (box.html ? inlineCardLinks(box.html) : [])));
   const entries = [
     ...shared.cards.filter((card) => !inlined.has(card.id)).map((card) => ({ id: card.id, at: card.at, after: card.after, key: card.id, node: <StoryCard card={card} own={inside.get(card.id) ?? []} shared={shared} /> })),
-    ...shared.boxes.map((box) => ({ id: box.id, at: madeAt(box), label: box.label, after: box.after, key: box.id, node: <TextBox box={box} shared={docShared} /> })),
+    ...shared.boxes.map((box) => ({ id: box.id, at: madeAt(box), label: box.label, sub: box.sub, after: box.after, before: box.before, key: box.id, node: <TextBox box={box} shared={docShared} /> })),
   ];
   // Sections read as they do on the whiteboard: each header, then what is linked to it.
   const byId = new Map(entries.map((e) => [e.id, e]));
   const stack = documentOrder(entries, shared.board).map((id) => byId.get(id)!);
-  // Two text cards one after the other under the same header: a divider line between them.
-  const textIds = new Set(shared.boxes.filter((b) => !b.label && !b.drawing && !b.table && !b.transcript && b.image === undefined && b.caption === undefined).map((b) => b.id));
-  const divided = new Set(stack.filter((entry, i) => i > 0 && textIds.has(entry.id) && textIds.has(stack[i - 1].id)).map((entry) => entry.id));
+  // A divider line where one was put in from the Insert menu, and nowhere else.
+  const dividers = new Set(shared.boxes.filter((b) => b.divider).map((b) => b.id));
+  const divided = new Set(stack.filter((entry, i) => i > 0 && dividers.has(entry.id)).map((entry) => entry.id));
 
   return (
     <div className="subject-doc" ref={setDocEl} onContextMenu={open} onDoubleClick={open} onMouseDown={clickBelow}
@@ -3292,10 +3406,14 @@ function DocumentView(
       {stack.length === 0 && (
         // An empty document is written in straight away, as a new Doc is.
         <div className="doc-start" role="textbox" tabIndex={0} aria-label="Start writing"
-          onMouseDown={(e) => { e.preventDefault(); shared.docInsert(null, [{}], { section: null }); }}
-          onKeyDown={(e) => { if (e.key.length === 1 || e.key === "Enter") { e.preventDefault(); shared.docInsert(null, [{}], { section: null }); } }}>
-          Start typing…
-          <span className="hint">Or add a story from an article with <strong>Subject</strong> in its toolbar.</span>
+          onMouseDown={(e) => { e.preventDefault(); markUsed("doc-start"); shared.docInsert(null, [{}], { section: null }); }}
+          onKeyDown={(e) => { if (e.key.length === 1 || e.key === "Enter") { e.preventDefault(); markUsed("doc-start"); shared.docInsert(null, [{}], { section: null }); } }}>
+          {hint("doc-start", "Start typing…") && (
+            <>
+              Start typing…
+              <span className="hint">Or add a story from an article with <strong>Subject</strong> in its toolbar.</span>
+            </>
+          )}
         </div>
       )}
       {stack.map((entry) => (
@@ -3835,10 +3953,11 @@ function Whiteboard(
     // what is linked to it; a node, only the nodes smaller than it (lib/drag-group.ts).
     const links = live(board).filter((i): i is LinkItem => i.kind === "link");
     const nodeIds = new Set(shared.boxes.filter((b) => b.label && b.labelShape === "node").map((b) => b.id));
+    const subIds = new Set(shared.boxes.filter((b) => b.label && b.sub && b.labelShape !== "node").map((b) => b.id));
     const movers = dragGroup(
       selected.has(id) ? selected : [id],
       links,
-      (other) => (nodeIds.has(other) ? "node" : labelIds.has(other) ? "label" : "block"),
+      (other) => (nodeIds.has(other) ? "node" : subIds.has(other) ? "sub" : labelIds.has(other) ? "label" : "block"),
       (other) => positions.get(other)?.w ?? 0,
     );
     if (!selected.has(id) && selected.size) setSelected(new Set());

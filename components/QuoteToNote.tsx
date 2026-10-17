@@ -5,6 +5,7 @@ import { Icon } from "./icons";
 import RichText from "./RichText";
 import SubjectChoices from "./SubjectChoices";
 import { cleanQuoteText, type Note } from "@/lib/notes";
+import { hint, markUsed } from "@/lib/first-use";
 
 type Placed = { text: string; top: number; left: number };
 
@@ -376,8 +377,9 @@ export default function QuoteToNote({
               <RichText
                 className="quote-note-field"
                 html="<ul><li><br></li></ul>"
-                placeholder="Add a note about this quote…"
+                placeholder={hint("quote-note", "Add a note about this quote…")}
                 onChange={(html) => {
+                  markUsed("quote-note");
                   draft.current = html;
                 }}
               />

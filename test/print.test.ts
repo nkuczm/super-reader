@@ -101,3 +101,8 @@ test("a picture's caption is written like a text box, and printed and exported a
     assert.doesNotMatch(html, /<i>Mayor|figcaption/, "not a line of small italics");
   }
 });
+
+test("a subheader prints one level below a header", async () => {
+  const { boxHtml: html } = await import("../lib/subject-doc");
+  assert.equal(html({ id: "s", kind: "box", html: "Detail", label: true, sub: true, at: 1 }), '<h3 class="section sub">Detail</h3>');
+});

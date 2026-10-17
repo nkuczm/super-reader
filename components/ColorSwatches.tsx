@@ -1,49 +1,66 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { FAVORITES_EVENT, hexColor, loadFavorites, saveFavorites } from "@/lib/colors";
+import { FAVORITES_EVENT, SHADES, hexColor, loadFavorites, loadRecent, pushRecent, saveFavorites, type ColorUse } from "@/lib/colors";
 
 /**
- * A grid of colours to choose from, the reader's favourites under them, and
- * a way to add one with the system's colour picker. A favourite is taken
- * off with a right-click (or Alt-click).
+ * Colours to choose from, set out by hue (across) and shade (down); the
+ * reader's favourites under them, with a way to add one with the system's
+ * colour picker; and along the bottom the five colours last chosen here.
+ * The last one chosen is ringed wherever it shows. A favourite is taken off
+ * with a right-click (or Alt-click).
  */
-export default function ColorSwatches({ colors, onPick, onNone, noneLabel = "No colour", label }: {
-  colors: string[];
+export default function ColorSwatches({ use, onPick, onNone, noneLabel = "No colour", label }: {
+  /** Highlights or table cells: each keeps its own recent colours. */
+  use: ColorUse;
   onPick: (color: string) => void;
   onNone?: () => void;
   noneLabel?: string;
   label: string;
 }) {
   const [favorites, setFavorites] = useState<string[]>([]);
+  const [recent, setRecent] = useState<string[]>([]);
+  const pick = (color: string) => {
+    pushRecent(use, color);
+    onPick(color);
+  };
   useEffect(() => {
-    const read = () => setFavorites(loadFavorites());
+    const read = () => {
+      setFavorites(loadFavorites());
+      setRecent(loadRecent(use));
+    };
     read();
     window.addEventListener(FAVORITES_EVENT, read);
     return () => window.removeEventListener(FAVORITES_EVENT, read);
-  }, []);
-  const swatch = (color: string, favorite = false) => (
-    <button key={`${favorite ? "f" : "c"}${color}`} type="button" role="menuitem" className="color-swatch" style={{ background: color }}
+  }, [use]);
+  const swatch = (color: string, favorite = false, row = "c") => (
+    <button key={`${row}${color}`} type="button" role="menuitem" className={`color-swatch${color === recent[0] ? " latest" : ""}`} style={{ background: color }}
       aria-label={`${favorite ? "Favourite " : ""}${color}`} title={favorite ? `${color} · right-click to remove` : color}
       onClick={(e) => {
         if (favorite && e.altKey) return saveFavorites(favorites.filter((c) => c !== color));
-        onPick(color);
+        pick(color);
       }}
       onContextMenu={favorite ? (e) => { e.preventDefault(); saveFavorites(favorites.filter((c) => c !== color)); } : undefined} />
   );
   return (
     <div className="color-swatches" role="group" aria-label={label} onMouseDown={(e) => e.preventDefault()}>
-      <div className="color-grid">
-        {colors.map((c) => swatch(c))}
-        {onNone && (
-          <button type="button" role="menuitem" className="color-swatch none" aria-label={noneLabel} title={noneLabel} onClick={onNone}>⌀</button>
-        )}
-      </div>
+      {SHADES.map((row, i) => (
+        <div key={i} className="color-grid">{row.map((c) => swatch(c))}</div>
+      ))}
+      {onNone && (
+        <button type="button" role="menuitem" className="color-none" aria-label={noneLabel} title={noneLabel} onClick={onNone}>⌀ {noneLabel}</button>
+      )}
       <div className="color-favs-head">Favourites</div>
       <div className="color-grid">
-        {favorites.map((c) => swatch(c, true))}
+        {favorites.map((c) => swatch(c, true, "f"))}
         <AddFavorite onAdd={(color) => saveFavorites([...favorites.filter((c) => c !== color), color])} />
       </div>
+      {recent.length > 0 && (
+        <>
+          <div className="color-favs-head">Recent</div>
+          <div className="color-grid">{recent.map((c) => swatch(c, false, "r"))}</div>
+        </>
+      )}
     </div>
   );
 }
