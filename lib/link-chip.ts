@@ -12,11 +12,18 @@
  */
 
 import { EXTRACT_VERSION } from "./offline";
+import { youtubeId } from "./youtube";
 
 /** A link in writing was opened: the subject page shows it in the reader. Cancelled when handled. */
 export const LINK_OPEN_EVENT = "super-reader:link-open";
 
-export type LinkInfo = { title?: string; site?: string };
+export type LinkInfo = { title?: string; site?: string; image?: string };
+
+/** The first picture in what the article route read: the page's lead or header image, or a video's thumbnail. */
+function firstImage(html: string | undefined): string | undefined {
+  const src = /<img\b[^>]*\bsrc="(https:\/\/[^"]+)"/i.exec(html ?? "")?.[1];
+  return src?.replace(/&amp;/g, "&");
+}
 
 /** The site a link goes to, for showing: "nytimes.com". */
 export function hostOf(href: string): string {
@@ -30,7 +37,7 @@ export function hostOf(href: string): string {
 const known = new Map<string, Promise<LinkInfo>>();
 
 /**
- * A page's headline and site name, read once per address for as long as the
+ * A page's headline, site name and picture, read once per address for as long as the
  * app is open. Through the article route, whose answers are cached at the
  * edge, so a link previewed twice or on two devices is read once. Nothing is
  * kept when the page will not answer: the preview shows its address instead.
@@ -41,14 +48,19 @@ export function linkInfo(href: string): Promise<LinkInfo> {
   const asked = (async (): Promise<LinkInfo> => {
     try {
       const res = await fetch(`/api/article?url=${encodeURIComponent(href)}&x=${EXTRACT_VERSION}`);
-      if (!res.ok) return {};
-      const data = (await res.json()) as { title?: string; siteName?: string };
+      // A YouTube video's thumbnail is at a known address, whatever the route answers.
+      const video = youtubeId(href);
+      const thumb = video ? `https://i.ytimg.com/vi/${video}/hqdefault.jpg` : undefined;
+      if (!res.ok) return thumb ? { image: thumb } : {};
+      const data = (await res.json()) as { title?: string; siteName?: string; html?: string };
       return {
         title: data.title?.replace(/\s+/g, " ").trim().slice(0, 300) || undefined,
         site: data.siteName?.replace(/\s+/g, " ").trim().slice(0, 120) || undefined,
+        image: thumb ?? firstImage(data.html),
       };
     } catch {
-      return {};
+      const video = youtubeId(href);
+      return video ? { image: `https://i.ytimg.com/vi/${video}/hqdefault.jpg` } : {};
     }
   })();
   known.set(href, asked);

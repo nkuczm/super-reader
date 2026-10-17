@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { authorsOf, cleanLinkedIn, contactId, initialsOf, safeImage, tagOrder, type Card, type ContactItem } from "@/lib/subjects";
 import { shrinkImage } from "./SubjectMedia";
+import { hint, markUsed } from "@/lib/first-use";
 
 const HIDE_SUGGESTED_KEY = "super-reader:hide-suggested-contacts";
 
@@ -287,7 +288,7 @@ function ContactRow({
         </div>
         <textarea
           className="contact-notes"
-          placeholder="Notes…"
+          placeholder={hint("contact-notes", "Notes…")}
           defaultValue={contact.notes ?? ""}
           rows={1}
           ref={(el) => {
@@ -299,6 +300,7 @@ function ContactRow({
           }}
           onPointerDown={(e) => e.stopPropagation()}
           onInput={(e) => {
+            markUsed("contact-notes");
             const el = e.currentTarget;
             el.style.height = "auto";
             el.style.height = `${el.scrollHeight}px`;

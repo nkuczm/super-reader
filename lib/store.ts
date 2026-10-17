@@ -247,6 +247,12 @@ export type Settings = {
   subjects: boolean;
   /** In a subject's document view, draw a story's or text box's border only on hover or while editing it. */
   hideSubjectBoxes: boolean;
+  /**
+   * Set once hideSubjectBoxes is the reader's own choice. The document reads
+   * as one page by default (17 Oct 2026); settings saved before then carried
+   * the old default, off, which is not a choice anyone made.
+   */
+  boxesChosen: boolean;
   /** A new text box's width in pixels; 0 is the default (full column in the document, 280 on the whiteboard). */
   textBoxWidth: number;
   /** Which AI the Subjects insights use, with the reader's own key for it. */
@@ -269,7 +275,8 @@ export const DEFAULT_SETTINGS: Settings = {
   quoteToNote: true,
   openOnSite: [],
   subjects: true,
-  hideSubjectBoxes: false,
+  hideSubjectBoxes: true,
+  boxesChosen: true,
   textBoxWidth: 0,
   aiProvider: "anthropic",
   openaiModel: "gpt-5-mini",
@@ -301,7 +308,8 @@ export function loadSettings(): Settings {
           : DEFAULT_SETTINGS.bigStoryMetric,
       hideRead: Boolean(parsed.hideRead),
       subjects: true,
-      hideSubjectBoxes: parsed.hideSubjectBoxes === true,
+      hideSubjectBoxes: parsed.boxesChosen === true ? parsed.hideSubjectBoxes === true : true,
+      boxesChosen: true,
       textBoxWidth:
         typeof parsed.textBoxWidth === "number" && parsed.textBoxWidth >= 160 && parsed.textBoxWidth <= 1000
           ? Math.round(parsed.textBoxWidth)

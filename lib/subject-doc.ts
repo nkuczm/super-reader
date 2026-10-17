@@ -85,7 +85,9 @@ export function boxKind(box: BoxItem): "label" | "image" | "transcript" | "table
 
 /** A box as written up: a section heading, picture, transcript, table, drawing or text. */
 export function boxHtml(box: BoxItem, board?: Board, out: Output = {}): string {
-  if (box.label) return `<h2 class="section">${escapeHtml(textOf(box.html).trim())}</h2>`;
+  if (box.label) return box.sub
+    ? `<h3 class="section sub">${escapeHtml(textOf(box.html).trim())}</h3>`
+    : `<h2 class="section">${escapeHtml(textOf(box.html).trim())}</h2>`;
   const image = safeImage(box.image);
   if (image) {
     // The caption reads as the writing it is, under the picture — not a line of small italics.

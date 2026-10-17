@@ -37,3 +37,11 @@ test("a section label still carries what is linked to it", () => {
 test("a story dragged on its own moves alone", () => {
   assert.deepEqual(group("hubStory"), ["hubStory"]);
 });
+
+test("a header carries its subheaders and their writing; a subheader carries only its own", () => {
+  const k: Record<string, BlockKind> = { H: "label", S: "sub", direct: "block", under: "block" };
+  const l = [["H", "S"], ["H", "direct"], ["S", "under"]].map(([from, to]) => ({ from, to }));
+  const g = (...ids: string[]) => [...dragGroup(ids, l, (id) => k[id], () => 0)].sort();
+  assert.deepEqual(g("H"), ["H", "S", "direct", "under"]);
+  assert.deepEqual(g("S"), ["S", "under"]);
+});

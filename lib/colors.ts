@@ -8,17 +8,15 @@
 /** The highlight's own yellow: a highlight in it is saved as a plain <mark>, as every highlight was before colours. */
 export const DEFAULT_HIGHLIGHT = "#fde68a";
 
-export const HIGHLIGHT_COLORS = [
-  DEFAULT_HIGHLIGHT, "#fef08a", "#fed7aa", "#fecaca", "#fbcfe8", "#f5d0fe", "#e9d5ff", "#c7d2fe",
-  "#bfdbfe", "#bae6fd", "#a5f3fc", "#99f6e4", "#bbf7d0", "#d9f99d", "#e7e5e4", "#e5e7eb",
-  "#facc15", "#fb923c", "#f87171", "#f472b6", "#c084fc", "#60a5fa", "#2dd4bf", "#4ade80",
-];
-
-/** The cell colours tables had, first, then more. */
-export const CELL_PALETTE = [
-  "#fde68a", "#fecaca", "#bbf7d0", "#bfdbfe", "#e9d5ff", "#fed7aa", "#e5e7eb",
-  "#fef9c3", "#ffe4e6", "#fce7f3", "#ede9fe", "#e0e7ff", "#dbeafe", "#cffafe", "#ccfbf1", "#dcfce7",
-  "#ecfccb", "#f5f5f4", "#d1d5db", "#fca5a5", "#93c5fd", "#86efac", "#fcd34d", "#c4b5fd",
+/**
+ * Colours set out by hue and shade: one row per shade, lightest first, one
+ * column per hue — yellow, orange, red, pink, purple, blue, teal, green, grey. The middle row holds the highlight's yellow and every cell
+ * colour tables began with.
+ */
+export const SHADES: string[][] = [
+  ["#fef9c3", "#ffedd5", "#fee2e2", "#fce7f3", "#f3e8ff", "#dbeafe", "#ccfbf1", "#dcfce7", "#f3f4f6"],
+  [DEFAULT_HIGHLIGHT, "#fed7aa", "#fecaca", "#fbcfe8", "#e9d5ff", "#bfdbfe", "#99f6e4", "#bbf7d0", "#e5e7eb"],
+  ["#facc15", "#fb923c", "#f87171", "#f472b6", "#c084fc", "#60a5fa", "#2dd4bf", "#4ade80", "#9ca3af"],
 ];
 
 /** A colour as #rrggbb, lower case, or null when it is not one. */
@@ -33,6 +31,7 @@ export function hexColor(value: string | undefined | null): string | null {
 }
 
 const FAVORITES_KEY = "super-reader:color-favorites";
+const RECENT_KEY = "super-reader:color-recent:";
 const LAST_HIGHLIGHT_KEY = "super-reader:last-highlight";
 export const FAVORITES_EVENT = "super-reader:color-favorites";
 
@@ -55,6 +54,30 @@ export function saveFavorites(list: string[]) {
   window.dispatchEvent(new Event(FAVORITES_EVENT));
 }
 
+export type ColorUse = "highlight" | "cell";
+
+/** The last five colours chosen for highlights or for cells, the latest first. */
+export function loadRecent(use: ColorUse): string[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(RECENT_KEY + use) ?? "[]");
+    return Array.isArray(list) ? list.map(hexColor).filter((c): c is string => Boolean(c)).slice(0, 5) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function pushRecent(use: ColorUse, color: string) {
+  const hex = hexColor(color);
+  if (!hex) return;
+  const list = [hex, ...loadRecent(use).filter((c) => c !== hex)].slice(0, 5);
+  try {
+    localStorage.setItem(RECENT_KEY + use, JSON.stringify(list));
+  } catch {
+    /* not remembered */
+  }
+  window.dispatchEvent(new Event(FAVORITES_EVENT));
+}
+
 /** The colour the highlight button puts on: the last one chosen. */
 export function lastHighlight(): string {
   try {
@@ -70,4 +93,5 @@ export function setLastHighlight(color: string) {
   } catch {
     /* not remembered */
   }
+  pushRecent("highlight", color);
 }

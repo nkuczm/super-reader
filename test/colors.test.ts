@@ -16,3 +16,11 @@ test("nothing but a checked colour gets into a highlight's style", () => {
   assert.equal(sanitizeRichText(`<mark data-hl="red;position:fixed" style="position:fixed">x</mark>`), `<mark>x</mark>`);
   assert.equal(hexColor("url(javascript:1)"), null);
 });
+
+test("the colours are a grid of hue by shade, holding the old defaults", async () => {
+  const { SHADES, DEFAULT_HIGHLIGHT } = await import("../lib/colors");
+  assert.ok(SHADES.every((row) => row.length === SHADES[0].length), "every shade has every hue");
+  const all = SHADES.flat();
+  for (const old of [DEFAULT_HIGHLIGHT, "#fecaca", "#bbf7d0", "#bfdbfe", "#e9d5ff", "#fed7aa", "#e5e7eb"]) assert.ok(all.includes(old), old);
+  assert.equal(new Set(all).size, all.length, "no colour twice");
+});

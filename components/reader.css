@@ -3465,7 +3465,7 @@
 }
 @media (prefers-reduced-motion: reduce) { .tab-rail-anchor { transition: none; } }
 /* The heading being read: bold, with a bar down its left, as a Doc's outline marks it. */
-.tab-outline-item.active { font-weight: 700; color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); box-shadow: inset 2px 0 0 var(--accent); }
+.tab-outline-item.active { font-weight: 700; color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); }
 .tab-outline-item.level-3.active { color: var(--accent); }
 
 /* ---------- a table wider than the page widens its card ----------
@@ -3559,3 +3559,34 @@
 .wb-landing { position: absolute; z-index: 1; border: 2px dashed color-mix(in srgb, var(--accent) 70%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--accent) 6%, transparent); pointer-events: none; }
 .wb-node:not(.dragging) { transition: left 0.18s ease, top 0.18s ease; }
 @media (prefers-reduced-motion: reduce) { .wb-node:not(.dragging) { transition: none; } }
+
+/* ---------- subheaders: a smaller header, filed under the header above ---------- */
+.section-label.sub-label { font-size: 18px; font-weight: 700; border-bottom-width: 2px; }
+.section-label.sub-label.fill { padding: 1px 8px; }
+.rich-body h4 { font-size: 13.5px; margin: 6px 0 2px; color: var(--text-dim); }
+.rt-glyph.rt-sub { font-size: 12px; }
+.link-bubble-image {
+  display: block; width: 100%; max-height: 150px; object-fit: cover; border-radius: 6px; margin-bottom: 4px;
+  background: var(--bg-hover);
+}
+.link-bubble { min-width: min(260px, 86vw); }
+.rt-menu .rt-style-h { font-size: 17px; font-weight: 750; }
+.rt-menu .rt-style-sh { font-size: 14.5px; font-weight: 700; }
+.link-bubble-unlink {
+  align-self: flex-start; font: inherit; font-size: 12.5px; color: var(--text-dim); background: none; border: 0;
+  padding: 2px 4px; border-radius: 6px; cursor: pointer;
+}
+.link-bubble-unlink:hover, .link-bubble-unlink.kbd { color: var(--text); background: var(--bg-hover); }
+
+/* Room above the first block to click into, for writing above it. */
+.subject-doc { padding-top: 28px; }
+/* By hue across and shade down; the last colour chosen ringed, light, wherever it shows. */
+.color-swatches { width: 262px; }
+.color-grid { grid-template-columns: repeat(9, 22px); }
+.color-swatches .color-swatch.latest { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px color-mix(in srgb, var(--text) 22%, transparent); }
+.color-none {
+  align-self: flex-start; font: inherit; font-size: 12.5px; color: var(--text-dim); background: none; border: 0;
+  padding: 3px 4px; margin-top: 2px; border-radius: 6px; cursor: pointer;
+}
+.color-none:hover { color: var(--text); background: var(--bg-hover); }
+.rt-menu .color-swatches button.color-none { display: inline-flex; width: auto; white-space: nowrap; gap: 4px; }

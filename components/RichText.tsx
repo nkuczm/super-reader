@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import CropDialog, { copyPicture, pastedWidth } from "./CropDialog";
 import { isHighlight, safeHref, sanitizeRichText } from "@/lib/subjects";
 import { hostOf, linkInfo, openLink, type LinkInfo } from "@/lib/link-chip";
-import { DEFAULT_HIGHLIGHT, HIGHLIGHT_COLORS, hexColor, lastHighlight, setLastHighlight } from "@/lib/colors";
+import { DEFAULT_HIGHLIGHT, hexColor, lastHighlight, setLastHighlight } from "@/lib/colors";
 import ColorSwatches from "./ColorSwatches";
 import { cleanPastedHtml } from "@/lib/paste";
 import { CITE_OPEN_EVENT, CITE_TYPE, CITES_CHANGED_EVENT, citeCardHtml, citeChipHtml, citeFor, citeTextHtml, refreshCiteChips, type Cite } from "@/lib/cite";
@@ -25,8 +25,8 @@ export const ToolsHostContext = createContext<HTMLElement | null>(null);
 /** The kinds of list a line can be in. */
 type ListKind = "bullet" | "check" | "1" | "1)" | "a" | "a)" | "A" | "A)";
 /** What the caret is in, for the tools to show as on. */
-type ToolState = { b?: boolean; i?: boolean; hl?: boolean; h?: boolean; list?: ListKind | null };
-type ToolAction = "undo" | "redo" | "bold" | "italic" | "highlight" | "hlColor" | "heading" | "list" | "link";
+type ToolState = { b?: boolean; i?: boolean; hl?: boolean; h?: boolean; sh?: boolean; list?: ListKind | null };
+type ToolAction = "undo" | "redo" | "bold" | "italic" | "highlight" | "hlColor" | "style" | "list" | "link";
 
 const svg = (children: React.ReactNode) => (
   <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -91,7 +91,7 @@ function ToolButtons({ state = {}, run, history, onHistory, open }: {
       <span className="rt-hl-more">{button("hlColor", "Highlight colour", ICON.chevron, false)}</span>
       <span className="rt-sep" aria-hidden="true" />
       {button("list", "Lists", LIST_ICON[state.list ?? "bullet"], Boolean(state.list), true)}
-      {button("heading", "Heading — again for normal text", <b className="rt-glyph">H</b>, state.h)}
+      {button("style", "Text style — normal text, section header or subheader", <b className={`rt-glyph${state.sh ? " rt-sub" : ""}`}>{state.sh ? "h" : "H"}</b>, Boolean(state.h || state.sh), true)}
       <span className="rt-sep" aria-hidden="true" />
       {button("link", "Link — a web address or another subject", ICON.link, false, true)}
     </>
@@ -184,7 +184,7 @@ function lineToCaret(block: Node, node: Node, offset: number): Range {
   range.setStart(block, 0);
   find: for (let at: Node | null = node; at && at !== block; at = at.parentNode) {
     for (let sib = at.previousSibling; sib; sib = sib.previousSibling) {
-      if (sib.nodeType === Node.ELEMENT_NODE && /^(BR|OL|UL|DIV|P|LI|H3|BLOCKQUOTE|TABLE)$/.test(sib.nodeName)) {
+      if (sib.nodeType === Node.ELEMENT_NODE && /^(BR|OL|UL|DIV|P|LI|H3|H4|BLOCKQUOTE|TABLE)$/.test(sib.nodeName)) {
         range.setStartAfter(sib);
         break find;
       }
@@ -215,7 +215,7 @@ function unwrapPageColours(root: Element) {
 function keepingCaret(run: () => void) {
   const sel = window.getSelection();
   const at = sel?.anchorNode;
-  const line = (at instanceof Element ? at : at?.parentElement)?.closest("li, p, div, h3, blockquote");
+  const line = (at instanceof Element ? at : at?.parentElement)?.closest("li, p, div, h3, h4, blockquote");
   let offset = -1;
   if (sel?.isCollapsed && at && line) offset = lineToCaret(line, at, sel.anchorOffset).toString().length;
   run();
@@ -223,7 +223,7 @@ function keepingCaret(run: () => void) {
   if (root) unwrapPageColours(root);
   if (offset < 0) return;
   const now = window.getSelection()?.anchorNode;
-  const target = (now instanceof Element ? now : now?.parentElement)?.closest("li, p, div, h3, blockquote");
+  const target = (now instanceof Element ? now : now?.parentElement)?.closest("li, p, div, h3, h4, blockquote");
   if (target && (target.textContent ?? "").length >= offset) caretAtText(target, offset);
 }
 
@@ -319,6 +319,23 @@ function LinkBubble({ link, top, left, onStoryCard, onChanged, keys, onKeysDone 
     selection?.addRange(after);
     onChanged();
   };
+  /** No longer a link: its words stay, as plain writing, with the caret after them. */
+  const unlink = () => {
+    const parent = link.parentNode;
+    if (!parent) return;
+    const last = link.lastChild;
+    while (link.firstChild) parent.insertBefore(link.firstChild, link);
+    link.remove();
+    const selection = window.getSelection();
+    if (last && selection) {
+      const after = document.createRange();
+      after.setStartAfter(last);
+      after.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(after);
+    }
+    onChanged();
+  };
   const toggleWeb = () => {
     if (web) link.removeAttribute("data-web");
     else link.setAttribute("data-web", "");
@@ -333,6 +350,7 @@ function LinkBubble({ link, top, left, onStoryCard, onChanged, keys, onKeysDone 
       { id: "chip", run: asChip },
       ...(onStoryCard ? [{ id: "card", run: asCard }] : []),
       { id: "web", run: toggleWeb },
+      { id: "unlink", run: unlink },
     ] : []),
   ];
   const [active, setActive] = useState(-1);
@@ -346,7 +364,8 @@ function LinkBubble({ link, top, left, onStoryCard, onChanged, keys, onKeysDone 
     // Ahead of the document's own keys (which move between blocks on the arrows): the window, capturing.
     const key = (event: KeyboardEvent) => {
       const { choices: list, active: at } = latest.current;
-      const step = event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : event.key === "ArrowUp" || event.key === "ArrowLeft" ? -1 : 0;
+      // Up and down go through the choices; left and right still move the caret, so a chip's words can be edited.
+      const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
       if (step && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
         event.preventDefault();
         event.stopPropagation();
@@ -374,6 +393,11 @@ function LinkBubble({ link, top, left, onStoryCard, onChanged, keys, onKeysDone 
     <div className="link-bubble" style={{ top, left }} onMouseDown={keep} role="dialog" aria-label="Link">
       <button type="button" className={`link-bubble-preview${lit("open")}`} title={web ? "Open on the site" : "Open in the reader"}
         onClick={() => openLink(href, title, web)}>
+        {info?.image && (
+          // The article's header picture or the video's thumbnail; gone quietly if it will not load.
+          <img className="link-bubble-image" src={info.image} alt="" referrerPolicy="no-referrer"
+            onError={(e) => { e.currentTarget.style.display = "none"; }} />
+        )}
         <span className="link-bubble-title">{title}</span>
         <span className="link-bubble-site">{info?.site || hostOf(href)} · {web ? "opens the site ↗" : "opens in the reader"}</span>
       </button>
@@ -388,6 +412,9 @@ function LinkBubble({ link, top, left, onStoryCard, onChanged, keys, onKeysDone 
         <label className={`link-bubble-web${lit("web")}`}>
           <input type="checkbox" checked={web} onChange={toggleWeb} /> Open the site, not a story
         </label>
+      )}
+      {!cited && (
+        <button type="button" className={`link-bubble-unlink${lit("unlink")}`} onClick={unlink}>Unlink</button>
       )}
     </div>
   );
@@ -460,7 +487,7 @@ function onEmptyLine(): boolean {
   const selection = window.getSelection();
   const at = selection?.anchorNode;
   if (!selection?.isCollapsed || !at) return false;
-  const holder = (at instanceof Element ? at : at.parentElement)?.closest("li, p, div, h3, blockquote, .rich-body");
+  const holder = (at instanceof Element ? at : at.parentElement)?.closest("li, p, div, h3, h4, blockquote, .rich-body");
   if (!holder) return false;
   return !(holder.textContent ?? "").replace(/[\u200b\u00a0\s]/g, "") && !holder.querySelector("img, a[data-cite], a[data-subject]");
 }
@@ -1143,7 +1170,7 @@ export default function RichText({
     const sel = window.getSelection();
     const root = el.current;
     if (!root || !sel?.isCollapsed || !sel.anchorNode || sel.anchorNode.nodeType !== Node.TEXT_NODE) return false;
-    const block = (sel.anchorNode.parentElement?.closest("p, div, h3, li, blockquote") ?? root) as HTMLElement;
+    const block = (sel.anchorNode.parentElement?.closest("p, div, h3, h4, li, blockquote") ?? root) as HTMLElement;
     if (!root.contains(block) || block.closest("li")) return false;
     const before = lineToCaret(block, sel.anchorNode, sel.anchorOffset);
     const typed = before.toString().replace(/\u00a0/g, " ").trim();
@@ -1334,10 +1361,11 @@ export default function RichText({
       }
       const next: ToolState = {
         // A heading is drawn bold; Bold shows as on there only for words made bold.
-        b: at.closest("h3") ? Boolean(at.closest("b, strong")) : ask ? document.queryCommandState("bold") : bold,
+        b: at.closest("h3, h4") ? Boolean(at.closest("b, strong")) : ask ? document.queryCommandState("bold") : bold,
         i: ask ? document.queryCommandState("italic") : italic,
         hl: lit,
         h: Boolean(at.closest("h3")),
+        sh: Boolean(at.closest("h4")),
         list,
       };
       setToolState((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
@@ -1372,7 +1400,7 @@ export default function RichText({
   }, [focused]);
 
   /** A tool's own menu — the kinds of list, the kinds of link — under its button. */
-  const [toolMenu, setToolMenu] = useState<{ kind: "list" | "link" | "hl"; left: number; top: number } | null>(null);
+  const [toolMenu, setToolMenu] = useState<{ kind: "list" | "link" | "hl" | "style"; left: number; top: number } | null>(null);
   useEffect(() => {
     // The colour picker in a menu takes focus while it is open: the menu stays for it.
     if (!focused && !document.activeElement?.closest?.(".rt-menu")) setToolMenu(null);
@@ -1401,7 +1429,6 @@ export default function RichText({
     const after = () => requestAnimationFrame(() => readTools.current(true));
     if (action === "bold" || action === "italic") return (format(action), after());
     if (action === "highlight") return (toggleHighlight(), after());
-    if (action === "heading") return (format("formatBlock", toolState.h ? "p" : "h3"), after());
     const kind = action === "hlColor" ? "hl" : action;
     setToolMenu((open) => (open?.kind === kind ? null : { kind, left: Math.min(at.left, window.innerWidth - 260), top: at.bottom + 6 }));
   };
@@ -1423,9 +1450,23 @@ export default function RichText({
   const menu = toolMenu && typeof document !== "undefined" && createPortal(
     <div className="rt-menu" role="menu" style={{ left: toolMenu.left, top: toolMenu.top }} onMouseDown={(e) => e.preventDefault()}>
       {toolMenu.kind === "hl" ? (
-        <ColorSwatches label="Highlight colour" colors={HIGHLIGHT_COLORS} noneLabel="No highlight"
+        <ColorSwatches label="Highlight colour" use="highlight" noneLabel="No highlight"
           onPick={(color) => { setToolMenu(null); colorHighlight(color); requestAnimationFrame(() => readTools.current(true)); }}
           onNone={() => { setToolMenu(null); colorHighlight(null); requestAnimationFrame(() => readTools.current(true)); }} />
+      ) : toolMenu.kind === "style" ? (
+        <>
+          {([["p", "Normal text", "rt-style-p"], ["h3", "Section header", "rt-style-h"], ["h4", "Subheader", "rt-style-sh"]] as const).map(([tag, label, cls]) => {
+            const on = tag === "h3" ? Boolean(toolState.h) : tag === "h4" ? Boolean(toolState.sh) : !toolState.h && !toolState.sh;
+            return (
+              <button key={tag} type="button" role="menuitemradio" aria-checked={on} className={on ? "on" : undefined}
+                onClick={() => { setToolMenu(null); if (!on) format("formatBlock", tag); requestAnimationFrame(() => readTools.current(true)); }}>
+                <span className="rt-menu-icon" />
+                <span className={`rt-menu-label ${cls}`}>{label}</span>
+                <span className="rt-menu-keys" />
+              </button>
+            );
+          })}
+        </>
       ) : toolMenu.kind === "list" ? (
         <>
           {LISTS.map(([kind, label, keys]) => (

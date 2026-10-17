@@ -75,8 +75,17 @@ export type BoxItem = Base & {
   embedded?: boolean;
   /** A section label: one line of big header text, which stories gather under. */
   label?: boolean;
+  /**
+   * A subheader: a section label that is itself filed under a header (joined
+   * to it by a line), with its own writing filed under it in turn.
+   */
+  sub?: boolean;
   /** Started from the keyboard below another block in the document: it reads right after that block. */
   after?: string;
+  /** Put in above the first block of the document: it reads right before that block. */
+  before?: string;
+  /** Started with a divider line from the Insert menu: the document draws the line above it. */
+  divider?: boolean;
   /** A section label's colour (one of LABEL_COLORS) and whether it underlines or fills behind the text. */
   labelColor?: string;
   labelStyle?: "underline" | "fill";
@@ -1148,7 +1157,7 @@ export function emailsIn(text: string): Set<string> {
 /* ------------------------------------------------------------------------ */
 
 const ALLOWED_TAGS = new Set([
-  "img", "p", "div", "br", "b", "strong", "i", "em", "u", "s", "mark", "ul", "ol", "li", "h3", "blockquote", "span", "a",
+  "img", "p", "div", "br", "b", "strong", "i", "em", "u", "s", "mark", "ul", "ol", "li", "h3", "h4", "blockquote", "span", "a",
 ]);
 
 /**
@@ -1806,7 +1815,7 @@ export function labelColorOf(box: { labelColor?: string }): string {
  * blocks by when they were made, so a header's content could sit pages
  * away from it.
  */
-export function documentOrder(entries: { id: string; at: number; label?: boolean; after?: string }[], board: Board | undefined): string[] {
+export function documentOrder(entries: { id: string; at: number; label?: boolean; sub?: boolean; after?: string; before?: string }[], board: Board | undefined): string[] {
   const byId = new Map(entries.map((e) => [e.id, e]));
   // A story pasted in as a link reads right below the block it was pasted
   // into — as long as that block is here, and the chain of such stories
@@ -1827,6 +1836,19 @@ export function documentOrder(entries: { id: string; at: number; label?: boolean
     }
     if (!at) follows.set(entry.id, anchor);
   }
+  // Put in above the top of the document: it reads right before the block that was first.
+  const precedes = new Map<string, string>();
+  for (const entry of entries) {
+    const target = entry.before;
+    if (!target || target === entry.id || follows.has(entry.id) || !byId.has(target)) continue;
+    let at: string | undefined = target;
+    const seen = new Set([entry.id]);
+    while (at && !seen.has(at)) {
+      seen.add(at);
+      at = byId.get(at)?.before;
+    }
+    if (!at || !seen.has(at) || at !== entry.id) precedes.set(entry.id, target);
+  }
   const pos = new Map<string, { x: number; y: number }>();
   const links: LinkItem[] = [];
   for (const item of live(board)) {
@@ -1839,25 +1861,30 @@ export function documentOrder(entries: { id: string; at: number; label?: boolean
     if (!label.label) continue;
     for (const l of links) {
       const other = l.from === label.id ? l.to : l.to === label.id ? l.from : null;
-      if (other && byId.has(other) && !byId.get(other)!.label && !owner.has(other) && !follows.has(other)) owner.set(other, label.id);
+      const held = other ? byId.get(other) : undefined;
+      if (!other || !held || owner.has(other) || follows.has(other) || precedes.has(other)) continue;
+      // A header gathers its writing and its subheaders; a subheader, only writing.
+      if (!held.label || (held.sub && !label.sub)) owner.set(other, label.id);
     }
   }
   const place = (id: string) => pos.get(id) ?? { x: Infinity, y: Infinity };
   const out: string[] = [];
   const emit = (id: string) => {
+    for (const prev of sorted) if (precedes.get(prev.id) === id) emit(prev.id);
     out.push(id);
     // Pasted one after another below the same block, they read in the order they were pasted.
     for (const next of sorted) if (follows.get(next.id) === id) emit(next.id);
     // A header, then what is filed under it — a header written in after another block too.
     if (!byId.get(id)?.label) return;
     const members = sorted.filter((e) => owner.get(e.id) === id);
-    members.sort((a, b) => place(a.id).y - place(b.id).y || place(a.id).x - place(b.id).x || a.at - b.at);
+    // What is written straight under a header comes before its subheaders, which each take what follows them.
+    members.sort((a, b) => Number(Boolean(a.label)) - Number(Boolean(b.label)) || place(a.id).y - place(b.id).y || place(a.id).x - place(b.id).x || a.at - b.at);
     for (const m of members) emit(m.id);
   };
-  for (const entry of sorted) {
-    if (owner.has(entry.id) || follows.has(entry.id)) continue;
-    emit(entry.id);
-  }
+  // What was put in at the top before the block it read above went away still reads at the top.
+  const roots = sorted.filter((entry) => !owner.has(entry.id) && !follows.has(entry.id) && !precedes.has(entry.id));
+  roots.sort((a, b) => Number(!a.before) - Number(!b.before));
+  for (const entry of roots) emit(entry.id);
   return out;
 }
 
