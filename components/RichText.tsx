@@ -3,7 +3,8 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import CropDialog, { copyPicture, pastedWidth } from "./CropDialog";
-import { isHighlight, sanitizeRichText } from "@/lib/subjects";
+import { isHighlight, safeHref, sanitizeRichText } from "@/lib/subjects";
+import { hostOf, linkInfo, openLink, type LinkInfo } from "@/lib/link-chip";
 import { cleanPastedHtml } from "@/lib/paste";
 import { CITE_OPEN_EVENT, CITE_TYPE, CITES_CHANGED_EVENT, citeCardHtml, citeChipHtml, citeFor, citeTextHtml, refreshCiteChips, type Cite } from "@/lib/cite";
 import { refreshSubjectChips, subjectChipHtml, subjectsMatching, SUBJECT_OPEN_EVENT, SUBJECTS_CHANGED_EVENT, type SubjectRef } from "@/lib/subject-links";
@@ -224,6 +225,106 @@ function keepingCaret(run: () => void) {
 }
 
 /**
+ * What a link in writing can be, offered when the caret is in it — as a
+ * Google Doc's link bubble does. The preview (the page's headline and site)
+ * opens it: in the reader, or on the site when it is marked to open there.
+ * Below, what it shows as: the link's own words, a chip (the headline as one
+ * piece of linked text, still editable in place), or a story card — a story
+ * of the subject, set into the writing as a card.
+ */
+function LinkBubble({ link, top, left, onStoryCard, onChanged }: {
+  link: HTMLAnchorElement;
+  top: number;
+  left: number;
+  onStoryCard?: (url: string) => Cite | null;
+  onChanged: () => void;
+}) {
+  const href = link.href;
+  const cited = link.dataset.cite;
+  const [info, setInfo] = useState<LinkInfo | null>(null);
+  const [, redraw] = useState(0);
+  useEffect(() => {
+    let live = true;
+    void linkInfo(href).then((got) => live && setInfo(got));
+    return () => {
+      live = false;
+    };
+  }, [href]);
+  const chip = link.dataset.link === "chip";
+  const web = link.hasAttribute("data-web");
+  const words = (link.textContent ?? "").trim();
+  const title = info?.title || (cited ? link.title || words : "") || (words && words !== href ? words : "") || hostOf(href);
+  const keep = (event: React.MouseEvent) => event.preventDefault();
+  const asChip = () => {
+    link.dataset.link = "chip";
+    // Its words become the headline, unless the writer chose their own.
+    const plainAddress = !words || words === href || words === href.replace(/\/$/, "") || /^https?:\/\//i.test(words);
+    if (plainAddress) {
+      link.textContent = info?.title || hostOf(href);
+      // Read meanwhile: the headline arrives a moment later, if the words are still the placeholder.
+      if (!info?.title) {
+        const placeholder = link.textContent;
+        void linkInfo(href).then((got) => {
+          if (got.title && link.isConnected && link.textContent === placeholder) {
+            link.textContent = got.title;
+            onChanged();
+          }
+        });
+      }
+    }
+    onChanged();
+    redraw((n) => n + 1);
+  };
+  const asText = () => {
+    delete link.dataset.link;
+    onChanged();
+    redraw((n) => n + 1);
+  };
+  const asCard = () => {
+    const cite = onStoryCard?.(href);
+    if (!cite) return;
+    const holder = document.createElement("span");
+    holder.innerHTML = citeCardHtml({ ...cite, title: info?.title || cite.title });
+    const card = holder.firstChild!;
+    link.replaceWith(card);
+    const selection = window.getSelection();
+    const after = document.createRange();
+    after.setStartAfter(card);
+    after.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(after);
+    onChanged();
+  };
+  const toggleWeb = () => {
+    if (web) link.removeAttribute("data-web");
+    else link.setAttribute("data-web", "");
+    onChanged();
+    redraw((n) => n + 1);
+  };
+  return (
+    <div className="link-bubble" style={{ top, left }} onMouseDown={keep} role="dialog" aria-label="Link">
+      <button type="button" className="link-bubble-preview" title={web ? "Open on the site" : "Open in the reader"}
+        onClick={() => openLink(href, title, web)}>
+        <span className="link-bubble-title">{title}</span>
+        <span className="link-bubble-site">{info?.site || hostOf(href)} · {web ? "opens the site ↗" : "opens in the reader"}</span>
+      </button>
+      {!cited && (
+        <div className="link-bubble-as" role="group" aria-label="Show as">
+          <button type="button" className={!chip ? "on" : ""} aria-pressed={!chip} onClick={asText}>Link</button>
+          <button type="button" className={chip ? "on" : ""} aria-pressed={chip} onClick={asChip}>Chip</button>
+          {onStoryCard && <button type="button" onClick={asCard}>Story card</button>}
+        </div>
+      )}
+      {!cited && (
+        <label className="link-bubble-web">
+          <input type="checkbox" checked={web} onChange={toggleWeb} /> Open the site, not a story
+        </label>
+      )}
+    </div>
+  );
+}
+
+/**
  * A citation chip at the caret, with a space after it so writing carries on
  * past it. Put straight into the text: the browser's insertHTML, at the end
  * of a line, sets an inline chip outside its paragraph.
@@ -419,7 +520,7 @@ export default function RichText({
   /** The quote the caret is in, and where to show its chip. */
   const [inQuote, setInQuote] = useState<{ id: string; top: number; left: number } | null>(null);
   /** The caret is in a link of the writer's own: where to offer opening it. */
-  const [inLink, setInLink] = useState<{ href: string; top: number; left: number } | null>(null);
+  const [inLink, setInLink] = useState<{ el: HTMLAnchorElement; href: string; top: number; left: number } | null>(null);
   /** Making a link: the text it goes on, and the address being typed. */
   const [linking, setLinking] = useState<{ range: Range; value: string } | null>(null);
   /**
@@ -574,12 +675,12 @@ export default function RichText({
       const anchor = window.getSelection()?.anchorNode;
       const inside = Boolean(node && anchor && node.contains(anchor));
       if (!inside && !showingLink.current) return;
-      const link = inside ? (anchor instanceof Element ? anchor : anchor!.parentElement)?.closest<HTMLAnchorElement>("a[href]") : null;
+      const link = inside ? (anchor instanceof Element ? anchor : anchor!.parentElement)?.closest<HTMLAnchorElement>("a[href]:not([data-quote]):not([data-subject])") : null;
       showingLink.current = Boolean(link && node);
       if (!link || !node) return setInLink(null);
       const box = node.parentElement!.getBoundingClientRect();
       const rect = link.getBoundingClientRect();
-      setInLink({ href: link.href, top: rect.bottom - box.top + 4, left: Math.max(0, rect.left - box.left) });
+      setInLink({ el: link, href: link.href, top: rect.bottom - box.top + 6, left: Math.max(0, rect.left - box.left) });
     };
     return el.current ? onCaret(el.current, checkLink) : undefined;
   }, []);
@@ -1342,10 +1443,18 @@ export default function RichText({
         );
       })()}
       {inLink && !linking && (
-        <a className="quote-chip link-chip" style={{ top: inLink.top, left: inLink.left }} href={inLink.href}
-          target="_blank" rel="noopener noreferrer" onMouseDown={(event) => event.preventDefault()}>
-          ↗ Open link
-        </a>
+        <LinkBubble
+          key={inLink.href}
+          link={inLink.el}
+          top={inLink.top}
+          left={inLink.left}
+          onStoryCard={onPasteLink}
+          onChanged={() => {
+            changed();
+            // The link may have become something else (a story card): look again where the caret is.
+            setInLink((now) => (now && now.el.isConnected ? { ...now } : null));
+          }}
+        />
       )}
       <div
         ref={el}
@@ -1483,15 +1592,10 @@ export default function RichText({
           // An address pasted over selected words links them, as in a Doc.
           const plain = event.clipboardData.getData("text/plain").trim();
           const selected = window.getSelection();
-          // The address of a story in the subject becomes its citation.
+          // The address of a story in the subject, pasted over words, links them to it.
           const cite = event.clipboardData.getData("text/html").includes("data-cite") ? null : citeFor(plain);
-          if (cite) {
-            if (selected && !selected.isCollapsed) document.execCommand("insertHTML", false, citeTextHtml(cite, selected.toString()));
-            else {
-              insertChip(cite);
-              // And the story comes to this tab, if it is on another one (lib/tab-place.ts).
-              onPasteLink?.(plain);
-            }
+          if (cite && selected && !selected.isCollapsed) {
+            document.execCommand("insertHTML", false, citeTextHtml(cite, selected.toString()));
             changed();
             return;
           }
@@ -1500,14 +1604,15 @@ export default function RichText({
             changed();
             return;
           }
-          // A link pasted on its own becomes a story in the subject, cited here as a chip.
-          if (onPasteLink && /^https?:\/\/\S+$/i.test(plain)) {
-            const story = onPasteLink(plain);
-            if (story) {
-              insertChip(story);
-              changed();
-              return;
-            }
+          // A link pasted on its own goes in as itself, linked, as in a Doc. Clicked,
+          // it offers to become a chip or a story card (the link bubble, below).
+          if (/^https?:\/\/\S+$/i.test(plain) && safeHref(plain)) {
+            const a = document.createElement("a");
+            a.href = plain;
+            a.textContent = plain;
+            document.execCommand("insertHTML", false, `${a.outerHTML}\u00a0`);
+            changed();
+            return;
           }
           const html = event.clipboardData.getData("text/html");
           if (html) {

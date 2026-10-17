@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons";
 import RichText, { dropCiteAt, dropEmbedAt, forceNextHtml, ToolbarIdle, ToolsHostContext } from "./RichText";
+import { LINK_OPEN_EVENT } from "@/lib/link-chip";
 import { CITE_OPEN_EVENT, CITE_TYPE, citeCardHtml, citeChipHtml, inlineCardLinks, setCiteSources, type Cite } from "@/lib/cite";
 import FlagButton from "./FlagButton";
 import type { FlagInput } from "@/lib/flags";
@@ -1352,7 +1353,18 @@ export default function SubjectPage(props: Props) {
       props.onOpenArticle(card?.link ?? href, card?.title ?? "", "");
     };
     window.addEventListener(CITE_OPEN_EVENT, open);
-    return () => window.removeEventListener(CITE_OPEN_EVENT, open);
+    // A link in the writing opened from its bubble: in the reader, as a story is (lib/link-chip.ts).
+    const openLinked = (event: Event) => {
+      const { href, title } = (event as CustomEvent<{ href: string; title: string }>).detail;
+      event.preventDefault();
+      const card = allCards.find((c) => c.id === canonicalUrl(href));
+      props.onOpenArticle(card?.link ?? href, card?.title ?? title, "");
+    };
+    window.addEventListener(LINK_OPEN_EVENT, openLinked);
+    return () => {
+      window.removeEventListener(CITE_OPEN_EVENT, open);
+      window.removeEventListener(LINK_OPEN_EVENT, openLinked);
+    };
   });
   /** Take the reader to an outline entry: scrolled to in the document, panned to on the whiteboard. */
   const goTo = (entry: OutlineEntry) => {

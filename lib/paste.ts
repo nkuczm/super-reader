@@ -117,6 +117,45 @@ function indentParagraphs(root: DocumentFragment | Element, doc: Document) {
   }
 }
 
+/**
+ * Google Docs' smart chips — a YouTube video, a file, a place — come on the
+ * clipboard as a link wrapped round an icon and the item's name. They come
+ * in here as chips: the name, linked, marked to show as one (lib/link-chip.ts).
+ */
+function chipsFromDocs(root: DocumentFragment | Element) {
+  for (const a of Array.from(root.querySelectorAll<HTMLAnchorElement>("a[href]"))) {
+    const marked = Array.from(a.attributes).some((attr) => /chip/i.test(attr.name) || /chip/i.test(attr.value))
+      || !!a.closest("[class*=chip], [data-chip], [data-smart-chip]");
+    if (!a.querySelector("img") && !marked) continue;
+    a.querySelectorAll("img").forEach((img) => img.remove());
+    const words = (a.textContent ?? "").replace(/\s+/g, " ").trim();
+    a.textContent = words || a.getAttribute("href") || "";
+    a.setAttribute("data-link", "chip");
+  }
+}
+
+/** What an element may keep through the clean: everything else is Docs' bookkeeping. */
+const KEEP = new Set(["href", "title", "type", "start", "data-link", "data-cite", "data-quote", "data-subject", "data-embed", "data-w", "data-check", "data-checked", "data-mark"]);
+
+/**
+ * Every attribute Docs adds that nothing reads — ids, classes, the styles
+ * already turned into tags — taken off. They were most of a Docs paste's
+ * size, and the sanitiser keeps only the first stretch of what it is given
+ * (MAX_HTML), so a long or chip-heavy paste was cut off partway through.
+ */
+function stripAttributes(root: DocumentFragment | Element) {
+  for (const el of Array.from(root.querySelectorAll("*"))) {
+    for (const attr of Array.from(el.attributes)) {
+      // A span's formatting has already been turned into tags (styleToTags), so its style goes too.
+      if (!KEEP.has(attr.name)) el.removeAttribute(attr.name);
+    }
+  }
+  // A span that says nothing is only its words.
+  for (const span of Array.from(root.querySelectorAll("span"))) {
+    if (!span.attributes.length) unwrap(span);
+  }
+}
+
 export function cleanPastedHtml(html: string, doc: Document = document): string {
   const template = doc.createElement("template");
   template.innerHTML = html;
@@ -138,6 +177,8 @@ export function cleanPastedHtml(html: string, doc: Document = document): string 
   indentParagraphs(root, doc);
   // Line items: <li><p>words</p></li> reads better as <li>words</li>.
   for (const p of Array.from(root.querySelectorAll("li > p"))) unwrap(p);
+  chipsFromDocs(root);
+  stripAttributes(root);
 
   const holder = doc.createElement("div");
   holder.appendChild(root);

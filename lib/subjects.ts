@@ -1279,7 +1279,10 @@ export function sanitizeRichText(html: string): string {
       const href = safeHref(match[2].match(/href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i)?.slice(1).find(Boolean));
       if (!href) continue;
       stack.push("a");
-      out.push(`<a href="${href}" target="_blank" rel="noopener noreferrer">`);
+      // Shown as a chip (lib/link-chip.ts), and opened on the site itself rather than in the reader.
+      const chip = /\bdata-link=["']?chip\b/.test(match[2]) ? ` data-link="chip"` : "";
+      const web = /\bdata-web\b/.test(match[2]) ? ` data-web=""` : "";
+      out.push(`<a href="${href}"${chip}${web} target="_blank" rel="noopener noreferrer">`);
       continue;
     }
     if (tag === "br") {

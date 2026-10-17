@@ -27,3 +27,25 @@ test("ordinary pasted HTML with real nested lists passes through", () => {
   const html = cleanPastedHtml("<ul><li>One<ul><li>Two</li></ul></li></ul><script>x()</script>", document);
   assert.equal(html, "<ul><li>One<ul><li>Two</li></ul></li></ul>");
 });
+
+// A Google Docs paste is mostly inline styles and ids; a smart chip adds an
+// icon and more of the same. All of it once counted against the sanitiser's
+// size cap, so a long paste — or one with a YouTube chip — stopped partway.
+const docsLine = (n: number) =>
+  `<p dir="ltr" style="line-height:1.38;margin-top:0pt;margin-bottom:0pt;" id="h.${n}"><span style="font-size:11pt;font-family:Arial,sans-serif;color:#000000;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;white-space:pre-wrap;">Paragraph number ${n} of the pasted document.</span></p>`;
+const YOUTUBE_CHIP = `<p dir="ltr" style="line-height:1.38;"><a href="https://www.youtube.com/watch?v=abc123" class="docs-chip" style="text-decoration:none;"><span style="font-size:11pt;"><img src="https://www.gstatic.com/youtube-icon.png" width="16" height="16" style="vertical-align:middle;"></span><span style="font-size:11pt;color:#1155cc;">How transformers work</span></a></p>`;
+
+test("a long Google Docs paste with a YouTube chip comes through whole, the chip as a chip", () => {
+  const lines = Array.from({ length: 60 }, (_, i) => docsLine(i + 1));
+  const source = `<meta charset="utf-8"><b style="font-weight:normal;" id="docs-internal-guid-9">${lines.slice(0, 30).join("")}${YOUTUBE_CHIP}${lines.slice(30).join("")}</b>`;
+  assert.ok(source.length > 20_000, "longer than the sanitiser keeps");
+  const html = cleanPastedHtml(source, document);
+  assert.match(html, /Paragraph number 60 of the pasted document\./, "nothing after the chip is lost");
+  assert.match(html, /<a href="https:\/\/www\.youtube\.com\/watch\?v=abc123" data-link="chip"[^>]*>How transformers work<\/a>/);
+  assert.doesNotMatch(html, /<img|style=|class=|id=/);
+});
+
+test("an ordinary pasted link stays an ordinary link", () => {
+  const html = cleanPastedHtml(`<p>See <a href="https://example.com/a" style="color:blue">this</a>.</p>`, document);
+  assert.equal(html, `<p>See <a href="https://example.com/a" target="_blank" rel="noopener noreferrer">this</a>.</p>`);
+});
