@@ -3507,10 +3507,8 @@
 }
 .link-bubble-as button:hover { border-color: var(--accent); }
 .link-bubble-as button.on { background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: var(--accent); color: var(--accent); font-weight: 600; }
-.link-bubble-web { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); padding: 0 2px 2px; cursor: pointer; }
 /* The choice the arrows are on. */
 .link-bubble .kbd { outline: 2px solid var(--accent); outline-offset: 1px; }
-.link-bubble-web.kbd { border-radius: 6px; }
 
 /* ---------- the document: Insert, divider lines, starting to write ---------- */
 .doc-insert { order: 20; margin-left: auto; display: flex; align-items: center; padding-left: 8px; }
@@ -3572,11 +3570,12 @@
 .link-bubble { min-width: min(260px, 86vw); }
 .rt-menu .rt-style-h { font-size: 17px; font-weight: 750; }
 .rt-menu .rt-style-sh { font-size: 14.5px; font-weight: 700; }
-.link-bubble-unlink {
-  align-self: flex-start; font: inherit; font-size: 12.5px; color: var(--text-dim); background: none; border: 0;
+.link-bubble-actions { display: flex; flex-wrap: wrap; gap: 2px; }
+.link-bubble-action {
+  font: inherit; font-size: 12.5px; color: var(--text-dim); background: none; border: 0;
   padding: 2px 4px; border-radius: 6px; cursor: pointer;
 }
-.link-bubble-unlink:hover, .link-bubble-unlink.kbd { color: var(--text); background: var(--bg-hover); }
+.link-bubble-action:hover, .link-bubble-action.kbd { color: var(--text); background: var(--bg-hover); }
 
 /* Room above the first block to click into, for writing above it. */
 .subject-doc { padding-top: 28px; }
