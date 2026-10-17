@@ -93,7 +93,7 @@ import { useHeadroom } from "./useHeadroom";
 import { useSubjectViewing } from "./useSubjectViewing";
 import MoreMenu from "./MoreMenu";
 import { arriveOnTab } from "@/lib/tab-place";
-import { fileUnder, headerOf, insertAfter, splitAtHeadings } from "@/lib/doc-sections";
+import { closeGap, fileUnder, headerOf, insertAfter, moveSection as moveSectionIn, moveTargets, sectionRun, splitAtHeadings } from "@/lib/doc-sections";
 import { hint, markUsed } from "@/lib/first-use";
 
 type Props = {
@@ -1038,10 +1038,12 @@ export default function SubjectPage(props: Props) {
       || (i.kind === "pos" && gone.has((i as PosItem).target))
       || (i.kind === "link" && (gone.has((i as LinkItem).from) || gone.has((i as LinkItem).to))));
     if (!items.length) return false;
+    // What read right after a removed block keeps its place; put back, it reads after that block again.
+    const followers = live(board).filter((i) => (i.kind === "box" || i.kind === "story") && (i as BoxItem).after && gone.has((i as BoxItem).after!) && !gone.has(i.id));
     // Put back where it was: a story keeps when it first arrived, which orders the document.
     const putBack = (b: Board | undefined) =>
-      items.reduce((n, i) => put(n, i.kind === "story" ? { ...i, since: (i as StoryItem).since ?? i.at, at: Date.now() } : { ...i, at: Date.now() }), b ?? {});
-    const takeAway = (b: Board | undefined) => items.reduce((n, i) => remove(n, i.id), b ?? {});
+      [...items, ...followers].reduce((n, i) => put(n, i.kind === "story" ? { ...i, since: (i as StoryItem).since ?? i.at, at: Date.now() } : { ...i, at: Date.now() }), b ?? {});
+    const takeAway = (b: Board | undefined) => items.reduce((n, i) => remove(n, i.id), closeGap(b, gone));
     recordOp({ undo: putBack, redo: takeAway });
     onBoard(takeAway);
     return true;
@@ -1067,6 +1069,10 @@ export default function SubjectPage(props: Props) {
       redo: (b) => ops.reduce((x, o) => o.redo(x), b ?? {}),
       ...(alsos.length ? { also: { undo: () => [...alsos].reverse().forEach((a) => a.undo()), redo: () => alsos.forEach((a) => a.redo()) } } : {}),
     });
+  };
+  /** The last few steps left off the history: they undid each other, so ⌘Z has nothing to take back. */
+  const forgetSteps = (n: number) => {
+    history.current.past.splice(-n);
   };
   /**
    * Any change to the board, undoable: each item it touches is kept as it
@@ -1144,7 +1150,13 @@ export default function SubjectPage(props: Props) {
     };
   }, [onBoard]);
 
-  const pasteBlocks = (copied: CopiedBlocks, after: string | null) => {
+  /**
+   * Blocks from the clipboard, reading in order after a block (or at the
+   * end). In the document (`doc`) they go in as writing does: what read
+   * after that block reads after them, each is filed under the header above
+   * it, and a header among them takes the writing below, up to the next.
+   */
+  const pasteBlocks = (copied: CopiedBlocks, after: string | null, doc?: { section: string | null; following?: string[]; before?: string }) => {
     recorded((current) => {
       let next = current ?? {};
       const now = Date.now();
@@ -1163,7 +1175,8 @@ export default function SubjectPage(props: Props) {
           if (block.note) next = put(next, { id: cardNoteId(id), kind: "cardnote", card: id, html: block.note, at: now }, now);
         } else {
           id = newItemId("box");
-          next = put(next, { ...block.box!, id, kind: "box", ...(prev ? { after: prev } : {}), at: now }, now);
+          const top = !prev && doc?.before ? { before: doc.before } : {};
+          next = put(next, { ...block.box!, id, kind: "box", ...(prev ? { after: prev } : {}), ...top, at: now }, now);
         }
         // The tab being looked at, even for a card cut from another one (its old place is still on record).
         next = placeOn(next, id, activeTabOf(next), now);
@@ -1173,6 +1186,33 @@ export default function SubjectPage(props: Props) {
       for (const [a, b] of copied.links) {
         const [from, to] = [ids[a], ids[b]].sort();
         if (from && to && from !== to) next = put(next, { id: `link:${from}|${to}`, kind: "link", from, to, at: now }, now);
+      }
+      if (!doc || !ids.length) return next;
+      const pasted = new Set([...ids, ...ids.map((id) => `story:${id}`)]);
+      const last = ids[ids.length - 1];
+      if (after) {
+        for (const item of live(next)) {
+          if ((item.kind !== "box" && item.kind !== "story") || pasted.has(item.id) || (item as BoxItem).after !== after) continue;
+          const since = item.kind === "story" ? { since: (item as StoryItem).since ?? item.at } : {};
+          next = put(next, { ...item, ...since, after: last, at: now } as BoxItem, now);
+        }
+      }
+      let section = doc.section;
+      for (const id of ids) {
+        const held = next[id];
+        const label = held?.kind === "box" && (held as BoxItem).label;
+        if (label && !(held as BoxItem).sub) section = id;
+        else {
+          next = fileUnder(next, id, section, now);
+          if (label) section = id;
+        }
+      }
+      if (section !== doc.section) {
+        const newSub = Boolean((next[section!] as BoxItem | undefined)?.sub);
+        for (const id of doc.following ?? []) {
+          const held = next[id];
+          if (!(held && held.kind === "box" && (held as BoxItem).label) || !newSub) next = fileUnder(next, id, section, now);
+        }
       }
       return next;
     });
@@ -1238,6 +1278,25 @@ export default function SubjectPage(props: Props) {
     return ids;
   };
 
+  /**
+   * A header moved in the document with what reads under it, to read right
+   * before `to` (null: the end), given the document's order as it reads now
+   * (lib/doc-sections.ts). One step to undo. False when nothing moved.
+   */
+  const moveSection = (id: string, to: string | null, order: string[]) => {
+    if (!moveSectionIn(board, order, id, to)) return false;
+    recorded((current) => {
+      let next = current ?? {};
+      const now = Date.now();
+      // A story known only from its quotes is given a story of its own, to hold its place.
+      for (const card of cards) {
+        if (order.includes(card.id) && !next[`story:${card.id}`]) next = addStory(next, { link: card.link, title: card.title, source: card.source }, now);
+      }
+      return moveSectionIn(next, order, id, to, now) ?? current ?? {};
+    });
+    return true;
+  };
+
   const joinBlocks = (into: string, from: string, html: string) =>
     recorded((current) => {
       const held = current?.[into];
@@ -1294,9 +1353,11 @@ export default function SubjectPage(props: Props) {
     addBoxAfter,
     recorded,
     mergeSteps,
+    forgetSteps,
     pasteBlocks,
     joinBlocks,
     docInsert,
+    moveSection,
     splitHeadings: (box: BoxItem, html: string, section: string | null, following: string[]) => {
       const split = splitAtHeadings(html, document);
       if (!split) return false;
@@ -1485,6 +1546,20 @@ export default function SubjectPage(props: Props) {
       window.removeEventListener(LINK_OPEN_EVENT, openLinked);
     };
   });
+  /** A header dragged in the outline: the places it can go among the outline's headers, and the move. */
+  const sectionMoves = (id: string) => {
+    const order = [...readOrder.entries()].sort((a, b) => a[1] - b[1]).map(([key]) => key);
+    const labels = new Set(boxes.filter((box) => box.label).map((box) => box.id));
+    const targets = moveTargets(board, order, id).filter((t) => t === null || labels.has(t));
+    return {
+      targets,
+      drop: (to: string | null) => {
+        if (!moveSection(id, to, order)) return;
+        const entry = outline.find((e) => e.id === id && e.n === -1);
+        if (entry) requestAnimationFrame(() => requestAnimationFrame(() => goTo(entry)));
+      },
+    };
+  };
   /** Take the reader to an outline entry: scrolled to in the document, panned to on the whiteboard. */
   const goTo = (entry: OutlineEntry) => {
     if (window.innerWidth <= 900) setRailOpen(false);
@@ -1878,6 +1953,7 @@ export default function SubjectPage(props: Props) {
               outline={outline}
               activeOutline={activeHeading}
               onGo={goTo}
+              sectionMoves={meta.view === "board" ? undefined : sectionMoves}
             />
           </>
       </div>
@@ -2017,8 +2093,11 @@ type Shared = {
   recorded: (update: (b: Board | undefined) => Board) => void;
   /** The last few steps taken back together. */
   mergeSteps: (n: number) => void;
-  /** Blocks from the clipboard, on this tab, reading in order after a block (or at the end). */
-  pasteBlocks: (blocks: CopiedBlocks, after: string | null) => void;
+  forgetSteps: (n: number) => void;
+  /** Blocks from the clipboard, on this tab, reading in order after a block (or at the end); in the document, filed as writing is. */
+  pasteBlocks: (blocks: CopiedBlocks, after: string | null, doc?: { section: string | null; following?: string[]; before?: string }) => void;
+  /** A header moved in the document with what reads under it, before `to` (null: the end). False when nothing moved. */
+  moveSection: (id: string, to: string | null, order: string[]) => boolean;
   /** One text block joined onto the end of another: one step, undone as one. */
   joinBlocks: (into: string, from: string, html: string) => void;
   /** Blocks put into the document below another, filed under the header above them (see docInsert). */
@@ -2802,8 +2881,40 @@ function useDocKeys(
       const { shared: s } = latest.current;
       const id = block.dataset.item!;
       const card = s.cards.find((c) => c.id === id);
-      if (card) s.removeStory(card);
-      else s.removeCards([id]);
+      if (card) return s.removeStory(card);
+      // A header taken out: what was written under it reads under the header above now, on the whiteboard too.
+      const members = isLabelBlock(block) ? blocksBelow(block) : [];
+      const above = sectionAbove(block.previousElementSibling as HTMLElement | null);
+      s.removeCards([id]);
+      if (!members.length) return;
+      s.recorded((b) => members.reduce((n, m) => fileUnder(n, m, above), b ?? {}));
+      s.mergeSteps(2);
+    };
+    /**
+     * A header's section moved up or down past the next place it can go
+     * (lib/doc-sections.ts), with the caret kept in the header.
+     */
+    const moveBy = (block: HTMLElement, by: -1 | 1) => {
+      const { shared: s } = latest.current;
+      const order = blocks().map((b) => b.dataset.item!);
+      const id = block.dataset.item!;
+      const targets = moveTargets(s.board, order, id);
+      const below = order[order.indexOf(id) + sectionRun(s.board, order, id).length] ?? null;
+      const at = targets.indexOf(below);
+      const to = targets[at + by];
+      if (at < 0 || to === undefined) return;
+      const label = editorOf(block);
+      const caret = label instanceof HTMLInputElement ? [label.selectionStart ?? 0, label.selectionEnd ?? 0] : null;
+      if (!s.moveSection(id, to, order)) return;
+      // Moved in the page, a field can lose the caret: it goes back where it was.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const moved = blockOf(id);
+        const input = moved && editorOf(moved);
+        if (!(input instanceof HTMLInputElement)) return;
+        input.focus({ preventScroll: true });
+        if (caret) input.setSelectionRange(caret[0], caret[1]);
+        moved!.scrollIntoView({ block: "nearest" });
+      }));
     };
     /** Write on right after a block: a new text box that reads below it. */
     const writeAfter = (block: HTMLElement) => {
@@ -2842,8 +2953,18 @@ function useDocKeys(
     };
 
     const key = (event: KeyboardEvent) => {
-      if (event.altKey || event.isComposing) return;
       const target = event.target as HTMLElement;
+      // ⌥⇧↑ / ⌥⇧↓ on a header: its section moves up or down, writing and all.
+      if (event.altKey && event.shiftKey && !event.metaKey && !event.ctrlKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+        const block = target.closest<HTMLElement>("[data-item]");
+        if (block && block.parentElement === root && isLabelBlock(block)) {
+          event.preventDefault();
+          event.stopPropagation();
+          moveBy(block, event.key === "ArrowUp" ? -1 : 1);
+          return;
+        }
+      }
+      if (event.altKey || event.isComposing) return;
       const chosen = latest.current.picked;
       const done = () => {
         event.preventDefault();
@@ -3036,8 +3157,17 @@ function useDocKeys(
       });
       return spots;
     };
+    /** A header whose words are all selected: copied (or cut) as the header itself. */
+    const wholeLabel = () => {
+      const input = document.activeElement;
+      if (!(input instanceof HTMLInputElement) || !input.classList.contains("section-label") || !input.value.trim()) return null;
+      const block = input.closest<HTMLElement>("[data-item]");
+      if (!block || block.parentElement !== root) return null;
+      return input.selectionStart === 0 && input.selectionEnd === input.value.length ? block : null;
+    };
     const copy = (event: ClipboardEvent, cut: boolean) => {
-      const ids = selectedNow(event);
+      const label = selectedNow(event).length ? null : wholeLabel();
+      const ids = label ? [label.dataset.item!] : selectedNow(event);
       if (!ids.length) return;
       const { shared: s } = latest.current;
       const copied = blocksFor(s.board, s.cards, ids, positions());
@@ -3051,6 +3181,12 @@ function useDocKeys(
         const run = ids.map(blockOf).filter((b): b is HTMLElement => !!b);
         clear();
         for (const b of run) removeBlock(b);
+        // The caret carries on where the header was.
+        if (label) {
+          const before = neighbour(label, -1);
+          const after = neighbour(label, 1);
+          requestAnimationFrame(() => enter(before, true) || enter(after, false));
+        }
       }
     };
     const paste = (event: ClipboardEvent) => {
@@ -3059,8 +3195,10 @@ function useDocKeys(
       // In the document, on nothing in particular (an empty tab, say), or on selected blocks.
       const nowhere = !t || t === document.body || t === document.documentElement;
       if (!inDoc && !nowhere && !latest.current.picked.length) return;
+      // An empty header takes blocks pasted into it; one with words in it is written in.
+      const emptyLabel = t instanceof HTMLInputElement && t.classList.contains("section-label") && !t.value.trim();
       // Writing in a table or transcript keeps its own paste.
-      if (t?.closest?.(".tbl, .transcript, .sheet, input, textarea")) return;
+      if (!emptyLabel && t?.closest?.(".tbl, .transcript, .sheet, input, textarea")) return;
       const custom = event.clipboardData?.getData(BLOCKS_TYPE);
       const plain = event.clipboardData?.getData("text/plain") ?? "";
       // Without the custom type (some browsers drop it), the blocks last copied here — if the text is theirs.
@@ -3069,10 +3207,65 @@ function useDocKeys(
       if (!copied) return;
       event.preventDefault();
       event.stopPropagation();
-      const picked = latest.current.picked;
-      const host = picked.length ? blockOf(picked[picked.length - 1]) : t?.closest<HTMLElement>("[data-item]") ?? null;
+      const { shared: s, picked } = latest.current;
+      let host = picked.length ? blockOf(picked[picked.length - 1]) : t?.closest<HTMLElement>("[data-item]") ?? null;
+      if (host && host.parentElement !== root) host = null;
       clear();
-      latest.current.shared.pasteBlocks(copied, host?.parentElement === root ? host.dataset.item! : null);
+      if (!host) {
+        const last = blocks().at(-1) ?? null;
+        return s.pasteBlocks(copied, last?.dataset.item ?? null, { section: sectionAbove(last) });
+      }
+      const id = host.dataset.item!;
+      const section = sectionAbove(host);
+      // Into an empty line (or an empty header): the blocks take its place.
+      const replace = () => {
+        s.pasteBlocks(copied, id, { section: sectionAbove(host.previousElementSibling as HTMLElement | null), following: blocksBelow(host) });
+        s.removeCards([id]);
+        s.mergeSteps(2);
+      };
+      if (emptyLabel) return replace();
+      // Writing in a text box: the blocks go in at the caret, as pasted paragraphs do in a Doc.
+      const body = !picked.length && isText(host) ? editorOf(host) : null;
+      const sel = window.getSelection();
+      if (!body || body instanceof HTMLInputElement || !sel?.rangeCount || !body.contains(sel.anchorNode)) {
+        return s.pasteBlocks(copied, id, { section, following: blocksBelow(host) });
+      }
+      const range = sel.getRangeAt(0);
+      if (!range.collapsed) {
+        range.deleteContents();
+        // What was selected is replaced, as a paste does: the box keeps that.
+        body.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      const side = (start: boolean) => {
+        const part = document.createRange();
+        part.selectNodeContents(body);
+        if (start) part.setEnd(range.startContainer, range.startOffset);
+        else part.setStart(range.startContainer, range.startOffset);
+        return part;
+      };
+      const holds = (part: Range) => {
+        const holder = document.createElement("div");
+        holder.appendChild(part.cloneContents());
+        return !isEmptyText(holder);
+      };
+      const head = holds(side(true));
+      const tail = holds(side(false));
+      if (!head && !tail) return replace();
+      if (!head) {
+        // At the start of the writing: the blocks go in above it.
+        const above = neighbour(host, -1);
+        return s.pasteBlocks(copied, above?.dataset.item ?? null, { section: sectionAbove(above), following: [id, ...blocksBelow(host)], ...(above ? {} : { before: id }) });
+      }
+      if (!tail) return s.pasteBlocks(copied, id, { section, following: blocksBelow(host) });
+      // In the middle: the writing is cut there, and what followed the caret reads after the blocks.
+      const holder = document.createElement("div");
+      holder.appendChild(side(false).extractContents());
+      holder.querySelectorAll("p:empty, div:empty, li:empty").forEach((el) => el.remove());
+      body.querySelectorAll(":scope > p:empty, :scope > div:empty").forEach((el) => el.remove());
+      forceNextHtml();
+      const [rest] = s.docInsert(id, [{ html: holder.innerHTML }], { section, keep: { id, html: body.innerHTML } });
+      s.pasteBlocks(copied, id, { section, following: [rest, ...blocksBelow(host)] });
+      s.mergeSteps(2);
     };
     const onCopy = (e: ClipboardEvent) => copy(e, false);
     const onCut = (e: ClipboardEvent) => copy(e, true);
@@ -3144,21 +3337,21 @@ function DocumentView(
    * filed under the header it lands below. A header takes the blocks below
    * it, up to the next header.
    */
-  const insertAfterBlock = (block: HTMLElement | null | "top", extra: Partial<BoxItem>) => {
+  const insertAfterBlock = (block: HTMLElement | null | "top", extra: Partial<BoxItem>): string[] => {
     if (block === "top") return insertAtTop(extra);
     const last = block ?? [...(docEl?.querySelectorAll<HTMLElement>(":scope > [data-item]") ?? [])].at(-1) ?? null;
-    shared.docInsert(last?.dataset.item ?? null, [extra], { section: sectionAbove(last), following: extra.label ? blocksBelow(last) : [] });
+    return shared.docInsert(last?.dataset.item ?? null, [extra], { section: sectionAbove(last), following: extra.label ? blocksBelow(last) : [] });
   };
   /**
    * A block put in above everything, from a click above the first block: it
    * reads before that block. A header put in there takes the writing below
    * it, up to the next header, as anywhere else.
    */
-  const insertAtTop = (extra: Partial<BoxItem>) => {
+  const insertAtTop = (extra: Partial<BoxItem>): string[] => {
     const first = docEl?.querySelector<HTMLElement>(":scope > [data-item]") ?? null;
     if (!first?.dataset.item) return shared.docInsert(null, [extra], { section: null });
     const following = extra.label && !isLabelBlock(first) ? [first.dataset.item, ...blocksBelow(first)] : [];
-    shared.docInsert(null, [extra], { section: null, before: first.dataset.item, following });
+    return shared.docInsert(null, [extra], { section: null, before: first.dataset.item, following });
   };
   /**
    * A divider line, put in from the Insert menu: the text box the caret is
@@ -3243,15 +3436,56 @@ function DocumentView(
     if (!block && first) {
       event.preventDefault();
       const firstBody = first.querySelector<HTMLElement>(".subject-box.text-box .rich-body");
-      if (firstBody && isEmptyText(firstBody)) return caretTo(firstBody, false);
-      return insertAtTop({});
+      if (firstBody && isEmptyText(firstBody)) {
+        firstClick.current = { at: Date.now(), where: "top", into: first };
+        return caretTo(firstBody, false);
+      }
+      firstClick.current = { at: Date.now(), where: "top", made: insertAtTop({})[0] };
+      return;
     }
     if (!block || event.clientY - block.getBoundingClientRect().bottom > 40) return;
+    event.preventDefault();
+    // Under an empty line: written in, rather than another put below it.
+    const ownBody = block.querySelector<HTMLElement>(".subject-box.text-box .rich-body");
+    if (ownBody && isEmptyText(ownBody)) {
+      firstClick.current = { at: Date.now(), where: block, into: block };
+      return caretTo(ownBody, false);
+    }
     const next = block.nextElementSibling as HTMLElement | null;
     const nextBody = next?.dataset.item ? next.querySelector<HTMLElement>(".subject-box.text-box .rich-body") : null;
+    if (nextBody && isEmptyText(nextBody)) {
+      firstClick.current = { at: Date.now(), where: block, into: next ?? undefined };
+      return caretTo(nextBody, false);
+    }
+    firstClick.current = { at: Date.now(), where: block, made: insertAfterBlock(block, {})[0] };
+  };
+  /**
+   * The first click of a double-click in the page's space has already
+   * started writing there (above). The double-click asks what to put there
+   * instead: the empty text box that click made goes again, and the menu
+   * opens for that spot.
+   */
+  const firstClick = useRef<{ at: number; where: HTMLElement | "top"; made?: string; into?: HTMLElement } | null>(null);
+  const doubleClick = (event: React.MouseEvent) => {
+    const click = firstClick.current;
+    firstClick.current = null;
+    const target = event.target as HTMLElement;
+    const fresh = click && Date.now() - click.at < 800;
+    if (!fresh) return open(event);
+    const made = click.made ? docEl?.querySelector<HTMLElement>(`:scope > [data-item="${CSS.escape(click.made)}"]`) : null;
+    // A double-click in writing that was already there is the writing's own (a word selected).
+    if (target !== event.currentTarget && !made?.contains(target) && !click.into?.contains(target)) return;
     event.preventDefault();
-    if (nextBody && isEmptyText(nextBody)) return caretTo(nextBody, false);
-    insertAfterBlock(block, {});
+    if (click.made) {
+      const body = made?.querySelector<HTMLElement>(".rich-body");
+      if (!body || isEmptyText(body)) {
+        shared.removeCards([click.made]);
+        shared.forgetSteps(2);
+      }
+    }
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    setMenuAfter(click.where);
+    setMenu({ left: Math.min(event.clientX, window.innerWidth - 220), top: Math.min(event.clientY, window.innerHeight - 320) });
   };
   // The latest board, for an editor saving on its way out after its box became a header.
   const boardRef = useRef(shared.board);
@@ -3294,6 +3528,90 @@ function DocumentView(
     document.addEventListener("paste", paste);
     return () => document.removeEventListener("paste", paste);
   });
+  /**
+   * A header dragged by its grip, its section with it: a line shows where it
+   * would go — only between sections (lib/doc-sections.ts, moveTargets) —
+   * and the page scrolls when the pointer nears its top or bottom edge.
+   */
+  const [moving, setMoving] = useState<{ run: string[]; line: { top: number; left: number; width: number } | null } | null>(null);
+  const startMove = (event: React.PointerEvent, id: string) => {
+    if (event.button !== 0 || !docEl) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const doc = docEl;
+    const els = () => [...doc.querySelectorAll<HTMLElement>(":scope > [data-item]")];
+    const order = els().map((b) => b.dataset.item!);
+    const targets = moveTargets(shared.board, order, id);
+    const run = sectionRun(shared.board, order, id);
+    if (!targets.length) return;
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    const scroller = doc.closest<HTMLElement>(".main");
+    let y = event.clientY;
+    let to: string | null | undefined;
+    // The spot nearest the pointer: just above the block it would read before, or below the last.
+    const aim = () => {
+      const all = els();
+      const half = 7;
+      let best: { to: string | null; at: number; r: DOMRect } | null = null;
+      for (const t of targets) {
+        const el = t === null ? all.at(-1) : all.find((b) => b.dataset.item === t);
+        if (!el) continue;
+        const r = el.getBoundingClientRect();
+        const at = t === null ? r.bottom + half : r.top - half;
+        if (!best || Math.abs(at - y) < Math.abs(best.at - y)) best = { to: t, at, r };
+      }
+      to = best?.to;
+      const box = doc.getBoundingClientRect();
+      setMoving({ run, line: best ? { top: best.at - box.top, left: best.r.left - box.left, width: best.r.width } : null });
+    };
+    let frame = 0;
+    const tick = () => {
+      frame = 0;
+      if (!scroller) return;
+      const r = scroller.getBoundingClientRect();
+      const edge = 56;
+      const speed = y < r.top + edge ? -(r.top + edge - y) / 3 : y > r.bottom - edge ? (y - (r.bottom - edge)) / 3 : 0;
+      if (!speed) return;
+      scroller.scrollTop += speed;
+      aim();
+      frame = requestAnimationFrame(tick);
+    };
+    const move = (e: PointerEvent) => {
+      y = e.clientY;
+      aim();
+      if (!frame) frame = requestAnimationFrame(tick);
+    };
+    const end = (drop: boolean) => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("keydown", esc, true);
+      document.body.classList.remove("doc-dragging");
+      setMoving(null);
+      if (!drop || to === undefined || !shared.moveSection(id, to, order)) return;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const moved = doc.querySelector<HTMLElement>(`:scope > [data-item="${CSS.escape(id)}"]`);
+        if (!moved) return;
+        moved.scrollIntoView({ block: "nearest" });
+        flashEl(moved);
+      }));
+    };
+    const up = () => end(true);
+    const cancel = () => end(false);
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      end(false);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+    window.addEventListener("keydown", esc, true);
+    document.body.classList.add("doc-dragging");
+    aim();
+  };
   const holdRef = useRef<{ x: number; y: number; timer: ReturnType<typeof setTimeout> } | null>(null);
   // The document written from the keyboard; a story, table or picture selected whole.
   const [picked, setPicked] = useState<string[]>([]);
@@ -3307,12 +3625,13 @@ function DocumentView(
   // Sections read as they do on the whiteboard: each header, then what is linked to it.
   const byId = new Map(entries.map((e) => [e.id, e]));
   const stack = documentOrder(entries, shared.board).map((id) => byId.get(id)!);
+  const headers = new Set(shared.boxes.filter((b) => b.label).map((b) => b.id));
   // A divider line where one was put in from the Insert menu, and nowhere else.
   const dividers = new Set(shared.boxes.filter((b) => b.divider).map((b) => b.id));
   const divided = new Set(stack.filter((entry, i) => i > 0 && dividers.has(entry.id)).map((entry) => entry.id));
 
   return (
-    <div className="subject-doc" ref={setDocEl} onContextMenu={open} onDoubleClick={open} onMouseDown={clickBelow}
+    <div className="subject-doc" ref={setDocEl} onContextMenu={open} onDoubleClick={doubleClick} onMouseDown={clickBelow}
       // A picture dragged in from the desktop or a screenshot's preview: added right below the
       // block it is let go on, or at the end. (Over writing, the writing takes it in instead.)
       onDragOver={(event) => {
@@ -3418,7 +3737,14 @@ function DocumentView(
       )}
       {stack.map((entry) => (
         <div key={entry.key} data-item={entry.key} tabIndex={-1}
-          className={[shared.tags.lit ? (shared.tags.lit.has(entry.id) ? "tag-lit" : "tag-dim") : "", picked.includes(entry.key) ? "doc-picked" : "", divided.has(entry.id) ? "doc-divided" : ""].filter(Boolean).join(" ") || undefined}>
+          className={[shared.tags.lit ? (shared.tags.lit.has(entry.id) ? "tag-lit" : "tag-dim") : "", picked.includes(entry.key) ? "doc-picked" : "", divided.has(entry.id) ? "doc-divided" : "", moving?.run.includes(entry.id) ? "doc-moving" : ""].filter(Boolean).join(" ") || undefined}>
+          {headers.has(entry.id) && (
+            <button type="button" className="doc-grip" aria-label="Move this section"
+              title="Drag to move this section and its writing (or ⌥⇧↑ / ⌥⇧↓)"
+              onPointerDown={(e) => startMove(e, entry.id)}>
+              <span aria-hidden="true">⋮⋮</span>
+            </button>
+          )}
           {entry.node}
           {picked[picked.length - 1] === entry.key && (
             <div className="doc-picked-hint" aria-live="polite">
@@ -3427,6 +3753,7 @@ function DocumentView(
           )}
         </div>
       ))}
+      {moving?.line && <div className="doc-drop-line" style={moving.line} aria-hidden="true" />}
       {apart.length > 0 && (
         <div className="subject-insights-card">
           <div className="subject-insights-head">✦ Across your stories</div>
@@ -4990,11 +5317,14 @@ function TabBar({
   outline = [],
   activeOutline = -1,
   onGo,
+  sectionMoves,
 }: {
   outline?: OutlineEntry[];
   /** The heading being read, lit as the document scrolls. */
   activeOutline?: number;
   onGo?: (entry: OutlineEntry) => void;
+  /** Where a header can be dragged to in the outline (each the header it would go above, or null: the end), and the move. */
+  sectionMoves?: (id: string) => { targets: (string | null)[]; drop: (to: string | null) => void } | null;
   tabs: Tab[];
   current: string;
   onSwitch: (tab: string) => void;
@@ -5008,6 +5338,66 @@ function TabBar({
   /** The open tab's headings, shown under its name; clicking the name folds them away. */
   const [outlineOpen, setOutlineOpen] = useState(true);
   const outlineList = useRef<HTMLUListElement | null>(null);
+  /**
+   * A header dragged up or down the outline, its section with it: a line
+   * shows where it would go. A press that does not move is a click.
+   */
+  const [dragging, setDragging] = useState<{ id: string; line: number } | null>(null);
+  const dragged = useRef(false);
+  const pressOutline = (event: React.PointerEvent, entry: OutlineEntry) => {
+    const list = outlineList.current;
+    if (event.button !== 0 || entry.n !== -1 || !list || !sectionMoves) return;
+    const moves = sectionMoves(entry.id);
+    if (!moves?.targets.length) return;
+    const startY = event.clientY;
+    let to: string | null | undefined;
+    let live = false;
+    const items = () => [...list.querySelectorAll<HTMLElement>(".tab-outline-item[data-section]")];
+    const aim = (y: number) => {
+      const all = items();
+      const box = list.getBoundingClientRect();
+      let best: { to: string | null; at: number } | null = null;
+      for (const t of moves.targets) {
+        const el = t === null ? all.at(-1) : all.find((b) => b.dataset.section === t);
+        if (!el) continue;
+        const r = el.getBoundingClientRect();
+        const at = t === null ? r.bottom : r.top;
+        if (!best || Math.abs(at - y) < Math.abs(best.at - y)) best = { to: t, at };
+      }
+      to = best?.to;
+      setDragging(best ? { id: entry.id, line: best.at - box.top } : null);
+    };
+    const move = (e: PointerEvent) => {
+      if (!live && Math.abs(e.clientY - startY) < 5) return;
+      live = true;
+      dragged.current = true;
+      document.body.classList.add("doc-dragging");
+      aim(e.clientY);
+    };
+    const end = (drop: boolean) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("keydown", esc, true);
+      document.body.classList.remove("doc-dragging");
+      setDragging(null);
+      if (live && drop && to !== undefined) moves.drop(to);
+      // The click that ends a drag is not a click on the heading.
+      setTimeout(() => (dragged.current = false), 0);
+    };
+    const up = () => end(true);
+    const cancel = () => end(false);
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || !live) return;
+      e.preventDefault();
+      e.stopPropagation();
+      end(false);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+    window.addEventListener("keydown", esc, true);
+  };
   // The lit heading kept in view in a long outline, by scrolling the rail alone — never the document.
   useEffect(() => {
     const item = outlineList.current?.querySelector<HTMLElement>(".tab-outline-item.active");
@@ -5093,13 +5483,17 @@ function TabBar({
                 ) : (
                   outline.map((entry, i) => (
                     <li key={`${entry.id}-${entry.n}-${i}`}>
-                      <button className={`tab-outline-item level-${entry.level}${i === activeOutline ? " active" : ""}`}
-                        aria-current={i === activeOutline ? "location" : undefined} onClick={() => onGo(entry)} title={entry.text}>
+                      <button className={`tab-outline-item level-${entry.level}${i === activeOutline ? " active" : ""}${dragging?.id === entry.id ? " moving" : ""}`}
+                        data-section={entry.n === -1 ? entry.id : undefined}
+                        aria-current={i === activeOutline ? "location" : undefined} title={entry.text}
+                        onPointerDown={(e) => pressOutline(e, entry)}
+                        onClick={() => !dragged.current && onGo(entry)}>
                         {entry.text}
                       </button>
                     </li>
                   ))
                 )}
+                {dragging && <li className="tab-outline-drop" style={{ top: dragging.line }} aria-hidden="true" />}
               </ul>
             )}
           </span>
