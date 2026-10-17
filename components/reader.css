@@ -3554,3 +3554,8 @@
 .rich-tools.docked .rt-hl-more button.rt-btn { width: 18px; }
 /* A highlight in a colour of its own keeps dark words on it in a dark theme. */
 .rich-body mark[data-hl] { color: #1f2937; }
+
+/* ---------- whiteboard: room made for a card being dragged ---------- */
+.wb-landing { position: absolute; z-index: 1; border: 2px dashed color-mix(in srgb, var(--accent) 70%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--accent) 6%, transparent); pointer-events: none; }
+.wb-node:not(.dragging) { transition: left 0.18s ease, top 0.18s ease; }
+@media (prefers-reduced-motion: reduce) { .wb-node:not(.dragging) { transition: none; } }

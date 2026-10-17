@@ -3528,6 +3528,8 @@ function Whiteboard(
    * measured height — lib/board-layout.ts — so cards never cover each other,
    * however much they have grown since they were put down.
    */
+  /** Where a card being dragged would land if let go now: its place in the layout that made room for it. */
+  const landing = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
   const positions = useMemo(() => {
     const placed = new Map<string, { x: number; y: number; w: number }>();
     for (const item of live(board)) {
@@ -3535,12 +3537,46 @@ function Whiteboard(
     }
     const counters = { card: 0, box: 0, insight: 0, suggest: 0 };
     const cardsBottom = Math.ceil(shared.cards.length / 2) * 200;
+    /*
+     * A block written in the document and never placed on the board goes
+     * where it reads: straight below the block it was written after, or
+     * below its header — and whatever is below that makes room for it
+     * (layoutBoard settles later cards down), rather than it landing at the
+     * bottom of a column far from its section.
+     */
+    const boxById = new Map(shared.boxes.map((b) => [b.id, b]));
+    const headerOf = new Map<string, string>();
+    for (const item of live(board)) {
+      if (item.kind !== "link") continue;
+      const l = item as LinkItem;
+      if (boxById.get(l.from)?.label && !boxById.get(l.to)?.label) headerOf.set(l.to, l.from);
+      else if (boxById.get(l.to)?.label && !boxById.get(l.from)?.label) headerOf.set(l.from, l.to);
+    }
+    const anchored = new Map<string, { x: number; y: number } | null>();
+    const anchorSpot = (id: string, depth = 0): { x: number; y: number } | null => {
+      if (placed.has(id)) return placed.get(id)!;
+      if (anchored.has(id)) return anchored.get(id)!;
+      anchored.set(id, null);
+      const box = boxById.get(id);
+      const anchor = box?.after && boxById.has(box.after) ? box.after : headerOf.get(id);
+      const at = anchor && depth < 200 ? anchorSpot(anchor, depth + 1) : null;
+      // Just after its anchor in reading order: the layout settles it under the anchor.
+      const spot = at ? { x: at.x, y: at.y + 0.5 } : null;
+      anchored.set(id, spot);
+      return spot;
+    };
+    // While a single card is dragged it counts where it is, so what it is over makes room for it (a preview of the drop).
+    const single = drag && drag.group.size === 0 ? drag : null;
+    const joinRect = single?.join ? placed.get(single.join) : undefined;
     const laid = layoutBoard(
       nodes
-        .filter((node) => node.id !== drag?.id && !drag?.group.has(node.id))
+        .filter((node) => (single ? true : node.id !== drag?.id) && !drag?.group.has(node.id))
         .map((node) => {
           const h = sizes[node.id]?.h ?? 160;
-          const saved = placed.get(node.id);
+          if (single && node.id === single.id) {
+            return { id: node.id, placed: true, x: joinRect ? joinRect.x : single.x, y: single.y, w: placed.get(node.id)?.w ?? CARD_W, h };
+          }
+          const saved: { x: number; y: number; w?: number } | undefined = placed.get(node.id) ?? (node.kind === "box" ? anchorSpot(node.id) ?? undefined : undefined);
           // A table's card is as wide as the table it holds.
           const table = node.kind === "box" ? shared.boxes.find((b) => b.id === node.id && b.table) : undefined;
           if (table) {
@@ -3556,6 +3592,7 @@ function Whiteboard(
           return { id: node.id, placed: false, x, y, w: width, h };
         }),
     );
+    landing.current = single ? laid.get(single.id) ?? null : null;
     if (drag) {
       laid.set(drag.id, { x: drag.x, y: drag.y, w: placed.get(drag.id)?.w ?? CARD_W, h: sizes[drag.id]?.h ?? 160 });
       for (const [other, from] of drag.group) {
@@ -3565,6 +3602,8 @@ function Whiteboard(
     return laid;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [board, shared.cards, shared.boxes, shared.insights, shared.suggestions, drag, sizes, resize]);
+  const positionsRef = useRef(positions);
+  positionsRef.current = positions;
 
   /**
    * Opening a board looks at its busiest stretch, not at the board's top-left
@@ -3852,31 +3891,31 @@ function Whiteboard(
         ]);
         return;
       }
+      /*
+       * Let go over other cards, it lands where it was let go, and what it
+       * was over moves aside to make room — down, and only as far as it
+       * needs, along with whatever that in turn runs into. Its exact spot is
+       * the one the drag was previewing (landing): over the lower half of a
+       * card, it goes in below that card rather than on top of it. Those
+       * that moved keep their new places, and one ⌘Z puts all of it back.
+       */
       const target = moved && e ? joinTarget(id, { ...last, w: origin.w }, { x: e.clientX, y: e.clientY }) : null;
-      if (target) {
-        const label = positions.get(target)!;
-        const linked = new Set(
-          live(board)
-            .filter((i): i is LinkItem => i.kind === "link")
-            .flatMap((l) => (l.from === target ? [l.to] : l.to === target ? [l.from] : [])),
-        );
-        let y = label.y + (sizes[target]?.h ?? 56) + 14;
-        for (const [other, rect] of [...positions.entries()].sort((a, b) => a[1].y - b[1].y)) {
-          if (other === id || !linked.has(other) || labelIds.has(other)) continue;
-          if (Math.abs(rect.x - label.x) < 40) y = Math.max(y, rect.y + (sizes[other]?.h ?? 160) + 14);
+      const land = landing.current;
+      if (moved && land && (target || last.x !== start.x || last.y !== start.y)) {
+        const now = positionsRef.current;
+        const shifted: Spot[] = [];
+        for (const [other, rect] of now) {
+          if (other === id) continue;
+          const was = positions.get(other);
+          if (was && (Math.abs(was.y - rect.y) > 0.5 || Math.abs(was.x - rect.x) > 0.5)) shifted.push({ id: other, x: rect.x, y: rect.y, w: rect.w });
         }
-        const [from, to] = [target, id].sort();
-        place([{ id, x: label.x, y, w: origin.w }]);
-        shared.recorded((current) => put(current, { id: `link:${from}|${to}`, kind: "link", from, to, at: Date.now() }));
-        // Lined up and linked in one gesture: one ⌘Z takes both back.
-        shared.mergeSteps(2);
-        return;
-      }
-      if (moved && (last.x !== start.x || last.y !== start.y)) {
-        // Dropped on top of something: it lands just below instead.
-        const others = [...positions.entries()].filter(([other]) => other !== id).map(([, rect]) => rect);
-        const landed = settle({ x: last.x, y: last.y, w: origin.w, h: sizes[id]?.h ?? 160 }, others);
-        place([{ id, x: landed.x, y: landed.y, w: origin.w }]);
+        place([{ id, x: land.x, y: land.y, w: origin.w }, ...shifted]);
+        if (target) {
+          // Dropped into a section: joined to its header too — lined up and linked in one gesture, one ⌘Z for both.
+          const [from, to] = [target, id].sort();
+          shared.recorded((current) => put(current, { id: `link:${from}|${to}`, kind: "link", from, to, at: Date.now() }));
+          shared.mergeSteps(2);
+        }
       }
     };
     window.addEventListener("pointermove", move);
@@ -4679,6 +4718,11 @@ function Whiteboard(
               line(link.id, link.from, link.to, "wb-line", () => shared.recorded((current) => remove(current, link.id))),
             )}
           </svg>
+          {drag && drag.group.size === 0 && landing.current && (Math.abs(landing.current.x - drag.x) > 4 || Math.abs(landing.current.y - drag.y) > 4) && (
+            // Where the card will land, when that is not where it is held.
+            <div className="wb-landing" aria-hidden="true"
+              style={{ left: landing.current.x, top: landing.current.y, width: landing.current.w, height: sizes[drag.id]?.h ?? 160 }} />
+          )}
           {marquee && (
             <div
               className="wb-marquee"
