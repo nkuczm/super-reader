@@ -3511,3 +3511,27 @@
 /* The choice the arrows are on. */
 .link-bubble .kbd { outline: 2px solid var(--accent); outline-offset: 1px; }
 .link-bubble-web.kbd { border-radius: 6px; }
+
+/* ---------- the document: Insert, divider lines, starting to write ---------- */
+.doc-insert { order: 20; margin-left: auto; display: flex; align-items: center; padding-left: 8px; }
+.doc-insert-btn {
+  display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.doc-insert-btn:hover, .doc-insert-btn.on { border-color: var(--accent); color: var(--accent); }
+.doc-insert-menu { position: fixed; z-index: 400; }
+/* A divider line: two text cards one after the other under the same header. */
+.subject-doc > .doc-divided::before {
+  content: ""; position: absolute; left: 0; right: 0; top: -8px; height: 0;
+  border-top: 1.5px solid color-mix(in srgb, var(--text-dim) 45%, transparent); pointer-events: none;
+}
+.doc-start {
+  display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; min-height: 160px; cursor: text;
+  font-size: 16px; color: var(--text-dim); border-radius: 10px; outline: none;
+}
+.doc-start:hover, .doc-start:focus { background: var(--bg-hover); }
+.doc-start .hint { font-size: 13px; }
+.doc-link-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.doc-link-ask .input { flex: 1; min-width: 200px; }
+/* Clicking just under a block starts writing there. */
+.subject-doc { cursor: default; }

@@ -1,7 +1,7 @@
 "use client";
 
 import { createPortal } from "react-dom";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons";
 import RichText, { dropCiteAt, dropEmbedAt, forceNextHtml, ToolbarIdle, ToolsHostContext } from "./RichText";
 import { LINK_OPEN_EVENT } from "@/lib/link-chip";
@@ -93,6 +93,7 @@ import { useHeadroom } from "./useHeadroom";
 import { useSubjectViewing } from "./useSubjectViewing";
 import MoreMenu from "./MoreMenu";
 import { arriveOnTab } from "@/lib/tab-place";
+import { fileUnder, insertAfter, splitAtHeadings } from "@/lib/doc-sections";
 
 type Props = {
   /** Whether this device's boards have been read from storage yet: nothing is written on a guess of an empty board. */
@@ -488,8 +489,11 @@ export default function SubjectPage(props: Props) {
   const [imageProblem, setImageProblem] = useState<string | null>(null);
   /** Where a picture chosen from the whiteboard's menu should land. */
   const imageAt = useRef<{ x: number; y: number } | undefined>(undefined);
-  const pickImage = (at?: { x: number; y: number }) => {
+  /** Where a picture being chosen goes in the document: a block put in there (DocumentView), rather than a place on the board. */
+  const imagePlace = useRef<((extra: Partial<BoxItem>) => void) | undefined>(undefined);
+  const pickImage = (at?: { x: number; y: number }, place?: (extra: Partial<BoxItem>) => void) => {
     imageAt.current = at;
+    imagePlace.current = place;
     imageInput.current?.click();
   };
   const addImage = async (file: File | undefined) => {
@@ -497,8 +501,10 @@ export default function SubjectPage(props: Props) {
     try {
       const image = await shrinkImage(file);
       setImageProblem(null);
-      addBox(imageAt.current, { image, caption: "" });
+      if (imagePlace.current) imagePlace.current({ image, caption: "" });
+      else addBox(imageAt.current, { image, caption: "" });
       imageAt.current = undefined;
+      imagePlace.current = undefined;
     } catch (error) {
       setImageProblem(error instanceof Error ? error.message : "Could not add that picture.");
     }
@@ -1168,6 +1174,55 @@ export default function SubjectPage(props: Props) {
       return next;
     });
   };
+  /**
+   * Blocks put into the document right below another, as writing goes into
+   * a Doc: each reads straight after the one before it, and each is filed
+   * under the header above it (lib/doc-sections.ts) — joined to it on the
+   * whiteboard. A header put in takes what reads below it, up to the next
+   * header, as a Doc's heading does. `keep` rewrites the block being split
+   * in the same step; `relabel` turns it into the first header itself. One
+   * step to undo. The new blocks' ids, in order.
+   */
+  const docInsert = (
+    after: string | null,
+    pieces: Partial<BoxItem>[],
+    opts: { section: string | null; following?: string[]; keep?: { id: string; html: string }; relabel?: string; focus?: number },
+  ) => {
+    const ids = pieces.map(() => newItemId("box"));
+    recorded((current) => {
+      const now = Date.now();
+      let next = current ?? {};
+      let section = opts.section;
+      if (opts.keep) {
+        const held = next[opts.keep.id];
+        if (held && held.kind === "box") next = put(next, { ...held, html: sanitizeRichText(opts.keep.html), at: now }, now);
+      }
+      if (opts.relabel && after) {
+        const held = next[after];
+        if (held && held.kind === "box") {
+          next = fileUnder(next, after, null, now);
+          next = put(next, { ...held, label: true, html: opts.relabel, at: now }, now);
+          section = after;
+        }
+      }
+      let prev = after;
+      pieces.forEach((extra, i) => {
+        const id = ids[i];
+        next = placeNew(put(next, { id, kind: "box", html: "", ...extra, ...(prev ? { after: prev } : {}), at: now }, now), id);
+        if (prev) next = insertAfter(next, id, prev, now);
+        if (extra.label) section = id;
+        else next = fileUnder(next, id, section, now);
+        prev = id;
+      });
+      if (section !== opts.section) for (const id of opts.following ?? []) next = fileUnder(next, id, section, now);
+      return next;
+    });
+    const focus = opts.focus ?? ids.length - 1;
+    const target = focus < 0 ? after : ids[focus];
+    if (target) setFocusBox(target);
+    return ids;
+  };
+
   const joinBlocks = (into: string, from: string, html: string) =>
     recorded((current) => {
       const held = current?.[into];
@@ -1226,6 +1281,21 @@ export default function SubjectPage(props: Props) {
     mergeSteps,
     pasteBlocks,
     joinBlocks,
+    docInsert,
+    splitHeadings: (box: BoxItem, html: string, section: string | null, following: string[]) => {
+      const split = splitAtHeadings(html, document);
+      if (!split) return false;
+      const empty = !textOf(split.before).trim() && !/<img\b|data-cite|data-subject/.test(split.before);
+      const [first, ...rest] = split.pieces;
+      const pieces = (empty && first && "heading" in first ? rest : split.pieces).map((piece): Partial<BoxItem> =>
+        "heading" in piece ? { label: true, html: escapeHtml(piece.heading) } : { html: piece.html });
+      // The writing before the first heading stays in this box; a heading at its very top makes the box itself the header.
+      const relabel = empty && first && "heading" in first ? escapeHtml(first.heading) : undefined;
+      // The caret goes to the header just made — the box's own, or the first new one.
+      const firstLabel = pieces.findIndex((piece) => piece.label);
+      docInsert(box.id, pieces, { section, following, keep: relabel ? undefined : { id: box.id, html: split.before }, relabel, focus: relabel ? -1 : firstLabel });
+      return true;
+    },
     // Undoable, as every change to a block is: a transcript's tab closed, a picture replaced, a caption cleared.
     updateBox: (box: BoxItem, change: Partial<BoxItem>) =>
       recorded((current) => {
@@ -1901,6 +1971,14 @@ type Shared = {
   pasteBlocks: (blocks: CopiedBlocks, after: string | null) => void;
   /** One text block joined onto the end of another: one step, undone as one. */
   joinBlocks: (into: string, from: string, html: string) => void;
+  /** Blocks put into the document below another, filed under the header above them (see docInsert). */
+  docInsert: (
+    after: string | null,
+    pieces: Partial<BoxItem>[],
+    opts: { section: string | null; following?: string[]; keep?: { id: string; html: string }; relabel?: string; focus?: number },
+  ) => string[];
+  /** A text box written with headings in it, cut into header cards and the writing under each. False when it has none. */
+  splitHeadings: (box: BoxItem, html: string, section: string | null, following: string[]) => boolean;
   removeQuotes: (ids: string[]) => void;
   setCardNote: (card: Card, html: string) => void;
   decide: (suggestion: SuggestItem, state: "accepted" | "dismissed") => void;
@@ -2563,6 +2641,25 @@ function caretTo(target: HTMLElement, end: boolean) {
   target.scrollIntoView({ block: "nearest" });
 }
 
+/** The header a block of the document reads under: the nearest label block at or above it. */
+function sectionAbove(block: HTMLElement | null): string | null {
+  for (let at: Element | null = block; at; at = at.previousElementSibling) {
+    if (at instanceof HTMLElement && at.dataset.item && isLabelBlock(at)) return at.dataset.item;
+  }
+  return null;
+}
+
+/** The blocks reading after one, up to the next header: what a header put in below it takes. */
+function blocksBelow(block: HTMLElement | null): string[] {
+  const out: string[] = [];
+  for (let at = block?.nextElementSibling ?? null; at; at = at.nextElementSibling) {
+    if (!(at instanceof HTMLElement) || !at.dataset.item) continue;
+    if (isLabelBlock(at)) break;
+    out.push(at.dataset.item);
+  }
+  return out;
+}
+
 /**
  * The document written as one document. Blocks are still the whiteboard's
  * blocks underneath — text boxes, stories, tables — but the keyboard crosses
@@ -2632,7 +2729,7 @@ function useDocKeys(
     /** Write on right after a block: a new text box that reads below it. */
     const writeAfter = (block: HTMLElement) => {
       clear();
-      latest.current.shared.addBox(undefined, { after: block.dataset.item });
+      latest.current.shared.docInsert(block.dataset.item!, [{}], { section: sectionAbove(block) });
     };
     /** Join one text block onto the end of another: the writing moves up, the emptied block goes. */
     const join = (into: HTMLElement, from: HTMLElement) => {
@@ -2909,13 +3006,14 @@ function useDocKeys(
 function DocumentView(
   shared: Shared & {
     addBox: (at?: { x: number; y: number }, extra?: Partial<BoxItem>) => void;
-    pickImage: (at?: { x: number; y: number }) => void;
+    pickImage: (at?: { x: number; y: number }, place?: (extra: Partial<BoxItem>) => void) => void;
     board: Board | undefined;
   },
 ) {
   const { inside, apart } = splitInsights(shared.insights);
   // Right-click (or double-click) the page's empty space for something new.
   const [menu, setMenu] = useState<{ left: number; top: number } | null>(null);
+  const [docEl, setDocEl] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!menu) return;
     const close = () => setMenu(null);
@@ -2929,10 +3027,145 @@ function DocumentView(
       window.removeEventListener("scroll", close, true);
     };
   }, [menu]);
+  /** The block a menu opened at puts new things after: the last one above where it was opened. */
+  const [menuAfter, setMenuAfter] = useState<HTMLElement | null>(null);
+  const blockAbove = (y: number) =>
+    [...(docEl?.querySelectorAll<HTMLElement>(":scope > [data-item]") ?? [])].filter((b) => b.getBoundingClientRect().top < y).at(-1) ?? null;
   const open = (event: React.MouseEvent) => {
     if (event.target !== event.currentTarget) return;
     event.preventDefault();
-    setMenu({ left: Math.min(event.clientX, window.innerWidth - 200), top: Math.min(event.clientY, window.innerHeight - 200) });
+    setMenuAfter(blockAbove(event.clientY));
+    setMenu({ left: Math.min(event.clientX, window.innerWidth - 220), top: Math.min(event.clientY, window.innerHeight - 320) });
+  };
+  /** The block being written in (or last written in): where the Insert menu puts things. */
+  const lastBlock = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!docEl) return;
+    const into = (event: FocusEvent) => {
+      const block = (event.target as HTMLElement | null)?.closest?.<HTMLElement>("[data-item]");
+      if (block && block.parentElement === docEl) lastBlock.current = block;
+    };
+    docEl.addEventListener("focusin", into);
+    return () => docEl.removeEventListener("focusin", into);
+  }, [docEl]);
+  /**
+   * Something new put into the document after a block (or at the end), and
+   * filed under the header it lands below. A header takes the blocks below
+   * it, up to the next header.
+   */
+  const insertAfterBlock = (block: HTMLElement | null, extra: Partial<BoxItem>) => {
+    const last = block ?? [...(docEl?.querySelectorAll<HTMLElement>(":scope > [data-item]") ?? [])].at(-1) ?? null;
+    shared.docInsert(last?.dataset.item ?? null, [extra], { section: sectionAbove(last), following: extra.label ? blocksBelow(last) : [] });
+  };
+  /**
+   * A divider line, put in from the Insert menu: the text box the caret is
+   * in is cut in two there, and what follows the caret starts a card of its
+   * own under the same header — joined to it on the whiteboard. Anywhere
+   * else, a new text box below the block.
+   */
+  const divide = (block: HTMLElement | null) => {
+    const body = block?.querySelector<HTMLElement>(".subject-box.text-box .rich-body");
+    const selection = window.getSelection();
+    if (!block || !body || !selection?.rangeCount || !body.contains(selection.anchorNode)) return insertAfterBlock(block, {});
+    const rest = document.createRange();
+    rest.setStart(selection.anchorNode!, selection.anchorOffset);
+    rest.setEnd(body, body.childNodes.length);
+    const holder = document.createElement("div");
+    holder.appendChild(rest.extractContents());
+    // A paragraph the caret was in the middle of leaves an empty shell at the cut: tidied away.
+    holder.querySelectorAll("p:empty, div:empty, li:empty").forEach((el) => el.remove());
+    body.querySelectorAll(":scope > p:empty, :scope > div:empty").forEach((el) => el.remove());
+    forceNextHtml();
+    shared.docInsert(block.dataset.item!, [{ html: holder.innerHTML }], { section: sectionAbove(block), keep: { id: block.dataset.item!, html: body.innerHTML } });
+  };
+  /** Story from link: from the clipboard if it holds one, otherwise asked for in the menu. */
+  const [askLink, setAskLink] = useState<{ after: HTMLElement | null; value: string; problem?: string } | null>(null);
+  const storyFrom = async (after: HTMLElement | null) => {
+    let text = "";
+    try {
+      text = (await navigator.clipboard.readText()).trim();
+    } catch {
+      /* the browser would not share the clipboard: ask instead */
+    }
+    const link = webLink(text);
+    if (link) addStoryBelow(link, after);
+    else setAskLink({ after, value: "" });
+  };
+  const addStoryBelow = (link: string, after: HTMLElement | null) => {
+    const last = after ?? [...(docEl?.querySelectorAll<HTMLElement>(":scope > [data-item]") ?? [])].at(-1) ?? null;
+    if (last) shared.storyFromLink(link, last.dataset.item!);
+    else shared.storyFromLink(link, "");
+  };
+  /** Everything that can be put into the document, for the double-click menu and the Insert menu alike. */
+  const choices = (block: HTMLElement | null, close: () => void): { icon: string; label: string; title?: string; run: () => void }[] => [
+    { icon: "—", label: "Divider line", title: "Starts a new card under the same header, from the caret", run: () => divide(block) },
+    { icon: "H", label: "Header", title: "A header card: what is written below it is joined to it", run: () => insertAfterBlock(block, { label: true, html: "" }) },
+    { icon: "¶", label: "Text box", run: () => insertAfterBlock(block, {}) },
+    { icon: "🔗", label: "Story from link", run: () => void storyFrom(block) },
+    { icon: "✎", label: "Drawing", run: () => insertAfterBlock(block, { drawing: [], height: DRAWING_HEIGHT }) },
+    { icon: "▣", label: "Image…", run: () => shared.pickImage(undefined, (extra) => insertAfterBlock(block, extra)) },
+    { icon: "▦", label: "Table", run: () => insertAfterBlock(block, { table: NEW_TABLE(), tableMode: "doc" }) },
+    { icon: "❝", label: "Transcript", run: () => insertAfterBlock(block, { transcript: { title: "", turns: [] } }) },
+  ].map((choice) => ({ ...choice, run: () => { close(); choice.run(); } }));
+  /** The Insert menu in the text tools, while the document is open. */
+  const toolsHost = useContext(ToolsHostContext);
+  /** Where the Insert menu opens: under its button, fixed to the screen (the tools bar clips what overflows it). */
+  const [inserting, setInserting] = useState<{ left: number; top: number } | null>(null);
+  useEffect(() => {
+    if (!inserting) return;
+    const close = (event: Event) => {
+      if (!(event.target as Element | null)?.closest?.(".doc-insert, .doc-insert-menu")) setInserting(null);
+    };
+    const esc = (event: KeyboardEvent) => event.key === "Escape" && setInserting(null);
+    window.addEventListener("pointerdown", close, true);
+    window.addEventListener("keydown", esc);
+    return () => {
+      window.removeEventListener("pointerdown", close, true);
+      window.removeEventListener("keydown", esc);
+    };
+  }, [inserting]);
+  /**
+   * A click just below a block — on its bottom edge, or in the space under
+   * it — starts writing there: a new text box below it, under the same
+   * header, as a divider line would make. An empty text box already there
+   * is written in instead.
+   */
+  const clickBelow = (event: React.MouseEvent) => {
+    if (event.target !== event.currentTarget || event.button !== 0 || event.detail > 1) return;
+    const block = blockAbove(event.clientY);
+    if (!block || event.clientY - block.getBoundingClientRect().bottom > 40) return;
+    const next = block.nextElementSibling as HTMLElement | null;
+    const nextBody = next?.dataset.item ? next.querySelector<HTMLElement>(".subject-box.text-box .rich-body") : null;
+    event.preventDefault();
+    if (nextBody && isEmptyText(nextBody)) return caretTo(nextBody, false);
+    insertAfterBlock(block, {});
+  };
+  // The latest board, for an editor saving on its way out after its box became a header.
+  const boardRef = useRef(shared.board);
+  boardRef.current = shared.board;
+  /**
+   * Writing in the document, with a heading made in a text box: the box is
+   * cut there, the heading becomes a header card, and what is written under
+   * it is joined to it (lib/doc-sections.ts).
+   */
+  const docShared: typeof shared = {
+    ...shared,
+    setBox: (box, html) => {
+      const held = boardRef.current?.[box.id];
+      if (held && held.kind === "box" && held.label) return;
+      if (/<h3\b/i.test(html) && docEl) {
+        const block = [...docEl.querySelectorAll<HTMLElement>(":scope > [data-item]")].find((b) => b.dataset.item === box.id) ?? null;
+        const split = splitAtHeadings(html, document);
+        if (block && split) {
+          const body = block.querySelector<HTMLElement>(".rich-body");
+          // The editor shows what stays in it at once, so leaving it does not save the heading back.
+          if (body) body.innerHTML = split.before;
+          forceNextHtml();
+          if (shared.splitHeadings(held && held.kind === "box" ? held : box, html, sectionAbove(block), blocksBelow(block))) return;
+        }
+      }
+      shared.setBox(box, html);
+    },
   };
   // A picture pasted while nothing is being typed in joins the page as its own box.
   useEffect(() => {
@@ -2948,26 +3181,24 @@ function DocumentView(
     return () => document.removeEventListener("paste", paste);
   });
   const holdRef = useRef<{ x: number; y: number; timer: ReturnType<typeof setTimeout> } | null>(null);
-  const pick = (run: () => void) => () => {
-    run();
-    setMenu(null);
-  };
   // The document written from the keyboard; a story, table or picture selected whole.
-  const [docEl, setDocEl] = useState<HTMLDivElement | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
   useDocKeys(docEl, shared, picked, setPicked);
   // A story set into the writing as a card reads there, not again as a block of its own.
   const inlined = new Set(shared.boxes.flatMap((box) => (box.html ? inlineCardLinks(box.html) : [])));
   const entries = [
     ...shared.cards.filter((card) => !inlined.has(card.id)).map((card) => ({ id: card.id, at: card.at, after: card.after, key: card.id, node: <StoryCard card={card} own={inside.get(card.id) ?? []} shared={shared} /> })),
-    ...shared.boxes.map((box) => ({ id: box.id, at: madeAt(box), label: box.label, after: box.after, key: box.id, node: <TextBox box={box} shared={shared} /> })),
+    ...shared.boxes.map((box) => ({ id: box.id, at: madeAt(box), label: box.label, after: box.after, key: box.id, node: <TextBox box={box} shared={docShared} /> })),
   ];
   // Sections read as they do on the whiteboard: each header, then what is linked to it.
   const byId = new Map(entries.map((e) => [e.id, e]));
   const stack = documentOrder(entries, shared.board).map((id) => byId.get(id)!);
+  // Two text cards one after the other under the same header: a divider line between them.
+  const textIds = new Set(shared.boxes.filter((b) => !b.label && !b.drawing && !b.table && !b.transcript && b.image === undefined && b.caption === undefined).map((b) => b.id));
+  const divided = new Set(stack.filter((entry, i) => i > 0 && textIds.has(entry.id) && textIds.has(stack[i - 1].id)).map((entry) => entry.id));
 
   return (
-    <div className="subject-doc" ref={setDocEl} onContextMenu={open} onDoubleClick={open}
+    <div className="subject-doc" ref={setDocEl} onContextMenu={open} onDoubleClick={open} onMouseDown={clickBelow}
       // A picture dragged in from the desktop or a screenshot's preview: added right below the
       // block it is let go on, or at the end. (Over writing, the writing takes it in instead.)
       onDragOver={(event) => {
@@ -3015,28 +3246,61 @@ function DocumentView(
       onTouchEnd={() => { if (holdRef.current) clearTimeout(holdRef.current.timer); holdRef.current = null; }}>
       {menu && (
         <div className="wb-menu doc-menu" role="menu" style={{ left: menu.left, top: menu.top }} onPointerDown={(e) => e.stopPropagation()}>
-          <button role="menuitem" onClick={pick(() => shared.addBox())}><span className="wb-menu-icon">¶</span> Text box</button>
-          <button role="menuitem" onClick={pick(() => shared.addBox(undefined, { drawing: [], height: DRAWING_HEIGHT }))}>
-            <span className="wb-menu-icon">✎</span> Drawing
-          </button>
-          <button role="menuitem" onClick={pick(() => shared.pickImage())}><span className="wb-menu-icon">▣</span> Image…</button>
-          <button role="menuitem" onClick={pick(() => shared.addBox(undefined, { table: NEW_TABLE(), tableMode: "doc" }))}>
-            <span className="wb-menu-icon">▦</span> Table
-          </button>
-          <button role="menuitem" onClick={pick(() => shared.addBox(undefined, { transcript: { title: "", turns: [] } }))}>
-            <span className="wb-menu-icon">❝</span> Transcript
-          </button>
+          {choices(menuAfter, () => setMenu(null)).filter((c) => c.label !== "Divider line").map((c) => (
+            <button key={c.label} role="menuitem" title={c.title} onClick={c.run}><span className="wb-menu-icon">{c.icon}</span> {c.label}</button>
+          ))}
         </div>
       )}
+      {askLink && (
+        <form className="doc-link-ask" onPointerDown={(e) => e.stopPropagation()}
+          onSubmit={(e) => {
+            e.preventDefault();
+            const link = webLink(askLink.value);
+            if (!link) return setAskLink({ ...askLink, problem: "That isn't a web link." });
+            addStoryBelow(link, askLink.after);
+            setAskLink(null);
+          }}>
+          <input className="input" autoFocus inputMode="url" placeholder="Paste a story's link" value={askLink.value}
+            onChange={(e) => setAskLink({ ...askLink, value: e.target.value, problem: undefined })}
+            onKeyDown={(e) => e.key === "Escape" && setAskLink(null)} />
+          <button className="btn small">Add story</button>
+          <button type="button" className="link-btn" onClick={() => setAskLink(null)}>Cancel</button>
+          {askLink.problem && <span className="hint">{askLink.problem}</span>}
+        </form>
+      )}
+      {toolsHost && createPortal(
+        <div className="doc-insert" onMouseDown={(e) => e.preventDefault()}>
+          <button type="button" className={`doc-insert-btn${inserting ? " on" : ""}`} aria-haspopup="menu" aria-expanded={Boolean(inserting)}
+            title="Insert a divider line, a header, a story, a table…"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              setInserting((o) => (o ? null : { left: Math.min(r.left, window.innerWidth - 220), top: r.bottom + 4 }));
+            }}>
+            <span aria-hidden="true">＋</span> Insert
+          </button>
+        </div>,
+        toolsHost,
+      )}
+      {inserting && createPortal(
+        <div className="wb-menu doc-insert-menu" role="menu" style={{ left: inserting.left, top: inserting.top }} onMouseDown={(e) => e.preventDefault()}>
+          {choices(lastBlock.current?.isConnected ? lastBlock.current : null, () => setInserting(null)).map((c) => (
+            <button key={c.label} role="menuitem" title={c.title} onClick={c.run}><span className="wb-menu-icon">{c.icon}</span> {c.label}</button>
+          ))}
+        </div>,
+        document.body,
+      )}
       {stack.length === 0 && (
-        <p className="hint">
-          Nothing here yet. Highlight a passage in an article and add it to this subject, use <strong>Subject</strong> in
-          an article&apos;s toolbar to add the whole story, or start with a text box.
-        </p>
+        // An empty document is written in straight away, as a new Doc is.
+        <div className="doc-start" role="textbox" tabIndex={0} aria-label="Start writing"
+          onMouseDown={(e) => { e.preventDefault(); shared.docInsert(null, [{}], { section: null }); }}
+          onKeyDown={(e) => { if (e.key.length === 1 || e.key === "Enter") { e.preventDefault(); shared.docInsert(null, [{}], { section: null }); } }}>
+          Start typing…
+          <span className="hint">Or add a story from an article with <strong>Subject</strong> in its toolbar.</span>
+        </div>
       )}
       {stack.map((entry) => (
         <div key={entry.key} data-item={entry.key} tabIndex={-1}
-          className={[shared.tags.lit ? (shared.tags.lit.has(entry.id) ? "tag-lit" : "tag-dim") : "", picked.includes(entry.key) ? "doc-picked" : ""].filter(Boolean).join(" ") || undefined}>
+          className={[shared.tags.lit ? (shared.tags.lit.has(entry.id) ? "tag-lit" : "tag-dim") : "", picked.includes(entry.key) ? "doc-picked" : "", divided.has(entry.id) ? "doc-divided" : ""].filter(Boolean).join(" ") || undefined}>
           {entry.node}
           {picked[picked.length - 1] === entry.key && (
             <div className="doc-picked-hint" aria-live="polite">
@@ -3081,7 +3345,7 @@ function Whiteboard(
     board: Board | undefined;
     onBoard: Props["onBoard"];
     addBox: (at?: { x: number; y: number }, extra?: Partial<BoxItem>) => void;
-    pickImage: (at?: { x: number; y: number }) => void;
+    pickImage: (at?: { x: number; y: number }, place?: (extra: Partial<BoxItem>) => void) => void;
   },
 ) {
   /** The right-click menu on empty board: where it opened, on screen and on the board. */

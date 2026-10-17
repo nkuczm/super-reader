@@ -1833,14 +1833,15 @@ export function documentOrder(entries: { id: string; at: number; label?: boolean
     out.push(id);
     // Pasted one after another below the same block, they read in the order they were pasted.
     for (const next of sorted) if (follows.get(next.id) === id) emit(next.id);
+    // A header, then what is filed under it — a header written in after another block too.
+    if (!byId.get(id)?.label) return;
+    const members = sorted.filter((e) => owner.get(e.id) === id);
+    members.sort((a, b) => place(a.id).y - place(b.id).y || place(a.id).x - place(b.id).x || a.at - b.at);
+    for (const m of members) emit(m.id);
   };
   for (const entry of sorted) {
     if (owner.has(entry.id) || follows.has(entry.id)) continue;
     emit(entry.id);
-    if (!entry.label) continue;
-    const members = sorted.filter((e) => owner.get(e.id) === entry.id);
-    members.sort((a, b) => place(a.id).y - place(b.id).y || place(a.id).x - place(b.id).x || a.at - b.at);
-    for (const m of members) emit(m.id);
   }
   return out;
 }
