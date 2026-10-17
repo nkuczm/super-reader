@@ -935,7 +935,7 @@ export default function ArticleReader({
           rel="noreferrer noopener"
           title="Open the original"
         >
-          Open<span className="btn-label"> original</span>
+          <span>Open<span className="btn-label"> original</span></span>
         </a>
         {(article || error) && (
           <MoreMenu label="Replace the text">
