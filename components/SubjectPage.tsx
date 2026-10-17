@@ -1456,6 +1456,28 @@ export default function SubjectPage(props: Props) {
   }, [tucked, meta.view]);
 
   /**
+   * How wide a block in the document may grow past the page's own width: a
+   * table wider than the page widens its card to the right, into the room
+   * beside the document, up to the screen's edge (and never past 1200px).
+   */
+  useEffect(() => {
+    const page = pageRef.current;
+    const scroller = page?.closest<HTMLElement>(".main");
+    const doc = page?.querySelector<HTMLElement>(".subject-doc");
+    if (!page || !scroller || !doc || meta.view === "board") return;
+    const measure = () => {
+      const left = doc.getBoundingClientRect().left + (parseFloat(getComputedStyle(doc).paddingLeft) || 0);
+      const room = Math.round(scroller.getBoundingClientRect().left + scroller.clientWidth - left - 24);
+      page.style.setProperty("--doc-room", `${Math.max(280, room)}px`);
+    };
+    measure();
+    const watch = new ResizeObserver(measure);
+    watch.observe(scroller);
+    watch.observe(doc);
+    return () => watch.disconnect();
+  }, [meta.view, railOpen]);
+
+  /**
    * The heading being read, lit in the outline as the document scrolls: the
    * last one whose top has passed under the bars. At the very end of the
    * document, where the last headings can never reach the top, the last one

@@ -3467,3 +3467,13 @@
 /* The heading being read: bold, with a bar down its left, as a Doc's outline marks it. */
 .tab-outline-item.active { font-weight: 700; color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); box-shadow: inset 2px 0 0 var(--accent); }
 .tab-outline-item.level-3.active { color: var(--accent); }
+
+/* ---------- a table wider than the page widens its card ----------
+   The card grows to the table's width, to the right into the room beside
+   the document (--doc-room, measured), and no further than 1200px. */
+.subject-doc > [data-item] > .subject-box.table-box {
+  width: max-content; min-width: 100%; max-width: min(1200px, var(--doc-room, 100%)); box-sizing: border-box;
+}
+@media (max-width: 700px) { .subject-doc > [data-item] > .subject-box.table-box { width: 100%; max-width: 100%; } }
+/* Wider still than that, the table scrolls inside its card rather than running off it. */
+.subject-doc > [data-item] > .subject-box.table-box .tbl-doc .tbl-scroll { overflow-x: auto; overflow-y: visible; }
