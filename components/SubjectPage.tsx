@@ -25,6 +25,7 @@ import { addTranscriptNote, documentOrder, LABEL_COLORS, labelColorOf, youtubeTh
 import { dragGroup } from "@/lib/drag-group";
 import { NODE_FONT_MAX, NODE_FONT_MIN, nodeFontSize } from "@/lib/node-fit";
 import { titleFromUrl } from "@/lib/manual";
+import { pastedText } from "@/lib/paste";
 import {
   addStory,
   applySynthesis,
@@ -3200,7 +3201,7 @@ function useDocKeys(
       // Writing in a table or transcript keeps its own paste.
       if (!emptyLabel && t?.closest?.(".tbl, .transcript, .sheet, input, textarea")) return;
       const custom = event.clipboardData?.getData(BLOCKS_TYPE);
-      const plain = event.clipboardData?.getData("text/plain") ?? "";
+      const plain = event.clipboardData ? pastedText(event.clipboardData) : "";
       // Without the custom type (some browsers drop it), the blocks last copied here — if the text is theirs.
       const fallback = !custom && blockClipboard && readBlocks(blockClipboard) && plain.trim() === (JSON.parse(blockClipboard) as CopiedBlocks).text.trim() ? blockClipboard : null;
       const copied = readBlocks(custom || fallback);
@@ -4474,7 +4475,7 @@ function Whiteboard(
       // Blocks copied here. A browser that drops the clipboard's own type still carries their
       // text, which is how the copy kept in memory is known to be what is being pasted —
       // and anything else on the clipboard (a link copied since) is not that copy.
-      const plain = (e.clipboardData?.getData("text/plain") ?? "").trim();
+      const plain = (e.clipboardData ? pastedText(e.clipboardData) : "").trim();
       const blocks = readBlocks(e.clipboardData?.getData(BLOCKS_TYPE))
         ?? (!plain || plain.replace(/\s+/g, " ") === copiedText(blockClipboard) ? readBlocks(blockClipboard) : null);
       if (!blocks) {
