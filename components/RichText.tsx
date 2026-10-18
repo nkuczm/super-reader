@@ -1,13 +1,13 @@
 "use client";
 
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import CropDialog, { copyPicture, pastedWidth } from "./CropDialog";
 import { isHighlight, safeHref, sanitizeRichText } from "@/lib/subjects";
 import { hostOf, linkInfo, openLink, type LinkInfo } from "@/lib/link-chip";
 import { DEFAULT_HIGHLIGHT, hexColor, lastHighlight, setLastHighlight } from "@/lib/colors";
 import ColorSwatches from "./ColorSwatches";
-import { cleanPastedHtml } from "@/lib/paste";
+import { cleanPastedHtml, linkedTextHtml, pastedText } from "@/lib/paste";
 import { CITE_OPEN_EVENT, CITE_TYPE, CITES_CHANGED_EVENT, citeCardHtml, citeChipHtml, citeFor, citeTextHtml, refreshCiteChips, type Cite } from "@/lib/cite";
 import { refreshSubjectChips, subjectChipHtml, subjectsMatching, SUBJECT_OPEN_EVENT, SUBJECTS_CHANGED_EVENT, type SubjectRef } from "@/lib/subject-links";
 
@@ -202,9 +202,30 @@ function lineToCaret(block: Node, node: Node, offset: number): Range {
 function unwrapPageColours(root: Element) {
   for (const span of root.querySelectorAll<HTMLSpanElement>("span[style]")) {
     const style = span.getAttribute("style") ?? "";
-    if (isHighlight(style) || /font-weight|font-style|text-decoration/i.test(style)) continue;
-    span.replaceWith(...span.childNodes);
+    if (isHighlight(style)) continue;
+    if (/font-weight|font-style|text-decoration/i.test(style)) dropColours(span);
+    else span.replaceWith(...span.childNodes);
   }
+}
+
+/**
+ * The same colours taken off wherever they turn up, leaving the spans where
+ * they are, so a caret or a selection across lines stays put. Indenting a
+ * bullet and bringing it back out, or joining two lines, wraps the words in a
+ * span declaring the page's background ("initial", or the page's own
+ * colour) — and in dark mode a span with any background shows as a
+ * highlight just made, so the line lit up amber on its own.
+ */
+function clearPageColours(root: Element) {
+  for (const span of root.querySelectorAll<HTMLElement>("span[style], font[style], a[style]")) {
+    if (!isHighlight(span.getAttribute("style") ?? "")) dropColours(span);
+  }
+}
+
+function dropColours(span: HTMLElement) {
+  if (!/background|color/i.test(span.getAttribute("style") ?? "")) return;
+  for (const property of ["background", "background-color", "color", "caret-color"]) span.style.removeProperty(property);
+  if (!span.style.length) span.removeAttribute("style");
 }
 
 /**
@@ -389,8 +410,37 @@ function LinkBubble({ link, top, left, onStoryCard, onChanged, keys, onKeysDone 
     return () => window.removeEventListener("keydown", key, true);
   }, [keys, onKeysDone]);
   const lit = (id: string) => (choices[active]?.id === id ? " kbd" : "");
+  /**
+   * Kept on the screen. On a phone a link near the right edge put most of
+   * the bubble past it, buttons and all, and one just above the keyboard put
+   * it underneath: there it shows above the link instead, below the toolbar.
+   */
+  const own = useRef<HTMLDivElement>(null);
+  const [nudge, setNudge] = useState({ x: 0, y: 0 });
+  useLayoutEffect(() => {
+    const node = own.current;
+    if (!node) return;
+    const r = node.getBoundingClientRect();
+    const view = window.visualViewport;
+    const minX = (view?.offsetLeft ?? 0) + 8;
+    const maxX = (view ? view.offsetLeft + view.width : document.documentElement.clientWidth) - 8;
+    const bottom = (view ? view.offsetTop + view.height : window.innerHeight) - 8;
+    // Where it sits without a nudge.
+    const left0 = r.left - nudge.x;
+    const top0 = r.top - nudge.y;
+    let x = 0;
+    if (left0 + r.width > maxX) x = maxX - r.width - left0;
+    if (left0 + x < minX) x = minX - left0;
+    let y = 0;
+    if (top0 + r.height > bottom) {
+      const above = link.getBoundingClientRect().top - 6 - r.height;
+      const bar = document.querySelector(".rich-tools.docked")?.getBoundingClientRect().bottom ?? 0;
+      if (above >= Math.max(view?.offsetTop ?? 0, bar) + 8) y = above - top0;
+    }
+    if (Math.abs(x - nudge.x) > 0.5 || Math.abs(y - nudge.y) > 0.5) setNudge({ x, y });
+  });
   return (
-    <div className="link-bubble" style={{ top, left }} onMouseDown={keep} role="dialog" aria-label="Link">
+    <div ref={own} className="link-bubble" style={{ top: top + nudge.y, left: left + nudge.x }} onMouseDown={keep} role="dialog" aria-label="Link">
       <button type="button" className={`link-bubble-preview${lit("open")}`} title={web ? "Open on the site" : "Open in the reader"}
         onClick={() => openLink(href, title, web)}>
         {info?.image && (
@@ -968,6 +1018,7 @@ export default function RichText({
 
   function changed() {
     if (el.current) {
+      clearPageColours(el.current);
       keepQuotesTight(el.current);
       markLines(el.current);
     }
@@ -1756,12 +1807,19 @@ export default function RichText({
           // Formatting comes with a paste — bullets, nesting, bold, italic,
           // highlight — translated from Google Docs' clipboard shape and
           // cleaned (lib/paste.ts). Plain text when that is all there is.
-          event.preventDefault();
           // A picture on the clipboard — a screenshot, an image copied from a
           // page — is set into the text at the caret, as a dropped one is.
           const pictures = onDropImage
             ? [...event.clipboardData.items].filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile()).filter((f): f is File => !!f)
             : [];
+          const text = pastedText(event.clipboardData);
+          const html = event.clipboardData.getData("text/html");
+          // Nothing here can be read: the browser's own paste, then, rather than none at all.
+          if (pictures.length === 0 && !text.trim() && !html) {
+            setTimeout(changed, 0);
+            return;
+          }
+          event.preventDefault();
           if (pictures.length > 0) {
             const node = el.current;
             const at = window.getSelection()?.rangeCount ? window.getSelection()!.getRangeAt(0).cloneRange() : null;
@@ -1785,10 +1843,10 @@ export default function RichText({
             return;
           }
           // An address pasted over selected words links them, as in a Doc.
-          const plain = event.clipboardData.getData("text/plain").trim();
+          const plain = text.trim();
           const selected = window.getSelection();
           // The address of a story in the subject, pasted over words, links them to it.
-          const cite = event.clipboardData.getData("text/html").includes("data-cite") ? null : citeFor(plain);
+          const cite = html.includes("data-cite") ? null : citeFor(plain);
           if (cite && selected && !selected.isCollapsed) {
             document.execCommand("insertHTML", false, citeTextHtml(cite, selected.toString()));
             changed();
@@ -1809,7 +1867,6 @@ export default function RichText({
             changed();
             return;
           }
-          const html = event.clipboardData.getData("text/html");
           if (html) {
             const clean = cleanPastedHtml(html);
             if (clean.trim()) {
@@ -1820,7 +1877,10 @@ export default function RichText({
               return;
             }
           }
-          document.execCommand("insertText", false, event.clipboardData.getData("text/plain"));
+          // Words with an address in them — a story's title and its link, shared from a phone — keep the link.
+          const linked = linkedTextHtml(text);
+          if (linked) document.execCommand("insertHTML", false, linked);
+          else document.execCommand("insertText", false, text);
           changed();
         }}
         onMouseMove={(event) => {

@@ -13,7 +13,7 @@
  * what may stay. Runs in the browser; needs a Document to build in.
  */
 
-import { sanitizeRichText } from "./subjects";
+import { escapeHtml, safeHref, sanitizeRichText } from "./subjects";
 
 function unwrap(el: Element) {
   el.replaceWith(...Array.from(el.childNodes));
@@ -183,4 +183,39 @@ export function cleanPastedHtml(html: string, doc: Document = document): string 
   const holder = doc.createElement("div");
   holder.appendChild(root);
   return sanitizeRichText(holder.innerHTML);
+}
+
+/**
+ * What a paste says in words. A link copied on an iPhone — from Safari's
+ * address bar, or a share sheet's Copy — can come only as a URI list, with
+ * no plain text beside it: read as plain text it was nothing, so pasting a
+ * link pasted nothing, and pasted over selected words it deleted them.
+ */
+export function pastedText(data: Pick<DataTransfer, "getData">): string {
+  const plain = data.getData("text/plain");
+  if (plain.trim()) return plain;
+  // One address a line; a line starting "#" is a comment.
+  return data.getData("text/uri-list").split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith("#")).join(" ");
+}
+
+/**
+ * A line of pasted words with web addresses in it, as writing with the
+ * addresses linked — as a Doc links them, and as one typed here is linked
+ * once a space follows it (a story's title and its link, shared from a
+ * phone, come as just this). Trailing punctuation stays outside the link.
+ * Null when there is no address, or more than one line.
+ */
+export function linkedTextHtml(text: string): string | null {
+  const line = text.trim();
+  if (!line || /[\r\n]/.test(line)) return null;
+  let out = "";
+  let from = 0;
+  for (const match of line.matchAll(/(?:https?:\/\/|www\.)[^\s<>"]+/gi)) {
+    const address = match[0].replace(/[.,;:!?'")\]]+$/, "");
+    const href = safeHref(/^www\./i.test(address) ? `https://${address}` : address);
+    if (!href || !/\.[a-z]{2,}/i.test(address)) continue;
+    out += `${escapeHtml(line.slice(from, match.index))}<a href="${href}">${escapeHtml(address)}</a>`;
+    from = match.index + address.length;
+  }
+  return from === 0 ? null : out + escapeHtml(line.slice(from));
 }

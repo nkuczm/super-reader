@@ -1834,9 +1834,11 @@
 }
 
 /* A highlight just made is an inline-styled span until it is saved and
-   re-read as a <mark>; in dark mode it takes the same muted amber at once. */
+   re-read as a <mark>; in dark mode it takes the same muted amber at once.
+   Not a span that only spells out the page showing through, which the
+   browser's list and indent commands make (RichText, clearPageColours). */
 @media (prefers-color-scheme: dark) {
-  .rich-body span[style*="background"], .rich-body font[style*="background"] {
+  .rich-body :is(span, font)[style*="background"]:not([style*="initial"], [style*="transparent"], [style*="inherit"], [style*="unset"], [style*="rgba(0, 0, 0, 0)"]) {
     background-color: #7c5e10 !important; color: inherit !important;
   }
 }
@@ -2383,8 +2385,10 @@
   margin-left: auto; position: sticky; right: 0; font-size: 18px; font-weight: 700; color: var(--accent);
   background: color-mix(in srgb, var(--bg) 96%, transparent); padding: 0 12px;
 }
-/* Holding a card or the board opens our menu, not the phone's own callout. */
+/* Holding a card or the board opens our menu, not the phone's own callout.
+   Writing keeps the phone's own: without it there is no Paste on an iPhone. */
 .wb-canvas, .subject-doc { -webkit-touch-callout: none; }
+:is(.wb-canvas, .subject-doc) :is(.rich-body, input, textarea) { -webkit-touch-callout: default; }
 /* The outline scrolls on its own on a phone: sized to the visible screen
    (100vh runs under Safari's toolbar), and a swipe in it stays in it. */
 .tab-rail.open {

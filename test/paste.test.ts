@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
-import { cleanPastedHtml } from "../lib/paste";
+import { cleanPastedHtml, linkedTextHtml, pastedText } from "../lib/paste";
 
 const { document } = new JSDOM("<!doctype html><body></body>").window;
 
@@ -48,4 +48,29 @@ test("a long Google Docs paste with a YouTube chip comes through whole, the chip
 test("an ordinary pasted link stays an ordinary link", () => {
   const html = cleanPastedHtml(`<p>See <a href="https://example.com/a" style="color:blue">this</a>.</p>`, document);
   assert.equal(html, `<p>See <a href="https://example.com/a" target="_blank" rel="noopener noreferrer">this</a>.</p>`);
+});
+
+/** A clipboard holding just these types, as a paste event's would. */
+const clipboard = (types: Record<string, string>) => ({ getData: (type: string) => types[type] ?? "" });
+
+test("a link an iPhone puts on the clipboard only as a URI list is still pasted", () => {
+  assert.equal(pastedText(clipboard({ "text/uri-list": "https://example.com/story" })), "https://example.com/story");
+  assert.equal(pastedText(clipboard({ "text/uri-list": "# copied from Safari\r\nhttps://example.com/a\r\n" })), "https://example.com/a");
+  assert.equal(pastedText(clipboard({ "text/plain": "words", "text/uri-list": "https://example.com/a" })), "words", "plain text first, when there is some");
+  assert.equal(pastedText(clipboard({})), "");
+});
+
+test("pasted words keep the links in them, and nothing else becomes markup", () => {
+  assert.equal(
+    linkedTextHtml("Read this https://example.com/a-story now"),
+    'Read this <a href="https://example.com/a-story">https://example.com/a-story</a> now',
+  );
+  assert.equal(
+    linkedTextHtml("Headline <b> — www.example.org/x."),
+    'Headline &lt;b&gt; — <a href="https://www.example.org/x">www.example.org/x</a>.',
+    "the full stop stays outside the link, and the words are escaped",
+  );
+  assert.equal(linkedTextHtml("no address here"), null);
+  assert.equal(linkedTextHtml("two lines https://example.com\nsecond"), null, "lines go in as typed lines");
+  assert.equal(linkedTextHtml("javascript:alert(1) and ftp://example.com"), null);
 });
