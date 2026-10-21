@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { meter } from "@/lib/db-usage";
 import { NextResponse } from "next/server";
 import { corpusAvailable, lastSweeps } from "@/lib/corpus";
@@ -23,7 +24,10 @@ export async function GET(request: Request) {
   }
 
   const params = new URL(request.url).searchParams;
-  const force = params.get("force") === "1";
+  // Forcing skips the interval below, which is all that stands between
+  // anyone with the address and a sweep on every request. Only the holder of
+  // CRON_SECRET may do it; with none configured, nobody can.
+  const force = params.get("force") === "1" && holdsCronSecret(request);
   const asked = params.get("slice");
 
   let slice: number;
@@ -65,3 +69,11 @@ export async function GET(request: Request) {
 }
 
 export const POST = GET;
+
+function holdsCronSecret(request: Request) {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return false;
+  const given = Buffer.from(request.headers.get("authorization") ?? "");
+  const wanted = Buffer.from(`Bearer ${secret}`);
+  return given.length === wanted.length && timingSafeEqual(given, wanted);
+}

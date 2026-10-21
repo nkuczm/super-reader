@@ -1,5 +1,6 @@
 import { stripHtml } from "./feed";
 import type { ReadableArticle } from "./article";
+import { fetchPublic } from "./net-guard";
 
 /**
  * Files a source links rather than writes: the PDF behind a court opinion, the
@@ -167,9 +168,10 @@ export async function fetchFile(url: string, timeoutMs = 20000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, {
+    // Redirects are followed one hop at a time, each checked: a file's bytes
+    // come back to the reader, so none may come from the private network.
+    const res = await fetchPublic(url, {
       headers: { accept: "*/*" },
-      redirect: "follow",
       signal: controller.signal,
     });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);

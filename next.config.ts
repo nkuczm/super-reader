@@ -30,6 +30,18 @@ const nextConfig: NextConfig = {
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
           { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
+          /**
+           * The parts of a Content-Security-Policy that cannot break a page:
+           * no <base> rewriting where links resolve, no plugins, no form
+           * posting off-site, and the same no-framing rule for browsers that
+           * read CSP rather than X-Frame-Options. Scripts are left alone —
+           * Next's inline bootstrap would need nonces on every page.
+           */
+          {
+            key: "Content-Security-Policy",
+            value: "base-uri 'self'; object-src 'none'; form-action 'self'; frame-ancestors 'none'",
+          },
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
         ],
       },
     ];
