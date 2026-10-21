@@ -1,4 +1,5 @@
 import { fileNameFrom } from "@/lib/files";
+import { BlockedUrlError, fetchPublic, refuseUrl } from "@/lib/net-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -85,13 +86,16 @@ export async function GET(request: Request) {
   if (target.protocol !== "https:" && target.protocol !== "http:") {
     return Response.json({ error: "Only http(s) files can be downloaded" }, { status: 400 });
   }
+  // Nor anything on the private network, before or after a redirect: this
+  // hands the bytes back as they came (lib/net-guard.ts).
+  const refused = refuseUrl(target);
+  if (refused) return Response.json({ error: refused }, { status: 400 });
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const upstream = await fetch(target, {
+    const upstream = await fetchPublic(target, {
       signal: controller.signal,
-      redirect: "follow",
       headers: {
         // The same identification the rest of the app fetches with.
         "user-agent":
@@ -157,6 +161,9 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
+    if (error instanceof BlockedUrlError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
     const aborted = error instanceof Error && error.name === "AbortError";
     return Response.json(
       { error: aborted ? "The file took too long to fetch" : "The file could not be fetched" },

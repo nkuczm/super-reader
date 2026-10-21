@@ -15,6 +15,7 @@ import { isTechmemeFeed, riverArticles, TECHMEME_RIVER } from "@/lib/techmeme";
 import { looksLikeSitemap, parseSitemap, withinOf, keepWithin } from "@/lib/sitemap";
 import { keepArticles } from "@/lib/authentic";
 import { budget, within } from "@/lib/deadline";
+import { refuseUrl } from "@/lib/net-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -103,10 +104,15 @@ export async function GET(request: Request) {
   if (urls.length === 0) {
     return NextResponse.json({ error: "Missing ?url" }, { status: 400 });
   }
+  // The public web only (lib/net-guard.ts). An address that names the
+  // private network fails as its own source, like any feed that will not answer.
+  const refusedFor = (url: string) => refuseUrl(url.split("#")[0]);
   const left = budget(BUDGET_MS);
 
   /** One feed, read and parsed. The unit a source is built out of. */
   async function readFeed(url: string, cap: number) {
+    const refused = refusedFor(url);
+    if (refused) throw new Error(refused);
     // A sitemap source may carry the section it is limited to in its
     // fragment (lib/sitemap.ts, `sitemapSource`); the fetch never sees it.
     // A feed's address answered with a web page is asked once more (lib/feed.ts).

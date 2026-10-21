@@ -5,6 +5,8 @@ import { GET } from "../app/api/download/route";
 import { downloadUrlFor } from "../lib/download";
 
 let site: { close: () => void };
+// The fixtures are on loopback, which the app otherwise refuses to fetch.
+process.env.ALLOW_PRIVATE_HOSTS = "1";
 const BASE = "http://localhost:8796";
 
 test.before(async () => {

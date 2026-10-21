@@ -8,6 +8,8 @@ import {
 } from "../lib/files";
 import { fetchText, parseFeed } from "../lib/feed";
 
+// The fixtures are on loopback, which the app otherwise refuses to fetch.
+process.env.ALLOW_PRIVATE_HOSTS = "1";
 const F = "http://127.0.0.1:8791";
 let site: { close: () => void };
 

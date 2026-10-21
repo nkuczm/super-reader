@@ -5,6 +5,9 @@ import { discover } from "../lib/discover";
 import { sitemapSource, withinOf, keepWithin } from "../lib/sitemap";
 import { GET } from "../app/api/feed/route";
 
+// The fixtures are on loopback, which the app otherwise refuses to fetch.
+process.env.ALLOW_PRIVATE_HOSTS = "1";
+
 test("a section's path rides in a sitemap source's fragment", () => {
   const source = sitemapSource("https://example.com/sitemap.xml", "/essays");
   assert.equal(source, "https://example.com/sitemap.xml#within=%2Fessays%2F");
