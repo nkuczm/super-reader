@@ -21,7 +21,7 @@ export const sourceKey = (feedUrl: string) => (typeof feedUrl === "string" && fe
  */
 export function cleanFeeds(input: unknown): Feed[] {
   if (!Array.isArray(input)) return [];
-  return input
+  const feeds = input
     .filter((feed): feed is Feed => !!feed && typeof feed === "object" && typeof (feed as Feed).id === "string")
     .map((feed) => ({
       ...feed,
@@ -40,6 +40,55 @@ export function cleanFeeds(input: unknown): Feed[] {
         // merged in from another device) is shown, and kept, once.
         .filter((source, i, all) => all.findIndex((other) => sourceKey(other.feedUrl) === sourceKey(source.feedUrl)) === i),
     }));
+  return oneFolderPerSource(feeds);
+}
+
+/**
+ * Each source in one folder. Moving a source to another folder keeps its id,
+ * and nothing else gives two folders the same one — adding an outlet a
+ * second time makes a new source — so one id in two folders is a source put
+ * back where it had been moved from: a device still holding the old list
+ * merged it in when it opened (fixed in the Reader's sign-in join, 1 Nov
+ * 2026). It showed as a folder that "keeps getting sources from different
+ * feeds", and as the same outlet twice in Notifications.
+ *
+ * Which copy is the one the reader meant: the folder it was moved *from*
+ * holds a copy of every source moved out of it, so the folder holding the
+ * most of these doubled sources gives its copies up. Between two folders
+ * holding as many, a copy in a trailing run of doubled sources goes — that
+ * is where the merge appended them — and then the later folder's.
+ */
+export function oneFolderPerSource(feeds: Feed[]): Feed[] {
+  const homes = new Map<string, number[]>();
+  feeds.forEach((feed, f) => {
+    for (const source of feed.sources) {
+      const at = homes.get(source.id);
+      if (!at) homes.set(source.id, [f]);
+      else if (!at.includes(f)) at.push(f);
+    }
+  });
+  const doubled = new Set([...homes].filter(([, at]) => at.length > 1).map(([id]) => id));
+  if (doubled.size === 0) return feeds;
+
+  const strays = feeds.map((feed) => feed.sources.filter((source) => doubled.has(source.id)).length);
+  /** Whether everything from this source to the end of its folder is doubled: what the merge appended. */
+  const trailing = (f: number, id: string) => {
+    const sources = feeds[f].sources;
+    return sources.slice(sources.findIndex((source) => source.id === id)).every((source) => doubled.has(source.id));
+  };
+  const keep = new Map<string, number>();
+  for (const id of doubled) {
+    const [best] = [...homes.get(id)!].sort(
+      (a, b) => strays[a] - strays[b] || Number(trailing(a, id)) - Number(trailing(b, id)) || a - b,
+    );
+    keep.set(id, best);
+  }
+  return feeds.map((feed, f) => {
+    const sources = feed.sources.filter((source, i, all) =>
+      doubled.has(source.id) ? keep.get(source.id) === f && all.findIndex((s) => s.id === source.id) === i : true,
+    );
+    return sources.length === feed.sources.length ? feed : { ...feed, sources };
+  });
 }
 
 /**
@@ -49,15 +98,23 @@ export function cleanFeeds(input: unknown): Feed[] {
  */
 export function unionFeeds(theirs: Feed[], mine: Feed[]): Feed[] {
   const out = theirs.map((feed) => ({ ...feed, sources: [...feed.sources] }));
+  // A source theirs holds in any folder is not missing: it was moved there.
+  const placed = new Set(out.flatMap((feed) => feed.sources.map((source) => source.id)));
   for (const feed of mine) {
     const held = out.find((f) => f.id === feed.id);
     if (!held) {
-      out.push(feed);
+      const sources = feed.sources.filter((source) => !placed.has(source.id));
+      for (const source of sources) placed.add(source.id);
+      out.push(sources.length === feed.sources.length ? feed : { ...feed, sources });
       continue;
     }
     for (const source of feed.sources) {
+      if (placed.has(source.id)) continue;
       const key = sourceKey(source.feedUrl);
-      if (!held.sources.some((s) => s.id === source.id || (key && sourceKey(s.feedUrl) === key))) held.sources.push(source);
+      if (!held.sources.some((s) => key && sourceKey(s.feedUrl) === key)) {
+        held.sources.push(source);
+        placed.add(source.id);
+      }
     }
   }
   return out;

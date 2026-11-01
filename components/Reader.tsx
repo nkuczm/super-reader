@@ -190,7 +190,7 @@ import {
 } from "@/lib/alerts";
 import type { WatchMarks } from "@/lib/alerts";
 import type { SavedRemoval } from "@/lib/saved";
-import { useAccount, type Writing } from "./useAccount";
+import { knownAccountId, useAccount, type Writing } from "./useAccount";
 import type { ArticleMark } from "./ArticleReader";
 import type { InboxItem } from "@/lib/inbox";
 import SignInCard, { AccountStrip, describe as describeSave, signInHref } from "./SignInCard";
@@ -531,6 +531,13 @@ export default function Reader() {
   const [accountChecked, setAccountChecked] = useState(false);
   /** This session has folded the device into the account (and dropped any old code). */
   const joinedAccount = useRef(false);
+  /**
+   * The account this device was already signed in to when the page opened.
+   * Read before anything is checked, so a sign-in that has just come back
+   * from Google is told apart from a device that has been signed in all
+   * along — which must not merge its list into the account's again.
+   */
+  const [accountAtOpen] = useState(() => (typeof window === "undefined" ? null : knownAccountId()));
   const [syncOpen, setSyncOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   // Naming and deleting happen inline in the sidebar rather than in
@@ -1275,8 +1282,15 @@ export default function Reader() {
   //
   // Signed in, the account is the only place things are kept. The first time
   // in a session the device joins it (POST /api/account/link): an old sync
-  // code it still had is folded into the account once and forgotten, and
-  // what the account holds is taken with this device's own additions kept.
+  // code it still had is folded into the account once and forgotten.
+  //
+  // Only a device that has just signed in, or still has a code to fold in,
+  // merges its feed list into the account's — so what it gathered while
+  // signed out is kept. Merging on every opening put back every source
+  // moved or removed on another device while this one was closed: a source
+  // moved out of a folder came back to it each time a phone opened the app
+  // (1 Nov 2026). A device already signed in goes by the stamps, like any
+  // later sync: the newer list wins.
   useEffect(() => {
     if (!ready || (!accountId && (!syncCode || !accountChecked))) return;
     let cancelled = false;
@@ -1286,15 +1300,16 @@ export default function Reader() {
       try {
         if (accountId) {
           if (!joinedAccount.current) {
+            const code = loadSyncCode();
             const res = await fetch("/api/account/link", {
               method: "POST",
               headers: { "content-type": "application/json" },
-              body: JSON.stringify({ code: loadSyncCode() }),
+              body: JSON.stringify({ code }),
             });
             if (!res.ok) throw new Error("Could not reach your account");
             const data = await res.json();
             pulled.current = true;
-            applyRemote(data.payload ?? {}, { joining: true, inAccount: true });
+            applyRemote(data.payload ?? {}, { joining: accountAtOpen !== accountId || Boolean(code), inAccount: true });
             joinedAccount.current = true;
             saveSyncCode(null);
             setSyncCode(null);
@@ -1330,7 +1345,7 @@ export default function Reader() {
     };
     // syncCode is dropped on joining; that must not start another round.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, accountId, accountId ? null : syncCode, accountChecked, pull, applyRemote]);
+  }, [ready, accountId, accountId ? null : syncCode, accountChecked, pull, applyRemote, accountAtOpen]);
 
   // Push local changes, debounced so a burst of edits is one request.
   useEffect(() => {
@@ -3630,14 +3645,19 @@ export default function Reader() {
     [allSources],
   );
 
-  /** One entry per watched source with posts newer than its mark. */
+  /** One entry per watched outlet with posts newer than its mark — however many folders it is in. */
   const alerts = useMemo(
-    () => alertsFor(watchedSources, bySource, watchMarks),
+    () => alertsFor(watchedSources, bySource, watchMarks, (source) => feedSourceKey(source.feedUrl ?? "") || source.id),
     [watchedSources, bySource, watchMarks],
   );
   const alertBySource = useMemo(
-    () => new Map(alerts.map((alert) => [alert.sourceId, alert])),
+    () => new Map(alerts.flatMap((alert) => alert.sourceIds.map((id) => [id, alert] as const))),
     [alerts],
+  );
+  /** Outlets watched, each counted once. */
+  const watchedOutlets = useMemo(
+    () => new Set(watchedSources.map((source) => feedSourceKey(source.feedUrl) || source.id)).size,
+    [watchedSources],
   );
   const alertTotal = alerts.reduce((sum, alert) => sum + alert.articles.length, 0);
 
@@ -3654,8 +3674,13 @@ export default function Reader() {
    * no badge at all.
    */
   const clearAlerts = useCallback(
-    (sourceIds: string[]) => {
-      if (sourceIds.length === 0) return;
+    (given: string[]) => {
+      if (given.length === 0) return;
+      // Seen in one folder is seen: the same outlet kept in another is acknowledged with it.
+      const outlets = new Set(
+        given.map((id) => allSources.find((entry) => entry.id === id)).filter(Boolean).map((source) => feedSourceKey(source!.feedUrl)),
+      );
+      const sourceIds = [...new Set([...given, ...allSources.filter((s) => s.notify && outlets.has(feedSourceKey(s.feedUrl))).map((s) => s.id)])];
       setWatchMarks((current) => {
         let next = current;
         let changed = false;
@@ -5131,9 +5156,9 @@ export default function Reader() {
               <div className="state">
                 <h2>Nothing new.</h2>
                 <p>
-                  {watchedSources.length === 1
+                  {watchedOutlets === 1
                     ? "You’re watching one source. "
-                    : `You’re watching ${watchedSources.length} sources. `}
+                    : `You’re watching ${watchedOutlets} sources. `}
                   When one of them posts, it shows up here and lights up in the
                   sidebar until you’ve looked at it.
                 </p>
@@ -5147,7 +5172,7 @@ export default function Reader() {
                   </p>
                   <button
                     className="btn ghost small"
-                    onClick={() => clearAlerts(alerts.map((alert) => alert.sourceId))}
+                    onClick={() => clearAlerts(alerts.flatMap((alert) => alert.sourceIds))}
                   >
                     {Icon.check} Acknowledge all
                   </button>
@@ -5174,7 +5199,7 @@ export default function Reader() {
                         </span>
                         <button
                           className="btn ghost small"
-                          onClick={() => clearAlerts([alert.sourceId])}
+                          onClick={() => clearAlerts(alert.sourceIds)}
                         >
                           {Icon.check} Acknowledge
                         </button>

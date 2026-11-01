@@ -106,29 +106,60 @@ export function pruneMarks(marks: WatchMarks, sourceIds: Iterable<string>): Watc
 }
 
 export type Alert<T> = {
+  /** The source the entry opens. */
   sourceId: string;
+  /** Every watched source for this outlet — the same outlet can sit in more than one folder. */
+  sourceIds: string[];
   /** Newest first. */
   articles: T[];
 };
 
 /**
- * What to show in the notifications tab: one entry per watched source with
- * unread posts, busiest first so the loudest source is not buried.
+ * What to show in the notifications tab: one entry per watched outlet with
+ * unread posts, busiest first so the loudest is not buried.
+ *
+ * One per outlet, not per source: an outlet kept in two folders is two
+ * sources, and with notifications on in both it was announced twice — the
+ * same posts in two entries (1 Nov 2026). And each post once: a story two
+ * watched outlets delivered is listed under its publisher's own (the source
+ * it is filed under), or the first that has it.
  */
-export function alertsFor<T extends Dated>(
-  watched: { id: string }[],
+export function alertsFor<T extends Dated & { sourceId?: string }>(
+  watched: { id: string; feedUrl?: string }[],
   bySource: Map<string, T[]>,
   marks: WatchMarks,
+  outletOf: (source: { id: string; feedUrl?: string }) => string = (source) => source.feedUrl || source.id,
 ): Alert<T>[] {
-  const alerts: Alert<T>[] = [];
+  const outlets = new Map<string, string[]>();
   for (const source of watched) {
-    const fresh = newSince(bySource.get(source.id) ?? [], marks[source.id]);
-    if (fresh.length > 0) {
+    const key = outletOf(source);
+    const ids = outlets.get(key) ?? [];
+    if (!ids.includes(source.id)) ids.push(source.id);
+    outlets.set(key, ids);
+  }
+  const groups = [...outlets.values()].map((sourceIds) => {
+    const fresh = new Map<string, T>();
+    for (const id of sourceIds) for (const article of newSince(bySource.get(id) ?? [], marks[id])) fresh.set(article.id, article);
+    return { sourceIds, fresh };
+  });
+  // Where each post is listed: with the outlet it is filed under, if that one is watched.
+  const home = new Map<string, number>();
+  groups.forEach((group, g) => {
+    for (const [id, article] of group.fresh) {
+      const owner = article.sourceId !== undefined && group.sourceIds.includes(article.sourceId);
+      if (!home.has(id) || (owner && !groups[home.get(id)!].sourceIds.includes(article.sourceId!))) home.set(id, g);
+    }
+  });
+  const alerts: Alert<T>[] = [];
+  groups.forEach((group, g) => {
+    const articles = [...group.fresh].filter(([id]) => home.get(id) === g).map(([, article]) => article);
+    if (articles.length > 0) {
       alerts.push({
-        sourceId: source.id,
-        articles: [...fresh].sort((a, b) => timeOf(b) - timeOf(a)),
+        sourceId: group.sourceIds[0],
+        sourceIds: group.sourceIds,
+        articles: articles.sort((a, b) => timeOf(b) - timeOf(a)),
       });
     }
-  }
+  });
   return alerts.sort((a, b) => b.articles.length - a.articles.length);
 }
