@@ -103,3 +103,32 @@ test("an unwatched source raises nothing however busy it is", () => {
   const bySource = new Map([["busy", [post("a", 1), post("b", 2)]]]);
   assert.deepEqual(alertsFor([], bySource, { busy: { at: 1 } }), []);
 });
+
+test("an outlet in two folders is announced once, and each post once", () => {
+  // The Atlantic is in News and in Culture, notifications on in both; a
+  // story it filed was also picked up by a watched topic search.
+  const shared = { ...post("atl:1", 5), sourceId: "atl-news" };
+  const other = { ...post("atl:2", 9), sourceId: "atl-news" };
+  const bySource = new Map([
+    ["atl-news", [shared, other]],
+    ["atl-culture", [shared, other]],
+    ["search", [shared, { ...post("s:1", 3), sourceId: "search" }]],
+  ]);
+  const mark = { at: Date.parse(ago(60)) };
+  const alerts = alertsFor(
+    [
+      { id: "atl-news", feedUrl: "https://www.theatlantic.com/feed/all/" },
+      { id: "atl-culture", feedUrl: "https://www.theatlantic.com/feed/all/" },
+      { id: "search", feedUrl: "https://news.google.com/rss/search?q=x" },
+    ],
+    bySource,
+    { "atl-news": mark, "atl-culture": mark, search: mark },
+  );
+  assert.deepEqual(
+    alerts.map((a) => [a.sourceIds, a.articles.map((p) => p.id)]),
+    [
+      [["atl-news", "atl-culture"], ["atl:1", "atl:2"]],
+      [["search"], ["s:1"]],
+    ],
+  );
+});

@@ -37,6 +37,9 @@ const BACKUP_DELAY_MS = 20 * 60 * 1000;
  */
 const KNOWN_KEY = "super-reader:account:v1";
 
+/** The account this device last knew it was signed in to, if any. */
+export const knownAccountId = () => knownAccount()?.id ?? null;
+
 function knownAccount(): AccountInfo | null {
   try {
     const held = JSON.parse(localStorage.getItem(KNOWN_KEY) ?? "null");
