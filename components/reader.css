@@ -3621,3 +3621,57 @@ body.doc-dragging .subject-doc > [data-item]:not(.doc-moving) > .doc-grip { opac
 .tab-outline { position: relative; }
 .tab-outline-item.moving { opacity: 0.45; }
 .tab-outline-drop { position: absolute; left: 6px; right: 0; height: 0; border-top: 2.5px solid var(--accent); border-radius: 2px; pointer-events: none; }
+
+/* ---------- story importance (components/AttentionPanel.tsx) ---------- */
+.attention {
+  margin: -12px 0 22px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg-sub); font-size: 13.5px; color: var(--text);
+  --level: var(--text-dim);
+}
+.attention.level-high { --level: var(--danger); }
+.attention.level-mid { --level: #d97706; }
+.attention.level-some { --level: var(--accent); }
+.attention-busy, .attention-error { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 9px 12px; color: var(--text-dim); }
+.attention-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: attention-pulse 1.2s ease-in-out infinite; }
+@keyframes attention-pulse { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .attention-dot { animation: none; } }
+.attention-head {
+  display: flex; align-items: center; gap: 12px; width: 100%; padding: 9px 12px; border: 0; background: none;
+  color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: 10px;
+}
+.attention-head:hover { background: var(--bg-hover); }
+.attention-score {
+  flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%;
+  border: 2.5px solid var(--level); font-weight: 700; font-size: 15px; font-variant-numeric: tabular-nums;
+}
+.attention-line { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.attention-line > strong { font-weight: 650; }
+.attention-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.attention-chip {
+  padding: 1px 7px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg);
+  color: var(--text-dim); font-size: 12px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+}
+.attention-chip.novelty-new { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.attention-chip.novelty-rehash { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--text-dim) 60%, transparent); }
+.attention-chip.check-disputed, .attention-chip.check-overstated { color: var(--danger); }
+.attention-toggle { flex: none; color: var(--text-dim); }
+.attention-body { padding: 2px 14px 12px; display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
+.attention-body p { margin: 0; line-height: 1.5; }
+.attention-new b { font-weight: 650; }
+.attention-fundamental { color: var(--accent); font-style: normal; }
+.attention-known > span { color: var(--text-dim); font-size: 12.5px; }
+.attention-known ul, .attention-check ul { margin: 4px 0 0; padding-left: 18px; }
+.attention-known li, .attention-check li { margin: 2px 0; }
+.attention-known ul { list-style: none; padding-left: 0; }
+.attention-known li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; }
+.attention-known .link-btn { flex: 0 1 auto; min-width: 0; padding: 0; text-align: left; color: var(--accent); font: inherit; }
+.attention-known .link-btn:hover { background: none; text-decoration: underline; }
+.attention-scale-head { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; font-size: 12.5px; }
+.attention-bar { height: 6px; margin: 4px 0 6px; border-radius: 999px; background: var(--bg-hover); overflow: hidden; }
+.attention-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--level); }
+.attention-bar.field > span { background: color-mix(in srgb, var(--accent) 55%, var(--text-dim)); }
+.attention-check { padding: 8px 10px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); }
+.attention-check a { color: var(--accent); }
+.attention-dim { color: var(--text-dim); }
+.attention-foot { font-size: 12px; }
+.attention-foot .link-btn { font-size: 12px; color: var(--accent); }

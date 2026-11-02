@@ -23,8 +23,8 @@ export const TIERS: Record<Tier, { name: string; blurb: string; activities: Acti
   },
   quick: {
     name: "Quick tools",
-    blurb: "AI transcript search and suggested reading — quick lookups a smaller, cheaper model does well.",
-    activities: ["transcript-search", "reading"],
+    blurb: "AI transcript search, suggested reading and story importance — quick judgments a smaller, cheaper model does well.",
+    activities: ["transcript-search", "reading", "importance"],
   },
 };
 export const DEFAULT_QUICK_MODEL: Record<AiProvider, string> = { anthropic: "claude-sonnet-5-5", openai: "gpt-5-mini" };
@@ -53,7 +53,8 @@ export const MODEL_CHOICES: Record<AiProvider, ModelChoice[]> = {
   anthropic: [
     { id: "claude-opus-5-5", name: "Claude Opus 5.5", blurb: "Careful, thorough reading. The best balance for insights and fact-checks.", input: 4, output: 20, recommended: true },
     { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", blurb: "Nearly as good for most subjects, at half the price.", input: 2, output: 10 },
-    { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", blurb: "Fastest and cheapest. Fine for quick insights; misses more in a fact-check.", input: 1, output: 5 },
+    { id: "claude-haiku-5-5", name: "Claude Haiku 5.5", blurb: "The current Haiku: very fast and by far the cheapest. Good for quick tools and story importance.", input: 0.1, output: 0.5 },
+    { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", blurb: "The previous Haiku. Fine for quick insights; misses more in a fact-check.", input: 1, output: 5 },
     { id: "claude-fable-5-1", name: "Claude Fable 5.1", blurb: "The most capable. Slower and much more expensive — for work where every detail matters.", input: 10, output: 50 },
   ],
   openai: [

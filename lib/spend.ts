@@ -22,13 +22,14 @@ export const PROVIDER_NAME: Record<AiProvider, string> = {
 export const DEFAULT_OPENAI_MODEL = "gpt-5-mini";
 
 /** What a run was for, as the spending page breaks it down. */
-export type Activity = "fact-check" | "production" | "insights" | "reading" | "transcript-search";
+export type Activity = "fact-check" | "production" | "insights" | "reading" | "transcript-search" | "importance";
 export const ACTIVITY_NAME: Record<Activity, string> = {
   "fact-check": "Fact check",
   production: "Production prep",
   insights: "Insights & connections",
   reading: "Suggested reading",
   "transcript-search": "Transcript search",
+  importance: "Story importance",
 };
 export const isActivity = (v: unknown): v is Activity => typeof v === "string" && v in ACTIVITY_NAME;
 
@@ -36,6 +37,7 @@ export const isActivity = (v: unknown): v is Activity => typeof v === "string" &
 export const PRICES: Record<string, { input: number; output: number }> = {
   "claude-opus-5-5": { input: 4, output: 20 },
   "claude-sonnet-5-5": { input: 2, output: 10 },
+  "claude-haiku-5-5": { input: 0.1, output: 0.5 },
   "claude-haiku-4-5": { input: 1, output: 5 },
   "claude-fable-5-1": { input: 10, output: 50 },
   "gpt-6-astra": { input: 10, output: 50 },
@@ -66,7 +68,16 @@ export type SpendRecord = {
   subject?: string;
   /** What it was for; runs from before this was kept have none. */
   activity?: Activity;
+  /** Web searches the run made, which are billed apart from tokens. */
+  searches?: number;
 };
+
+/**
+ * What one web search costs on top of the tokens: Anthropic's list price,
+ * $10 per 1,000. OpenAI's depends on the model and is not counted here, so
+ * an OpenAI run with searches reads a little low rather than guessed at.
+ */
+export const SEARCH_PRICE: Partial<Record<AiProvider, number>> = { anthropic: 0.01 };
 
 const KEY = "super-reader:spend:v1";
 const MAX_RECORDS = 2000;
@@ -96,10 +107,12 @@ export function loadSpend(): SpendRecord[] {
 }
 
 export function recordSpend(
-  usage: { provider: AiProvider; model: string; input: number; output: number; activity?: Activity },
+  usage: { provider: AiProvider; model: string; input: number; output: number; activity?: Activity; searches?: number },
   subject?: string,
   now = Date.now(),
 ) {
+  const searches = Math.max(0, Math.round(Number(usage.searches) || 0));
+  const tokens = costOf(usage.model, usage.input, usage.output);
   const record: SpendRecord = {
     id: `${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     device: deviceName(),
@@ -108,9 +121,10 @@ export function recordSpend(
     model: usage.model,
     input: usage.input,
     output: usage.output,
-    cost: costOf(usage.model, usage.input, usage.output),
+    cost: tokens === null ? null : tokens + searches * (SEARCH_PRICE[usage.provider] ?? 0),
     subject,
     ...(isActivity(usage.activity) ? { activity: usage.activity } : {}),
+    ...(searches ? { searches } : {}),
   };
   try {
     const next = [...loadSpend(), record].slice(-MAX_RECORDS);
