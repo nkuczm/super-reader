@@ -143,6 +143,12 @@ export default function SettingsDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   const [flagsOpen, setFlagsOpen] = useState(false);
+  /** What scoring one story costs with the quick model chosen: a story read, the reader's similar ones, and the answer. */
+  const importanceModel = MODEL_CHOICES[settings.aiProvider].find(
+    (m) => m.id === (settings.aiProvider === "openai" ? settings.openaiQuickModel : settings.anthropicQuickModel),
+  );
+  const perStory = importanceModel ? costAt(importanceModel, { input: 5_000, output: 1_000 }) : 0;
+  const importanceCost = !perStory ? "" : perStory < 0.01 ? "less than a cent" : `about $${perStory.toFixed(2)}`;
   const [tab, setTabState] = useState<SettingsTab>(() => {
     try {
       const held = localStorage.getItem(TAB_KEY) as SettingsTab | null;
@@ -497,6 +503,27 @@ export default function SettingsDialog({
                     />
                   );
                 })}
+                <p className="field-label reading-label">Stories</p>
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={settings.storyImportance}
+                    onChange={(event) => onChange({ ...settings, storyImportance: event.target.checked })}
+                  />
+                  <span>
+                    Score stories for importance and novelty
+                    <em>
+                      Each story you open is weighed for what is new in it, against the stories you already have and
+                      established knowledge, and for what rides on it: the lives at stake, and its weight in its own field.
+                      A news story that looks very important is checked against recent reporting.
+                    </em>
+                  </span>
+                </label>
+                <p className="field-note">
+                  Uses your {settings.aiProvider === "openai" ? "OpenAI" : "Anthropic"} key and the quick-tools model, once per
+                  story{importanceCost ? `: ${importanceCost} a story with the model chosen above` : ""}, and a few cents more
+                  when a story is checked against recent reporting. On for this device only.
+                </p>
                 <p className="field-label reading-label">Usage</p>
                 <div className="settings-links">
                   <button className="btn ghost small" onClick={onOpenSpend}>AI spending</button>

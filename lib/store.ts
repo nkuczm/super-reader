@@ -264,6 +264,13 @@ export type Settings = {
   /** The models for quick tools (transcript search, suggested reading), per provider. */
   anthropicQuickModel: string;
   openaiQuickModel: string;
+  /**
+   * Score each story opened for how much attention it deserves — what is new
+   * in it and what rides on it (lib/attention.ts) — with the quick-tools
+   * model. Off by default: it spends the reader's key on every story opened,
+   * once. Kept per device, so a phone can leave it off.
+   */
+  storyImportance: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -283,6 +290,7 @@ export const DEFAULT_SETTINGS: Settings = {
   anthropicModel: DEFAULT_ANTHROPIC_MODEL,
   anthropicQuickModel: DEFAULT_QUICK_MODEL.anthropic,
   openaiQuickModel: DEFAULT_QUICK_MODEL.openai,
+  storyImportance: false,
 };
 
 const SETTINGS_KEY = "super-reader:settings:v1";
@@ -322,6 +330,7 @@ export function loadSettings(): Settings {
       anthropicModel: modelFor("anthropic", parsed.anthropicModel),
       anthropicQuickModel: quickModel("anthropic", parsed.anthropicQuickModel),
       openaiQuickModel: quickModel("openai", parsed.openaiQuickModel),
+      storyImportance: parsed.storyImportance === true,
       showDownloadBar: Boolean(parsed.showDownloadBar),
       quoteToNote: parsed.quoteToNote !== false,
       openOnSite: Array.isArray(parsed.openOnSite)

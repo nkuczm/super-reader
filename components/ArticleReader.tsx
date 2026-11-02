@@ -19,6 +19,7 @@ import PrintDialog, { type PrintJob } from "./PrintDialog";
 import { printedOn, printPage, transcriptArticleExcerpt } from "@/lib/print";
 import { findQuoteRange } from "@/lib/highlight";
 import type { Note } from "@/lib/notes";
+import type { AttentionSetup } from "./AttentionPanel";
 import MoreMenu from "./MoreMenu";
 import { lazyPanel } from "./lazyPanel";
 
@@ -28,6 +29,8 @@ import { lazyPanel } from "./lazyPanel";
  * opens (or earlier, when the app is idle) rather than with the page.
  */
 const QuoteToNote = lazyPanel(() => import("./QuoteToNote"));
+/* The importance score, only for readers who turned it on (Settings → AI). */
+const AttentionPanel = lazyPanel(() => import("./AttentionPanel"));
 export const preloadArticleExtras = QuoteToNote.preload;
 
 /** How many words an article's HTML holds. */
@@ -63,6 +66,8 @@ type Props = {
   onAlwaysOpenOnSite?: (link: string) => void;
   /** The list's own summary, shown when the full text cannot be fetched. */
   summary?: string;
+  /** Score the story for importance and novelty (Settings → AI); absent when that is off. */
+  attention?: AttentionSetup;
   /**
    * The reader's API keys. Some sources — CourtListener — serve their text
    * only through an API that needs one, so this request needs them too.
@@ -137,6 +142,7 @@ export default function ArticleReader({
   feedUrl,
   onAlwaysOpenOnSite,
   summary,
+  attention,
   keyHeaders,
   onOpenMenu,
   saved,
@@ -999,6 +1005,20 @@ export default function ArticleReader({
             .filter(Boolean)
             .join("  ·  ")}
         </p>
+
+        {attention && (
+          <AttentionPanel
+            setup={attention}
+            url={url}
+            title={article?.title ?? fallbackTitle}
+            html={article && article.via !== "preview" ? article.html : undefined}
+            summary={summary ?? article?.excerpt}
+            siteName={article?.siteName ?? hostOf(url)}
+            byline={article?.byline}
+            publishedAt={article?.publishedAt}
+            ready={Boolean(article) || Boolean(error)}
+          />
+        )}
 
         {(busy || notice) && (
           <div className="reader-replaced" role="status">

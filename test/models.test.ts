@@ -33,6 +33,9 @@ test("only offered Claude models are used, with the options each accepts", () =>
   assert.equal(claudeOptions("claude-opus-5-5", "medium").effort.effort, "medium");
   assert.equal(claudeSearchTool("claude-haiku-4-5", 3).type, "web_search_20250305");
   assert.equal(claudeSearchTool("claude-sonnet-5-5", 3).type, "web_search_20260209");
+  // Claude Haiku 5.5 takes an effort level, but no refusal fallback and only the basic search.
+  assert.deepEqual(claudeOptions("claude-haiku-5-5", "low"), { effort: { effort: "low" }, fallback: {} });
+  assert.equal(claudeSearchTool("claude-haiku-5-5", 3).type, "web_search_20250305");
 });
 
 test("each tier's estimate counts only its own activities, older runs as deep analysis", () => {

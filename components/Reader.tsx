@@ -128,6 +128,8 @@ import { attributeStories, inAnySource, inSource } from "@/lib/attribute";
 import { loadHealth, recordRuns, saveHealth, type HealthLog } from "@/lib/health";
 import { groupsOf, inLanes, isDue, IN_FLIGHT } from "@/lib/refresh";
 import { groupStories, headlineMatches } from "@/lib/story-groups";
+import { earlierStories } from "@/lib/attention";
+import type { AttentionSetup } from "./AttentionPanel";
 import { arriveOnTab } from "@/lib/tab-place";
 import { aboutTopic, trendingTopics, type Topic } from "@/lib/trending";
 import { listenForClientErrors } from "@/lib/client-errors";
@@ -3185,6 +3187,53 @@ export default function Reader() {
   );
 
   /**
+   * What an opened story is scored against, when importance scoring is on
+   * (Settings → AI, lib/attention.ts): the reader's own earlier stories most
+   * like it — held, saved and downloaded — the coverage the outlet panel has
+   * seen of it, and the folder its source sits in. Worked out only when a
+   * story is scored, not on every render.
+   */
+  const attentionContext = useCallback(
+    (story: { url: string; title: string; publishedAt?: string; summary?: string }) => {
+      const key = canonicalUrl(story.url);
+      const held = articles.find((a) => canonicalUrl(a.link) === key);
+      const pool = [...articles, ...savedAsArticles, ...downloadedAsArticles].map((a) => ({
+        title: a.title,
+        link: a.link,
+        summary: a.summary,
+        publishedAt: a.publishedAt,
+        outlet: sourceById.get(a.sourceId)?.title,
+      }));
+      const publishedAt = story.publishedAt ?? held?.publishedAt;
+      const earlier = earlierStories({ title: story.title, link: story.url, publishedAt, summary: story.summary ?? held?.summary }, pool, { canonical: canonicalUrl });
+      const rank = held ? ranking.get(held.id) : undefined;
+      const ids = held ? [held.sourceId, ...(held.alsoIn ?? [])] : [];
+      return {
+        earlier,
+        ...(rank ? { coverage: { newsrooms: rank.newsrooms, firstSeen: rank.firstSeen, titles: rank.titles?.slice(0, 8) } } : {}),
+        source: { title: held ? sourceById.get(held.sourceId)?.title : undefined, folders: feeds.filter((f) => f.sources.some((s) => ids.includes(s.id))).map((f) => f.name) },
+        ...(publishedAt ? { publishedAt } : {}),
+      };
+    },
+    [articles, savedAsArticles, downloadedAsArticles, ranking, feeds, sourceById],
+  );
+  /** Importance scoring as set up in Settings → AI: the provider, its quick model and its key. */
+  const attentionSetup = useMemo<AttentionSetup | undefined>(
+    () =>
+      settings.storyImportance
+        ? {
+            provider: settings.aiProvider,
+            model: settings.aiProvider === "openai" ? settings.openaiQuickModel : settings.anthropicQuickModel,
+            hasKey: Boolean(apiKeys[settings.aiProvider]),
+            keyHeaders: (keyHeaders ?? {}) as Record<string, string>,
+            context: attentionContext,
+            onOpenStory: (link, title) => setReading({ url: link, title }),
+          }
+        : undefined,
+    [settings.storyImportance, settings.aiProvider, settings.openaiQuickModel, settings.anthropicQuickModel, apiKeys, keyHeaders, attentionContext, setReading],
+  );
+
+  /**
    * What gets saved for reading offline: subjects marked available offline,
    * Saved stories, and each source's newest N.
    */
@@ -4824,6 +4873,7 @@ export default function Reader() {
             fallbackTitle={reading.title}
             feedUrl={reading.feedUrl}
             summary={reading.summary}
+            attention={attentionSetup}
             keyHeaders={keyHeaders}
             onOpenMenu={() => setMenuOpen(true)}
             onAlwaysOpenOnSite={alwaysOpenOnSite}
