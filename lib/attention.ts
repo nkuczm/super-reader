@@ -19,9 +19,15 @@
  *                  killing no one. Counted at half weight for a field of
  *                  knowledge, less for culture, little for entertainment.
  *
- * Then novelty: the share of that which is news to the reader, judged
- * against the stories they already hold and against what is established
- * knowledge.
+ * Then novelty, judged as the world's news rather than as a count of who
+ * else ran it. Every outlet that reports a story in the same news cycle —
+ * within about a day and a half of the first report — counts in full: a
+ * blitz of coverage on one day does not make any one report worth less.
+ * What loses value is staleness: a story whose main point was already known
+ * days or weeks before it was published, or a long-familiar idea restated
+ * (the reader's correction, 3 Nov 2026). How long it was known comes from
+ * the reader's own earlier stories, the outlet panel, a web check, and the
+ * model's knowledge for ideas that have been around for years.
  *
  * The model gives the estimates — lives, probability, field significance,
  * novelty — and the arithmetic is done here, the same way every time, so a
@@ -33,6 +39,8 @@ import { idfOver, similarity, tokensOf } from "./cluster";
 export type StoryKind = "news" | "research" | "analysis" | "opinion" | "other";
 export type FieldClass = "knowledge" | "culture" | "entertainment";
 export type Novelty = "new" | "development" | "minor" | "rehash";
+/** How long a story's main point had been known when it was published. */
+export type KnownFor = "fresh" | "days" | "weeks" | "months" | "years";
 
 /** What the model judges of a story: its estimates, not the score. */
 export type Assessment = {
@@ -58,8 +66,16 @@ export type Assessment = {
   whatsNew: string;
   /** Ids of the reader's earlier stories that already carried it. */
   knownFrom: string[];
+  /** The model's sense of how long its main point had been known: "years" for a saturated idea. */
+  knownFor: KnownFor;
   /** It challenges or changes established understanding, not only the news. */
   fundamental: boolean;
+  /**
+   * How many days its main point had been known when it was published, from
+   * everything there is to go on (`knownForDays`). Worked out on the server
+   * after the model answers; absent from a score kept by an older build.
+   */
+  knownDays?: number;
 };
 
 /** One model call's cost, as the provider reported it. */
@@ -72,7 +88,8 @@ export type AttentionRequest = {
   article: { url: string; title: string; siteName?: string; byline?: string; publishedAt?: string; text: string };
   source?: { title?: string; folders?: string[] };
   earlier: Earlier[];
-  coverage?: { newsrooms: number; firstSeen?: number; titles?: string[] };
+  /** The outlet panel's view of the story: how long before this article it first saw it, and some of its headlines. */
+  coverage?: { firstSeenHoursBefore?: number; newsrooms?: number; titles?: string[] };
   /** false skips the recent-reporting check. */
   check?: boolean;
 };
@@ -92,8 +109,80 @@ export type Verification = {
 export const SPECULATIVE_PENALTY = 3;
 /** How much field significance counts against world stakes. */
 export const FIELD_WEIGHT: Record<FieldClass, number> = { knowledge: 0.5, culture: 0.3, entertainment: 0.1 };
-export const NOVELTY_FACTOR: Record<Novelty, number> = { new: 1, development: 0.7, minor: 0.4, rehash: 0.15 };
 export const NOVELTY_NAME: Record<Novelty, string> = { new: "New", development: "Development", minor: "Minor update", rehash: "Already known" };
+/** One news cycle: reports this close to the first are all equally new. */
+export const NEWS_CYCLE_DAYS = 1.5;
+/** What the model's sense of "known for" means in days, when nothing dated says more. */
+export const KNOWN_FOR_DAYS: Record<KnownFor, number> = { fresh: 0, days: 3, weeks: 14, months: 90, years: 730 };
+
+/** What a repeat is worth, by how long what it repeats had been known: in full within the news cycle, a tenth for a settled idea. */
+export function staleness(days: number): number {
+  if (!(days > NEWS_CYCLE_DAYS)) return 1;
+  if (days <= 3) return 0.7;
+  if (days <= 7) return 0.5;
+  if (days <= 30) return 0.3;
+  if (days <= 365) return 0.15;
+  return 0.1;
+}
+
+/**
+ * The novelty multiplier. Something new to the world counts in full, and so
+ * does anything in the same news cycle as the first report, however many
+ * others carried it. Past the cycle: new information on an older story
+ * keeps most of its weight; a small new detail on it a little more than a
+ * plain repeat; a repeat as much as `staleness` leaves it.
+ */
+export function noveltyFactor(a: Pick<Assessment, "novelty" | "knownFor" | "knownDays">): number {
+  const days = Number.isFinite(a.knownDays) ? a.knownDays! : KNOWN_FOR_DAYS[a.knownFor] ?? 0;
+  if (a.novelty === "new" || days <= NEWS_CYCLE_DAYS) return 1;
+  if (a.novelty === "development") return 0.85;
+  const stale = staleness(days);
+  return a.novelty === "minor" ? Math.round((stale + (1 - stale) * 0.3) * 100) / 100 : stale;
+}
+
+/** The novelty as the panel names it: within the news cycle, a repeat is simply fresh. */
+export function noveltyLabel(a: Pick<Assessment, "novelty" | "knownFor" | "knownDays">): string {
+  const days = Number.isFinite(a.knownDays) ? a.knownDays! : KNOWN_FOR_DAYS[a.knownFor] ?? 0;
+  if (a.novelty !== "new" && days <= NEWS_CYCLE_DAYS) return "Fresh";
+  return NOVELTY_NAME[a.novelty];
+}
+
+/**
+ * How many days a story's main point had been known when the article was
+ * published: the longest of what the evidence says — the reader's own
+ * earlier stories that carried it, when the outlet panel first saw it, the
+ * date a web check found it first reported, and the model's own sense of it
+ * (which is what catches an idea that has been around for years). An
+ * article's own outlet running its own story again does not age it.
+ */
+export function knownForDays(
+  a: Pick<Assessment, "knownFrom" | "knownFor" | "novelty">,
+  context: {
+    publishedAt?: string;
+    earlier: Pick<Earlier, "id" | "publishedAt">[];
+    coverage?: { firstSeenHoursBefore?: number };
+    firstReported?: string;
+    now?: number;
+  },
+): number {
+  const at = Date.parse(context.publishedAt ?? "");
+  const when = Number.isFinite(at) ? at : context.now ?? Date.now();
+  const ages = [KNOWN_FOR_DAYS[a.knownFor] ?? 0];
+  for (const e of context.earlier) {
+    if (!a.knownFrom.includes(e.id)) continue;
+    const t = Date.parse(e.publishedAt ?? "");
+    if (Number.isFinite(t)) ages.push((when - t) / 86_400_000);
+  }
+  // The panel's cluster can hold an earlier stage of a running story, so it
+  // only dates a report that the model says repeats what was known.
+  if ((a.novelty === "minor" || a.novelty === "rehash") && Number(context.coverage?.firstSeenHoursBefore) > 0) {
+    ages.push(Number(context.coverage!.firstSeenHoursBefore) / 24);
+  }
+  const first = Date.parse(`${context.firstReported ?? ""}T12:00:00Z`);
+  // Dated to the day, so a day's slack either side.
+  if (Number.isFinite(first)) ages.push((when - first) / 86_400_000 - 1);
+  return Math.max(0, Math.round(Math.max(...ages) * 10) / 10);
+}
 /** A news story whose world stakes reach this is checked against recent reporting. */
 export const VERIFY_AT = 3.5;
 
@@ -135,9 +224,9 @@ export function scoreOf(a: Assessment): Score {
   const field = Math.round(clamp(a.fieldSignificance, 0, 10, 0));
   const weight = FIELD_WEIGHT[a.fieldClass] ?? FIELD_WEIGHT.knowledge;
   const fieldCounts = Math.round(field * weight * 10) / 10;
-  const noveltyFactor = NOVELTY_FACTOR[a.novelty] ?? NOVELTY_FACTOR.minor;
+  const novelty = noveltyFactor(a);
   const led = fieldCounts > world ? "field" : "world";
-  return { attention: Math.round(10 * Math.max(world, fieldCounts) * noveltyFactor), world, field, fieldCounts, noveltyFactor, led };
+  return { attention: Math.round(10 * Math.max(world, fieldCounts) * novelty), world, field, fieldCounts, noveltyFactor: novelty, led };
 }
 
 /** Whether to check the story against recent reporting: a news event that looks very important. */
@@ -171,7 +260,7 @@ export function revise(a: Assessment, found: Partial<Pick<Assessment, "realizedL
   if (Number.isFinite(Number(found.realizedLives))) next.realizedLives = clamp(found.realizedLives, 0, 1e10);
   if (Number.isFinite(Number(found.potentialLives))) next.potentialLives = clamp(found.potentialLives, 0, 1e10);
   if (Number.isFinite(Number(found.probability))) next.probability = clamp(found.probability, 0, 1);
-  if (found.novelty && found.novelty in NOVELTY_FACTOR) next.novelty = found.novelty;
+  if (found.novelty && found.novelty in NOVELTY_NAME) next.novelty = found.novelty;
   return next;
 }
 
@@ -246,6 +335,7 @@ export function cleanAssessment(raw: unknown, earlierIds: Set<string>): Assessme
     novelty: novelties.includes(r.novelty as Novelty) ? (r.novelty as Novelty) : "minor",
     whatsNew: text(r.whatsNew),
     knownFrom: (Array.isArray(r.knownFrom) ? r.knownFrom : []).filter((id): id is string => typeof id === "string" && earlierIds.has(id)).slice(0, 6),
+    knownFor: (["fresh", "days", "weeks", "months", "years"] as KnownFor[]).includes(r.knownFor as KnownFor) ? (r.knownFor as KnownFor) : "fresh",
     fundamental: r.fundamental === true,
   };
 }

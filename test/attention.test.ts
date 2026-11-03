@@ -3,8 +3,11 @@ import assert from "node:assert/strict";
 import {
   cleanAssessment,
   earlierStories,
+  knownForDays,
   livesScale,
   needsCheck,
+  noveltyFactor,
+  noveltyLabel,
   revise,
   scoreOf,
   stakesLabel,
@@ -26,6 +29,7 @@ const base: Assessment = {
   novelty: "new",
   whatsNew: "",
   knownFrom: [],
+  knownFor: "fresh",
   fundamental: false,
 };
 const story = (over: Partial<Assessment>) => ({ ...base, ...over });
@@ -46,10 +50,42 @@ test("a shooting that happened outranks a war that might, which outranks a shoot
   assert.equal(possibleShooting.attention, 0);
 });
 
-test("the thousandth telling of a big story is worth little attention", () => {
+test("a blitz of coverage on one day takes nothing away from any report of it", () => {
   const first = scoreOf(story({ realizedLives: 5_000, novelty: "new" }));
-  const again = scoreOf(story({ realizedLives: 5_000, novelty: "rehash" }));
-  assert.ok(again.attention < first.attention / 5);
+  // The twentieth outlet that afternoon, adding nothing: still the day's news.
+  const twentieth = scoreOf(story({ realizedLives: 5_000, novelty: "rehash", knownDays: 0.4 }));
+  assert.equal(twentieth.attention, first.attention);
+  assert.equal(noveltyLabel({ novelty: "rehash", knownFor: "fresh", knownDays: 0.4 }), "Fresh");
+});
+
+test("what was already known days or years before is worth less, the older the less", () => {
+  const fresh = scoreOf(story({ realizedLives: 5_000, novelty: "rehash", knownDays: 1 })).attention;
+  const week = scoreOf(story({ realizedLives: 5_000, novelty: "rehash", knownDays: 6 })).attention;
+  const month = scoreOf(story({ realizedLives: 5_000, novelty: "rehash", knownDays: 25 })).attention;
+  const saturated = scoreOf(story({ realizedLives: 5_000, novelty: "rehash", knownFor: "years" })).attention;
+  assert.ok(fresh > week && week > month && month > saturated, `${fresh} > ${week} > ${month} > ${saturated}`);
+  assert.ok(saturated < fresh / 5);
+});
+
+test("new information on an older story keeps most of its weight; a small detail, some", () => {
+  assert.equal(noveltyFactor({ novelty: "development", knownFor: "weeks", knownDays: 20 }), 0.85);
+  assert.equal(noveltyFactor({ novelty: "new", knownFor: "weeks", knownDays: 20 }), 1);
+  assert.equal(noveltyFactor({ novelty: "minor", knownFor: "days", knownDays: 10 }), 0.51);
+  assert.equal(noveltyFactor({ novelty: "rehash", knownFor: "days", knownDays: 10 }), 0.3);
+});
+
+test("how long a story was known comes from the evidence, the longest of it", () => {
+  const publishedAt = "2026-11-03T12:00:00Z";
+  const earlier = [{ id: "E1", publishedAt: "2026-10-29T12:00:00Z" }, { id: "E2", publishedAt: "2026-11-03T08:00:00Z" }];
+  // Only the earlier stories that carried its main point count.
+  assert.equal(knownForDays({ knownFrom: ["E2"], knownFor: "fresh", novelty: "rehash" }, { publishedAt, earlier }), 0.2);
+  assert.equal(knownForDays({ knownFrom: ["E1", "E2"], knownFor: "fresh", novelty: "rehash" }, { publishedAt, earlier }), 5);
+  // The panel's first sighting dates a repeat, not a new development of a running story.
+  assert.equal(knownForDays({ knownFrom: [], knownFor: "fresh", novelty: "rehash" }, { publishedAt, earlier, coverage: { firstSeenHoursBefore: 30 } }), 1.3);
+  assert.equal(knownForDays({ knownFrom: [], knownFor: "fresh", novelty: "development" }, { publishedAt, earlier, coverage: { firstSeenHoursBefore: 30 } }), 0);
+  // A web check's first report, and the model's sense of a settled idea.
+  assert.equal(knownForDays({ knownFrom: [], knownFor: "fresh", novelty: "rehash" }, { publishedAt, earlier, firstReported: "2026-10-30" }), 3);
+  assert.equal(knownForDays({ knownFrom: [], knownFor: "years", novelty: "rehash" }, { publishedAt, earlier }), 730);
 });
 
 test("a unique story about a new film is new, and still not important", () => {

@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import {
   FIELD_WEIGHT,
-  NOVELTY_NAME,
+  KNOWN_FOR_DAYS,
+  NEWS_CYCLE_DAYS,
+  noveltyLabel,
   scoreOf,
   stakesLabel,
   type AttentionRequest,
@@ -29,7 +31,8 @@ export type AttentionSetup = {
 
 type Held = { at: number; model: string; result: AttentionResult; earlier: Earlier[] };
 
-const CACHE_KEY = "super-reader:attention:v1";
+// v2: novelty measured by staleness, not by how many others ran the story (3 Nov 2026).
+const CACHE_KEY = "super-reader:attention:v2";
 const CACHE_MAX = 200;
 
 /*
@@ -193,6 +196,23 @@ export default function AttentionPanel({
   const score = scoreOf(a);
   const known = held.earlier.filter((e) => a.knownFrom.includes(e.id));
   const cost = (usages ?? []).reduce((sum, u) => sum + (recordCostOf(u) ?? 0), 0);
+  const label = noveltyLabel(a);
+  const knownDays = Number.isFinite(a.knownDays) ? a.knownDays! : KNOWN_FOR_DAYS[a.knownFor] ?? 0;
+  const at = Date.parse(publishedAt ?? "");
+  /** "3 days before it", "the same day" — an earlier story's place against this one. */
+  const before = (date?: string) => {
+    const t = Date.parse(date ?? "");
+    if (!Number.isFinite(t) || !Number.isFinite(at)) return "";
+    const days = (at - t) / 86_400_000;
+    return days < 1 ? "the same day" : days < 2 ? "the day before" : `${Math.round(days)} days before`;
+  };
+  /** How long its main point had been known, and what that does to the score. */
+  const staleNote =
+    knownDays <= NEWS_CYCLE_DAYS
+      ? a.novelty === "new" ? "" : "Reported in the same news cycle as the first reports, so it counts in full."
+      : a.novelty === "new"
+        ? ""
+        : `${knownDays >= 365 ? "A long-familiar idea" : knownDays >= 60 ? `Known for about ${Math.round(knownDays / 30)} months` : `Known for ${Math.round(knownDays)} days`} before this was published${a.novelty === "development" ? "; the new information still counts" : ""}.`;
 
   return (
     <section className={`attention level-${score.attention >= 70 ? "high" : score.attention >= 40 ? "mid" : score.attention >= 15 ? "some" : "low"}`} aria-label="Story importance">
@@ -201,7 +221,7 @@ export default function AttentionPanel({
         <span className="attention-line">
           <strong>{verdictOf(score.attention)}</strong>
           <span className="attention-chips">
-            <span className={`attention-chip novelty-${a.novelty}`}>{NOVELTY_NAME[a.novelty]}</span>
+            <span className={`attention-chip novelty-${label === "Fresh" ? "new" : a.novelty}`}>{label}</span>
             <span className="attention-chip">World {score.world.toFixed(1)}</span>
             <span className="attention-chip">{a.field} {score.field}/10</span>
             {v && <span className={`attention-chip check-${v.verdict}`}>{VERDICT_NAME[v.verdict]}</span>}
@@ -214,14 +234,15 @@ export default function AttentionPanel({
         <div className="attention-body">
           {a.whatsNew && (
             <p className="attention-new">
-              <b>{a.novelty === "rehash" ? "Nothing new: " : "What's new: "}</b>
+              <b>{a.novelty === "rehash" && label !== "Fresh" ? "Nothing new: " : "What's new: "}</b>
               {a.whatsNew}
               {a.fundamental && <em className="attention-fundamental"> Claims to change established understanding.</em>}
             </p>
           )}
+          {staleNote && <p className="attention-dim">{staleNote}</p>}
           {known.length > 0 && (
             <div className="attention-known">
-              <span>Already in your stories:</span>
+              <span>Reported earlier, in your stories:</span>
               <ul>
                 {known.map((e) => (
                   <li key={e.id}>
@@ -230,7 +251,9 @@ export default function AttentionPanel({
                     ) : (
                       <a href={e.link} target="_blank" rel="noreferrer noopener">{e.title}</a>
                     )}
-                    {e.outlet && <span className="attention-dim"> · {e.outlet}</span>}
+                    {(e.outlet || before(e.publishedAt)) && (
+                      <span className="attention-dim"> · {[e.outlet, before(e.publishedAt)].filter(Boolean).join(", ")}</span>
+                    )}
                   </li>
                 ))}
               </ul>
