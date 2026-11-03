@@ -1824,7 +1824,12 @@ export default function Reader() {
   );
 
   /** Fetch every known feed and merge the results newest-first. */
-  const refresh = useCallback(async (sources: Source[]) => {
+  /**
+   * `fresh`: the reader asked for it (Refresh, pulling the list down), so the
+   * server reads every source anew rather than answering from its cache of
+   * the last few minutes (app/api/feed).
+   */
+  const refresh = useCallback(async (sources: Source[], { fresh: anew = false }: { fresh?: boolean } = {}) => {
     const run = ++refreshRun.current;
     if (sources.length === 0) {
       refreshed.current = true;
@@ -1916,6 +1921,7 @@ export default function Reader() {
         for (const source of group) {
           if (source.scope === "site") params.append("whole", source.feedUrl);
         }
+        if (anew) params.append("fresh", String(Date.now()));
         let data: { results?: Result[] };
         try {
           const res = await fetch(`/api/feed?${params}`, {
@@ -3003,7 +3009,7 @@ export default function Reader() {
     saveVault(next.vault);
     saveUnlockedKeys(next.keys);
     // An API source that was failing for want of a key should now work.
-    void refresh(allSources);
+    void refresh(allSources, { fresh: true });
   }
 
   function updateSettings(next: Settings) {
@@ -3419,16 +3425,23 @@ export default function Reader() {
    *
    * The articles have to be sent because the feeds live on this device, and
    * only the link and the headline go — the ranking is a fact about the
-   * press, not about the reader. Runs whenever the list changes; the answer
-   * is cached server-side, so this is one small request per refresh.
+   * press, not about the reader.
+   *
+   * Once a refresh has finished, not every time the list changes during one
+   * — that was several requests a refresh, each of them work on the server
+   * (3 Nov 2026) — and not again for the same stories within a few hours:
+   * the ranking itself is rebuilt only twice a day, after the panel's sweep.
    */
+  const rankedFor = useRef<{ key: string; at: number } | null>(null);
   useEffect(() => {
-    if (!ready || articles.length === 0) return;
+    if (!ready || refreshing || articles.length === 0) return;
     const payload = articles.slice(0, 600).map((article) => ({
       id: article.id,
       link: article.link,
       title: article.title,
     }));
+    const key = payload.map((article) => article.id).join("\n");
+    if (rankedFor.current?.key === key && Date.now() - rankedFor.current.at < 6 * 3_600_000) return;
     let live = true;
     const timer = window.setTimeout(() => {
       fetch("/api/rank", {
@@ -3447,6 +3460,7 @@ export default function Reader() {
             windowHours?: number;
           }) => {
             if (!live) return;
+            rankedFor.current = { key, at: Date.now() };
             if (!data.available) {
               // Ranking needs the shared corpus; without it the app works as
               // before and the sub-line says so rather than implying the
@@ -3476,7 +3490,7 @@ export default function Reader() {
       live = false;
       window.clearTimeout(timer);
     };
-  }, [articles, ready]);
+  }, [articles, ready, refreshing]);
 
   const listed = useMemo(() => {
     /*
@@ -4086,7 +4100,7 @@ export default function Reader() {
     setPullDistance(0);
     if (travelled >= PULL_TRIGGER && !refreshing) {
       setPullRefresh(true);
-      void refresh(allSources);
+      void refresh(allSources, { fresh: true });
     }
   }, [pullDistance, refreshing, refresh, allSources]);
 
@@ -4964,7 +4978,7 @@ export default function Reader() {
             )}
             health={health}
             refreshing={refreshing}
-            onRefresh={() => void refresh(allSources)}
+            onRefresh={() => void refresh(allSources, { fresh: true })}
             onBack={backToSettings}
             onOpenMenu={() => setMenuOpen(true)}
           />
@@ -5194,7 +5208,7 @@ export default function Reader() {
                 would only crowd the row. */}
             <button
               className="btn ghost small refresh-btn"
-              onClick={() => refresh(allSources)}
+              onClick={() => refresh(allSources, { fresh: true })}
               disabled={refreshing || allSources.length === 0}
             >
               {refreshing ? <span className="spinner" /> : Icon.refresh}

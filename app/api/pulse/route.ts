@@ -1,6 +1,5 @@
 import { meter } from "@/lib/db-usage";
 import { NextResponse } from "next/server";
-import { after } from "next/server";
 import {
   corpusAvailable,
   readPulse,
@@ -9,7 +8,7 @@ import {
   PULSE_TTL_MS,
   WINDOW_HOURS,
 } from "@/lib/corpus";
-import { catchUpSweeps, dueSlices, sliceCount } from "@/lib/sweep";
+import { dueSlices, sliceCount } from "@/lib/sweep";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,8 +48,8 @@ export async function GET(request: Request) {
 
   try {
     const payload = await readPulse();
+    // Swept on the schedule only (vercel.json): see /api/rank.
     const due = await dueSlices();
-    if (due.length > 0) after(() => catchUpSweeps(2));
 
     return NextResponse.json({
       available: true,

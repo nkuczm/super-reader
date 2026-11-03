@@ -1,8 +1,7 @@
 import { meter } from "@/lib/db-usage";
-import { NextResponse, after } from "next/server";
+import { NextResponse } from "next/server";
 import { corpusAvailable, readPulse, WINDOW_HOURS } from "@/lib/corpus";
 import { rankAgainstPulse } from "@/lib/pulse";
-import { catchUpSweeps } from "@/lib/sweep";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,11 +52,12 @@ export async function POST(request: Request) {
     .slice(0, MAX_ARTICLES);
 
   try {
+    // The ranking as last built — after the scheduled sweep, not here. This
+    // request used to start a sweep of the panel after answering, and a
+    // reader makes several on every refresh: the whole panel was fetched and
+    // parsed every half hour anyone had the app open, which used up the free
+    // plan's CPU allowance and paused the deployment (3 Nov 2026).
     const payload = await readPulse();
-    // This is the request a reader makes on every refresh, and on a quiet
-    // deployment it may be the only traffic there is — so it is also what
-    // keeps the corpus swept, after the response rather than before it.
-    after(() => catchUpSweeps(2));
 
     return NextResponse.json({
       available: true,

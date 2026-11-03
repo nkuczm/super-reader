@@ -77,74 +77,79 @@ type EnrichOptions = {
   preferPageDates?: boolean;
 };
 
+/** What a story's page says about itself, read from its <head>. */
+type PageFacts = { description?: string; image?: string; published?: string; modified?: string; title?: string };
+
+/*
+ * Pages already read, kept while the server instance lives. Every refresh,
+ * on every device, used to read the same stories' pages again for the same
+ * picture and summary — fetching, decompressing and scanning a few hundred
+ * kilobytes each, which is server CPU the free plan counts (3 Nov 2026).
+ * What a page said is kept for half a day; a page that would not answer is
+ * asked again after two hours.
+ */
+const pages = new Map<string, { at: number; facts: PageFacts | null }>();
+const READ_FOR_MS = 12 * 60 * 60 * 1000;
+const FAILED_FOR_MS = 2 * 60 * 60 * 1000;
+const PAGES_HELD = 4000;
+
+async function pageFacts(link: string): Promise<PageFacts | null> {
+  const held = pages.get(link);
+  if (held && Date.now() - held.at < (held.facts ? READ_FOR_MS : FAILED_FOR_MS)) return held.facts;
+  let facts: PageFacts | null = null;
+  try {
+    const { body, finalUrl } = await fetchText(link, 9000);
+    // A bot or cookie check where the article should be says nothing about it.
+    if (!isChallengeHtml(body, finalUrl)) {
+      // Metadata lives in <head>; ignore the rest of a potentially huge page.
+      const head = body.slice(0, 60_000);
+      const description = metaTag(head, ["og:description", "twitter:description", "description"]);
+      const social = metaTag(head, ["og:image", "og:image:secure_url", "twitter:image", "twitter:image:src"]);
+      const title = metaTag(head, ["og:title", "twitter:title"]);
+      facts = {
+        ...(description ? { description: stripHtml(description) } : {}),
+        // No social image: the first real picture in the body.
+        image: social && !isTrackingPixel(social) ? absolute(social, finalUrl) : firstImageIn(body, finalUrl),
+        published: toIso(metaTag(head, ["article:published_time", "datePublished"])),
+        modified: toIso(metaTag(head, ["article:modified_time"])),
+        ...(title ? { title: stripHtml(title) } : {}),
+      };
+    }
+  } catch {
+    // A slow page or one that refuses us: nothing to add, and not asked again for a while.
+  }
+  if (pages.size >= PAGES_HELD) pages.delete(pages.keys().next().value!);
+  pages.set(link, { at: Date.now(), facts });
+  return facts;
+}
+
 async function enrichOne(
   article: Article,
   { siteDescription, preferPageDates }: EnrichOptions = {},
 ): Promise<Article> {
-  try {
-    const { body, finalUrl } = await fetchText(article.link, 9000);
-    // A bot or cookie check where the article should be says nothing about it.
-    if (isChallengeHtml(body, finalUrl)) return article;
-    // Metadata lives in <head>; ignore the rest of a potentially huge page.
-    const head = body.slice(0, 60_000);
+  const facts = await pageFacts(article.link);
+  // A source that blocks us, or a slow page, must not fail the whole feed.
+  if (!facts) return article;
 
-    const summary =
-      article.summary ??
-      (() => {
-        const raw = metaTag(head, [
-          "og:description",
-          "twitter:description",
-          "description",
-        ]);
-        if (!raw) return undefined;
-        const text = stripHtml(raw);
-        // Sites fall back to one boilerplate description for pages that have
-        // none of their own; repeating it under every headline is just noise.
-        if (siteDescription && normalize(text) === normalize(siteDescription)) {
-          return undefined;
-        }
-        return text;
-      })();
+  // Sites fall back to one boilerplate description for pages that have
+  // none of their own; repeating it under every headline is just noise.
+  const summary =
+    article.summary ??
+    (facts.description && !(siteDescription && normalize(facts.description) === normalize(siteDescription))
+      ? facts.description
+      : undefined);
+  const image = article.image ?? facts.image;
+  const publishedAt = preferPageDates
+    ? (facts.published ?? article.publishedAt)
+    : (article.publishedAt ?? facts.published ?? facts.modified);
+  /*
+   * A headline made up from the URL's slug — all a plain sitemap has —
+   * gives way to the page's own. "Economic policy for agi" is legible;
+   * "Economic Policy for AGI" is the title.
+   */
+  const title = article.title && article.title !== titleFromSlug(article.link) ? article.title : (facts.title ?? article.title);
 
-    const image =
-      article.image ??
-      (() => {
-        const raw = metaTag(head, [
-          "og:image",
-          "og:image:secure_url",
-          "twitter:image",
-          "twitter:image:src",
-        ]);
-        if (raw && !isTrackingPixel(raw)) return absolute(raw, finalUrl);
-        // No social image: fall back to the first real picture in the body.
-        return firstImageIn(body, finalUrl);
-      })();
-
-    const published = toIso(metaTag(head, ["article:published_time", "datePublished"]));
-    const publishedAt = preferPageDates
-      ? (published ?? article.publishedAt)
-      : (article.publishedAt ??
-        published ??
-        toIso(metaTag(head, ["article:modified_time"])));
-
-    /*
-     * A headline made up from the URL's slug — all a plain sitemap has —
-     * gives way to the page's own. "Economic policy for agi" is legible;
-     * "Economic Policy for AGI" is the title.
-     */
-    const title =
-      article.title && article.title !== titleFromSlug(article.link)
-        ? article.title
-        : (() => {
-            const own = metaTag(head, ["og:title", "twitter:title"]);
-            return own ? stripHtml(own) : article.title;
-          })();
-
-    return { ...article, title, summary, image, publishedAt };
-  } catch {
-    // A source that blocks us, or a slow page, must not fail the whole feed.
-    return article;
-  }
+  return { ...article, title, summary, image, publishedAt };
 }
 
 /**

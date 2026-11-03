@@ -22,8 +22,14 @@ export { isConfigured as corpusAvailable };
 export const WINDOW_HOURS = 48;
 /** Rows older than this are dropped: the corpus is a window, not an archive. */
 const RETAIN_DAYS = 10;
-/** How long a built ranking is served before it is rebuilt. */
-export const PULSE_TTL_MS = 10 * 60 * 1000;
+/**
+ * How long a built ranking is served before a reader's request rebuilds it.
+ * It is rebuilt after each scheduled sweep (app/api/pulse/sweep), which is
+ * when it can change; this is only the safety net for a sweep that did not
+ * run. It was ten minutes, which rebuilt it — clustering two days of the
+ * panel — six times an hour whenever anyone had the app open (3 Nov 2026).
+ */
+export const PULSE_TTL_MS = 12 * 60 * 60 * 1000;
 
 let ready: Promise<void> | null = null;
 
@@ -236,7 +242,7 @@ async function recentReddit(hours: number): Promise<CorpusRedditHit[]> {
 }
 
 /**
- * The current ranking, rebuilt at most every PULSE_TTL_MS.
+ * The current ranking: rebuilt after each sweep, and otherwise at most every PULSE_TTL_MS.
  *
  * Clustering the whole corpus takes long enough that doing it per reader
  * would be the slowest thing in the app, so the built payload is cached in
