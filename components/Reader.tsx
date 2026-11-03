@@ -3208,9 +3208,12 @@ export default function Reader() {
       const earlier = earlierStories({ title: story.title, link: story.url, publishedAt, summary: story.summary ?? held?.summary }, pool, { canonical: canonicalUrl });
       const rank = held ? ranking.get(held.id) : undefined;
       const ids = held ? [held.sourceId, ...(held.alsoIn ?? [])] : [];
+      // When the panel first saw the story, against this article: the only thing about its coverage that bears on novelty.
+      const at = Date.parse(publishedAt ?? "");
+      const firstSeenHoursBefore = rank && Number.isFinite(at) && rank.firstSeen > 0 ? (at - rank.firstSeen) / 3_600_000 : undefined;
       return {
         earlier,
-        ...(rank ? { coverage: { newsrooms: rank.newsrooms, firstSeen: rank.firstSeen, titles: rank.titles?.slice(0, 8) } } : {}),
+        ...(rank ? { coverage: { newsrooms: rank.newsrooms, titles: rank.titles?.slice(0, 5), ...(firstSeenHoursBefore !== undefined ? { firstSeenHoursBefore } : {}) } } : {}),
         source: { title: held ? sourceById.get(held.sourceId)?.title : undefined, folders: feeds.filter((f) => f.sources.some((s) => ids.includes(s.id))).map((f) => f.name) },
         ...(publishedAt ? { publishedAt } : {}),
       };
