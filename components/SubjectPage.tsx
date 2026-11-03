@@ -1340,8 +1340,26 @@ export default function SubjectPage(props: Props) {
     decide,
     dismissInsight: (insight: InsightItem) => recorded((current) => remove(current, insight.id)),
     // A box deleted meanwhile stays deleted: its editor saving on the way out must not bring it back.
-    setBox: (box: BoxItem, html: string) =>
-      onBoard((current) => (current?.[box.id]?.deleted ? current : put(current, { ...box, html, at: Date.now() }))),
+    setBox: (box: BoxItem, html: string) => {
+      // A quote filed under a story's link in this writing, its bullet deleted, is the quote deleted —
+      // unless it was moved into other writing.
+      const held = boardRef.current?.[box.id];
+      const before = quoteIdsIn(held && held.kind === "box" ? held.html : box.html);
+      if (before.size > 0) {
+        const after = quoteIdsIn(html);
+        const placed = new Set(noteRef.current.entries.filter((e) => e.kind === "quote" && e.inText).map((e) => e.id));
+        const elsewhere = (id: string) =>
+          live(boardRef.current).some((item) => item.id !== box.id && item.kind === "box" && item.html.includes(`data-quote="${id}"`));
+        const gone = [...before].filter((id) => !after.has(id) && placed.has(id) && !elsewhere(id));
+        if (gone.length > 0) removeQuotes(gone);
+      }
+      onBoard((current) => (current?.[box.id]?.deleted ? current : put(current, { ...box, html, at: Date.now() })));
+    },
+    /** A quote's bullet in writing opened: the article, at that passage. */
+    openQuote: (id: string) => {
+      const entry = noteRef.current.entries.find((e) => e.id === id);
+      if (entry && entry.kind === "quote") props.onOpenArticle(entry.link, entry.articleTitle, entry.text);
+    },
     // A picture's caption is its html, with a plain-text copy for its alt text and older copies of the app.
     setCaption: (box: BoxItem, html: string) =>
       onBoard((current) => {
@@ -2116,6 +2134,7 @@ type Shared = {
   decide: (suggestion: SuggestItem, state: "accepted" | "dismissed") => void;
   dismissInsight: (insight: InsightItem) => void;
   setBox: (box: BoxItem, html: string) => void;
+  openQuote: (id: string) => void;
   setCaption: (box: BoxItem, html: string) => void;
   resolveEmbed: (id: string) => string | undefined;
   embedBox: (id: string) => void;
@@ -2647,7 +2666,8 @@ function TextBox({ box, shared, dragHandle }: { box: BoxItem; shared: Shared; dr
       ) : (
         <RichText html={box.html} placeholder={hint("text", "Write anything…")} autoFocus={shared.focusBox === box.id}
           resolveEmbed={shared.resolveEmbed} onEmbed={shared.embedBox} onDropImage={shared.dropImage} onReplaceEmbed={shared.replaceEmbed}
-          onPasteLink={(url) => shared.storyFromLink(url, box.id)} onChange={(html) => { markUsed("text"); shared.setBox(box, html); }} />
+          onPasteLink={(url) => shared.storyFromLink(url, box.id)} onOpenQuote={shared.openQuote}
+          onChange={(html) => { markUsed("text"); shared.setBox(box, html); }} />
       )}
       {!inDoc && <TagBadges id={box.id} tags={shared.tags} />}
     </div>
