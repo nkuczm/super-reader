@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { meter } from "@/lib/db-usage";
 import { NextResponse } from "next/server";
-import { corpusAvailable, lastSweeps } from "@/lib/corpus";
+import { corpusAvailable, lastSweeps, readPulse } from "@/lib/corpus";
 import { sweepSlice, sliceCount, dueSlices, SWEEP_INTERVAL_MS } from "@/lib/sweep";
 
 export const runtime = "nodejs";
@@ -59,11 +59,22 @@ export async function GET(request: Request) {
   // allow a couple of firings a day, and one slice a day would never cover
   // the panel. Bounded so the request still finishes inside maxDuration.
   const rounds = Math.min(Math.max(Number(params.get("rounds") ?? 1) || 1, 1), 5);
+  const started = Date.now();
   const results = [];
   let next: number | undefined = slice;
   for (let round = 0; round < rounds && next !== undefined; round++) {
     results.push(await sweepSlice(next));
     next = round + 1 < rounds ? (await dueSlices())[0] : undefined;
+  }
+  // The ranking is rebuilt here, once, now that there is something new in
+  // it — not on readers' requests (lib/corpus.ts). Skipped when the sweep
+  // left too little of the minute; the next request's safety rebuild catches it.
+  if (Date.now() - started < 40_000) {
+    try {
+      await readPulse({ force: true });
+    } catch {
+      /* the ranking as it was stands until the next sweep */
+    }
   }
   return NextResponse.json(results.length === 1 ? results[0] : { rounds: results });
 }

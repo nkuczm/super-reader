@@ -267,5 +267,25 @@ export async function GET(request: Request) {
     }),
   );
 
-  return NextResponse.json({ results });
+  return NextResponse.json({ results }, { headers: cacheHeaders(urls, results, params.has("fresh")) });
+}
+
+/**
+ * The same sources asked for again within a few minutes — the app opened
+ * twice, or on the phone and then the computer — are answered from the
+ * cache rather than read and parsed again: each of these requests is server
+ * CPU, which the free plan counts (3 Nov 2026). Five minutes at the edge,
+ * shared across devices; two in the browser. A refresh the reader asked for
+ * (`fresh`) is always read anew, and so is anything with a source that
+ * failed, so it is tried again next time. A group with an API source is
+ * read with the reader's own keys, so it is kept in their browser only.
+ */
+function cacheHeaders(urls: string[], results: { ok: boolean }[], fresh: boolean): Record<string, string> {
+  if (fresh || results.some((result) => !result.ok)) return { "cache-control": "no-store" };
+  if (urls.some((url) => parseApiSourceUrl(url))) return { "cache-control": "private, max-age=300" };
+  return {
+    "cache-control": "public, max-age=120",
+    "cdn-cache-control": "public, s-maxage=300",
+    "vercel-cdn-cache-control": "public, s-maxage=300",
+  };
 }
