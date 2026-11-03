@@ -123,6 +123,8 @@ import {
   slimBoardsForSync,
   type Board,
   type Boards,
+  placeQuoteInText,
+  removeQuoteFromText,
 } from "@/lib/subjects";
 import { attributeStories, inAnySource, inSource } from "@/lib/attribute";
 import { loadHealth, recordRuns, saveHealth, type HealthLog } from "@/lib/health";
@@ -2679,6 +2681,8 @@ export default function Reader() {
         : undefined;
       const title = known?.title ?? reading?.title ?? link;
       const wasIn = holds(noteId, link);
+      // A story the subject's writing already links to: the quote goes under that link as a bullet, not on a card of its own.
+      const inText = placeQuoteInText(boardsRef.current[noteId], link, { id: entryId, text }) !== null;
 
       commitNotes((current) =>
         appendQuote(current, noteId, {
@@ -2691,10 +2695,12 @@ export default function Reader() {
           publishedAt: known?.publishedAt,
           author: known?.author,
           at: Date.now(),
+          ...(inText ? { inText: true } : {}),
         }),
       );
+      if (inText) commitBoard(noteId, (board) => placeQuoteInText(board, link, { id: entryId, text })?.board ?? board ?? {});
       // A new story quoted into a subject lands on the tab open there; one it already has stays put.
-      commitBoard(noteId, (board) => arriveOnTab(board, { link, title }, wasIn));
+      else commitBoard(noteId, (board) => arriveOnTab(board, { link, title }, wasIn));
 
       if (savedRef.current.some((a) => a.link === link)) return entryId;
       setSaved((current) => {
@@ -2732,10 +2738,26 @@ export default function Reader() {
    */
   const moveQuote = useCallback(
     (entryId: string, toNoteId: string) => {
-      commitNotes((current) => moveEntry(current, entryId, toNoteId));
+      const from = notesRef.current.find((n) => n.entries.some((e) => e.id === entryId));
+      const entry = from?.entries.find((e) => e.id === entryId);
+      if (from && entry && entry.kind === "quote" && entry.inText) {
+        // Out of the writing it was filed in, and into the other subject's — under the story's link there, or on a card.
+        const quote = { id: entry.id, text: entry.text };
+        const inText = placeQuoteInText(boardsRef.current[toNoteId], entry.link, quote) !== null;
+        commitBoard(from.id, (board) => removeQuoteFromText(board, entryId));
+        commitNotes((current) =>
+          moveEntry(current, entryId, toNoteId).map((note) =>
+            note.id !== toNoteId ? note : { ...note, entries: note.entries.map((e) => (e.id === entryId && e.kind === "quote" ? { ...e, inText } : e)) },
+          ),
+        );
+        if (inText) commitBoard(toNoteId, (board) => placeQuoteInText(board, entry.link, quote)?.board ?? board ?? {});
+        else commitBoard(toNoteId, (board) => arriveOnTab(board, { link: entry.link, title: entry.articleTitle }, holds(toNoteId, entry.link)));
+      } else {
+        commitNotes((current) => moveEntry(current, entryId, toNoteId));
+      }
       touchSubject(toNoteId);
     },
-    [commitNotes, touchSubject],
+    [commitNotes, commitBoard, touchSubject, holds],
   );
 
   const removeNote = useCallback(

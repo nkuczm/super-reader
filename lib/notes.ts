@@ -29,6 +29,12 @@ export type NoteQuote = {
   publishedAt?: string;
   author?: string;
   at: number;
+  /**
+   * Filed as a bullet under the story's link in the subject's writing
+   * (`placeQuoteInText`, lib/subjects.ts) rather than on a card of its own:
+   * a story already in the writing does not also become a block.
+   */
+  inText?: boolean;
 };
 
 export type NoteComment = {

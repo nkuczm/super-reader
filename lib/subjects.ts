@@ -773,7 +773,8 @@ export function cardsOf(note: Note, board: Board | undefined): Card[] {
   };
 
   for (const entry of note.entries) {
-    if (!isQuote(entry)) continue;
+    // A quote filed under the story's link in the writing lives there, not on a card.
+    if (!isQuote(entry) || entry.inText) continue;
     ensure(entry.link, entry.articleTitle, entry.sourceTitle, entry.at, entry).quotes.push({
       id: entry.id,
       text: entry.text,
@@ -1566,7 +1567,7 @@ export function deleteTab(board: Board | undefined, tab: string, now = Date.now(
 /* ------------------------------------------------------------------------ */
 
 /** The bullets of some HTML, or nothing when every bullet is empty. */
-function noteBullets(html: string): string {
+export function noteBullets(html: string): string {
   const clean = sanitizeRichText(html);
   const text = clean.replace(/<[^>]+>/g, "").replace(/&nbsp;|\s/g, "");
   if (!text) return "";
@@ -1598,7 +1599,7 @@ export function addQuoteNote(
   const bullets = noteBullets(html);
   if (!bullets) return board ?? {};
   const card = cardsOf(note, board).find((c) => c.quotes.some((q) => q.id === quoteId));
-  if (!card) return board ?? {};
+  if (!card) return addQuoteNoteInText(board, quoteId, html, now) ?? board ?? {};
   const doc = composeCardDoc(card.note, card.quotes);
   const anchor = doc.indexOf(`data-quote="${quoteId}"`);
   const open = anchor >= 0 ? doc.lastIndexOf("<li", anchor) : -1;
@@ -1662,7 +1663,8 @@ export function bylineOf(card: { publishedAt?: string; author?: string; source?:
  */
 export function quoteNotesFor(note: Note, board: Board | undefined, quoteId: string): string[] {
   const card = cardsOf(note, board).find((c) => c.quotes.some((q) => q.id === quoteId));
-  if (!card || !card.note) return [];
+  if (!card) return quoteNotesInText(board, quoteId);
+  if (!card.note) return [];
   const nodes = parseHtml(composeCardDoc(card.note, card.quotes));
   const text = (n: HtmlNode | string): string =>
     typeof n === "string" ? n : n.tag === "ul" || n.tag === "ol" ? "" : n.children.map(text).join("");
@@ -1683,6 +1685,175 @@ export function quoteNotesFor(note: Note, board: Board | undefined, quoteId: str
       for (const child of li.children) if (typeof child !== "string" && (child.tag === "ul" || child.tag === "ol")) collect(child, 0);
     }
   }
+  return lines;
+}
+
+/* ------------------------------------------------------------------------ */
+/* A quote filed under the story's link in the writing                      */
+/* ------------------------------------------------------------------------ */
+
+/** Writing: a text box, not a header, picture, drawing, table or transcript. */
+function isWriting(item: BoardItem): item is BoxItem {
+  return item.kind === "box" && !item.label && !item.drawing && item.image === undefined && item.caption === undefined &&
+    !item.table && !item.transcript && !item.embedded;
+}
+
+const isList = (node: HtmlNode | string): node is HtmlNode => typeof node !== "string" && (node.tag === "ul" || node.tag === "ol");
+const BLOCK_TAGS = new Set(["p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "ul", "ol", "li", "pre", "table"]);
+const LINKS = /<a\b[^>]*\bhref="([^"]*)"[^>]*>/g;
+
+/** A link to the story in some writing — any link but a quote's own. */
+const linksTo = (open: string, key: string) => {
+  const href = open.match(/\bhref="([^"]*)"/)?.[1];
+  return !!href && !open.includes("data-quote=") && canonicalUrl(href.replace(/&amp;/g, "&")) === key;
+};
+
+/** The writing in a subject that links to a story, most recently written first. */
+export function boxesLinking(board: Board | undefined, link: string): BoxItem[] {
+  const key = canonicalUrl(link);
+  return live(board)
+    .filter(isWriting)
+    .filter((box) => [...box.html.matchAll(LINKS)].some((m) => linksTo(m[0], key)))
+    .sort((a, b) => b.at - a.at);
+}
+
+/** The nodes from the top of the writing down to the first link to the story. */
+function pathToLink(nodes: (HtmlNode | string)[], key: string): HtmlNode[] | null {
+  for (const node of nodes) {
+    if (typeof node === "string") continue;
+    if (node.tag === "a" && linksTo(node.open, key)) return [node];
+    const below = pathToLink(node.children, key);
+    if (below) return [node, ...below];
+  }
+  return null;
+}
+
+const quoteBullet = (quote: { id: string; text: string }): HtmlNode => ({
+  tag: "li",
+  open: "<li>",
+  children: [{ tag: "a", open: `<a data-quote="${quote.id}">`, children: [`\u201c${escapeHtml(quote.text.trim())}\u201d`] }],
+});
+
+/**
+ * Writing with a quote put under its story's link: one level below the
+ * bullet that holds the link, after any bullets already there; or, for a
+ * link in a line or heading of its own, in the list just below that line —
+ * after its last bullet — or a new list there. Null when the writing has no
+ * link to the story.
+ */
+export function quoteUnderLink(html: string, link: string, quote: { id: string; text: string }): string | null {
+  const nodes = parseHtml(html);
+  const path = pathToLink(nodes, canonicalUrl(link));
+  if (!path) return null;
+  const bullet = quoteBullet(quote);
+  const at = path.slice(0, -1).map((n) => n.tag).lastIndexOf("li");
+  if (at >= 0) {
+    const holder = path[at];
+    const lists = holder.children.filter(isList);
+    const list = lists[lists.length - 1];
+    if (list) list.children.push(bullet);
+    else holder.children.push({ tag: "ul", open: "<ul>", children: [bullet] });
+    return serializeHtml(nodes);
+  }
+  // The line the link is on: a block of its own, or a run of text ended by a line break.
+  let end = nodes.indexOf(path[0]);
+  if (!BLOCK_TAGS.has(path[0].tag)) {
+    let i = end + 1;
+    while (i < nodes.length) {
+      const n = nodes[i];
+      if (typeof n !== "string" && (n.tag === "br" || BLOCK_TAGS.has(n.tag))) break;
+      i++;
+    }
+    end = i < nodes.length && typeof nodes[i] !== "string" && (nodes[i] as HtmlNode).tag === "br" ? i : i - 1;
+  }
+  let next = end + 1;
+  while (next < nodes.length && typeof nodes[next] === "string" && !(nodes[next] as string).trim()) next++;
+  const below = nodes[next];
+  if (below !== undefined && isList(below)) below.children.push(bullet);
+  else nodes.splice(end + 1, 0, { tag: "ul", open: "<ul>", children: [bullet] });
+  return serializeHtml(nodes);
+}
+
+/**
+ * File a quote under the story's link in the subject's writing, where the
+ * story is already linked: the writing most recently worked on, at the
+ * link's first appearance in it. Null when nothing in the subject links to
+ * the story, so the quote goes on a card as before.
+ */
+export function placeQuoteInText(
+  board: Board | undefined,
+  link: string,
+  quote: { id: string; text: string },
+  now = Date.now(),
+): { board: Board; boxId: string } | null {
+  for (const box of boxesLinking(board, link)) {
+    const html = quoteUnderLink(box.html, link, quote);
+    if (html !== null) return { board: put(board, { ...box, html: sanitizeRichText(html), at: now }, now), boxId: box.id };
+  }
+  return null;
+}
+
+/** The writing that holds a quote's bullet, and that bullet. */
+function quoteInText(board: Board | undefined, quoteId: string) {
+  for (const box of live(board).filter(isWriting)) {
+    if (!box.html.includes(`data-quote="${quoteId}"`)) continue;
+    const nodes = parseHtml(box.html);
+    const find = (list: (HtmlNode | string)[]): HtmlNode | null => {
+      for (const n of list) {
+        if (typeof n === "string") continue;
+        if (n.tag === "li" && n.children.some((c) => typeof c !== "string" && c.tag === "a" && c.open.includes(`data-quote="${quoteId}"`))) return n;
+        const deeper = find(n.children);
+        if (deeper) return deeper;
+      }
+      return null;
+    };
+    const li = find(nodes);
+    if (li) return { box, nodes, li };
+  }
+  return null;
+}
+
+/** A quote's bullet taken out of the writing it was filed in, with what was nested under it; an emptied list goes too. */
+export function removeQuoteFromText(board: Board | undefined, quoteId: string, now = Date.now()): Board {
+  const found = quoteInText(board, quoteId);
+  if (!found) return board ?? {};
+  const prune = (list: (HtmlNode | string)[]): (HtmlNode | string)[] =>
+    list
+      .filter((n) => n !== found.li)
+      .map((n) => (typeof n === "string" ? n : { ...n, children: prune(n.children) }))
+      .filter((n) => !(isList(n) && !n.children.some((c) => typeof c !== "string")));
+  return put(board, { ...found.box, html: sanitizeRichText(serializeHtml(prune(found.nodes))), at: now }, now);
+}
+
+/** A note under a quote filed in the writing: bullets one level below it, after any already there. */
+function addQuoteNoteInText(board: Board | undefined, quoteId: string, html: string, now: number): Board | null {
+  const bullets = noteBullets(html);
+  const found = bullets ? quoteInText(board, quoteId) : null;
+  if (!found) return null;
+  const items = (parseHtml(`<ul>${bullets}</ul>`)[0] as HtmlNode).children;
+  const lists = found.li.children.filter(isList);
+  const list = lists[lists.length - 1];
+  if (list) list.children.push(...items);
+  else found.li.children.push({ tag: "ul", open: "<ul>", children: items });
+  return put(board, { ...found.box, html: sanitizeRichText(serializeHtml(found.nodes)), at: now }, now);
+}
+
+/** What was written under a quote filed in the writing, one line per bullet, indented by depth. */
+function quoteNotesInText(board: Board | undefined, quoteId: string): string[] {
+  const found = quoteInText(board, quoteId);
+  if (!found) return [];
+  const text = (n: HtmlNode | string): string =>
+    typeof n === "string" ? n : n.tag === "ul" || n.tag === "ol" ? "" : n.children.map(text).join("");
+  const lines: string[] = [];
+  const collect = (list: HtmlNode, depth: number) => {
+    for (const li of list.children) {
+      if (typeof li === "string" || li.tag !== "li") continue;
+      const own = decodeEntities(li.children.map(text).join("")).replace(/\s+/g, " ").trim();
+      if (own) lines.push(`${"  ".repeat(depth)}${own}`);
+      for (const child of li.children) if (isList(child)) collect(child, depth + 1);
+    }
+  };
+  for (const child of found.li.children) if (isList(child)) collect(child, 0);
   return lines;
 }
 
