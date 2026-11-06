@@ -30,8 +30,37 @@ function overBudget(report) {
   );
 }
 
+const DETACH = "resourcemanager.projects.deleteBillingAssignment";
+
+/**
+ * Whether the cap would work, without using it. Publish {"check": true} to
+ * the topic (a field no budget report carries) and the log says Ready, or
+ * what is missing — the one test that does not take the site down.
+ */
+async function check(name) {
+  try {
+    const client = await billing.auth.getClient();
+    const { data } = await client.request({
+      url: `https://cloudresourcemanager.googleapis.com/v3/${name}:testIamPermissions`,
+      method: "POST",
+      data: { permissions: [DETACH] },
+    });
+    if ((data.permissions ?? []).includes(DETACH)) {
+      console.log(`Ready: past the budget, this would detach billing from ${name}.`);
+    } else {
+      console.error(`NOT READY: this function's service account cannot detach billing. Give it the Project Billing Manager role (IAM → Grant access).`);
+    }
+  } catch (error) {
+    console.error(`Could not check (${error.message}). If it names the Cloud Resource Manager API, enable that API and publish the check again.`);
+  }
+}
+
 functions.cloudEvent("stopBilling", async (event) => {
   const report = JSON.parse(Buffer.from(event.data.message.data, "base64").toString());
+  if (report.check === true) {
+    await check(`projects/${await billing.getProjectId()}`);
+    return;
+  }
   const spent = `${report.costAmount} of ${report.budgetAmount} ${report.currencyCode ?? ""}`.trim();
   if (!overBudget(report)) {
     console.log(`Under budget (${spent}); nothing to do.`);

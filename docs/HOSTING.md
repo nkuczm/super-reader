@@ -172,6 +172,36 @@ dry run off. The first 0.5 GB is free and each build adds one image.
 
 ---
 
+## Testing it
+
+**Straight away**, once a step is done:
+
+| What | How | Passes when |
+|---|---|---|
+| The site builds from GitHub | Cloud Build → History | the newest build is green, and Settings' footer says "built" a time after it |
+| Sign-in and saving | Subjects → sign in → edit a subject | your subjects appear and the strip says "Saved" (a refused save would say otherwise) |
+| The sweep | Cloud Scheduler → `pulse-sweep` → ⋮ → **Force run** | Last run says **Success** |
+| The cap is wired | Pub/Sub → Topics → `budget-cap` → Messages → **Publish message** `{"costAmount": 1, "budgetAmount": 10, "currencyCode": "USD"}` | `budget-cap`'s Logs: `Under budget (1 of 10 USD); nothing to do.` |
+| The cap would work | publish `{"check": true}` the same way | Logs: `Ready: past the budget, this would detach billing…`. `NOT READY` means the role from step 6.3 is missing; a message naming the Cloud Resource Manager API means enable that API and publish again |
+| The cap is private | open `budget-cap`'s own URL in a browser | 403 Forbidden |
+
+The one test left out on purpose is a real over-budget message
+(`{"costAmount": 11, "budgetAmount": 10}`): it does detach billing, the site
+stops within a minute, and it comes back only when billing is linked again
+(Billing → Account management). The check above tests the same permission
+without that.
+
+**After a day:** `budget-cap`'s Logs show an `Under budget (0 of 10 USD)` line
+you did not publish — the budget itself reached the topic — and
+`pulse-sweep`'s Last run is from 11:00 or 23:00 UTC, not a forced run.
+
+**After a week:** Billing → Reports, this project, reads $0.00 (the free
+tier covers it); Cloud Run → super-reader → Metrics → *Billable container
+instance time* shows how much of the 50 hours a month is in use; Artifact
+Registry holds at most three images.
+
+---
+
 ## Costs, and where to look
 
 | | Free each month | Then |
