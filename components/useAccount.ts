@@ -78,6 +78,8 @@ export function useAccount(params: {
   const [enabled, setEnabled] = useState(false);
   const [account, setAccount] = useState<AccountInfo | null>(null);
   const [checked, setChecked] = useState(false);
+  /** Why the server has sign-in off, when it says. */
+  const [problem, setProblem] = useState<string | null>(null);
   const [status, setStatus] = useState<SaveStatus>("idle");
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [backedUpAt, setBackedUpAt] = useState<number | null>(null);
@@ -127,6 +129,7 @@ export function useAccount(params: {
         askFailures.current = 0;
         const who: AccountInfo | null = data.enabled ? (data.account ?? null) : null;
         setEnabled(Boolean(data.enabled));
+        setProblem(data.enabled ? null : typeof data.problem === "string" ? data.problem : null);
         setAccount((current) => (sameAccount(current, who) ? current : who));
         rememberAccount(who);
       })
@@ -468,5 +471,5 @@ export function useAccount(params: {
     await backup();
   }, [backup]);
 
-  return { enabled, account, checked, status, savedAt, backedUpAt, backupProblem, signOut, backupNow, applyRemote };
+  return { enabled, problem, account, checked, status, savedAt, backedUpAt, backupProblem, signOut, backupNow, applyRemote };
 }

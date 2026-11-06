@@ -8,7 +8,7 @@ import { accountForSession, SESSION_COOKIE, SESSION_DAYS, type Account } from ".
 import { isConfigured as databaseConfigured } from "./db";
 import { googleConfig } from "./google";
 import { attribute } from "./db-meter";
-import { dataKeyFits } from "./key-check";
+import { dataKeyFits, keyStatus } from "./key-check";
 import { authSecret, cookieFrom, dataKey, sameOrigin } from "./secure";
 
 /** Sign-in works only with Google credentials, both secrets and a database. */
@@ -19,6 +19,26 @@ export function accountsEnabled() {
 /** ...and only with the DATA_KEY the saved data was sealed with (lib/key-check.ts). */
 export async function accountsReady() {
   return accountsEnabled() && (await dataKeyFits());
+}
+
+/**
+ * Why sign-in is off here, in words the person setting up the server can act
+ * on — or null when it is on. Names settings, never their values.
+ */
+export async function signInProblem(): Promise<string | null> {
+  const missing: string[] = [];
+  if (!process.env.GOOGLE_CLIENT_ID) missing.push("GOOGLE_CLIENT_ID");
+  if (!process.env.GOOGLE_CLIENT_SECRET) missing.push("GOOGLE_CLIENT_SECRET");
+  if (!process.env.AUTH_SECRET) missing.push("AUTH_SECRET");
+  if (!process.env.DATA_KEY) missing.push("DATA_KEY");
+  if (!databaseConfigured()) missing.push("POSTGRES_URL");
+  if (missing.length) return `This server is missing ${missing.join(", ")}.`;
+  if (!authSecret()) return "AUTH_SECRET is too short: it needs at least 32 characters.";
+  if (!dataKey()) return "DATA_KEY is not a key: it should be 44 characters ending in \"=\" (32 bytes, base64).";
+  const status = await keyStatus();
+  if (status === "wrong") return "DATA_KEY is not the key your saved data was locked with, so nothing has been read or changed. It must be the exact value Vercel has.";
+  if (status === "unreachable") return "The database could not be reached. Check POSTGRES_URL.";
+  return null;
 }
 
 export async function currentAccount(request: Request): Promise<Account | null> {
