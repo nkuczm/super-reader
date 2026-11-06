@@ -1,5 +1,5 @@
 import { meter } from "@/lib/db-usage";
-import { accountsReady, currentAccount, json } from "@/lib/session";
+import { accountsReady, currentAccount, json, signInProblem } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,5 +8,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   meter("auth");
   const account = await currentAccount(request);
-  return json({ enabled: await accountsReady(), account });
+  const enabled = await accountsReady();
+  // Said, not hidden: a server with sign-in off otherwise just loses the button.
+  return json({ enabled, account, problem: enabled ? null : await signInProblem() });
 }

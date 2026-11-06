@@ -1599,9 +1599,8 @@ export default function Reader() {
       </div>,
       document.body,
     );
-  const accountStrip = auth.enabled && (
-    <>
-    {<AccountStrip
+  const accountStrip = auth.enabled ? (
+    <AccountStrip
       account={auth.account}
       enabled={auth.enabled}
       status={auth.status}
@@ -1609,9 +1608,13 @@ export default function Reader() {
       backedUpAt={auth.backedUpAt}
       backupProblem={auth.backupProblem}
       onSignOut={() => void auth.signOut()}
-    />}
-    </>
-  );
+    />
+  ) : auth.problem ? (
+    // Sign-in is off on this server: say why, rather than lose the button.
+    <div className="account-strip nudge" role="status">
+      <span>Sign-in is off on this server. {auth.problem}</span>
+    </div>
+  ) : null;
 
   // Back from Google: tidy the address bar, and say so if it went wrong.
   const [signInFailed, setSignInFailed] = useState<string | false>(false);

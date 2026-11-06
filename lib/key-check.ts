@@ -54,7 +54,9 @@ async function sampleSealed(): Promise<string[]> {
   return found;
 }
 
-let checked: Promise<boolean> | null = null;
+export type KeyStatus = "fits" | "wrong" | "unreachable";
+
+let checked: Promise<KeyStatus> | null = null;
 
 /** Tests change the key or the database between cases. */
 export function forgetKeyCheckForTesting() {
@@ -66,23 +68,25 @@ export function forgetKeyCheckForTesting() {
  * database may only have been unreachable — and counts as "no" meanwhile,
  * so a wrong key never gets a write in while the check is retried.
  */
-export function dataKeyFits(): Promise<boolean> {
-  if (!isConfigured()) return Promise.resolve(false);
+export function keyStatus(): Promise<KeyStatus> {
+  if (!isConfigured()) return Promise.resolve("unreachable");
   checked ??= sampleSealed().then(
-    (sealed) => {
-      const fits = keyOpens(sealed, dataKey());
-      if (!fits) {
-        console.error(
-          "DATA_KEY does not open the data already saved in the database. Sign-in and every account feature are off until this deployment has the key the data was saved with.",
-        );
-      }
-      return fits;
+    (sealed): KeyStatus => {
+      if (keyOpens(sealed, dataKey())) return "fits";
+      console.error(
+        "DATA_KEY does not open the data already saved in the database. Sign-in and every account feature are off until this deployment has the key the data was saved with.",
+      );
+      return "wrong";
     },
-    (error) => {
+    (error): KeyStatus => {
       checked = null;
       console.warn("DATA_KEY check could not reach the database:", error);
-      return false;
+      return "unreachable";
     },
   );
   return checked;
+}
+
+export async function dataKeyFits(): Promise<boolean> {
+  return (await keyStatus()) === "fits";
 }
