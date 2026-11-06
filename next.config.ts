@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  /**
+   * The container build (Dockerfile, for Google Cloud Run) asks for a
+   * standalone server: only the files the app needs, in one folder, run with
+   * `node server.js`. Vercel builds its own way and is left to it.
+   */
+  output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   images: { unoptimized: true },
   /**
    * pdf.js resolves its worker relative to its own file on disk. Bundled into

@@ -13,6 +13,7 @@
  * them the account features stay off rather than running with weak defaults.
  */
 
+import { publicOrigin } from "./origin";
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 export function dataKey(): Buffer | null {
@@ -124,7 +125,7 @@ export function sameOrigin(request: Request): boolean {
     return site === null || site === "same-origin" || site === "none";
   }
   try {
-    return new URL(origin).host === new URL(request.url).host;
+    return new URL(origin).host === new URL(publicOrigin(request)).host;
   } catch {
     return false;
   }

@@ -1,0 +1,13 @@
+# Kept out of the image build: what the build makes for itself, local
+# state, and anything that could hold a secret.
+node_modules
+.next
+out
+.git
+.env*
+*.tsbuildinfo
+npm-debug.log*
+test-results
+playwright-report
+Dockerfile
+.dockerignore
