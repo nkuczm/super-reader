@@ -3,6 +3,9 @@
   "private": true,
   "description": "Detaches billing from the project when its budget is passed. See docs/HOSTING.md.",
   "main": "index.js",
+  "scripts": {
+    "start": "functions-framework --target=stopBilling"
+  },
   "engines": {
     "node": ">=22"
   },
