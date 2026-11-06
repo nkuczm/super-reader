@@ -1,7 +1,9 @@
 /**
  * The spending cap for super-reader's Google Cloud project (docs/HOSTING.md,
- * part 5). It is not part of the app and is not deployed with it: it is
- * pasted into a Cloud Run function of its own, once.
+ * step 6). It is not part of the app and is not built with it: Cloud Build
+ * builds this folder on its own, with Google's buildpacks (`npm ci`, then
+ * `npm start`), and deploys it as a second Cloud Run service on every merge
+ * that changes it.
  *
  * Google has no hard spending limit, only budgets that report. A budget
  * publishes the month's running cost to a Pub/Sub topic several times a

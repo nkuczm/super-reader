@@ -15,7 +15,7 @@ What runs where:
 | The twice-daily panel sweep | Cloud Scheduler → `/api/pulse/sweep?slice=due&rounds=5` | 11:00 and 23:00 UTC |
 | PR previews | Vercel | every push to a PR branch |
 | The database | Neon, unchanged | — |
-| The spending cap | a Cloud Run function, `budget-cap` (`gcp/budget-cap/`) | the budget's reports |
+| The spending cap | Cloud Run, a second service, `budget-cap`, built from `gcp/budget-cap/` on merge | the budget's reports, through Pub/Sub |
 
 ## What the code does for this
 
@@ -127,13 +127,26 @@ month are free.
    a Pub/Sub topic** → create topic `budget-cap`. Save.
 3. **IAM → Service accounts → Create:** `budget-cap`. Then **IAM → Grant
    access:** that account, role **Project Billing Manager**.
-4. **Cloud Run → Write a function:** name `budget-cap`, same region,
-   **Node.js 22**, trigger **Pub/Sub** on topic `budget-cap`, service
-   account `budget-cap`. In the editor, replace `index.js` and
-   `package.json` with the two files in `gcp/budget-cap/`; entry point
-   **`stopBilling`**. Deploy.
-5. Within a day its **Logs** should show `Under budget (… of 10 USD);
+4. **Cloud Run → Create service → Continuously deploy from a repository →
+   Set up with Cloud Build**, the same as the site (step 2), with three
+   differences in the build settings:
+   - **Build type:** Go, Node.js, Python… **via Google Cloud's buildpacks**
+     (not Dockerfile).
+   - **Build context directory:** `/gcp/budget-cap`
+   - **Function target** (or entry point), if asked: `stopBilling`
+
+   Then: name `budget-cap`, same region, **Require authentication** (only
+   the budget's trigger calls it), maximum instances **1**, memory 512 MiB,
+   and under **Security** the service account `budget-cap`. Create.
+5. On the new service's **Triggers** tab → **Add trigger → Pub/Sub**, topic
+   `budget-cap`. Accept the roles it offers to grant.
+6. Within a day its **Logs** should show `Under budget (… of 10 USD);
    nothing to do.` That line is the check that it is wired up.
+
+A change to `gcp/budget-cap/` then deploys itself on merge, like the site.
+So that each trigger rebuilds only for its own changes: **Cloud Build →
+Triggers** → the function's trigger → **Included files filter**
+`gcp/budget-cap/**`; the site's trigger → **Ignored files filter** `gcp/**`.
 
 Past $10 in a month it detaches billing, which stops everything in the
 project, the reader included. **Billing → Account management** → link the
