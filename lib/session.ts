@@ -8,6 +8,7 @@ import { accountForSession, SESSION_COOKIE, SESSION_DAYS, type Account } from ".
 import { isConfigured as databaseConfigured } from "./db";
 import { googleConfig } from "./google";
 import { attribute } from "./db-meter";
+import { dataKeyFits } from "./key-check";
 import { authSecret, cookieFrom, dataKey, sameOrigin } from "./secure";
 
 /** Sign-in works only with Google credentials, both secrets and a database. */
@@ -15,8 +16,13 @@ export function accountsEnabled() {
   return Boolean(googleConfig() && authSecret() && dataKey() && databaseConfigured());
 }
 
+/** ...and only with the DATA_KEY the saved data was sealed with (lib/key-check.ts). */
+export async function accountsReady() {
+  return accountsEnabled() && (await dataKeyFits());
+}
+
 export async function currentAccount(request: Request): Promise<Account | null> {
-  if (!accountsEnabled()) return null;
+  if (!(await accountsReady())) return null;
   try {
     const account = await accountForSession(cookieFrom(request, SESSION_COOKIE));
     if (account) attribute(account.id);
@@ -41,6 +47,9 @@ export async function requireAccount(
   { write = false }: { write?: boolean } = {},
 ): Promise<{ account: Account } | { response: NextResponse }> {
   if (!accountsEnabled()) return { response: json({ error: "Sign-in is not set up on this deployment." }, { status: 503 }) };
+  if (!(await dataKeyFits())) {
+    return { response: json({ error: "This server cannot open your saved data (its DATA_KEY is not the one it was saved with), so nothing was read or changed." }, { status: 503 }) };
+  }
   if (write && !sameOrigin(request)) return { response: json({ error: "Cross-site request refused." }, { status: 403 }) };
   const account = await currentAccount(request);
   if (!account) return { response: json({ error: "Sign in with Google to use Subjects.", signIn: true }, { status: 401 }) };

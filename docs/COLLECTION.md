@@ -665,6 +665,12 @@ every number in section 2 was obtained, and the probe is deliberately not in
 the repository: a permanent endpoint that fetches arbitrary URLs on request is
 not something a reader app should carry.
 
+**Since November 2026 the live site runs on Google Cloud Run while PR
+previews stay on Vercel** (`docs/HOSTING.md`). A probe deployed as a preview
+therefore measures from Vercel's addresses, not the live site's — and §8's
+walls were all measured from Vercel. Where a refusal is what is being
+measured, measure it from the live site.
+
 `test/watchlist.json` is the accumulating record: whenever a source misbehaves
 in real use, add an entry with what you expect of it. The entry becomes the
 thing that notices the regression.

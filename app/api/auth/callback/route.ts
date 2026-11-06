@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 import { createSession, upsertAccount } from "@/lib/accounts";
 import { exchangeCode, googleConfig, redirectUri } from "@/lib/google";
 import { cookieFrom, unsign } from "@/lib/secure";
-import { accountsEnabled, sessionCookie } from "@/lib/session";
+import { accountsReady, sessionCookie } from "@/lib/session";
+import { sitePath } from "@/lib/origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,12 +15,12 @@ export async function GET(request: Request) {
   const fail = (reason: string) => {
     // Logged, so a failed sign-in can be diagnosed from the deployment's logs.
     console.warn(`sign-in failed: ${reason}`);
-    const response = NextResponse.redirect(new URL(`/?signin=failed&reason=${encodeURIComponent(reason)}`, request.url));
+    const response = NextResponse.redirect(sitePath(request, `/?signin=failed&reason=${encodeURIComponent(reason)}`));
     response.cookies.delete({ name: "sr_oauth", path: "/api/auth" });
     return response;
   };
   const config = googleConfig();
-  if (!accountsEnabled() || !config) return fail("unavailable");
+  if (!(await accountsReady()) || !config) return fail("unavailable");
 
   const params = new URL(request.url).searchParams;
   if (params.get("error")) return fail(params.get("error") ?? "denied");
@@ -48,7 +49,7 @@ export async function GET(request: Request) {
       refreshToken,
     );
     const { token } = await createSession(identity.sub);
-    const response = NextResponse.redirect(new URL("/?signedin=1", request.url));
+    const response = NextResponse.redirect(sitePath(request, "/?signedin=1"));
     response.cookies.set(sessionCookie(token));
     response.cookies.delete({ name: "sr_oauth", path: "/api/auth" });
     return response;

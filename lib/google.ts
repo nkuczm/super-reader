@@ -10,6 +10,8 @@
  * Plain fetch against Google's documented endpoints; no SDK to carry.
  */
 
+import { publicOrigin } from "./origin";
+
 export const GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth";
 export const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
 export const SCOPES = ["openid", "email", "profile", "https://www.googleapis.com/auth/drive.file"];
@@ -22,10 +24,7 @@ export function googleConfig() {
 
 /** Where Google sends the person back — this deployment's own callback. */
 export function redirectUri(request: Request) {
-  const url = new URL(request.url);
-  const host = request.headers.get("x-forwarded-host") ?? url.host;
-  const proto = request.headers.get("x-forwarded-proto") ?? url.protocol.replace(":", "");
-  return `${proto}://${host}/api/auth/callback`;
+  return `${publicOrigin(request)}/api/auth/callback`;
 }
 
 export function authUrl(params: { clientId: string; redirectUri: string; state: string; challenge: string }) {

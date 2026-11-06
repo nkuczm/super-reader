@@ -1,0 +1,13 @@
+{
+  "name": "super-reader-budget-cap",
+  "private": true,
+  "description": "Detaches billing from the project when its budget is passed. See docs/HOSTING.md.",
+  "main": "index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@google-cloud/billing": "^6.2.0",
+    "@google-cloud/functions-framework": "^5.0.5"
+  }
+}

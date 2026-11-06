@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { authUrl, googleConfig, redirectUri } from "@/lib/google";
 import { pkce, randomToken, sign } from "@/lib/secure";
-import { accountsEnabled } from "@/lib/session";
+import { accountsReady } from "@/lib/session";
+import { sitePath } from "@/lib/origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,7 +10,7 @@ export const dynamic = "force-dynamic";
 /** Start signing in: off to Google, with a state and PKCE verifier held in a signed cookie. */
 export async function GET(request: Request) {
   const config = googleConfig();
-  if (!accountsEnabled() || !config) return NextResponse.redirect(new URL("/?signin=unavailable", request.url));
+  if (!(await accountsReady()) || !config) return NextResponse.redirect(sitePath(request, "/?signin=unavailable"));
   const state = randomToken(24);
   const { verifier, challenge } = pkce();
   const response = NextResponse.redirect(

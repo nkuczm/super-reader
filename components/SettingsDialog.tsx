@@ -578,7 +578,7 @@ export default function SettingsDialog({
         <div className="dialog-foot">
           {/* Which build this is, so "has it updated?" is answerable. */}
           <span className="build-stamp">
-            {(process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? "local").slice(0, 7)}
+            {buildStamp()}
           </span>
           <button className="btn ghost small" onClick={onClose}>
             Done
@@ -670,4 +670,17 @@ function ModelPicker({ tier, provider, value, onChange, openaiKey }: {
       </p>}
     </div>
   );
+}
+
+/**
+ * Vercel names the commit; the container build (Dockerfile) can only say
+ * when it was built, which answers the same question.
+ */
+function buildStamp() {
+  const commit = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA;
+  if (commit) return commit.slice(0, 7);
+  const built = process.env.NEXT_PUBLIC_BUILT_AT;
+  const at = built ? new Date(built) : null;
+  if (!at || Number.isNaN(at.getTime())) return "local";
+  return `built ${at.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
 }

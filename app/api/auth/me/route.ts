@@ -1,5 +1,5 @@
 import { meter } from "@/lib/db-usage";
-import { accountsEnabled, currentAccount, json } from "@/lib/session";
+import { accountsReady, currentAccount, json } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,5 +8,5 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   meter("auth");
   const account = await currentAccount(request);
-  return json({ enabled: accountsEnabled(), account });
+  return json({ enabled: await accountsReady(), account });
 }
