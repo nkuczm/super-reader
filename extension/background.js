@@ -8,7 +8,7 @@
  */
 
 const MARK = "super-reader-capture";
-const DEFAULT_SERVER = "https://super-reader-wine.vercel.app";
+importScripts("server.js"); // resolveServer(): where Super Reader is now
 const busy = new Set();
 
 function marked(url) {
@@ -32,7 +32,10 @@ async function capture(tab) {
   try {
     // Pages that build the article with JavaScript need a moment after "complete".
     await new Promise((r) => setTimeout(r, 1800));
-    const { code = "", server = DEFAULT_SERVER } = await chrome.storage.local.get(["code", "server"]);
+    const { code = "" } = await chrome.storage.local.get("code");
+    // The reader opened this tab from Super Reader, so a Super Reader tab is open:
+    // if the saved address has stopped answering, that tab's is the one to use.
+    const { server } = await resolveServer(code);
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["vendor/Readability.js", "extract.js"] });
     // A YouTube video: its transcript, as this browser sees it, is the text.
     const youtube = /(^|\.)youtube\.com$/.test(new URL(tab.url).hostname);
@@ -46,7 +49,7 @@ async function capture(tab) {
     }
     page.url = withoutMark(page.url);
     page.selection = "";
-    const res = await fetch(`${server.replace(/\/+$/, "")}/api/inbox`, {
+    const res = await fetch(`${server}/api/inbox`, {
       method: "POST",
       credentials: "include",
       headers: { "content-type": "application/json" },

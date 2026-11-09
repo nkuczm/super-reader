@@ -190,7 +190,10 @@ dry run off. The first 0.5 GB is free and each build adds one image.
   copies, Source status history, and per-device switches (story
   importance, background downloads).
 - On a phone, add the new address to the home screen and remove the old.
-- The Chrome extension: open it → **Server** → the new address → allow.
+- The Chrome extension: reload it in `chrome://extensions` (version 1.5
+  or later), open Super Reader at the new address and sign in, then open
+  the extension: it finds the open tab and moves to that address itself.
+  Typing the address under **Server** still works.
 
 ---
 
