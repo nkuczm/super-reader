@@ -18,6 +18,7 @@ import { canonicalUrl } from "./url";
 
 export { canonicalUrl };
 import { scoreCluster, importanceBand } from "./importance";
+import { quietPrior, QUIET_KEEP, QUIET_MAX_NEWSROOMS, type QuietStory } from "./novelty";
 import type { ClusterEvidence, Importance, RedditEvidence, StoryEvidence } from "./importance";
 
 /** One copy of a story, as recorded by a sweep. */
@@ -77,7 +78,7 @@ export type PulseCluster = {
  * deploy, so without this a new build serves its own older cache and the
  * app reads fields that are not there. The score page did exactly that.
  */
-export const PULSE_SHAPE = 2;
+export const PULSE_SHAPE = 3;
 
 export type PulsePayload = {
   /** PULSE_SHAPE at the time it was built. */
@@ -87,6 +88,12 @@ export type PulsePayload = {
   storyCount: number;
   outletCount: number;
   clusters: PulseCluster[];
+  /**
+   * Stories one or two newsrooms ran, with the evidence that they might
+   * matter anyway: what Discover is made of (lib/novelty.ts). The best
+   * QUIET_KEEP by that evidence, so the payload stays small.
+   */
+  quiet?: QuietStory[];
 };
 
 /** Newsrooms that syndicate: a copy here is not an independent decision. */
@@ -122,6 +129,7 @@ export function buildPulsePayload(
   const idf = idfOver([...tokensByUrl.values()]);
 
   const ranked: PulseCluster[] = [];
+  const quiet: QuietStory[] = [];
   for (const cluster of clusters) {
     const members = cluster.members
       .map((member) => byUrl.get(member.id))
@@ -148,6 +156,11 @@ export function buildPulsePayload(
     const hasEngagement =
       (evidence.reddit?.length ?? 0) > 0 ||
       members.some((story) => (story.comments ?? 0) > 0);
+
+    if (independent.length <= QUIET_MAX_NEWSROOMS) {
+      const pick = quietOf(members, newsrooms, redditByUrl);
+      if (pick) quiet.push(pick);
+    }
     if (independent.length < 2 && !hasEngagement) continue;
 
     const importance = scoreCluster(evidence, now);
@@ -182,12 +195,47 @@ export function buildPulsePayload(
   }
 
   ranked.sort((a, b) => b.score - a.score || b.firstSeen - a.firstSeen);
+  quiet.sort((a, b) => b.prior - a.prior || b.seenAt - a.seenAt);
   return {
     shape: PULSE_SHAPE,
     builtAt: now,
     storyCount: stories.length,
     outletCount: new Set(stories.map((story) => story.outletId)).size,
     clusters: ranked,
+    quiet: quiet.slice(0, QUIET_KEEP),
+  };
+}
+
+/**
+ * A quiet story's best copy, with the evidence for it: the copy an editor
+ * placed highest, then the better-tiered newsroom.
+ */
+function quietOf(
+  members: CorpusStory[],
+  newsrooms: string[],
+  redditByUrl: Map<string, CorpusRedditHit[]>,
+): QuietStory | null {
+  const best = [...members].sort(
+    (a, b) => Number(b.front) - Number(a.front) || a.tier - b.tier || a.slot - b.slot,
+  )[0];
+  if (!best) return null;
+  const hits = dedupeReddit(members.flatMap((story) => redditByUrl.get(story.url) ?? []));
+  const redditMass = hits.reduce((sum, hit) => sum + (4 - hit.weight) * (1 - Math.min(hit.position, 25) / 25), 0);
+  const comments = members.reduce((sum, story) => sum + (story.comments ?? 0), 0);
+  const top = [...hits].sort((a, b) => a.position - b.position)[0];
+  return {
+    url: best.url,
+    title: best.title,
+    newsroom: best.newsroom,
+    tier: best.tier,
+    front: best.front,
+    slot: best.slot,
+    comments: comments > 0 ? comments : undefined,
+    subreddits: hits.length > 0 ? hits.length : undefined,
+    subreddit: top?.subreddit,
+    newsrooms: [best.newsroom, ...newsrooms.filter((name) => name !== best.newsroom)],
+    seenAt: Math.min(...members.map((story) => story.seenAt)),
+    prior: quietPrior({ title: best.title, tier: best.tier, front: best.front, slot: best.slot, comments, redditMass }),
   };
 }
 

@@ -206,7 +206,7 @@ export type ViewMode = "magazine" | "cards" | "list";
  * How the list is ordered. "top" ranks by how big the story is rather than
  * when it arrived — see lib/importance.ts for what that means.
  */
-export type SortMode = "new" | "top";
+export type SortMode = "new" | "top" | "discover";
 
 /**
  * What the circle beside a big story's headline shows: the score out of 100,
@@ -309,7 +309,7 @@ export function loadSettings(): Settings {
       view: (["magazine", "cards", "list"] as const).includes(parsed.view as ViewMode)
         ? (parsed.view as ViewMode)
         : DEFAULT_SETTINGS.view,
-      sort: parsed.sort === "top" ? "top" : DEFAULT_SETTINGS.sort,
+      sort: parsed.sort === "top" || parsed.sort === "discover" ? parsed.sort : DEFAULT_SETTINGS.sort,
       bigStoryMetric:
         parsed.bigStoryMetric === "newsrooms"
           ? "newsrooms"

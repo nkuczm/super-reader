@@ -134,6 +134,7 @@ import { earlierStories } from "@/lib/attention";
 import type { AttentionSetup } from "./AttentionPanel";
 import { arriveOnTab } from "@/lib/tab-place";
 import { aboutTopic, trendingTopics, type Topic } from "@/lib/trending";
+import { discoverStories, type QuietStory } from "@/lib/novelty";
 import { listenForClientErrors } from "@/lib/client-errors";
 import { encodeKeysHeader, KEYS_HEADER } from "@/lib/vault";
 import {
@@ -172,7 +173,7 @@ import { sortNewestFirst, timeOf } from "@/lib/sort";
 import type { RankedArticle } from "@/lib/pulse";
 import type { PickedSource } from "./OutletCatalog";
 import type { CorpusStats } from "./ScoreExplainer";
-import { canonicalUrl } from "@/lib/url";
+import { canonicalUrl, faviconFor } from "@/lib/url";
 import { KEEP_DAYS, mergeWindow, stamp } from "@/lib/window";
 import { mergeSaved, differsFrom, slimForSync } from "@/lib/saved";
 import { knownRefusal } from "@/lib/refusals";
@@ -563,6 +564,13 @@ export default function Reader() {
    * and a corpus of N stories from M feeds.
    */
   const [rankState, setRankState] = useState<"unavailable" | "warming" | string | null>(null);
+  /**
+   * The panel's quiet stories, for Discover (lib/novelty.ts): fetched when
+   * Discover is first shown, and again after a few hours — the panel is
+   * swept twice a day. `null` until asked; empty without a database.
+   */
+  const [quiet, setQuiet] = useState<QuietStory[] | null>(null);
+  const quietAt = useRef(0);
   /** What the ranking was measured against, shown on the score page. */
   const [corpusStats, setCorpusStats] = useState<CorpusStats | null>(null);
   /** The article whose score is being explained, if any. */
@@ -3495,6 +3503,66 @@ export default function Reader() {
     };
   }, [articles, ready, refreshing]);
 
+  useEffect(() => {
+    if (!ready || settings.sort !== "discover") return;
+    if (quiet && Date.now() - quietAt.current < 3 * 3_600_000) return;
+    let live = true;
+    fetch("/api/quiet")
+      .then((res) => res.json())
+      .then((data: { stories?: QuietStory[] }) => {
+        if (!live) return;
+        quietAt.current = Date.now();
+        setQuiet(Array.isArray(data.stories) ? data.stories : []);
+      })
+      .catch(() => {
+        // Offline: Discover is made from the reader's own stories alone.
+        if (live) setQuiet((current) => current ?? []);
+      });
+    return () => {
+      live = false;
+    };
+  }, [ready, settings.sort, quiet]);
+
+  /**
+   * Discover: important-looking stories few others are running, from this
+   * view's own sources and from the outlet panel beyond them, scored on the
+   * device against this view's list (lib/novelty.ts). Each pick's reason is
+   * kept beside it for the row; a panel story is shown under its newsroom.
+   */
+  const discovery = useMemo(() => {
+    const empty = { list: [] as Loaded[], why: new Map<string, string>(), outlet: new Map<string, string>() };
+    if (settings.sort !== "discover") return empty;
+    const ownSources = selection.type === "all" || selection.type === "feed" || selection.type === "source";
+    const topics = ownSources ? trendingFor(visible) : [];
+    const picks = discoverStories({
+      held: visible,
+      // Beyond the reader's own sources only where the view is a feed of them.
+      quiet: ownSources ? quiet ?? [] : [],
+      ranking,
+      matches: matchesFor(visible),
+      crowded: (title) => topics.some((topic) => aboutTopic(title, topic.key)),
+      measured: rankState !== null && rankState !== "unavailable",
+    });
+    for (const pick of picks) {
+      if (pick.kind === "held") {
+        empty.list.push(pick.story);
+        empty.why.set(pick.story.id, pick.why);
+      } else {
+        const id = `discover:${pick.story.url}`;
+        empty.list.push({
+          id,
+          title: pick.story.title,
+          link: pick.story.url,
+          publishedAt: new Date(pick.story.seenAt).toISOString(),
+          sourceId: "",
+        });
+        empty.why.set(id, pick.why);
+        empty.outlet.set(id, pick.story.newsroom);
+      }
+    }
+    return empty;
+  }, [settings.sort, selection.type, visible, quiet, ranking, rankState]);
+
   const listed = useMemo(() => {
     /*
      * Hide-read triages a feed; it has no business emptying the keep-list.
@@ -3508,6 +3576,9 @@ export default function Reader() {
       settings.hideRead &&
       selection.type !== "saved" &&
       selection.type !== "downloaded";
+    if (settings.sort === "discover") {
+      return hideRead ? discovery.list.filter((a) => !read.has(a.id)) : discovery.list;
+    }
     if (settings.sort === "top") {
       // Ranked first, by score; everything else keeps its date order below,
       // which is what an unranked story deserves — not a guess at a score.
@@ -3532,7 +3603,7 @@ export default function Reader() {
      * hold whatever order they came in.
      */
     return selection.type === "saved" ? list : sortNewestFirst(list);
-  }, [visible, settings.hideRead, settings.sort, selection.type, read, ranking, topic]);
+  }, [visible, settings.hideRead, settings.sort, selection.type, read, ranking, topic, discovery]);
 
   /**
    * Top stories, one row per story: a story's copies from other outlets sit
@@ -4248,9 +4319,13 @@ export default function Reader() {
           ))}
         <div className="article-body">
           <div className="article-meta">
-            {(source || savedMeta(article.link)) && (
+            {(source || savedMeta(article.link) || discovery.outlet.has(article.id)) && (
               <SourceIcon
-                src={source?.favicon ?? savedMeta(article.link)?.favicon ?? ""}
+                src={
+                  source?.favicon ??
+                  savedMeta(article.link)?.favicon ??
+                  (discovery.outlet.has(article.id) ? faviconFor(article.link) : "")
+                }
                 title={
                   source?.title ??
                   savedMeta(article.link)?.sourceTitle ??
@@ -4274,7 +4349,9 @@ export default function Reader() {
               </button>
             ) : (
               <span className="meta-name">
-                {savedMeta(article.link)?.sourceTitle ?? hostOf(article.link)}
+                {discovery.outlet.get(article.id) ??
+                  savedMeta(article.link)?.sourceTitle ??
+                  hostOf(article.link)}
               </span>
             )}
             {article.author && (
@@ -4353,6 +4430,12 @@ export default function Reader() {
             );
           })()}
           </div>
+          {discovery.why.has(article.id) && (
+            <p className="discover-why">
+              {discovery.outlet.has(article.id) && <span className="discover-new">New to you</span>}
+              {discovery.why.get(article.id)}
+            </p>
+          )}
           {article.summary && settings.view !== "list" && (
             <p className="article-summary">{article.summary}</p>
           )}
@@ -5171,6 +5254,10 @@ export default function Reader() {
                 } of text`}
               {selectedSourceCount > 0 &&
                 ` · ${selectedSourceCount} source${selectedSourceCount === 1 ? "" : "s"}`}
+              {settings.sort === "discover" &&
+                (quiet === null
+                  ? " · looking beyond your sources…"
+                  : " · few others are covering these")}
               {settings.sort === "top" &&
                 (rankState === "unavailable"
                   ? " · ranking needs a database on this deployment"
@@ -5204,6 +5291,13 @@ export default function Reader() {
                 }
               >
                 Top stories
+              </button>
+              <button
+                className={sortShown === "discover" ? "on" : ""}
+                onClick={() => chooseSort("discover")}
+                title="Stories that might matter and that few others are covering"
+              >
+                Discover
               </button>
             </div>
             {/* Desktop keeps a button: there is no pull gesture with a mouse.
@@ -5366,6 +5460,12 @@ export default function Reader() {
                   and it will wait here — kept on this device, and downloaded
                   for reading offline, even after it leaves its feed.
                 </p>
+              ) : settings.sort === "discover" ? (
+                <p>
+                  Nothing under-covered from the last three days yet. Discover
+                  looks for stories that might matter that few others are
+                  running — check back after the next refresh.
+                </p>
               ) : (
                 <p>This selection has no articles right now.</p>
               ))}
@@ -5397,7 +5497,9 @@ export default function Reader() {
             ) : (
               // The end, said as one: a list that just stops reads as one still loading.
               <p className="list-end">
-                {["all", "feed", "source"].includes(selection.type)
+                {settings.sort === "discover"
+                  ? "That\u2019s this round. New finds arrive as the press moves on."
+                  : ["all", "feed", "source"].includes(selection.type)
                   ? `That\u2019s everything — stories are kept for ${KEEP_DAYS} days.`
                   : "That\u2019s everything here."}
               </p>
