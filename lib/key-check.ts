@@ -41,17 +41,21 @@ async function sampleSealed(): Promise<string[]> {
     () => sql`SELECT payload AS sealed FROM account_items WHERE payload LIKE 'v1.%' LIMIT 1`,
     () => sql`SELECT refresh_token AS sealed FROM accounts WHERE refresh_token LIKE 'v1.%' LIMIT 1`,
   ];
-  const found: string[] = [];
-  for (const probe of probes) {
-    try {
-      const rows = (await probe()) as { sealed: string }[];
-      if (rows[0]?.sealed) found.push(rows[0].sealed);
-    } catch (error) {
-      // A table not made yet holds nothing to check; anything else is a real failure.
-      if ((error as { code?: string }).code !== "42P01") throw error;
-    }
-  }
-  return found;
+  // All at once: this runs on the first request a new server answers, and
+  // four database round trips one after another were added to that wait.
+  const answers = await Promise.all(
+    probes.map(async (probe) => {
+      try {
+        const rows = (await probe()) as { sealed: string }[];
+        return rows[0]?.sealed ?? null;
+      } catch (error) {
+        // A table not made yet holds nothing to check; anything else is a real failure.
+        if ((error as { code?: string }).code !== "42P01") throw error;
+        return null;
+      }
+    }),
+  );
+  return answers.filter((sealed): sealed is string => Boolean(sealed));
 }
 
 export type KeyStatus = "fits" | "wrong" | "unreachable";

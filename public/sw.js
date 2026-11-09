@@ -12,6 +12,31 @@ const SHELL = "super-reader-shell-v1";
  */
 const PHOTOS = "super-reader-photos-v1";
 
+/**
+ * How long a page waits for the server before the kept copy is shown.
+ *
+ * The server (Google Cloud Run) stops when nobody is using it and takes
+ * seconds to start again, and a server that is starting is not "offline":
+ * asking it first, as this worker used to, left the app blank for the whole
+ * start. A server that is up answers well inside this; one that is starting
+ * does not, and the copy kept from last time opens instead, while the
+ * server's answer is kept for the next visit. The scripts that copy names
+ * were kept as they were fetched, and every panel is fetched soon after the
+ * app opens, so the kept page has what it needs.
+ */
+const QUICK_MS = 800;
+
+async function openPage(key, fresh) {
+  const kept = await caches.match(key);
+  if (!kept) {
+    // Nothing kept for this page: wait for the server; offline, the app's shell.
+    return fresh.catch(() => caches.match("/").then((hit) => hit ?? Response.error()));
+  }
+  const slow = new Promise((resolve) => setTimeout(() => resolve(null), QUICK_MS));
+  const first = await Promise.race([fresh.catch(() => null), slow]);
+  return first ?? kept;
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(SHELL).then((cache) => cache.addAll(["/"])).then(() => self.skipWaiting()),
@@ -81,17 +106,20 @@ self.addEventListener("fetch", (event) => {
   // API responses are handled by the app's own cache, not here.
   if (url.pathname.startsWith("/api/")) return;
 
-  // Navigations: try the network, fall back to the cached shell offline.
+  // Navigations: the server's page if it answers quickly, the kept one if not.
   if (request.mode === "navigate") {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(SHELL).then((cache) => cache.put("/", copy));
-          return response;
-        })
-        .catch(() => caches.match("/").then((hit) => hit ?? Response.error())),
-    );
+    const key = url.pathname;
+    let saving = Promise.resolve();
+    const fresh = fetch(request).then((response) => {
+      if (response.ok && response.type === "basic" && !response.redirected) {
+        const copy = response.clone();
+        saving = caches.open(SHELL).then((cache) => cache.put(key, copy));
+      }
+      return response;
+    });
+    // However the page is answered, the server's copy is kept for next time.
+    event.waitUntil(fresh.then(() => saving, () => {}));
+    event.respondWith(openPage(key, fresh));
     return;
   }
 

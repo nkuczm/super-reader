@@ -13,6 +13,7 @@ What runs where:
 |---|---|---|
 | The live site | Cloud Run, one service, `super-reader` | every merge to `claude/feedly-clone-custom-feeds-laz6ll` (Cloud Build) |
 | The twice-daily panel sweep | Cloud Scheduler → `/api/pulse/sweep?slice=due&rounds=5` | 11:00 and 23:00 UTC |
+| Keeping the server awake | Cloud Scheduler → `/api/warm` (does nothing, no database) | every 5 minutes |
 | PR previews | Vercel | every push to a PR branch |
 | The database | Neon, unchanged | — |
 | The spending cap | Cloud Run, a second service, `budget-cap`, built from `gcp/budget-cap/` on merge | the budget's reports, through Pub/Sub |
@@ -41,6 +42,14 @@ What runs where:
   and Next finishes any still pending when Cloud Run stops the instance.
 - **The cron** left `vercel.json` (now removed) for Cloud Scheduler, so
   Vercel no longer sweeps once it unpauses.
+- **Opening the app does not wait for a starting server** (`public/sw.js`).
+  The service worker used to ask the server for the page first and fall
+  back to its kept copy only offline; a server that is starting is not
+  offline, so the app stayed blank for the whole start. Now the server's
+  page is used if it answers within 0.8 s, and the kept copy otherwise,
+  with the server's answer kept for next time. Measured locally with a
+  server held for 5 s: the page in 5.0 s before, 0.8 s after, and the
+  reader on screen, panels opening, in 0.87 s.
 - **No CDN.** The `cdn-cache-control` headers do nothing on Cloud Run;
   browsers still cache what `cache-control` allows. For one reader the
   difference is a few extra requests.
@@ -111,13 +120,26 @@ instead sign-in is unavailable, Cloud Run → super-reader → **Logs**: the
 line `DATA_KEY does not open the data already saved` means the key is not
 the one Vercel has (and nothing was changed).
 
-### 5. The twice-daily sweep
+### 5. The schedule: the sweep, and keeping the server awake
 
 **Cloud Scheduler** → **Create job**: name `pulse-sweep`, same region,
 frequency `0 11,23 * * *`, time zone **UTC**, target **HTTP**, URL
 `https://<address>/api/pulse/sweep?slice=due&rounds=5`, method **GET**, no
 auth header (the sweep needs none: only what is due runs). Three jobs a
 month are free.
+
+**And a second job to keep the server awake:** name `keep-warm`, frequency
+`*/5 * * * *`, URL `https://<address>/api/warm`, method **GET**, otherwise
+the same. Cloud Run stops a server nobody is using after some minutes, and
+starting it again takes seconds — the delay on opening the app. A visit
+every five minutes keeps it running for what is effectively nothing: the
+endpoint answers in milliseconds and touches nothing, least of all the
+database (Neon bills by the hour its own compute is awake). Two of the three
+free jobs.
+
+While you are in the service: **Edit & deploy new revision → Container(s)
+→ Startup CPU boost** on. It gives a starting server more CPU for its first
+seconds, which shortens the starts that still happen (after each deploy).
 
 ### 6. The spending cap
 
@@ -181,6 +203,7 @@ dry run off. The first 0.5 GB is free and each build adds one image.
 | The site builds from GitHub | Cloud Build → History | the newest build is green, and Settings' footer says "built" a time after it |
 | Sign-in and saving | Subjects → sign in → edit a subject | your subjects appear and the strip says "Saved" (a refused save would say otherwise) |
 | The sweep | Cloud Scheduler → `pulse-sweep` → ⋮ → **Force run** | Last run says **Success** |
+| Kept awake | Cloud Scheduler → `keep-warm` | Last run says **Success**, every five minutes; the app opens without a pause even after an hour away |
 | The cap is wired | Pub/Sub → Topics → `budget-cap` → Messages → **Publish message** `{"costAmount": 1, "budgetAmount": 10, "currencyCode": "USD"}` | `budget-cap`'s Logs: `Under budget (1 of 10 USD); nothing to do.` |
 | The cap would work | publish `{"check": true}` the same way | Logs: `Ready: past the budget, this would detach billing…`. `NOT READY` means the role from step 6.3 is missing; a message naming the Cloud Resource Manager API means enable that API and publish again |
 | The cap is private | open `budget-cap`'s own URL in a browser | 403 Forbidden |
