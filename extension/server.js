@@ -15,7 +15,7 @@
  * never sends requests to whatever else happens to be open.
  */
 
-const DEFAULT_SERVER = "https://super-reader-wine.vercel.app";
+const DEFAULT_SERVER = "https://super-reader.cloud.run";
 
 /** Addresses the app no longer runs at. A device saved with one is moved on. */
 const OLD_SERVERS = ["https://super-reader-wine.vercel.app"];
