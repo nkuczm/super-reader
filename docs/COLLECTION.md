@@ -13,7 +13,7 @@ the number.
 **What this covers:** `lib/discover.ts`, `lib/article-link.ts`, `lib/scholarly.ts`, `lib/harvest.ts`, `lib/sitemap.ts`,
 `lib/structured.ts`, `lib/sitesearch.ts`, `lib/authentic.ts`,
 `lib/relevance.ts`, `lib/coverage.ts`, `lib/bundle.ts`, `lib/window.ts`,
-`lib/publishers.ts`, `lib/scrape.ts`, `lib/feed.ts`, `lib/techmeme.ts`, `app/api/feed/route.ts`,
+`lib/publishers.ts`, `lib/novelty.ts`, `lib/scrape.ts`, `lib/feed.ts`, `lib/techmeme.ts`, `app/api/feed/route.ts`,
 `app/api/discover/route.ts`, `scripts/coverage.mjs`.
 
 ---
@@ -520,6 +520,33 @@ So a refresh of Techmeme's feed reads the River at the same time
 Only `techmeme.com/feed.xml` reads it. Mediagazer and memeorandum run
 the same software and very likely the same River, but they are not
 measured, and §1 does not take "very likely" as a measurement.
+
+### Discover: the panel's quiet stories (9 Nov 2026)
+
+Discover, beside Top stories, lists stories that might matter and that few
+others are running. It fetches nothing new. The panel sweep already
+recorded every story; `buildPulsePayload` used to discard the ones only
+one newsroom ran, and now keeps the best 300 of them (`quiet`, one or two
+independent newsrooms) with a prior from evidence the sweep already has:
+the newsroom's tier, front-page placement, comments and subreddits
+(`quietPrior`, `lib/novelty.ts`). `/api/quiet` serves that list the same to
+everyone, cacheable at the edge. The device scores it against its own list,
+so the server never learns what a reader follows:
+
+- **Near what the reader reads.** At least two words in common with the
+  view's headlines. One word is a coincidence. A prior of 0.85 or more is
+  shown without that.
+- **Not something the reader already has.** No same address, and no headline
+  that matches a held story at the clustering threshold.
+- **The reader's own quiet stories too.** The ranking found no wider
+  coverage, at most two of their sources ran it, and a source that files
+  rarely counts as considered.
+- **Spread.** No outlet more than three times, one copy per story, and 40
+  stories at most.
+
+This is not collection and does not change recall. The weights are a first
+reading, made against fixtures and not yet against the live corpus.
+`/api/quiet` is how to look at what the panel actually offers it.
 
 ### What those numbers mean
 
