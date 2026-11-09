@@ -14,6 +14,17 @@ into a subject, with any selected text as a quote and a note under it.
    the extension and press **Connect**. (A device still on an old sync code
    can paste it under "Still using an old sync code?".)
 
+## If Super Reader moves
+
+The extension remembers the address it connected to. If that stops
+answering — as when the app moved from Vercel to Cloud Run in November
+2026 — it looks for a Super Reader tab open in this browser, signed in, and
+uses that address instead (`server.js`). So: open Super Reader, then the
+extension. The address can also be typed under **Server** in the popup.
+
+After pulling a new version of this folder, press the reload arrow on the
+extension's card in `chrome://extensions`.
+
 ## Use
 
 On any article, click the icon. Pick a subject (or "Just save it"), add a

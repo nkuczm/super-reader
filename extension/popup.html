@@ -9,6 +9,7 @@
       <section id="setup" hidden>
         <h1>Connect to Super Reader</h1>
         <p>Open <a id="open-app" href="https://super-reader-wine.vercel.app" target="_blank">Super Reader</a> in this browser and sign in with Google. Then press Connect — saved stories go straight to your account.</p>
+        <p class="hint">Super Reader open in another tab is found by itself. If it has moved, put its address under Server.</p>
         <details>
           <summary>Still using an old sync code?</summary>
           <input id="code" placeholder="Sync code" autocomplete="off" spellcheck="false" />
@@ -59,6 +60,7 @@
         <footer><button id="disconnect" class="link" data-disconnect>Disconnect</button></footer>
       </section>
     </main>
+    <script src="server.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

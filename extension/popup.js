@@ -9,14 +9,14 @@
  * the app files it into Saved and, if one was chosen, a subject.
  */
 
-const DEFAULT_SERVER = "https://super-reader-wine.vercel.app";
+// DEFAULT_SERVER, savedServer(), answers() and resolveServer() are in server.js.
 const $ = (id) => document.getElementById(id);
 
 let page = null;
 
 async function settings() {
-  const { code = "", server = DEFAULT_SERVER } = await chrome.storage.local.get(["code", "server"]);
-  return { code, server: server.replace(/\/+$/, "") || DEFAULT_SERVER };
+  const { code = "" } = await chrome.storage.local.get("code");
+  return { code, server: await savedServer() };
 }
 
 function show(id) {
@@ -299,7 +299,13 @@ $("save-btn").addEventListener("click", async () => {
 
 $("connect").addEventListener("click", async () => {
   const code = $("code").value.trim();
-  const server = ($("server").value.trim() || DEFAULT_SERVER).replace(/\/+$/, "");
+  let server = cleanServer($("server").value) || DEFAULT_SERVER;
+  // The address given has stopped answering (the app moved): a Super Reader
+  // tab open in this browser says where it is now.
+  if (!(await answers(server, code))) {
+    const found = await resolveServer(code);
+    if (found.ok) server = found.server;
+  }
   const error = $("setup-error");
   error.hidden = true;
   try {
@@ -340,19 +346,16 @@ async function start() {
   return startSave();
 }
 
-/** Signed in to Super Reader in this browser: its session reaches the account's inbox, no code needed. */
-async function signedIn(server) {
-  try {
-    const res = await fetch(`${server}/api/inbox`, { cache: "no-store", credentials: "include" });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
+// Signed in to Super Reader in this browser (or holding a sync code) at the
+// saved address — or, if that one has stopped answering, at an open Super
+// Reader tab's, which is then saved. Otherwise: connect, with the address
+// shown so a moved app is plain to see.
 (async () => {
-  const { code, server } = await settings();
+  const { code } = await settings();
+  const { server, ok } = await resolveServer(code);
   $("server").value = server;
-  if (code || (await signedIn(server))) void start();
-  else show("setup");
+  $("open-app").href = server;
+  if (ok) return void start();
+  $("server").closest("details").open = true;
+  show("setup");
 })();
