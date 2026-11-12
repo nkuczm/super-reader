@@ -297,24 +297,52 @@ $("save-btn").addEventListener("click", async () => {
   }
 });
 
+/** Asks Chrome for this site, which it may be withholding ("Site access: on click"). Needs the click's gesture. */
+function askForSite(server) {
+  try {
+    return chrome.permissions.request({ origins: [`${new URL(server).origin}/*`] });
+  } catch {
+    return Promise.resolve(false);
+  }
+}
+
+/** A fetch that failed before any answer: say what to check, not "Failed to fetch". */
+function unreachable(server) {
+  const host = (() => {
+    try {
+      return new URL(server).host;
+    } catch {
+      return server;
+    }
+  })();
+  return new Error(
+    `Chrome couldn't reach ${host}. Check that the address is the one Super Reader opens at, and that the extension may use that site: chrome://extensions → Super Reader → Details → Site access → On all sites.`,
+  );
+}
+
 $("connect").addEventListener("click", async () => {
   const code = $("code").value.trim();
   let server = cleanServer($("server").value) || DEFAULT_SERVER;
-  // The address given has stopped answering (the app moved): a Super Reader
-  // tab open in this browser says where it is now.
-  if (!(await answers(server, code))) {
-    const found = await resolveServer(code);
-    if (found.ok) server = found.server;
-  }
   const error = $("setup-error");
   error.hidden = true;
+  // First, while the click still counts as one: Chrome can hold back a site
+  // even from an extension that lists every site, and a request to a site it
+  // holds back fails with nothing but "Failed to fetch".
+  const asked = askForSite(server);
   try {
-    // Another deployment needs permission to talk to it.
-    if (server !== DEFAULT_SERVER) {
-      const granted = await chrome.permissions.request({ origins: [`${new URL(server).origin}/*`] });
-      if (!granted) throw new Error("Permission to reach that server was not given.");
+    if (!(await asked)) throw new Error(`Chrome didn't let the extension reach ${new URL(server).host}. Press Connect again and choose Allow.`);
+    // The address given has stopped answering (the app moved): a Super Reader
+    // tab open in this browser says where it is now.
+    if (!(await answers(server, code))) {
+      const found = await resolveServer(code);
+      if (found.ok) server = found.server;
     }
-    const res = await fetch(`${server}/api/inbox${code ? `?code=${encodeURIComponent(code)}` : ""}`, { cache: "no-store", credentials: "include" });
+    let res;
+    try {
+      res = await fetch(`${server}/api/inbox${code ? `?code=${encodeURIComponent(code)}` : ""}`, { cache: "no-store", credentials: "include" });
+    } catch {
+      throw unreachable(server);
+    }
     if (!res.ok) {
       throw new Error(
         res.status === 404
