@@ -15,10 +15,12 @@
  * never sends requests to whatever else happens to be open.
  */
 
-const DEFAULT_SERVER = "https://super-reader.cloud.run";
+const DEFAULT_SERVER = "https://super-reader-j6zkelkjva-uk.a.run.app";
 
 /** Addresses the app no longer runs at. A device saved with one is moved on. */
-const OLD_SERVERS = ["https://super-reader-wine.vercel.app"];
+// super-reader.cloud.run was never an address of the app (it does not resolve);
+// 1.5.1 shipped it as the default by mistake.
+const OLD_SERVERS = ["https://super-reader-wine.vercel.app", "https://super-reader.cloud.run"];
 
 function cleanServer(server) {
   return String(server || "").trim().replace(/\/+$/, "");

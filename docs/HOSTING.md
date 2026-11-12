@@ -11,7 +11,7 @@ What runs where:
 
 | | Where | Started by |
 |---|---|---|
-| The live site | Cloud Run, one service, `super-reader` | every merge to `claude/feedly-clone-custom-feeds-laz6ll` (Cloud Build) |
+| The live site, [super-reader-j6zkelkjva-uk.a.run.app](https://super-reader-j6zkelkjva-uk.a.run.app) | Cloud Run, one service, `super-reader`, region us-east4 | every merge to `claude/feedly-clone-custom-feeds-laz6ll` (Cloud Build) |
 | The twice-daily panel sweep | Cloud Scheduler → `/api/pulse/sweep?slice=due&rounds=5` | 11:00 and 23:00 UTC |
 | Keeping the server awake | Cloud Scheduler → `/api/warm` (does nothing, no database) | every 5 minutes |
 | PR previews | Vercel | every push to a PR branch |
