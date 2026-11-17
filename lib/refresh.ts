@@ -72,7 +72,7 @@ export async function inLanes<T>(items: T[], lanes: number, work: (item: T) => P
  * lib/apis.ts by a test; spelled out here so the reader's own code does not
  * have to carry the whole provider table.
  */
-export const PAPER_APIS = ["arxiv", "crossref", "journal", "openalex", "rxiv", "osf"] as const;
+export const PAPER_APIS = ["arxiv", "crossref", "journal", "openalex", "rxiv", "osf", "elife"] as const;
 
 /**
  * How often a research service is asked for a source's newest papers.

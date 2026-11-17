@@ -548,6 +548,47 @@ This is not collection and does not change recall. The weights are a first
 reading, made against fixtures and not yet against the live corpus.
 `/api/quiet` is how to look at what the panel actually offers it.
 
+### The directory audited from Cloud Run (17 Nov 2026)
+
+The first audit since the live site moved to Cloud Run (§5): `/api/outlets/audit`,
+all 30 slices, read from the live server. 19 of 356 entries failed, and each
+failed again when read alone. A month earlier, from Vercel, every one answered.
+
+| Entry | From Cloud Run | Done |
+|---|---|---|
+| NPR (four), Newsweek, eLife | 403 / 406 | answer a feed reader that names itself |
+| phys.org | 429 in the burst | answered alone; unchanged |
+| New Scientist | 406 both ways | Google News, two days |
+| justice.gov press releases | 401 both ways | Google News, `site:justice.gov/opa`, seven days |
+| Seattle Times | a web page both ways | Google News, two days |
+| The Brains Blog | 403 both ways | Google News, thirty days (it files weekly) |
+| eLife Neuroscience | 406 both ways; eLife's API answers | `api:elife?subject=neuroscience` |
+| Nature Comms Neuroscience | a web page, as since October | OpenAlex by ISSN, narrowed to the field (`area=`) |
+| Synthese | OpenAlex: nothing by print ISSN | the online ISSN |
+| Nature (four journals) | a web page in the burst | answered alone; unchanged |
+
+**A refused feed is asked once more as a feed reader** (`fetchFeedText`,
+`lib/feed.ts`): its own user agent, a feed Accept header, nothing else. The
+first ask still looks like a browser, because that is what many publishers'
+pages need (§8); but a Chrome user agent from a datacentre address, without
+anything else Chrome sends, is what bot filters are built to catch, and a
+reader that names itself is what a feed is for. The audit reports
+`agent: "reader"` for a feed only that ask got, so a later audit shows which
+feeds depend on it.
+
+The Journal route's field (`area=`) never falls back to Crossref, which cannot
+narrow a journal to one field: the whole of Nature Communications under a
+neuroscience name would be the plausible substitute of §6.
+
+**A publication typed by its name is the publication.** "The New Atlantis"
+was reported broken; its feed and its articles both answered. What failed was
+the name: typed into Add a source, it became a Bing news search for its
+words. `outletByName` (`lib/outlets.ts`) now matches a directory name before
+the topic rung — two words or more, or one word typed with "The", since
+"science" or "deadline" alone is as likely a topic. The New Atlantis is a
+quarterly that files a whole issue under one date, so its feed of ten reads
+as weeks quiet between issues; that is the publication, not a fault.
+
 ### What those numbers mean
 
 **No ordering of routes wins everywhere.** Sitemaps-first loses stories at the
