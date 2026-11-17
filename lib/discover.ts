@@ -15,7 +15,7 @@ import { xHandleFrom, fetchXFeed } from "./x";
 import { parseApiSourceUrl, fetchApiSource } from "./apis";
 import { subredditFrom, subredditFeedUrl, subredditPageUrl } from "./reddit";
 import { knownFeedFor } from "./publishers";
-import { frontOutletForHost } from "./outlets";
+import { frontOutletForHost, outletByName } from "./outlets";
 import { scholarlyRoute, type ScholarlyRoute } from "./scholarly";
 import { parseBundle, mergeBundled } from "./bundle";
 import { canonicalUrl } from "./url";
@@ -395,6 +395,32 @@ export async function discover(
     };
   }
 
+  // A publication by its name, as the directory holds it: the publication,
+  // not a news search for the words in its name.
+  const named = !isProbablyUrl(raw) ? outletByName(raw) : null;
+  if (named) {
+    const { meta, total, articles } = await tryFeed(named.feedUrl, limit);
+    let faviconHost = "";
+    try {
+      faviconHost = new URL(named.siteUrl).hostname.replace(/^www\./, "");
+    } catch {
+      /* no icon */
+    }
+    return {
+      ...meta,
+      kind: "feed",
+      // Where collection is aimed: a section, or a feed on another host (Google
+      // News), must never have the site's sitemap merged in (COLLECTION.md §3).
+      scope: named.section && named.section !== "All" ? "section" : sameHost(named.feedUrl, named.siteUrl) ? "site" : "section",
+      total,
+      title: named.section && named.section !== "All" ? `${named.name} · ${named.section}` : named.name,
+      siteUrl: named.siteUrl,
+      feedUrl: named.feedUrl,
+      favicon: faviconFor(faviconHost),
+      articles,
+    };
+  }
+
   if (!isProbablyUrl(raw)) {
     // A plain topic: search-backed feed so any subject becomes a source.
     const { meta, total, articles } = await tryFeed(topicFeedUrl(raw), limit);
@@ -736,5 +762,15 @@ export async function discover(
         ? error.message
         : "No feed found for that site, and its articles could not be read.",
     );
+  }
+}
+
+/** Whether a feed lives on the site it is for (www. aside). */
+function sameHost(a: string, b: string) {
+  try {
+    const host = (url: string) => new URL(url).hostname.replace(/^www\./, "");
+    return host(a) === host(b);
+  } catch {
+    return false;
   }
 }

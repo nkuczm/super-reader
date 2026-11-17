@@ -78,3 +78,47 @@ test("enrichment leaves an article alone when its page is a bot or cookie check"
   assert.ok(isChallengeHtml("<html><head><title>Just a moment...</title></head><body>Checking your browser</body></html>", "https://example.com/a"));
   assert.ok(!isChallengeHtml("<html><head><title>A real story</title></head><body><p>" + "Words. ".repeat(500) + "</p></body></html>", "https://example.com/a"));
 });
+
+// Measured from the live server, 17 Nov 2026: NPR 403, Newsweek 406, phys.org 429.
+test("a refused feed is asked once more as a feed reader that names itself", async () => {
+  const agents: string[] = [];
+  globalThis.fetch = (async (_input: any, init?: RequestInit) => {
+    const agent = new Headers(init?.headers).get("user-agent") ?? "";
+    agents.push(agent);
+    if (/Chrome/.test(agent)) return new Response("no", { status: 403, statusText: "Forbidden" });
+    return new Response(RSS, { status: 200 });
+  }) as typeof fetch;
+  const { body, agent } = await fetchFeedText("https://feeds.example.org/1001/rss.xml");
+  assert.match(body, /<rss/);
+  assert.equal(agent, "reader");
+  assert.equal(agents.length, 2);
+  assert.match(agents[1], /SuperReader/);
+  assert.doesNotMatch(agents[1], /Chrome|Safari/);
+});
+
+test("a feed refused both ways reports the first refusal, and other failures are not retried", async () => {
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls++;
+    return new Response("no", { status: calls === 1 ? 406 : 403, statusText: calls === 1 ? "Not Acceptable" : "Forbidden" });
+  }) as typeof fetch;
+  await assert.rejects(fetchFeedText("https://www.example.org/rss.xml"), /^Error: 406 Not Acceptable/);
+  assert.equal(calls, 2);
+
+  calls = 0;
+  globalThis.fetch = (async () => {
+    calls++;
+    return new Response("gone", { status: 404, statusText: "Not Found" });
+  }) as typeof fetch;
+  await assert.rejects(fetchFeedText("https://www.example.org/rss.xml"), /404/);
+  assert.equal(calls, 1);
+});
+
+test("a feed answered with a page even after the cookie retry is asked as a feed reader", async () => {
+  globalThis.fetch = (async (_input: any, init?: RequestInit) => {
+    const agent = new Headers(init?.headers).get("user-agent") ?? "";
+    return new Response(/SuperReader/.test(agent) ? RSS : PAGE, { status: 200 });
+  }) as typeof fetch;
+  const { body } = await fetchFeedText("https://www.example.org/feed/");
+  assert.match(body, /<rss/);
+});
