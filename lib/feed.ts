@@ -80,11 +80,66 @@ const isFeedOrSitemap = (body: string) => looksLikeFeed(body) || /<(urlset|sitem
  * any feed reader with a cookie jar does: the site's own cookie, to the site's
  * own hosts, and nothing else.
  */
-export async function fetchFeedText(url: string, timeoutMs = 12000) {
-  const first = await onePerTurn(url, () => fetchTextNow(url, timeoutMs));
+export async function fetchFeedText(url: string, timeoutMs = 12000): Promise<FeedText> {
+  let first: FeedText;
+  try {
+    first = await onePerTurn(url, () => fetchTextNow(url, timeoutMs));
+  } catch (error) {
+    // A refusal is asked once more, as a feed reader that says so.
+    if (!isRefusal(error)) throw error;
+    return onePerTurn(url, () => fetchAsFeedReader(url, timeoutMs)).catch(() => {
+      throw error;
+    });
+  }
   if (!FEEDISH.test(url) || isFeedOrSitemap(first.body)) return first;
   await new Promise((resolve) => setTimeout(resolve, 800));
-  return onePerTurn(url, () => fetchKeepingCookies(url, timeoutMs));
+  let second: FeedText | undefined;
+  let failure: unknown;
+  try {
+    second = await onePerTurn(url, () => fetchKeepingCookies(url, timeoutMs));
+    if (isFeedOrSitemap(second.body)) return second;
+  } catch (error) {
+    failure = error;
+  }
+  try {
+    const third = await onePerTurn(url, () => fetchAsFeedReader(url, timeoutMs));
+    if (isFeedOrSitemap(third.body)) return third;
+  } catch {
+    /* what the second ask got stands */
+  }
+  if (second) return second;
+  throw failure;
+}
+
+export type FeedText = { body: string; finalUrl: string; agent?: "reader" };
+
+/**
+ * Refusals measured from the live server (Cloud Run, 17 Nov 2026): NPR 403,
+ * Newsweek, New Scientist and eLife 406, phys.org 429, justice.gov 401. All
+ * of them had answered the same request from Vercel a month before.
+ */
+const REFUSED = /^(401|403|406|429)\b/;
+const isRefusal = (error: unknown) => error instanceof Error && REFUSED.test(error.message);
+
+/**
+ * The second ask after a refusal: no browser's user agent, a feed reader's
+ * own name and a feed reader's Accept. A server that pretends to be Chrome
+ * from a datacentre address, without anything else Chrome sends, is what bot
+ * filters are built to catch; a reader that names itself is what many
+ * publishers' feeds are there for. Nothing here pretends to be anyone.
+ */
+const READER_UA = "Mozilla/5.0 (compatible; SuperReader/1.0; RSS feed reader)";
+async function fetchAsFeedReader(url: string, timeoutMs: number): Promise<FeedText> {
+  const res = await fetch(url, {
+    headers: {
+      "user-agent": READER_UA,
+      accept: "application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.9, */*;q=0.5",
+    },
+    redirect: "follow",
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return { body: await res.text(), finalUrl: res.url || url, agent: "reader" };
 }
 
 /** The last two labels of a host: nature.com for www.nature.com and idp.nature.com. */

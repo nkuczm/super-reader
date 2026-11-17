@@ -239,6 +239,8 @@ export type AuditResult = {
     id: string;
     feedUrl: string;
     ok: boolean;
+    /** "reader" when only the plain feed reader's ask was answered (lib/feed.ts). */
+    agent?: "reader";
     items?: number;
     /** The newest dated item: a feed that answers but stopped filing is quiet, not alive. */
     newest?: string;
@@ -301,11 +303,12 @@ export async function auditSlice(slice: number): Promise<AuditResult> {
           return { id: outlet.id, feedUrl: outlet.feedUrl, ok: true, ...freshness(articles) };
         }
         // As the refresh asks for it, a bot check's web page asked for again (lib/feed.ts).
-        const { body, finalUrl } = await fetchFeedText(outlet.feedUrl, 12000);
+        const { body, finalUrl, agent } = await fetchFeedText(outlet.feedUrl, 12000);
         if (!looksLikeFeed(body)) throw new Error("Not a feed");
         const { articles } = parseFeed(body, finalUrl);
         if (articles.length === 0) throw new Error("Feed is empty");
-        return { id: outlet.id, feedUrl: outlet.feedUrl, ok: true, ...freshness(articles) };
+        // Which ask answered: a feed only the feed reader's ask gets is worth knowing.
+        return { id: outlet.id, feedUrl: outlet.feedUrl, ok: true, ...(agent ? { agent } : {}), ...freshness(articles) };
       } catch (error) {
         return {
           id: outlet.id,

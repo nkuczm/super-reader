@@ -240,6 +240,7 @@ export const OUTLETS: Outlet[] = [
   // ---- Science and health --------------------------------------------------
   { id: "nature-news", name: "Nature", section: "News", feedUrl: "https://www.nature.com/nature.rss", siteUrl: "https://www.nature.com", category: "science", region: "Global", tier: 2, panel: true, issn: ["0028-0836", "1476-4687"] },
   { id: "science-news", name: "Science", section: "News", feedUrl: "https://www.science.org/rss/news_current.xml", siteUrl: "https://www.science.org/news", category: "science", region: "Global", tier: 2, panel: true },
+  { id: "newatlantis", name: "The New Atlantis", feedUrl: "https://www.thenewatlantis.com/feed", siteUrl: "https://www.thenewatlantis.com", category: "science", region: "US", tier: 3 },
   { id: "quanta", name: "Quanta Magazine", section: "All", feedUrl: "https://www.quantamagazine.org/feed/", siteUrl: "https://www.quantamagazine.org", category: "science", region: "US", tier: 3 },
   { id: "newscientist", name: "New Scientist", section: "Home", feedUrl: "https://www.newscientist.com/feed/home/", siteUrl: "https://www.newscientist.com", category: "science", region: "UK", tier: 3 },
   { id: "sciam", name: "Scientific American", section: "All", feedUrl: "https://www.scientificamerican.com/platform/syndication/rss/", siteUrl: "https://www.scientificamerican.com", category: "science", region: "US", tier: 3 },
@@ -362,7 +363,7 @@ export const OUTLETS: Outlet[] = [
   { id: "jphil", name: "The Journal of Philosophy", feedUrl: journal("0022-362X", "The Journal of Philosophy", "crossref"), siteUrl: "https://www.pdcnet.org/jphil", category: "philosophy", region: "US", tier: 3, issn: ["0022-362X", "1939-8549"] },
   { id: "ethics", name: "Ethics", feedUrl: journal("0014-1704", "Ethics"), siteUrl: "https://www.journals.uchicago.edu/journal/et", category: "philosophy", region: "US", tier: 3, issn: ["0014-1704", "1539-297X"] },
   { id: "philstudies", name: "Philosophical Studies", feedUrl: journal("0031-8116", "Philosophical Studies"), siteUrl: "https://link.springer.com/journal/11098", category: "philosophy", region: "Global", tier: 3, issn: ["0031-8116", "1573-0883"] },
-  { id: "synthese", name: "Synthese", feedUrl: journal("0039-7857", "Synthese"), siteUrl: "https://link.springer.com/journal/11229", category: "philosophy", region: "Global", tier: 3, issn: ["0039-7857", "1573-0964"] },
+  { id: "synthese", name: "Synthese", feedUrl: journal("1573-0964", "Synthese"), siteUrl: "https://link.springer.com/journal/11229", category: "philosophy", region: "Global", tier: 3, issn: ["0039-7857", "1573-0964"] },
   { id: "erkenntnis", name: "Erkenntnis", feedUrl: journal("0165-0106", "Erkenntnis"), siteUrl: "https://link.springer.com/journal/10670", category: "philosophy", region: "Global", tier: 3, issn: ["0165-0106", "1572-8420"] },
   { id: "ergo", name: "Ergo", feedUrl: journal("2330-4014", "Ergo", "crossref"), siteUrl: "https://journals.publishing.umich.edu/ergo", category: "philosophy", region: "Global", tier: 3, issn: ["2330-4014"] },
   { id: "philsci", name: "Philosophy of Science", feedUrl: journal("0031-8248", "Philosophy of Science"), siteUrl: "https://www.cambridge.org/core/journals/philosophy-of-science", category: "philosophy", region: "Global", tier: 3, issn: ["0031-8248", "1539-767X"] },
@@ -689,6 +690,8 @@ export const RETIRED_FEEDS: Record<string, string> = {
   // OpenAlex trailed Crossref by weeks for these two (Mind: 30 Jul against 23 Sep).
   "api:journal?issn=1047-3211&name=Cerebral+Cortex": "cercor",
   "api:journal?issn=0026-4423&name=Mind": "mind",
+  // OpenAlex holds Synthese's new papers under its online ISSN only: none came back for the print one (17 Nov 2026).
+  "api:journal?issn=0039-7857&name=Synthese": "synthese",
 };
 
 /** Ready-made bundles, so a reader can follow a beat in one tap. */
@@ -745,6 +748,30 @@ export function frontOutletForHost(host: string): Outlet | null {
     if (front !== 0) return front;
     if (a.tier !== b.tier) return a.tier - b.tier;
     return Number(Boolean(a.section)) - Number(Boolean(b.section));
+  })[0];
+}
+
+/**
+ * A publication typed by its name — "The New Atlantis", "new scientist" — as
+ * the directory spells it. Without this a name became a news search for its
+ * words, which for The New Atlantis is stories about the lost city. Only a
+ * name that means one outlet: several sections of it give the front or the
+ * whole, never a guess between publishers.
+ */
+export function outletByName(input: string): Outlet | null {
+  const plain = (text: string) =>
+    text.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, " ").trim().replace(/^the /, "");
+  const wanted = plain(input);
+  // One word is as likely a topic as a title ("science", "deadline", "nature"),
+  // so a single word counts only when typed as a title, with "the" before it.
+  const titled = /^the\s/i.test(input.trim());
+  if (wanted.length < 3 || (!wanted.includes(" ") && !titled)) return null;
+  const matches = OUTLETS.filter((outlet) => plain(outlet.name) === wanted && !outlet.feedUrl.startsWith("api:"));
+  if (matches.length === 0) return null;
+  return [...matches].sort((a, b) => {
+    const front = Number(Boolean(b.front)) - Number(Boolean(a.front));
+    if (front !== 0) return front;
+    return Number(Boolean(a.section && a.section !== "All")) - Number(Boolean(b.section && b.section !== "All"));
   })[0];
 }
 
