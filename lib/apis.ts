@@ -882,15 +882,24 @@ export const API_PROVIDERS: ApiProvider[] = [
         hint: "On the journal's own site, usually labelled ISSN or eISSN. Either one works.",
       },
       { key: "name", label: "Name", placeholder: "Mind" },
+      {
+        // One field of a broad journal: Nature Communications' neuroscience,
+        // whose own subject feed answers a server with a web page (17 Nov 2026).
+        key: "area",
+        label: "Field",
+        options: [{ value: "", label: "Every field" }, ...OPENALEX_AREAS.map(({ value, label }) => ({ value, label }))],
+        default: "",
+      },
     ],
     // OpenAlex first: abstracts, authors, and every publisher. Measured on
     // 11 Oct 2026 for twenty journals whose sites refuse a server, each
     // with papers from that week. `via=crossref` reverses the order, for a
     // journal whose papers OpenAlex dates only by the year — it then sorts
     // a year's papers in no particular order, and the newest go missing.
-    request: ({ issn = "" }, { limit }) => ({
+    request: ({ issn = "", area = "" }, { limit }) => ({
       url:
         `https://api.openalex.org/works?filter=primary_location.source.issn:${filterValue(issn)},` +
+        (OPENALEX_AREAS.find((a) => a.value === area) ? `${OPENALEX_AREAS.find((a) => a.value === area)!.filter},` : "") +
         `to_publication_date:${today()},type:article|preprint|review` +
         `&sort=publication_date:desc&per-page=${Math.min(limit, 50)}`,
     }),
@@ -900,14 +909,19 @@ export const API_PROVIDERS: ApiProvider[] = [
     // newest registered first — a publication date of only a year cannot order
     // a year's papers, and registration is when a paper appears.
     fallback: {
-      request: ({ issn = "" }, { limit }) => ({
+      request: ({ issn = "", area = "" }, { limit }) => {
+        // Crossref cannot narrow a journal to one field, and the whole journal
+        // under a field's name would be a section silently becoming the paper.
+        if (area.trim()) throw new Error("OpenAlex did not answer, and Crossref cannot narrow a journal to one field.");
+        return {
         url:
           `https://api.crossref.org/journals/${encodeURIComponent(issn.trim())}/works` +
           `?sort=created&order=desc&rows=${Math.min(limit, 50)}` +
           // A year back at most: Crossref registers old back issues as well, and a
           // registration sort put New Literary History's 1994 papers first.
           `&filter=from-pub-date:${yearAgo()},until-pub-date:${today()},type:journal-article`,
-      }),
+        };
+      },
       items: (body) => body?.message?.items ?? [],
       article: crossrefArticle,
     },
@@ -1074,6 +1088,55 @@ export const API_PROVIDERS: ApiProvider[] = [
       };
     },
     title: ({ server = "psyarxiv" }) => OSF_SERVERS[server.trim().toLowerCase()]?.label.split(" (")[0] ?? `OSF · ${server}`,
+  },
+
+  {
+    id: "elife",
+    name: "eLife, by subject",
+    category: "Research",
+    description: "New papers and reviewed preprints in one eLife subject, newest first, first versions only.",
+    siteUrl: "https://elifesciences.org/subjects",
+    docsUrl: "https://api.elifesciences.org/documentation",
+    params: [
+      {
+        key: "subject",
+        label: "Subject",
+        placeholder: "neuroscience",
+        hint: "As in the subject's address on eLife: elifesciences.org/subjects/<subject>.",
+        required: true,
+      },
+    ],
+    // Measured 17 Nov 2026: eLife's subject feed answers the live server 406,
+    // to a browser's user agent and a feed reader's alike, while its API
+    // answers. Sorted by the latest version's date, so revisions are dropped.
+    request: ({ subject = "" }, { limit }) => ({
+      url:
+        `https://api.elifesciences.org/search?subject%5B%5D=${encodeURIComponent(subject.trim().toLowerCase())}` +
+        `&sort=date&order=desc&per-page=${Math.min(limit + 10, 50)}` +
+        ["research-article", "short-report", "research-advance", "tools-resources", "reviewed-preprint"]
+          .map((type) => `&type%5B%5D=${type}`)
+          .join(""),
+    }),
+    // A second version of an old paper is a revision, not a new paper.
+    items: (body) => (Array.isArray(body?.items) ? body.items : []).filter((item: any) => Number(item?.version ?? 1) === 1),
+    article: (item) => {
+      const title = clean(item?.title, 300);
+      const id = pick(String(item?.id ?? ""));
+      if (!title || !id) return null;
+      const link = `https://elifesciences.org/${item?.type === "reviewed-preprint" ? "reviewed-preprints" : "articles"}/${id}`;
+      return {
+        id: `elife:${id}`,
+        title,
+        link,
+        author: clean(item?.authorLine, 200),
+        publishedAt: notFuture(toIso(pick(item?.published))),
+        summary: clean(item?.impactStatement, 600) ?? clean(item?.elifeAssessment?.content?.[0]?.text, 600),
+      };
+    },
+    title: ({ subject = "" }) => {
+      const name = subject.trim().replace(/-/g, " ");
+      return `eLife · ${name.charAt(0).toUpperCase()}${name.slice(1)}`;
+    },
   },
 
   {
