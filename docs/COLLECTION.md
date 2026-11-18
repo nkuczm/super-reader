@@ -557,12 +557,12 @@ failed again when read alone. A month earlier, from Vercel, every one answered.
 | Entry | From Cloud Run | Done |
 |---|---|---|
 | NPR (four), Newsweek, eLife | 403 / 406 | answer a feed reader that names itself |
-| phys.org | 429 in the burst | answered alone; unchanged |
+| phys.org | 429, alone as well as in a burst, after one good answer | Google News, one day (it files about a hundred a day) |
 | New Scientist | 406 both ways | Google News, two days |
 | justice.gov press releases | 401 both ways | Google News, `site:justice.gov/opa`, seven days |
 | Seattle Times | a web page both ways | Google News, two days |
 | The Brains Blog | 403 both ways | Google News, thirty days (it files weekly) |
-| eLife Neuroscience | 406 both ways; eLife's API answers | `api:elife?subject=neuroscience` |
+| eLife Neuroscience | 406 both ways; eLife's API answers, but only to its own media type (`application/json` is a 406 too) | `api:elife?subject=neuroscience` |
 | Nature Comms Neuroscience | a web page, as since October | OpenAlex by ISSN, narrowed to the field (`area=`) |
 | Synthese | OpenAlex: nothing by print ISSN | the online ISSN |
 | Nature (four journals) | a web page in the burst | answered alone; unchanged |

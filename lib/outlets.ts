@@ -244,7 +244,7 @@ export const OUTLETS: Outlet[] = [
   { id: "quanta", name: "Quanta Magazine", section: "All", feedUrl: "https://www.quantamagazine.org/feed/", siteUrl: "https://www.quantamagazine.org", category: "science", region: "US", tier: 3 },
   { id: "newscientist", name: "New Scientist", section: "Home", feedUrl: googleNews("newscientist.com"), siteUrl: "https://www.newscientist.com", category: "science", region: "UK", tier: 3 },
   { id: "sciam", name: "Scientific American", section: "All", feedUrl: "https://www.scientificamerican.com/platform/syndication/rss/", siteUrl: "https://www.scientificamerican.com", category: "science", region: "US", tier: 3 },
-  { id: "physorg", name: "Phys.org", section: "All", feedUrl: "https://phys.org/rss-feed/", siteUrl: "https://phys.org", category: "science", region: "Global", tier: 3 },
+  { id: "physorg", name: "Phys.org", section: "All", feedUrl: googleNews("phys.org", 1), siteUrl: "https://phys.org", category: "science", region: "Global", tier: 3 },
   { id: "sciencenews", name: "Science News", section: "All", feedUrl: "https://www.sciencenews.org/feed", siteUrl: "https://www.sciencenews.org", category: "science", region: "US", tier: 3 },
   { id: "nasa", name: "NASA", section: "Breaking news", feedUrl: "https://www.nasa.gov/rss/dyn/breaking_news.rss", siteUrl: "https://www.nasa.gov", category: "science", region: "US", tier: 3 },
   { id: "spacenews", name: "SpaceNews", section: "All", feedUrl: "https://spacenews.com/feed/", siteUrl: "https://spacenews.com", category: "science", region: "US", tier: 3 },
@@ -695,6 +695,8 @@ export const RETIRED_FEEDS: Record<string, string> = {
   "https://www.justice.gov/news/rss": "justice-gov",
   "https://www.seattletimes.com/feed/": "seattletimes",
   "https://philosophyofbrains.com/feed": "brainsblog",
+  // 429 to the live server alone as well as in a burst; it files about a hundred a day, so one day's window.
+  "https://phys.org/rss-feed/": "physorg",
   "https://www.nature.com/subjects/neuroscience/ncomms.rss": "ncomms-neuro",
   "https://elifesciences.org/rss/subject/neuroscience.xml": "elife-neuro",
   // OpenAlex holds Synthese's new papers under its online ISSN only: none came back for the print one (17 Nov 2026).
