@@ -1116,6 +1116,8 @@ export const API_PROVIDERS: ApiProvider[] = [
         ["research-article", "short-report", "research-advance", "tools-resources", "reviewed-preprint"]
           .map((type) => `&type%5B%5D=${type}`)
           .join(""),
+      // eLife's API serves only its own media types: "application/json" is a 406.
+      headers: { accept: "application/vnd.elife.search+json, */*;q=0.1" },
     }),
     // A second version of an old paper is a revision, not a new paper.
     items: (body) => (Array.isArray(body?.items) ? body.items : []).filter((item: any) => Number(item?.version ?? 1) === 1),
