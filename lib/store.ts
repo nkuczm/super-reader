@@ -11,7 +11,7 @@ import type { Article, SourceMeta } from "./types";
 import type { SavedArticle, SavedRemoval } from "./saved";
 import type { WatchMarks } from "./alerts";
 import { PARTS, type PartStamps } from "./sync-doc";
-import { cleanFeeds, sanitizeTeams, sourceKey } from "./feed-merge";
+import { cleanFeeds, cleanFeedRemovals, sanitizeTeams, sourceKey, type FeedRemoval } from "./feed-merge";
 export { cleanFeeds, unionFeeds, unionTeams, unionRead, sanitizeTeams, sourceKey } from "./feed-merge";
 
 export type Source = SourceMeta & {
@@ -627,6 +627,26 @@ export function savePartStamps(stamps: PartStamps) {
     window.localStorage.setItem(PART_STAMPS_KEY, JSON.stringify(stamps));
   } catch {
     /* sync falls back to the server's copy */
+  }
+}
+
+const FEED_REMOVALS_KEY = "super-reader:feed-removals:v1";
+
+/** Folders and sources this device knows were taken out on purpose (lib/feed-merge.ts). */
+export function loadFeedRemovals(): FeedRemoval[] {
+  if (typeof window === "undefined") return [];
+  try {
+    return cleanFeedRemovals(JSON.parse(window.localStorage.getItem(FEED_REMOVALS_KEY) ?? "[]"));
+  } catch {
+    return [];
+  }
+}
+
+export function saveFeedRemovals(removals: FeedRemoval[]) {
+  try {
+    window.localStorage.setItem(FEED_REMOVALS_KEY, JSON.stringify(removals));
+  } catch {
+    /* kept for this session */
   }
 }
 

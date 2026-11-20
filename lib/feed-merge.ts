@@ -147,3 +147,90 @@ export function sanitizeTeams(value: unknown): TeamFeed[] {
   }
   return teams;
 }
+
+/* ---------- merging two devices' feed lists ---------- */
+
+/**
+ * A folder or source taken out of the feed list, by id, and when. The feed
+ * list used to be replaced whole by whichever device changed it last, so a
+ * phone holding last week's list — which a repair on opening dated as new —
+ * replaced the laptop's list and took away the folder just made there (20
+ * Nov 2026, "good longform reads"). Now the newer list leads and anything
+ * the other side holds that it lacks is kept, unless it was taken out on
+ * purpose: these are the record of that purpose. Ids are never reused
+ * (adding an outlet again makes a new source), so an id is enough.
+ */
+export type FeedRemoval = { id: string; at: number };
+
+/** Removals are kept this long: a device away for longer may bring something back. */
+export const FEED_REMOVAL_KEEP_MS = 400 * 24 * 60 * 60 * 1000;
+export const MAX_FEED_REMOVALS = 4000;
+
+/** Every folder and source id in a list. */
+function feedIds(feeds: Feed[]): Set<string> {
+  const ids = new Set<string>();
+  for (const feed of feeds) {
+    ids.add(feed.id);
+    for (const source of feed.sources) ids.add(source.id);
+  }
+  return ids;
+}
+
+/** Folders and sources `before` held that `after` holds nowhere — moving a source is not removing it. */
+export function removedFeedIds(before: Feed[], after: Feed[]): string[] {
+  const now = feedIds(after);
+  return [...feedIds(before)].filter((id) => !now.has(id));
+}
+
+/** Ids `after` holds that `before` did not: put back, so no longer removed. */
+export function addedFeedIds(before: Feed[], after: Feed[]): string[] {
+  const was = feedIds(before);
+  return [...feedIds(after)].filter((id) => !was.has(id));
+}
+
+/** Removal records from another device, checked. */
+export function cleanFeedRemovals(value: unknown): FeedRemoval[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(
+      (r): r is FeedRemoval =>
+        !!r && typeof r === "object" && typeof (r as FeedRemoval).id === "string" && Number.isFinite(Number((r as FeedRemoval).at)),
+    )
+    .map((r) => ({ id: r.id, at: Number(r.at) }));
+}
+
+/** Two devices' removals as one: the later of each, the old ones let go. */
+export function mergeFeedRemovals(a: FeedRemoval[], b: FeedRemoval[], now = Date.now()): FeedRemoval[] {
+  const byId = new Map<string, number>();
+  for (const r of [...cleanFeedRemovals(a), ...cleanFeedRemovals(b)]) {
+    if (now - r.at > FEED_REMOVAL_KEEP_MS) continue;
+    byId.set(r.id, Math.max(byId.get(r.id) ?? 0, r.at));
+  }
+  return [...byId]
+    .map(([id, at]) => ({ id, at }))
+    .sort((x, y) => x.at - y.at)
+    .slice(-MAX_FEED_REMOVALS);
+}
+
+/** A list without the folders and sources taken out of it. */
+function withoutRemoved(feeds: Feed[], removed: Set<string>): Feed[] {
+  return feeds
+    .filter((feed) => !removed.has(feed.id))
+    .map((feed) => {
+      const sources = feed.sources.filter((source) => !removed.has(source.id));
+      return sources.length === feed.sources.length ? feed : { ...feed, sources };
+    });
+}
+
+/**
+ * The newer list, with whatever the older one holds that the newer lacks
+ * and nobody took out: a folder made on one device survives another device
+ * pushing a list that never had it. The newer list's order, names and
+ * placements win; removals are applied to the older side only, so a list
+ * brought back from history (which re-adds what was removed) stands.
+ */
+export function mergeFeedLists(newer: Feed[], older: Feed[], removals: FeedRemoval[]): Feed[] {
+  if (older.length === 0) return newer;
+  const removed = new Set(cleanFeedRemovals(removals).map((r) => r.id));
+  return unionFeeds(newer, withoutRemoved(older, removed));
+}
