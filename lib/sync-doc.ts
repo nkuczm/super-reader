@@ -4,7 +4,10 @@
  * Pure, so it can be tested without a database and imported by the browser.
  *
  * Four parts are replaced whole, newest wins: the feed list, the read marks,
- * the team list and the key vault. Each carries its own change time. They
+ * the team list and the key vault — the feed list with one exception: what
+ * the older list holds that the newer lacks is kept unless it was removed on
+ * purpose (`feedRemovals`), so a stale device cannot take away a folder made
+ * elsewhere. Each carries its own change time. They
  * used to share one, so the phone marking an article read made its week-old
  * feed list look newer than the source just added on the laptop, and the
  * next push from the phone took the new source away.
@@ -21,6 +24,7 @@ import type { Note, NoteRemoval } from "./notes";
 import { mergeBoards, slimBoardsForSync, type Boards } from "./subjects";
 import { mergeManual, slimManualForSync, type ManualStories } from "./manual";
 import { mergeHighlights, slimHighlightsForSync, type Highlights } from "./highlights";
+import { cleanFeeds, mergeFeedLists, mergeFeedRemovals, type FeedRemoval } from "./feed-merge";
 
 /** The parts replaced whole, each stamped with when it last changed. */
 export const PARTS = ["feeds", "read", "teams", "vault"] as const;
@@ -39,6 +43,8 @@ export type SharedPrefsWire = {
 
 export type SyncPayload = {
   feeds: unknown[];
+  /** Folders and sources taken out of the feed list on purpose, so merging two lists does not bring them back (lib/feed-merge.ts). */
+  feedRemovals?: FeedRemoval[];
   read?: string[];
   /** Bookmarks, and the dated un-saves that must outlive a device still holding the article (lib/saved.ts). */
   saved?: SavedArticle[];
@@ -112,8 +118,20 @@ export function mergeSyncDocs(incoming: SyncPayload, stored: SyncPayload, now = 
     { notes: stored.notes ?? [], removals: stored.noteRemovals ?? [] },
     now,
   );
+  let feeds: unknown[] = Array.isArray(parts.feeds) ? parts.feeds : [];
+  const removalsBoth = mergeFeedRemovals(incoming.feedRemovals ?? [], stored.feedRemovals ?? [], now);
+  const loser = parts.feeds === incoming.feeds ? stored.feeds : incoming.feeds;
+  if (Array.isArray(loser) && loser.length && loser !== parts.feeds) {
+    const merged = mergeFeedLists(cleanFeeds(feeds), cleanFeeds(loser), removalsBoth);
+    if (JSON.stringify(merged) !== JSON.stringify(cleanFeeds(feeds))) feeds = merged;
+  }
+  // What the list now holds is not removed: a folder brought back from an
+  // earlier list stays back.
+  const held = new Set(feedIdsOf(feeds));
+  const feedRemovals = removalsBoth.filter((r) => !held.has(r.id));
   return {
-    feeds: Array.isArray(parts.feeds) ? parts.feeds : [],
+    feeds,
+    ...(feedRemovals.length ? { feedRemovals } : {}),
     ...(parts.read ? { read: (parts.read as string[]).slice(-MAX_READ) } : {}),
     ...(parts.teams ? { teams: parts.teams } : {}),
     ...(present(parts.vault) ? { vault: parts.vault } : {}),
@@ -136,6 +154,19 @@ export function mergeSyncDocs(incoming: SyncPayload, stored: SyncPayload, now = 
 }
 
 /* ---------- history of the replaced parts ---------- */
+
+function feedIdsOf(feeds: unknown[]): string[] {
+  const out: string[] = [];
+  for (const feed of feeds) {
+    const f = feed as { id?: unknown; sources?: unknown[] };
+    if (typeof f?.id === "string") out.push(f.id);
+    for (const source of Array.isArray(f?.sources) ? f.sources : []) {
+      const id = (source as { id?: unknown })?.id;
+      if (typeof id === "string") out.push(id);
+    }
+  }
+  return out;
+}
 
 /** What a version of the feed list holds, for listing without reading it. */
 export function feedsSummary(feeds: unknown): { folders: number; sources: number } {

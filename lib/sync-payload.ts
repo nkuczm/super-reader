@@ -12,6 +12,7 @@ import type { Positions } from "./position";
 import type { Boards } from "./subjects";
 import type { ManualStories } from "./manual";
 import type { Highlights } from "./highlights";
+import { cleanFeedRemovals } from "./feed-merge";
 
 export function cleanPayload(value: unknown): SyncPayload | null {
   if (!value || typeof value !== "object") return null;
@@ -22,6 +23,7 @@ export function cleanPayload(value: unknown): SyncPayload | null {
   const stamps = obj(body.stamps) as Record<string, unknown> | undefined;
   return {
     feeds: body.feeds,
+    ...(list(body.feedRemovals) ? { feedRemovals: cleanFeedRemovals(body.feedRemovals).slice(-4000) } : {}),
     ...(list(body.read) ? { read: (body.read as unknown[]).filter((id): id is string => typeof id === "string").slice(-MAX_READ) } : {}),
     saved: (list(body.saved) ?? []) as SavedArticle[],
     savedRemovals: (list(body.savedRemovals) ?? []) as SavedRemoval[],

@@ -67,7 +67,7 @@ test("a second device reading the same code sees the first device's feeds", asyn
 test("later writes win", async () => {
   const { code } = await createSync();
   await writeSync(code, { feeds: [{ id: "a", name: "First", sources: [] }] });
-  await writeSync(code, { feeds: [{ id: "b", name: "Second", sources: [] }] });
+  await writeSync(code, { feeds: [{ id: "b", name: "Second", sources: [] }], feedRemovals: [{ id: "a", at: Date.now() }] });
 
   const record = await readSync(code);
   assert.equal(record!.payload.feeds.length, 1);
@@ -169,9 +169,10 @@ test("a feed list is kept as a version before anything is taken from it", async 
   const source = (id: string) => ({ id, feedUrl: `https://${id}.example/rss` });
   await writeSync(code, { feeds: [{ id: "f", name: "News", sources: [source("a"), source("b")] }], stamps: { feeds: 1 }, updatedAt: 1 });
   // A source is removed: the list as it was is kept.
-  await writeSync(code, { feeds: [{ id: "f", name: "News", sources: [source("a")] }], stamps: { feeds: 2 }, updatedAt: 2 });
-  // And the whole list emptied by a device that lost it: kept again, however soon after.
-  await writeSync(code, { feeds: [], stamps: { feeds: 3 }, updatedAt: 3 });
+  const at = Date.now();
+  await writeSync(code, { feeds: [{ id: "f", name: "News", sources: [source("a")] }], feedRemovals: [{ id: "b", at }], stamps: { feeds: 2 }, updatedAt: 2 });
+  // And the whole list emptied: kept again, however soon after.
+  await writeSync(code, { feeds: [], feedRemovals: [{ id: "f", at }, { id: "a", at }], stamps: { feeds: 3 }, updatedAt: 3 });
 
   const versions = await listSyncVersions(code);
   assert.equal(versions.length, 2);
@@ -346,4 +347,60 @@ test("notes merge through storage rather than replacing each other", async () =>
     after!.payload.notes![0].entries.map((entry) => entry.id),
     ["q2"],
   );
+});
+
+test("a folder made on one device survives a stale device's newer push", async () => {
+  // 20 Nov 2026: a folder of longform reads made on the laptop vanished when
+  // the phone, holding last week's list (dated new by a repair on opening),
+  // pushed its copy and replaced the laptop's whole list.
+  const { code } = await createSync();
+  const source = (id: string) => ({ id, feedUrl: `https://${id}.example/rss` });
+  await writeSync(code, {
+    feeds: [
+      { id: "news", name: "News", sources: [source("a")] },
+      { id: "longform", name: "Good longform reads", sources: [source("lf1"), source("lf2")] },
+    ],
+    stamps: { feeds: 5_000 },
+    updatedAt: 5_000,
+  });
+  const after = await writeSync(code, {
+    feeds: [{ id: "news", name: "News", sources: [source("a"), source("b")] }],
+    stamps: { feeds: 6_000 },
+    updatedAt: 6_000,
+  });
+  const feeds = after!.payload.feeds as { id: string; sources: { id: string }[] }[];
+  assert.deepEqual(feeds.map((f) => f.id), ["news", "longform"]);
+  assert.deepEqual(feeds[0].sources.map((s) => s.id), ["a", "b"], "the phone's addition is kept too");
+  assert.deepEqual(feeds[1].sources.map((s) => s.id), ["lf1", "lf2"]);
+});
+
+test("a folder or source taken out on purpose stays out", async () => {
+  const { code } = await createSync();
+  const source = (id: string) => ({ id, feedUrl: `https://${id}.example/rss` });
+  const at = Date.now();
+  await writeSync(code, {
+    feeds: [{ id: "news", name: "News", sources: [source("a"), source("b")] }, { id: "old", name: "Old", sources: [] }],
+    stamps: { feeds: 5_000 },
+  });
+  // The laptop removes a source and a folder.
+  await writeSync(code, {
+    feeds: [{ id: "news", name: "News", sources: [source("a")] }],
+    feedRemovals: [{ id: "b", at }, { id: "old", at }],
+    stamps: { feeds: 6_000 },
+  });
+  // The phone, still holding both, pushes an older list: neither comes back.
+  const after = await writeSync(code, {
+    feeds: [{ id: "news", name: "News", sources: [source("a"), source("b")] }, { id: "old", name: "Old", sources: [] }],
+    stamps: { feeds: 4_000 },
+  });
+  const feeds = after!.payload.feeds as { id: string; sources: { id: string }[] }[];
+  assert.deepEqual(feeds.map((f) => f.id), ["news"]);
+  assert.deepEqual(feeds[0].sources.map((s) => s.id), ["a"]);
+  // And a folder brought back from an earlier list stays back.
+  const restored = await writeSync(code, {
+    feeds: [{ id: "news", name: "News", sources: [source("a")] }, { id: "old", name: "Old", sources: [] }],
+    stamps: { feeds: 7_000 },
+  });
+  assert.deepEqual((restored!.payload.feeds as { id: string }[]).map((f) => f.id), ["news", "old"]);
+  assert.ok(!restored!.payload.feedRemovals?.some((r) => r.id === "old"), "its removal is forgotten");
 });

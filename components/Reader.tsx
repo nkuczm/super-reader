@@ -49,6 +49,8 @@ import {
   saveUpdatedAt,
   loadPartStamps,
   savePartStamps,
+  loadFeedRemovals,
+  saveFeedRemovals,
   unionTeams,
   unionRead,
   loadUnlockedKeys,
@@ -60,6 +62,7 @@ import {
 } from "@/lib/store";
 import type { TeamArticle } from "@/lib/team";
 import { fitForSync, partStamp, type Part, type PartStamps } from "@/lib/sync-doc";
+import { addedFeedIds, cleanFeedRemovals, mergeFeedLists, mergeFeedRemovals, removedFeedIds, type FeedRemoval } from "@/lib/feed-merge";
 import { useLibrary } from "./useLibrary";
 import { setSignedIn } from "@/lib/signed-in";
 import type { Library } from "@/lib/library";
@@ -719,6 +722,8 @@ export default function Reader() {
   const partStampsRef = useRef<PartStamps>({});
   /** Each replaced part as last loaded or taken from sync, to tell a change made here from one that arrived. */
   const known = useRef<Partial<Record<Part, string>>>({});
+  /** Folders and sources taken out on this device or another, so a merge does not bring them back. */
+  const feedRemovalsRef = useRef<FeedRemoval[]>([]);
   const vaultHeld = useRef<unknown>(null);
 
   // Crashes on a phone are otherwise invisible; see lib/client-errors.ts.
@@ -747,7 +752,12 @@ export default function Reader() {
           changed = true;
           return { ...feed, sources };
         });
-        return changed ? next : current;
+        if (!changed) return current;
+        // Not a change the reader made: each device repairs its own copy, so
+        // it is not dated as new. Dating it was how a phone opening last
+        // week's list replaced the laptop's newer one (20 Nov 2026).
+        known.current.feeds = JSON.stringify(next);
+        return next;
       }),
     );
     setRead(loadRead());
@@ -830,6 +840,7 @@ export default function Reader() {
     setApiKeys(loadUnlockedKeys());
     updatedAtRef.current = loadUpdatedAt();
     partStampsRef.current = loadPartStamps();
+    feedRemovalsRef.current = loadFeedRemovals();
     setUpdatedAt(updatedAtRef.current);
     setReady(true);
   }, []);
@@ -844,6 +855,7 @@ export default function Reader() {
 
   const applyRemote = useCallback((payload: {
     feeds?: Feed[];
+    feedRemovals?: unknown;
     read?: string[];
     saved?: SavedArticle[];
     savedRemovals?: SavedRemoval[];
@@ -892,14 +904,25 @@ export default function Reader() {
     /** Parts a join added this device's own things to: to be sent as a change of its own. */
     const added: Part[] = [];
 
+    // Removals travel both ways and only ever add up (lib/feed-merge.ts).
+    const remoteRemovals = cleanFeedRemovals(payload.feedRemovals);
+    const removals = mergeFeedRemovals(feedRemovalsRef.current, remoteRemovals);
+    if (!unchanged(removals, feedRemovalsRef.current)) {
+      feedRemovalsRef.current = removals;
+      saveFeedRemovals(removals);
+    }
+    const removalsAhead = removals.some((r) => !remoteRemovals.some((o) => o.id === r.id && o.at >= r.at));
     if (Array.isArray(payload.feeds)) {
       // Checked like stored feeds: another device's malformed list must not blank this one.
       const remote = cleanFeeds(payload.feeds);
       if (takes("feeds")) {
         // Joining (a new or cleared browser, or one signing in), the feeds the
         // code holds are taken whatever this device's stamp says, with anything
-        // only this device has added kept alongside.
-        const next = unions("feeds") ? unionFeeds(remote, feedsRef.current) : remote;
+        // only this device has added kept alongside. Otherwise the newer list
+        // leads, and a folder or source only this device holds is kept unless
+        // it was taken out on purpose — a list that never had it is not a
+        // removal of it.
+        const next = unions("feeds") ? unionFeeds(remote, feedsRef.current) : mergeFeedLists(remote, feedsRef.current, removals);
         if (!unchanged(next, feedsRef.current)) {
           known.current.feeds = JSON.stringify(next);
           feedsRef.current = next;
@@ -1086,6 +1109,7 @@ export default function Reader() {
     // — and push forever trying.
     const owes =
       ahead.length > 0 ||
+      removalsAhead ||
       added.length > 0 ||
       differsFrom(
         { saved: slimForSync(bookmarks.saved), removals: bookmarks.removals },
@@ -1220,6 +1244,25 @@ export default function Reader() {
     saveUpdatedAt(now);
   }, []);
   /**
+   * Record what a change here took out of the feed list, and forget the
+   * removal of anything it put back (a list brought back from history).
+   */
+  const noteFeedRemovals = useCallback((wasText: string, after: Feed[]) => {
+    let before: Feed[] = [];
+    try {
+      before = cleanFeeds(JSON.parse(wasText));
+    } catch {
+      return;
+    }
+    const now = Date.now();
+    const gone = removedFeedIds(before, after).map((id) => ({ id, at: now }));
+    const back = new Set(addedFeedIds(before, after));
+    if (!gone.length && !back.size) return;
+    const next = mergeFeedRemovals(feedRemovalsRef.current.filter((r) => !back.has(r.id)), gone, now);
+    feedRemovalsRef.current = next;
+    saveFeedRemovals(next);
+  }, []);
+  /**
    * A replaced part as it now stands. What was loaded, or taken from sync, is
    * recorded in `known` first, so only a change made on this device is
    * stamped — by content, not by timing, which a render can outrun.
@@ -1229,10 +1272,12 @@ export default function Reader() {
       const text = JSON.stringify(value ?? null);
       if (known.current[part] === text) return;
       const first = known.current[part] === undefined;
+      const was = known.current[part];
       known.current[part] = text;
+      if (!first && part === "feeds") noteFeedRemovals(was!, value as Feed[]);
       if (!first) stampSyncPart(part);
     },
-    [stampSyncPart],
+    [stampSyncPart, noteFeedRemovals],
   );
   useEffect(() => {
     if (ready) notice("feeds", feeds);
@@ -1376,6 +1421,7 @@ export default function Reader() {
             fitForSync({
               ...(accountId ? {} : { code: syncCode }),
               feeds,
+              feedRemovals: feedRemovalsRef.current,
               read: [...read],
               // Trimmed: the newest few hundred, the summaries short. The rest
               // stay here and, signed in, in the account's library.
