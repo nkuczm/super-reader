@@ -379,6 +379,13 @@ async function start() {
 // Reader tab's, which is then saved. Otherwise: connect, with the address
 // shown so a moved app is plain to see.
 (async () => {
+  // Scan-in reads a page the reader didn't click the extension on, which only
+  // works with every site allowed; Chrome's Site access setting can withhold them.
+  try {
+    if (!(await chrome.permissions.contains({ origins: ["https://*/*"] }))) $("site-access").hidden = false;
+  } catch {
+    /* can't tell */
+  }
   const { code } = await settings();
   const { server, ok } = await resolveServer(code);
   $("server").value = server;
