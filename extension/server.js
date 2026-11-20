@@ -15,12 +15,17 @@
  * never sends requests to whatever else happens to be open.
  */
 
-const DEFAULT_SERVER = "https://super-reader-j6zkelkjva-uk.a.run.app";
+// The address the app is used at, and so where the Google sign-in's cookie
+// lives: the extension is signed in only where the reader signed in. 1.5.2
+// called this address dead (it was measured from a network that could not
+// reach it) and the extension then refused it even when typed in.
+const DEFAULT_SERVER = "https://super-reader.cloud.run";
+
+/** Cloud Run's own address for the same service: tried when the default does not answer. */
+const OTHER_SERVERS = ["https://super-reader-j6zkelkjva-uk.a.run.app"];
 
 /** Addresses the app no longer runs at. A device saved with one is moved on. */
-// super-reader.cloud.run was never an address of the app (it does not resolve);
-// 1.5.1 shipped it as the default by mistake.
-const OLD_SERVERS = ["https://super-reader-wine.vercel.app", "https://super-reader.cloud.run"];
+const OLD_SERVERS = ["https://super-reader-wine.vercel.app"];
 
 function cleanServer(server) {
   return String(server || "").trim().replace(/\/+$/, "");
@@ -76,7 +81,8 @@ async function openAppOrigins() {
 async function resolveServer(code = "") {
   const saved = await savedServer();
   if (await answers(saved, code)) return { server: saved, ok: true };
-  for (const origin of await openAppOrigins()) {
+  const candidates = [...(await openAppOrigins()), DEFAULT_SERVER, ...OTHER_SERVERS];
+  for (const origin of [...new Set(candidates)]) {
     if (origin === saved || OLD_SERVERS.includes(origin)) continue;
     if (await answers(origin, code)) {
       await chrome.storage.local.set({ server: origin });
