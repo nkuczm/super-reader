@@ -49,7 +49,7 @@ async function capture(tab) {
     }
     page.url = withoutMark(page.url);
     page.selection = "";
-    const res = await fetch(`${server}/api/inbox`, {
+    const res = await inboxFetch(server, {
       method: "POST",
       credentials: "include",
       headers: { "content-type": "application/json" },

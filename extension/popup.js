@@ -102,7 +102,7 @@ async function fillSubjects(select, { required, keep = 0 }) {
   const { code, server } = await settings();
   let subjects = [];
   try {
-    const res = await fetch(`${server}/api/inbox${code ? `?code=${encodeURIComponent(code)}` : ""}`, { cache: "no-store", credentials: "include" });
+    const res = await inboxFetch(server, { query: code ? `?code=${encodeURIComponent(code)}` : "" });
     const data = res.ok ? await res.json() : {};
     subjects = data.subjects || [];
   } catch {
@@ -189,7 +189,7 @@ $("person-save").addEventListener("click", async () => {
   personStatus("Adding…");
   const { code, server } = await settings();
   try {
-    const res = await fetch(`${server}/api/inbox`, {
+    const res = await inboxFetch(server, {
       method: "POST",
       credentials: "include",
       headers: { "content-type": "application/json" },
@@ -280,7 +280,7 @@ $("save-btn").addEventListener("click", async () => {
   $("save-btn").disabled = true;
   status("Saving…");
   try {
-    const res = await fetch(`${server}/api/inbox`, {
+    const res = await inboxFetch(server, {
       method: "POST",
       credentials: "include",
       headers: { "content-type": "application/json" },
@@ -339,7 +339,7 @@ $("connect").addEventListener("click", async () => {
     }
     let res;
     try {
-      res = await fetch(`${server}/api/inbox${code ? `?code=${encodeURIComponent(code)}` : ""}`, { cache: "no-store", credentials: "include" });
+      res = await inboxFetch(server, { query: code ? `?code=${encodeURIComponent(code)}` : "" });
     } catch {
       throw unreachable(server);
     }
@@ -348,7 +348,7 @@ $("connect").addEventListener("click", async () => {
         res.status === 404
           ? code
             ? "That sync code wasn't found. Sign in to Super Reader with Google instead."
-            : "Not signed in yet: open Super Reader in this browser and sign in with Google."
+            : `Not signed in yet. Open ${new URL(server).host} in a tab of this window, signed in with Google, then press Connect again.`
           : `Couldn't reach Super Reader (${res.status}).`,
       );
     }

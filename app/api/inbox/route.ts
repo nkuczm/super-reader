@@ -26,7 +26,7 @@ function reply(data: unknown, status = 200) {
  */
 async function codeFrom(request: Request, value: unknown): Promise<string | null> {
   if (!isConfigured()) return null;
-  const account = await currentAccount(request);
+  const account = await currentAccount(request, { bearer: true });
   if (account) return accountKey(account.id);
   if (typeof value !== "string" || !value.trim() || value.length > 200) return null;
   return (await readSync(value.trim())) ? value.trim() : null;

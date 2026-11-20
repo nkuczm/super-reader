@@ -41,10 +41,21 @@ export async function signInProblem(): Promise<string | null> {
   return null;
 }
 
-export async function currentAccount(request: Request): Promise<Account | null> {
+/** A session token sent as `Authorization: Bearer …` — the extension's (app/api/extension/token). */
+function bearerFrom(request: Request): string | null {
+  const match = /^Bearer\s+([A-Za-z0-9_\-]{20,200})$/.exec(request.headers.get("authorization") ?? "");
+  return match ? match[1] : null;
+}
+
+/**
+ * The signed-in account: by the session cookie, or — where a route accepts it
+ * (`bearer`, only /api/inbox) — by the extension's token.
+ */
+export async function currentAccount(request: Request, { bearer = false }: { bearer?: boolean } = {}): Promise<Account | null> {
   if (!(await accountsReady())) return null;
   try {
-    const account = await accountForSession(cookieFrom(request, SESSION_COOKIE));
+    const account =
+      (await accountForSession(cookieFrom(request, SESSION_COOKIE))) ?? (bearer ? await accountForSession(bearerFrom(request)) : null);
     if (account) attribute(account.id);
     return account;
   } catch {

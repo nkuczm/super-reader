@@ -39,16 +39,87 @@ async function savedServer() {
   return DEFAULT_SERVER;
 }
 
-/** Whether this address is Super Reader with this browser signed in (or holding this sync code). */
-async function answers(server, code = "") {
+/**
+ * The extension's own sign-in for an address, if it has one. Chrome does not
+ * always send the app's cookie with an extension's request (on Nathan's
+ * Chrome it did not, 20 Nov 2026), so the extension asks the app for a token
+ * of its own and sends it itself. Kept per address, and sent only there.
+ */
+async function tokenFor(server) {
+  const { tokens = {} } = await chrome.storage.local.get("tokens");
+  return typeof tokens[server] === "string" ? tokens[server] : "";
+}
+
+async function keepToken(server, token) {
+  const { tokens = {} } = await chrome.storage.local.get("tokens");
+  if (token) tokens[server] = token;
+  else delete tokens[server];
+  await chrome.storage.local.set({ tokens });
+}
+
+/** A request to the app's inbox, signed in by the extension's token where it has one, and by the cookie anyway. */
+async function inboxFetch(server, { query = "", ...init } = {}) {
+  const token = await tokenFor(server);
+  const headers = { ...(init.headers || {}), ...(token ? { authorization: `Bearer ${token}` } : {}) };
+  return fetch(`${server}/api/inbox${query}`, { cache: "no-store", credentials: "include", ...init, headers });
+}
+
+/**
+ * Asks a Super Reader tab at this address for a token. The request runs in
+ * the tab's own page, so it is the app asking itself: its cookie, its origin.
+ */
+async function tokenFromTab(server) {
+  let tabs = [];
   try {
-    const res = await fetch(`${server}/api/inbox${code ? `?code=${encodeURIComponent(code)}` : ""}`, { cache: "no-store", credentials: "include" });
+    tabs = await chrome.tabs.query({});
+  } catch {
+    return "";
+  }
+  for (const tab of tabs) {
+    try {
+      if (!tab.url || new URL(tab.url).origin !== server) continue;
+      const [{ result }] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: "MAIN",
+        func: async () => {
+          try {
+            const res = await fetch("/api/extension/token", { method: "POST", credentials: "same-origin" });
+            return res.ok ? await res.json() : null;
+          } catch {
+            return null;
+          }
+        },
+      });
+      if (result && typeof result.token === "string") {
+        await keepToken(server, result.token);
+        return result.token;
+      }
+    } catch {
+      /* a tab the extension may not read; try the next */
+    }
+  }
+  return "";
+}
+
+async function inboxAnswers(server, code) {
+  try {
+    const res = await inboxFetch(server, { query: code ? `?code=${encodeURIComponent(code)}` : "" });
     if (!res.ok) return false;
     const data = await res.json().catch(() => null);
     return Boolean(data && typeof data === "object");
   } catch {
     return false;
   }
+}
+
+/** Whether this address is Super Reader with this browser signed in (or holding this sync code). */
+async function answers(server, code = "") {
+  if (await inboxAnswers(server, code)) return true;
+  // Not signed in as far as the extension's request goes: a token from a
+  // signed-in Super Reader tab at this address, if one is open.
+  if (code) return false;
+  if (await tokenFor(server)) await keepToken(server, "");
+  return Boolean(await tokenFromTab(server)) && inboxAnswers(server, code);
 }
 
 /** Super Reader tabs open in this browser, by their address. */
